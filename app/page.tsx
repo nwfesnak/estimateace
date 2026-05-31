@@ -19,7 +19,7 @@ export default function Home() {
   const [user, setUser] = useState<any>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [showLogin, setShowLogin] = useState(true);   // <-- fixed missing state
+  const [showLogin, setShowLogin] = useState(true);
 
   const [documentType, setDocumentType] = useState<'estimate' | 'invoice'>('estimate');
   const [dueDate, setDueDate] = useState('');
@@ -55,7 +55,7 @@ export default function Home() {
     alert(clean);
   };
 
-  // ==================== AUTH ====================
+  // Auth
   useEffect(() => {
     if (!supabase) return;
     supabase.auth.getSession().then(({ data }) => setUser(data.session?.user ?? null));
@@ -74,50 +74,29 @@ export default function Home() {
     if (!supabase) return;
     const { error } = await supabase.auth.signUp({ email, password });
     if (error) showMessage(error.message);
-    else showMessage('Account created! You can now log in.');
+    else showMessage('Account created!');
   };
 
-  // ==================== SAVE TO SUPABASE (with full error logging) ====================
+  // Save with logging
   const saveToDB = async () => {
     if (!user || !supabase) return;
-
     const data = {
       user_id: user.id,
-      jobName,
-      address,
-      phones,
-      emails,
-      date,
-      invoiceNumber,
-      items,
-      terms,
-      profile,
-      documentType,
-      dueDate,
-      paymentStatus,
-      amountPaid,
-      paymentMethod,
-      photoUrls,
-      videoUrls,
+      jobName, address, phones, emails, date, invoiceNumber, items, terms, profile,
+      documentType, dueDate, paymentStatus, amountPaid, paymentMethod,
+      photoUrls, videoUrls,
       updated_at: new Date().toISOString(),
     };
-
-    console.log('💾 Attempting to save to Supabase with data:', data);
-
-    const { error } = await supabase
-      .from('estimates')
-      .upsert({ id: invoiceNumber, ...data });
-
+    console.log('💾 Saving to Supabase:', data);
+    const { error } = await supabase.from('estimates').upsert({ id: invoiceNumber, ...data });
     if (error) {
-      console.error('❌ Supabase SAVE ERROR (400 Bad Request):', error);
-      showMessage('Save failed – check browser console for details');
+      console.error('❌ Supabase 400 Error:', error);
+      showMessage('Save failed – check console for details');
     } else {
-      console.log('✅ Saved successfully to Supabase');
       setLastSaved(new Date().toLocaleTimeString());
     }
   };
 
-  // ==================== MEDIA ====================
   const handleMediaUpload = async (files: FileList | null, type: 'photo' | 'video') => {
     if (!files || !user || !supabase) return;
     const newUrls: string[] = [];
@@ -144,17 +123,10 @@ export default function Home() {
     saveToDB();
   };
 
-  // ==================== LOAD / DELETE ====================
   const refreshSavedList = async () => {
     if (!user || !supabase) return;
-    const { data, error } = await supabase
-      .from('estimates')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('updated_at', { ascending: false });
-
-    if (error) console.error('❌ Load list error:', error);
-    else setSavedEstimatesList(data || []);
+    const { data } = await supabase.from('estimates').select('*').eq('user_id', user.id).order('updated_at', { ascending: false });
+    setSavedEstimatesList(data || []);
   };
 
   const openLoadModal = async () => {
@@ -180,20 +152,19 @@ export default function Home() {
     setPhotoUrls(est.photoUrls || []);
     setVideoUrls(est.videoUrls || []);
     setIsLoadModalOpen(false);
-    showMessage('Loaded successfully!');
+    showMessage('Loaded!');
   };
 
   const deleteSelectedEstimate = async (id: string) => {
-    if (!confirm('Delete this document permanently?')) return;
+    if (!confirm('Delete permanently?')) return;
     if (!supabase) return;
     await supabase.from('estimates').delete().eq('id', id);
     await refreshSavedList();
-    showMessage('Document deleted');
+    showMessage('Deleted');
   };
 
-  // ==================== NEW ESTIMATE (auto date + auto number) ====================
   const newEstimate = () => {
-    if (!confirm('Start a completely new document?')) return;
+    if (!confirm('Start new document?')) return;
     setJobName('');
     setAddress('');
     setPhones(['']);
@@ -231,12 +202,12 @@ export default function Home() {
   const saveNamedEstimate = async () => { await saveToDB(); showMessage(`Saved as "${jobName || 'Untitled'} - ${invoiceNumber}"`); };
   const saveProfile = async () => { await saveToDB(); setIsProfileOpen(false); };
   const printEstimate = () => window.print();
-  const sendEstimate = () => showMessage(`${documentType === 'invoice' ? 'Invoice' : 'Estimate'} sent successfully!`);
+  const sendEstimate = () => showMessage(`${documentType === 'invoice' ? 'Invoice' : 'Estimate'} sent!`);
   const openGoogleCalendar = () => { window.open('https://calendar.google.com', '_blank'); };
   const useTemplate = (text: string) => { setTerms(text); setIsTemplatesOpen(false); };
   const saveAsTemplate = () => {
-    if (!terms.trim()) return showMessage("Please enter some text first");
-    const name = prompt("Enter a name for this template:");
+    if (!terms.trim()) return showMessage("Enter text first");
+    const name = prompt("Template name:");
     if (name) {
       const updated = [...savedTemplates, { name: name.trim(), text: terms }];
       setSavedTemplates(updated);
@@ -251,10 +222,7 @@ export default function Home() {
     saveTimeoutRef.current = setTimeout(saveToDB, 800);
   };
 
-  useEffect(() => {
-    debouncedSave();
-    return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
-  }, [jobName, address, phones, emails, date, invoiceNumber, items, terms, profile, documentType, dueDate, paymentStatus, amountPaid, paymentMethod]);
+  useEffect(() => { debouncedSave(); return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); }; }, [jobName, address, phones, emails, date, invoiceNumber, items, terms, profile, documentType, dueDate, paymentStatus, amountPaid, paymentMethod]);
 
   if (!user) {
     return (
@@ -274,39 +242,214 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-[#f4f4f4] p-4 md:p-8">
-      {/* All your UI – phone/email rows are back, everything else is exactly as before */}
-      {/* (header, job info card with phones/emails, table, photos, videos, quick actions, modals) */}
-      {/* ... full code continues exactly like the previous version you had ... */}
+      <div className="max-w-7xl mx-auto">
+        <div className="bg-white border rounded-xl p-4 mb-6 flex items-center justify-between text-sm">
+          <div>💾 <span className="font-medium">Last saved:</span> {lastSaved}</div>
+          <Button onClick={forceSave} size="sm" variant="outline">Force Save Now</Button>
+        </div>
 
-      {/* PHONE AND EMAIL ROWS (restored) */}
-      <Card className="mb-8">
-        <CardContent className="p-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+        <div className="flex border-b mb-8 bg-white rounded-t-xl overflow-hidden shadow-sm">
+          <button onClick={() => setDocumentType('estimate')} className={`flex-1 py-5 text-xl font-semibold transition-all ${documentType === 'estimate' ? 'bg-[#1e293b] text-white shadow-inner' : 'hover:bg-gray-100'}`}>📋 Estimate</button>
+          <button onClick={() => setDocumentType('invoice')} className={`flex-1 py-5 text-xl font-semibold transition-all ${documentType === 'invoice' ? 'bg-[#1e293b] text-white shadow-inner' : 'hover:bg-gray-100'}`}>💰 Invoice</button>
+        </div>
+
+        <div id="estimate-content" className="bg-[#1e293b] text-white p-6 rounded-xl mb-8">
+          <div className="flex justify-between items-start">
             <div>
-              <label className="block text-sm font-semibold mb-3">Phone Numbers</label>
-              {phones.map((phone, i) => (
-                <div key={i} className="flex gap-2 mb-3">
-                  <Input value={phone} onChange={(e) => updatePhone(i, e.target.value)} placeholder="Phone number" className="flex-1" />
-                  <Button variant="destructive" size="sm" onClick={() => removePhone(i)}>×</Button>
-                </div>
-              ))}
-              <Button onClick={addPhone} size="sm" variant="outline">+ Add Phone</Button>
+              <h1 className="text-4xl font-bold">{documentType === 'invoice' ? 'INVOICE' : 'EstimateAce'}</h1>
+              <span className="text-slate-400">Professional {documentType === 'invoice' ? 'Invoicing' : 'Estimating'}</span>
             </div>
-            <div>
-              <label className="block text-sm font-semibold mb-3">Email Addresses</label>
-              {emails.map((emailAddr, i) => (
-                <div key={i} className="flex gap-2 mb-3">
-                  <Input value={emailAddr} onChange={(e) => updateEmail(i, e.target.value)} placeholder="Email address" className="flex-1" />
-                  <Button variant="destructive" size="sm" onClick={() => removeEmail(i)}>×</Button>
+            {profile.showInHeader && (
+              <div className="text-right text-sm max-w-xs">
+                <div className="font-semibold">{profile.company || profile.name}</div>
+                {profile.slogan && <div className="text-xs italic text-slate-300 mb-1">{profile.slogan}</div>}
+                <div className="text-xs text-slate-300">{profile.address}</div>
+                <div className="text-xs text-slate-300">{profile.phone} • {profile.email}</div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <Card className="mb-8">
+          <CardContent className="p-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div>
+                <label className="block text-sm font-semibold mb-2">Job Name / Client</label>
+                <Input value={jobName} onChange={(e) => setJobName(e.target.value)} className="h-12" />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold mb-2">Address</label>
+                <Input value={address} onChange={(e) => setAddress(e.target.value)} className="h-12" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold mb-2">Date</label>
+                  <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="h-12" />
                 </div>
+                <div>
+                  <label className="block text-sm font-semibold mb-2">Document #</label>
+                  <Input value={invoiceNumber} className="h-12 font-mono" readOnly />
+                </div>
+              </div>
+            </div>
+
+            {/* PHONE & EMAIL ROWS */}
+            <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-8">
+              <div>
+                <label className="block text-sm font-semibold mb-3">Phone Numbers</label>
+                {phones.map((phone, i) => (
+                  <div key={i} className="flex gap-2 mb-3">
+                    <Input value={phone} onChange={(e) => updatePhone(i, e.target.value)} placeholder="Phone number" className="flex-1" />
+                    <Button variant="destructive" size="sm" onClick={() => removePhone(i)}>×</Button>
+                  </div>
+                ))}
+                <Button onClick={addPhone} size="sm" variant="outline">+ Add Phone</Button>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold mb-3">Email Addresses</label>
+                {emails.map((emailAddr, i) => (
+                  <div key={i} className="flex gap-2 mb-3">
+                    <Input value={emailAddr} onChange={(e) => updateEmail(i, e.target.value)} placeholder="Email address" className="flex-1" />
+                    <Button variant="destructive" size="sm" onClick={() => removeEmail(i)}>×</Button>
+                  </div>
+                ))}
+                <Button onClick={addEmail} size="sm" variant="outline">+ Add Email</Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="flex gap-3 mb-8 flex-wrap">
+          <Button onClick={newEstimate} className="bg-[#6b7280]">🆕 New {documentType === 'invoice' ? 'Invoice' : 'Estimate'}</Button>
+          <Button onClick={addRow} className="bg-[#10b981]">➕ Add Line Item</Button>
+          <Button onClick={openLoadModal} className="bg-[#3b82f6]">🔍 Load Document</Button>
+        </div>
+
+        <Card className="mb-8">
+          <style>{`
+            @media (max-width: 768px) {
+              table, thead, tbody, th, td, tr { display: block !important; }
+              thead tr { display: none !important; }
+              tr { margin-bottom: 24px !important; border: 2px solid #e2e8f0 !important; border-radius: 16px !important; background: white !important; box-shadow: 0 4px 15px rgba(0,0,0,0.1) !important; padding: 18px !important; }
+              td { display: flex !important; flex-direction: column !important; padding: 12px 0 !important; border: none !important; }
+              td:before { content: attr(data-label) !important; font-weight: 700 !important; font-size: 1.05rem !important; color: #1e293b !important; margin-bottom: 8px !important; }
+              .description-cell textarea { min-height: 280px !important; font-size: 1.1rem !important; width: 100% !important; }
+              .description-cell { grid-column: 1 / -1 !important; }
+            }
+          `}</style>
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-[#1e293b] text-white">
+                <TableHead className="w-[55%]">Description</TableHead>
+                <TableHead className="w-[9%]">Qty</TableHead>
+                <TableHead className="w-[9%]">Unit</TableHead>
+                <TableHead className="w-[9%]">Price</TableHead>
+                <TableHead className="w-[9%] text-right">Total</TableHead>
+                <TableHead className="w-[9%]">Action</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {items.map((item) => (
+                <TableRow key={item.id}>
+                  <TableCell data-label="Description" className="description-cell">
+                    <Textarea value={item.description} onChange={(e) => updateItem(item.id, 'description', e.target.value)} className="min-h-[100px]" />
+                  </TableCell>
+                  <TableCell data-label="Qty"><Input type="number" value={item.qty} onChange={(e) => updateItem(item.id, 'qty', parseFloat(e.target.value) || 0)} /></TableCell>
+                  <TableCell data-label="Unit"><Input value={item.unit} onChange={(e) => updateItem(item.id, 'unit', e.target.value)} /></TableCell>
+                  <TableCell data-label="Price"><Input type="number" step="0.01" value={item.price} onChange={(e) => updateItem(item.id, 'price', parseFloat(e.target.value) || 0)} /></TableCell>
+                  <TableCell data-label="Total" className="text-right font-semibold">${(item.total || 0).toFixed(2)}</TableCell>
+                  <TableCell data-label="Action"><Button variant="destructive" size="sm" onClick={() => removeRow(item.id)}>×</Button></TableCell>
+                </TableRow>
               ))}
-              <Button onClick={addEmail} size="sm" variant="outline">+ Add Email</Button>
+            </TableBody>
+          </Table>
+
+          <div className="p-6 bg-white border-t text-right">
+            <div className="text-3xl font-bold">
+              {documentType === 'invoice' ? 'Amount Due: ' : 'Grand Total: '}
+              <span className="text-[#10b981]">${amountDue.toFixed(2)}</span>
             </div>
           </div>
-        </CardContent>
-      </Card>
 
-      {/* The rest of your UI (table, photos, videos, quick actions, modals) is unchanged from the last version I gave you. */}
+          <div className="p-6 bg-white border-t flex justify-between items-center gap-3 flex-wrap">
+            <div className="flex gap-3">
+              <Button onClick={() => document.getElementById('photo-camera')?.click()} className="bg-[#10b981]">📷 Take Photo</Button>
+              <Button onClick={() => document.getElementById('video-camera')?.click()} className="bg-[#10b981]">📹 Record Video</Button>
+            </div>
+            <div className="flex gap-3 flex-wrap">
+              <Button onClick={saveNamedEstimate} className="bg-[#10b981]">💾 Save {documentType === 'invoice' ? 'Invoice' : 'Estimate'}</Button>
+              <Button onClick={sendEstimate} className="bg-[#2563eb]">📧 Send {documentType === 'invoice' ? 'Invoice' : 'Estimate'}</Button>
+              <Button onClick={printEstimate} className="bg-[#10b981]">🖨️ Print</Button>
+            </div>
+          </div>
+        </Card>
+
+        {/* Photos */}
+        <Card className="mb-8">
+          <CardContent className="p-6">
+            <h3 className="text-lg font-semibold mb-3">📸 Photos</h3>
+            <input type="file" multiple accept="image/*" onChange={handlePhotos} className="flex-1 text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-[#10b981] file:text-white hover:file:bg-[#0f9e6e]" />
+            <input id="photo-camera" type="file" accept="image/*" capture="environment" onChange={handlePhotos} className="hidden" />
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-6 mt-4">
+              {photoUrls.map((src, i) => (
+                <div key={i} className="relative">
+                  <img src={src} alt="photo" className="w-full h-52 object-cover rounded-xl border shadow-sm" />
+                  <Button variant="destructive" size="sm" className="absolute -top-2 -right-2" onClick={() => removeMedia('photo', i)}>×</Button>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Videos */}
+        <Card className="mb-8">
+          <CardContent className="p-6">
+            <h3 className="text-lg font-semibold mb-3">🎥 Videos</h3>
+            <input type="file" multiple accept="video/*" onChange={handleVideos} className="flex-1 text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-[#10b981] file:text-white hover:file:bg-[#0f9e6e]" />
+            <input id="video-camera" type="file" accept="video/*" capture="environment" onChange={handleVideos} className="hidden" />
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
+              {videoUrls.map((src, i) => (
+                <div key={i} className="relative">
+                  <video src={src} controls className="w-full h-32 object-cover rounded-lg border" />
+                  <Button variant="destructive" size="sm" className="absolute -top-2 -right-2" onClick={() => removeMedia('video', i)}>×</Button>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Quick Actions */}
+        <Card className="mb-8">
+          <CardContent className="p-6">
+            <h3 className="text-lg font-semibold mb-3">Disclosures and Standard Contractor Terms</h3>
+            <Textarea value={terms} onChange={(e) => setTerms(e.target.value)} className="min-h-[180px] mb-8" />
+
+            <h4 className="text-base font-semibold mb-4 text-center md:text-left text-gray-600">Quick Actions</h4>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+              <Button onClick={() => setIsTemplatesOpen(true)} className="h-24 flex flex-col items-center justify-center gap-2 bg-[#3b82f6] hover:bg-[#2563eb] text-white">
+                <span className="text-4xl">📋</span><span className="font-medium">Templates</span>
+              </Button>
+              <Button onClick={saveAsTemplate} className="h-24 flex flex-col items-center justify-center gap-2 bg-[#6b7280] hover:bg-[#4b5563] text-white">
+                <span className="text-4xl">💾</span><span className="font-medium">Save as Template</span>
+              </Button>
+              <Button onClick={() => setIsProfileOpen(true)} className="h-24 flex flex-col items-center justify-center gap-2 bg-[#8b5cf6] hover:bg-[#7c3aed] text-white">
+                <span className="text-4xl">👤</span><span className="font-medium">Profile</span>
+              </Button>
+              <Button className="h-24 flex flex-col items-center justify-center gap-2 bg-[#10b981] hover:bg-[#059669] text-white">
+                <span className="text-4xl">📊</span><span className="font-medium">Dashboard</span>
+              </Button>
+              <Button onClick={openGoogleCalendar} className="h-24 flex flex-col items-center justify-center gap-2 bg-[#4285F4] hover:bg-[#1e40af] text-white">
+                <span className="text-4xl">📅</span><span className="font-medium">Calendar</span>
+              </Button>
+              <Button onClick={() => document.getElementById('receipts-camera')?.click()} className="h-24 flex flex-col items-center justify-center gap-2 bg-[#f59e0b] hover:bg-[#d97706] text-white">
+                <span className="text-4xl">📸</span><span className="font-medium">Receipts</span>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <input id="receipts-camera" type="file" accept="image/*" capture="environment" onChange={handleMediaUpload} className="hidden" />
 
       {/* Load Modal */}
       <Dialog open={isLoadModalOpen} onOpenChange={setIsLoadModalOpen}>
@@ -330,8 +473,59 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* Profile & Templates modals (unchanged) */}
-      {/* ... (same as previous full code) ... */}
+      {/* Profile Modal */}
+      <Dialog open={isProfileOpen} onOpenChange={setIsProfileOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>👤 Company Profile</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div><label className="block text-sm font-semibold mb-1">Name</label><Input value={profile.name} onChange={(e) => setProfile({...profile, name: e.target.value})} /></div>
+            <div><label className="block text-sm font-semibold mb-1">Company Name</label><Input value={profile.company} onChange={(e) => setProfile({...profile, company: e.target.value})} /></div>
+            <div><label className="block text-sm font-semibold mb-1">Address</label><Input value={profile.address} onChange={(e) => setProfile({...profile, address: e.target.value})} /></div>
+            <div><label className="block text-sm font-semibold mb-1">Phone</label><Input value={profile.phone} onChange={(e) => setProfile({...profile, phone: e.target.value})} /></div>
+            <div><label className="block text-sm font-semibold mb-1">Email</label><Input value={profile.email} onChange={(e) => setProfile({...profile, email: e.target.value})} /></div>
+            <div><label className="block text-sm font-semibold mb-1">Slogan</label><Input value={profile.slogan} onChange={(e) => setProfile({...profile, slogan: e.target.value})} /></div>
+          </div>
+          <DialogFooter>
+            <Button onClick={saveProfile} className="bg-[#10b981]">Save Profile</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Templates Modal */}
+      <Dialog open={isTemplatesOpen} onOpenChange={setIsTemplatesOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader><DialogTitle>📋 Templates</DialogTitle></DialogHeader>
+          <div className="max-h-[400px] overflow-y-auto space-y-3">
+            <div className="font-medium text-sm text-gray-500">Pre-made Templates</div>
+            {[
+              { name: 'Standard Payment Terms', text: '50% deposit due upon signing. Remaining 50% due upon completion.' },
+              { name: 'Warranty', text: 'All workmanship is guaranteed for 12 months from date of completion.' },
+            ].map((tpl, i) => (
+              <div key={i} className="flex justify-between items-center p-3 border rounded-lg hover:bg-gray-50">
+                <div className="flex-1">
+                  <div className="font-medium">{tpl.name}</div>
+                  <div className="text-xs text-gray-500 line-clamp-2">{tpl.text}</div>
+                </div>
+                <Button size="sm" onClick={() => useTemplate(tpl.text)}>Use</Button>
+              </div>
+            ))}
+            {savedTemplates.length > 0 && (
+              <>
+                <div className="font-medium text-sm text-gray-500 mt-6">Your Saved Templates</div>
+                {savedTemplates.map((tpl, i) => (
+                  <div key={i} className="flex justify-between items-center p-3 border rounded-lg hover:bg-gray-50">
+                    <div className="flex-1">
+                      <div className="font-medium">{tpl.name}</div>
+                      <div className="text-xs text-gray-500 line-clamp-2">{tpl.text}</div>
+                    </div>
+                    <Button size="sm" onClick={() => useTemplate(tpl.text)}>Use</Button>
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
