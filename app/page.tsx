@@ -57,6 +57,7 @@ export default function Home() {
     alert(clean);
   };
 
+  // Auth
   useEffect(() => {
     if (!supabase) return;
     supabase.auth.getSession().then(({ data: { session } }) => setUser(session?.user ?? null));
@@ -147,7 +148,6 @@ export default function Home() {
     showMessage('Loaded from Supabase!');
   };
 
-  // Delete saved document
   const deleteSelectedEstimate = async (id: string) => {
     if (!confirm('Delete this document permanently?')) return;
     if (!supabase) return;
@@ -156,10 +156,8 @@ export default function Home() {
     showMessage('Document deleted');
   };
 
-  // Auto-increment Document # and set today's date on new document
   const newEstimate = () => {
     if (!confirm('Start a completely new document?')) return;
-
     setJobName('');
     setAddress('');
     setPhones(['']);
@@ -200,6 +198,18 @@ export default function Home() {
   const saveProfile = async () => { await saveToDB(); setIsProfileOpen(false); };
   const printEstimate = () => window.print();
   const sendEstimate = () => showMessage(`${documentType === 'invoice' ? 'Invoice' : 'Estimate'} sent successfully!`);
+
+  // Google Calendar function
+  const openGoogleCalendar = () => {
+    const title = encodeURIComponent(`${documentType === 'invoice' ? 'Invoice' : 'Estimate'} - ${jobName || 'New Job'}`);
+    const eventDate = date ? date.replace(/-/g, '') : new Date().toISOString().slice(0,10).replace(/-/g,'');
+    const startTime = `${eventDate}T080000`;
+    const endTime = `${eventDate}T170000`;
+    const details = encodeURIComponent(`#${invoiceNumber}\nJob: ${jobName}\nAddress: ${address}`);
+    const url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${startTime}/${endTime}&details=${details}`;
+    window.open(url, '_blank');
+  };
+
   const useTemplate = (text: string) => { setTerms(text); setIsTemplatesOpen(false); };
   const saveAsTemplate = () => {
     if (!terms.trim()) return showMessage("Please enter some text first");
