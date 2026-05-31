@@ -57,6 +57,7 @@ export default function Home() {
     alert(clean);
   };
 
+  // Auth
   useEffect(() => {
     if (!supabase) return;
     supabase.auth.getSession().then(({ data: { session } }) => setUser(session?.user ?? null));
@@ -157,7 +158,6 @@ export default function Home() {
 
   const newEstimate = () => {
     if (!confirm('Start a completely new document?')) return;
-
     setJobName('');
     setAddress('');
     setPhones(['']);
