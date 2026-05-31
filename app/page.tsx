@@ -64,16 +64,32 @@ export default function Home() {
     return () => listener.subscription.unsubscribe();
   }, [supabase]);
 
-  const login = async () => { if (supabase) { const { error } = await supabase.auth.signInWithPassword({ email, password }); if (error) showMessage(error.message); else setShowLogin(false); } };
-  const signup = async () => { if (supabase) { const { error } = await supabase.auth.signUp({ email, password }); if (error) showMessage(error.message); else showMessage('Account created!'); } };
+  const login = async () => {
+    if (!supabase) return;
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) showMessage(error.message); else setShowLogin(false);
+  };
+
+  const signup = async () => {
+    if (!supabase) return;
+    const { error } = await supabase.auth.signUp({ email, password });
+    if (error) showMessage(error.message); else showMessage('Account created!');
+  };
 
   const saveToDB = async () => {
     if (!user || !supabase) return;
-    const data = { user_id: user.id, jobName, address, phones, emails, date, invoiceNumber, items, terms, profile, documentType, dueDate, paymentStatus, amountPaid, paymentMethod, updated_at: new Date().toISOString() };
+    const data = {
+      user_id: user.id,
+      jobName, address, phones, emails, date, invoiceNumber, items, terms, profile,
+      documentType, dueDate, paymentStatus, amountPaid, paymentMethod,
+      photoUrls, videoUrls,
+      updated_at: new Date().toISOString(),
+    };
     await supabase.from('estimates').upsert({ id: invoiceNumber, ...data });
     setLastSaved(new Date().toLocaleTimeString());
   };
 
+  // Upload to Supabase Storage with clear error
   const handleMediaUpload = async (files: FileList | null, type: 'photo' | 'video') => {
     if (!files || !user || !supabase) return;
     const newUrls: string[] = [];
@@ -81,7 +97,10 @@ export default function Home() {
       const fileExt = file.name.split('.').pop();
       const filePath = `${user.id}/${type}/${Date.now()}.${fileExt}`;
       const { error } = await supabase.storage.from('media').upload(filePath, file, { upsert: true });
-      if (!error) {
+      if (error) {
+        console.error('Upload error:', error);
+        showMessage('Upload failed: ' + error.message);
+      } else {
         const { data } = supabase.storage.from('media').getPublicUrl(filePath);
         newUrls.push(data.publicUrl);
       }
@@ -97,6 +116,7 @@ export default function Home() {
   const removeMedia = (type: 'photo' | 'video', index: number) => {
     if (type === 'photo') setPhotoUrls(prev => prev.filter((_, i) => i !== index));
     else setVideoUrls(prev => prev.filter((_, i) => i !== index));
+    saveToDB();
   };
 
   const refreshSavedList = async () => {
@@ -105,7 +125,10 @@ export default function Home() {
     setSavedEstimatesList(data || []);
   };
 
-  const openLoadModal = async () => { await refreshSavedList(); setIsLoadModalOpen(true); };
+  const openLoadModal = async () => {
+    await refreshSavedList();
+    setIsLoadModalOpen(true);
+  };
 
   const loadSelectedEstimate = async (est: any) => {
     setJobName(est.jobName || '');
@@ -122,11 +145,13 @@ export default function Home() {
     setPaymentStatus(est.paymentStatus || 'pending');
     setAmountPaid(est.amountPaid || 0);
     setPaymentMethod(est.paymentMethod || '');
+    setPhotoUrls(est.photoUrls || []);
+    setVideoUrls(est.videoUrls || []);
     setIsLoadModalOpen(false);
     showMessage('Loaded from Supabase!');
   };
 
-  const improveWithGrok = async (id: number) => { showMessage('Grok AI improvement (demo)'); };
+  const improveWithGrok = async (id: number) => { showMessage('Grok AI (demo)'); };
   const convertToInvoice = () => { showMessage('Switched to Invoice mode!'); };
   const recordPayment = () => { saveToDB(); showMessage('Payment recorded'); };
   const openGoogleCalendar = () => { window.open('https://calendar.google.com', '_blank'); };
