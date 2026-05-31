@@ -15,8 +15,9 @@ const DB_VERSION = 2;
 let dbInstance: IDBDatabase | null = null;
 
 const initDB = async (): Promise<IDBDatabase> => {
-  if (dbInstance) return dbInstance;  return new Promise((resolve, reject) =>
-        const request = indexedDB.open(DB_NAME, DB_VERSION);
+  if (dbInstance) return dbInstance;  
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = (e) => {
       const db = (e.target as IDBOpenDBRequest).result;
       if (!db.objectStoreNames.contains('media')) db.createObjectStore('media', { keyPath: 'id' });
@@ -28,7 +29,7 @@ const initDB = async (): Promise<IDBDatabase> => {
   });
 };
 
-// ==================== Database Helpers (unchanged) ====================
+// ==================== Database Helpers ====================
 const saveEstimateToDB = async (data: any) => {
   const db = await initDB();
   const tx = db.transaction('currentEstimate', 'readwrite');
@@ -596,6 +597,7 @@ export default function Home() {
           <Button variant="outline">⚡ Quick Lines</Button>
         </div>
 
+        {/* Line Items Table - unchanged */}
         <Card className="mb-8">
           <style>{`
             @media (max-width: 768px) {
@@ -707,38 +709,47 @@ export default function Home() {
             </div>
           )}
 
-          <div className="p-6 bg-white border-t flex justify-end gap-3 flex-wrap">
-            <Button onClick={saveNamedEstimate} className="bg-[#10b981]">
-              💾 Save {documentType === 'invoice' ? 'Invoice' : 'Estimate'}
-            </Button>
-            <Button onClick={sendEstimate} className="bg-[#2563eb]">
-              📧 Send {documentType === 'invoice' ? 'Invoice' : 'Estimate'}
-            </Button>
-            <Button onClick={printEstimate} className="bg-[#10b981]">
-              🖨️ Print
-            </Button>
+          {/* Bottom Actions - Take Photo and Record Video moved here to the LEFT of Save Estimate */}
+          <div className="p-6 bg-white border-t flex justify-between items-center gap-3 flex-wrap">
+            {/* Camera buttons on the left */}
+            <div className="flex gap-3">
+              <Button onClick={() => document.getElementById('photo-camera')?.click()} className="bg-[#10b981]">
+                📷 Take Photo
+              </Button>
+              <Button onClick={() => document.getElementById('video-camera')?.click()} className="bg-[#10b981]">
+                📹 Record Video
+              </Button>
+            </div>
+
+            {/* Original action buttons on the right */}
+            <div className="flex gap-3 flex-wrap">
+              <Button onClick={saveNamedEstimate} className="bg-[#10b981]">
+                💾 Save {documentType === 'invoice' ? 'Invoice' : 'Estimate'}
+              </Button>
+              <Button onClick={sendEstimate} className="bg-[#2563eb]">
+                📧 Send {documentType === 'invoice' ? 'Invoice' : 'Estimate'}
+              </Button>
+              <Button onClick={printEstimate} className="bg-[#10b981]">
+                🖨️ Print
+              </Button>
+            </div>
           </div>
         </Card>
 
-        {/* Photos - Take Photo button moved above Choose File */}
+        {/* Photos card - file input only (button moved) */}
         <Card className="mb-8">
           <CardContent className="p-6">
             <h3 className="text-lg font-semibold mb-3">📸 Photos</h3>
-            <div className="flex gap-3 mb-4">
-              <Button onClick={() => document.getElementById('photo-camera')?.click()} className="bg-[#10b981] px-4">
-                📷 Take Photo
-              </Button>
-              <input
-                type="file"
-                multiple
-                accept="image/*"
-                onChange={handlePhotos}
-                className="flex-1 text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-[#10b981] file:text-white hover:file:bg-[#0f9e6e]"
-              />
-            </div>
+            <input
+              type="file"
+              multiple
+              accept="image/*"
+              onChange={handlePhotos}
+              className="flex-1 text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-[#10b981] file:text-white hover:file:bg-[#0f9e6e]"
+            />
             <input id="photo-camera" type="file" accept="image/*" capture="environment" onChange={handlePhotos} className="hidden" />
 
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
               {photoUrls.map((src, i) => (
                 <div key={i} className="relative">
                   <img src={src} alt="photo" className="w-full h-32 object-cover rounded-lg border" />
@@ -749,25 +760,20 @@ export default function Home() {
           </CardContent>
         </Card>
 
-        {/* Videos - Record Video button moved above Choose File */}
+        {/* Videos card - file input only (button moved) */}
         <Card className="mb-8">
           <CardContent className="p-6">
             <h3 className="text-lg font-semibold mb-3">🎥 Videos</h3>
-            <div className="flex gap-3 mb-4">
-              <Button onClick={() => document.getElementById('video-camera')?.click()} className="bg-[#10b981] px-4">
-                📹 Record Video
-              </Button>
-              <input
-                type="file"
-                multiple
-                accept="video/*"
-                onChange={handleVideos}
-                className="flex-1 text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-[#10b981] file:text-white hover:file:bg-[#0f9e6e]"
-              />
-            </div>
+            <input
+              type="file"
+              multiple
+              accept="video/*"
+              onChange={handleVideos}
+              className="flex-1 text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-[#10b981] file:text-white hover:file:bg-[#0f9e6e]"
+            />
             <input id="video-camera" type="file" accept="video/*" capture="environment" onChange={handleVideos} className="hidden" />
 
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
               {videoUrls.map((src, i) => (
                 <div key={i} className="relative">
                   <video src={src} controls className="w-full h-32 object-cover rounded-lg border" />
@@ -827,7 +833,7 @@ export default function Home() {
 
       <input id="receipts-camera" type="file" accept="image/*" capture="environment" onChange={handleReceipts} className="hidden" />
 
-      {/* Load Modal */}
+      {/* Load Modal, Profile Modal, Templates Modal - unchanged */}
       <Dialog open={isLoadModalOpen} onOpenChange={setIsLoadModalOpen}>
         <DialogContent className="max-w-3xl max-h-[80vh]">
           <DialogHeader><DialogTitle>🔍 Load Saved Document</DialogTitle></DialogHeader>
@@ -854,7 +860,6 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* Profile Modal */}
       <Dialog open={isProfileOpen} onOpenChange={setIsProfileOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle>👤 Company Profile</DialogTitle></DialogHeader>
@@ -880,7 +885,6 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* Templates Modal */}
       <Dialog open={isTemplatesOpen} onOpenChange={setIsTemplatesOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader><DialogTitle>📋 Templates</DialogTitle></DialogHeader>
