@@ -69,9 +69,10 @@ export default function Home() {
   const signup = async () => {
     if (!supabase) return;
     const { error } = await supabase.auth.signUp({ email, password });
-    if (error) alert(error.message); else alert('✅ Check your email or login now');
+    if (error) alert(error.message); else alert('✅ Account created!');
   };
 
+  // Save to Supabase
   const saveToDB = async () => {
     if (!user || !supabase) return;
     const data = {
@@ -84,7 +85,7 @@ export default function Home() {
     setLastSaved(new Date().toLocaleTimeString());
   };
 
-  // Upload photos/videos to Supabase Storage
+  // Photos & Videos to Supabase Storage
   const handleMediaUpload = async (files: FileList | null, type: 'photo' | 'video') => {
     if (!files || !user || !supabase) return;
     const newUrls: string[] = [];
@@ -110,7 +111,7 @@ export default function Home() {
     else setVideoUrls(prev => prev.filter((_, i) => i !== index));
   };
 
-  // Load list from Supabase
+  // Load from Supabase
   const refreshSavedList = async () => {
     if (!user || !supabase) return;
     const { data } = await supabase.from('estimates').select('*').eq('user_id', user.id).order('updated_at', { ascending: false });
@@ -142,8 +143,8 @@ export default function Home() {
   };
 
   // Original functions
-  const improveWithGrok = async (id: number) => { const item = items.find(i => i.id === id); if (!item?.description?.trim()) return alert("Type something first!"); alert("Grok AI improvement (demo)"); };
-  const convertToInvoice = () => { /* original logic */ alert('✅ Switched to Invoice mode!'); };
+  const improveWithGrok = async (id: number) => { const item = items.find(i => i.id === id); if (!item?.description?.trim()) return alert("Type something first!"); alert("Grok AI (demo)"); };
+  const convertToInvoice = () => { alert('✅ Switched to Invoice mode!'); };
   const recordPayment = () => { saveToDB(); alert('Payment recorded'); };
   const openGoogleCalendar = () => { window.open('https://calendar.google.com', '_blank'); };
   const addRow = () => setItems([...items, { id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
@@ -159,10 +160,10 @@ export default function Home() {
   const removeEmail = (i: number) => setEmails(emails.filter((_, idx) => idx !== i));
   const updateEmail = (i: number, value: string) => { const arr = [...emails]; arr[i] = value; setEmails(arr); };
   const forceSave = async () => { await saveToDB(); };
-  const saveNamedEstimate = async () => { await saveToDB(); alert('✅ Saved!'); };
+  const saveNamedEstimate = async () => { await saveToDB(); alert('✅ Saved to Supabase!'); };
   const saveProfile = async () => { await saveToDB(); setIsProfileOpen(false); };
   const printEstimate = () => window.print();
-  const sendEstimate = () => alert('✅ Sent successfully!');
+  const sendEstimate = () => alert(`✅ ${documentType === 'invoice' ? 'Invoice' : 'Estimate'} sent!`);
   const useTemplate = (text: string) => { setTerms(text); setIsTemplatesOpen(false); };
   const saveAsTemplate = () => {
     if (!terms.trim()) return alert("Enter text first");
@@ -229,7 +230,6 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Job Info */}
         <Card className="mb-8">
           <CardContent className="p-6">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -255,14 +255,12 @@ export default function Home() {
           </CardContent>
         </Card>
 
-        {/* Buttons */}
         <div className="flex gap-3 mb-8 flex-wrap">
           <Button onClick={newEstimate} className="bg-[#6b7280]">🆕 New {documentType === 'invoice' ? 'Invoice' : 'Estimate'}</Button>
           <Button onClick={addRow} className="bg-[#10b981]">➕ Add Line Item</Button>
           <Button onClick={openLoadModal} className="bg-[#3b82f6]">🔍 Load Document</Button>
         </div>
 
-        {/* Table */}
         <Card className="mb-8">
           <Table>
             <TableHeader>
@@ -290,9 +288,40 @@ export default function Home() {
               ))}
             </TableBody>
           </Table>
+
+          <div className="p-6 bg-white border-t text-right">
+            <div className="text-3xl font-bold">
+              {documentType === 'invoice' ? 'Amount Due: ' : 'Grand Total: '}
+              <span className="text-[#10b981]">${amountDue.toFixed(2)}</span>
+            </div>
+          </div>
+
+          {/* BOTTOM TOOLBAR - THE BUTTONS YOU WERE MISSING */}
+          <div className="p-6 bg-white border-t flex justify-between items-center gap-3 flex-wrap">
+            <div className="flex gap-3">
+              <Button onClick={() => document.getElementById('photo-camera')?.click()} className="bg-[#10b981]">
+                📷 Take Photo
+              </Button>
+              <Button onClick={() => document.getElementById('video-camera')?.click()} className="bg-[#10b981]">
+                📹 Record Video
+              </Button>
+            </div>
+
+            <div className="flex gap-3 flex-wrap">
+              <Button onClick={saveNamedEstimate} className="bg-[#10b981]">
+                💾 Save {documentType === 'invoice' ? 'Invoice' : 'Estimate'}
+              </Button>
+              <Button onClick={sendEstimate} className="bg-[#2563eb]">
+                📧 Send {documentType === 'invoice' ? 'Invoice' : 'Estimate'}
+              </Button>
+              <Button onClick={printEstimate} className="bg-[#10b981]">
+                🖨️ Print
+              </Button>
+            </div>
+          </div>
         </Card>
 
-        {/* Photos */}
+        {/* Photos Card */}
         <Card className="mb-8">
           <CardContent className="p-6">
             <h3 className="text-lg font-semibold mb-3">📸 Photos</h3>
@@ -309,7 +338,7 @@ export default function Home() {
           </CardContent>
         </Card>
 
-        {/* Videos */}
+        {/* Videos Card */}
         <Card className="mb-8">
           <CardContent className="p-6">
             <h3 className="text-lg font-semibold mb-3">🎥 Videos</h3>
@@ -334,26 +363,80 @@ export default function Home() {
             <Button onClick={saveAsTemplate} className="bg-[#6b7280]">Save as Template</Button>
           </CardContent>
         </Card>
+      </div>
 
-        {/* Load Modal */}
-        <Dialog open={isLoadModalOpen} onOpenChange={setIsLoadModalOpen}>
-          <DialogContent className="max-w-3xl">
-            <DialogHeader><DialogTitle>Load Saved Document</DialogTitle></DialogHeader>
-            <div className="max-h-[500px] overflow-y-auto">
-              {savedEstimatesList.map((est) => (
+      {/* Load Modal */}
+      <Dialog open={isLoadModalOpen} onOpenChange={setIsLoadModalOpen}>
+        <DialogContent className="max-w-3xl max-h-[80vh]">
+          <DialogHeader><DialogTitle>🔍 Load Saved Document</DialogTitle></DialogHeader>
+          <div className="max-h-[500px] overflow-y-auto">
+            {savedEstimatesList.length === 0 ? (
+              <p className="text-center text-gray-500 py-8">No saved documents yet.</p>
+            ) : (
+              savedEstimatesList.map((est) => (
                 <div key={est.id} className="flex justify-between p-4 border rounded-lg mb-2">
-                  <div>
-                    <div className="font-semibold">{est.invoiceNumber} — {est.jobName}</div>
-                  </div>
+                  <div className="font-semibold">{est.invoiceNumber} — {est.jobName}</div>
                   <Button size="sm" onClick={() => loadSelectedEstimate(est)}>Load</Button>
                 </div>
-              ))}
-            </div>
-          </DialogContent>
-        </Dialog>
+              ))
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
-        {/* Profile & Templates modals (shortened for space - they are the same as before) */}
-      </div>
+      {/* Profile Modal */}
+      <Dialog open={isProfileOpen} onOpenChange={setIsProfileOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>👤 Company Profile</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div><label className="block text-sm font-semibold mb-1">Name</label><Input value={profile.name} onChange={(e) => setProfile({...profile, name: e.target.value})} /></div>
+            <div><label className="block text-sm font-semibold mb-1">Company Name</label><Input value={profile.company} onChange={(e) => setProfile({...profile, company: e.target.value})} /></div>
+            <div><label className="block text-sm font-semibold mb-1">Address</label><Input value={profile.address} onChange={(e) => setProfile({...profile, address: e.target.value})} /></div>
+            <div><label className="block text-sm font-semibold mb-1">Phone</label><Input value={profile.phone} onChange={(e) => setProfile({...profile, phone: e.target.value})} /></div>
+            <div><label className="block text-sm font-semibold mb-1">Email</label><Input value={profile.email} onChange={(e) => setProfile({...profile, email: e.target.value})} /></div>
+            <div><label className="block text-sm font-semibold mb-1">Slogan</label><Input value={profile.slogan} onChange={(e) => setProfile({...profile, slogan: e.target.value})} /></div>
+          </div>
+          <DialogFooter>
+            <Button onClick={saveProfile} className="bg-[#10b981]">Save Profile</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Templates Modal */}
+      <Dialog open={isTemplatesOpen} onOpenChange={setIsTemplatesOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader><DialogTitle>📋 Templates</DialogTitle></DialogHeader>
+          <div className="max-h-[400px] overflow-y-auto space-y-3">
+            <div className="font-medium text-sm text-gray-500">Pre-made Templates</div>
+            {[
+              { name: 'Standard Payment Terms', text: '50% deposit due upon signing. Remaining 50% due upon completion.' },
+              { name: 'Warranty', text: 'All workmanship is guaranteed for 12 months from date of completion.' },
+            ].map((tpl, i) => (
+              <div key={i} className="flex justify-between items-center p-3 border rounded-lg hover:bg-gray-50">
+                <div className="flex-1">
+                  <div className="font-medium">{tpl.name}</div>
+                  <div className="text-xs text-gray-500 line-clamp-2">{tpl.text}</div>
+                </div>
+                <Button size="sm" onClick={() => useTemplate(tpl.text)}>Use</Button>
+              </div>
+            ))}
+            {savedTemplates.length > 0 && (
+              <>
+                <div className="font-medium text-sm text-gray-500 mt-6">Your Saved Templates</div>
+                {savedTemplates.map((tpl, i) => (
+                  <div key={i} className="flex justify-between items-center p-3 border rounded-lg hover:bg-gray-50">
+                    <div className="flex-1">
+                      <div className="font-medium">{tpl.name}</div>
+                      <div className="text-xs text-gray-500 line-clamp-2">{tpl.text}</div>
+                    </div>
+                    <Button size="sm" onClick={() => useTemplate(tpl.text)}>Use</Button>
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
