@@ -274,13 +274,23 @@ export default function Home() {
       `}</style>
 
       <div className="min-h-screen bg-[#f4f4f4] p-4 md:p-8">
-        {/* Document type toggle */}
+        {/* HEADER - Estimate / Invoice Toggle */}
         <div className="flex border-b mb-8 bg-white rounded-t-xl overflow-hidden shadow-sm">
-          <button onClick={() => setDocumentType('estimate')} className={`flex-1 py-5 text-xl font-semibold ${documentType === 'estimate' ? 'bg-[#1e293b] text-white' : 'hover:bg-gray-100'}`}>📋 Estimate</button>
-          <button onClick={() => setDocumentType('invoice')} className={`flex-1 py-5 text-xl font-semibold ${documentType === 'invoice' ? 'bg-[#1e293b] text-white' : 'hover:bg-gray-100'}`}>💰 Invoice</button>
+          <button 
+            onClick={() => setDocumentType('estimate')} 
+            className={`flex-1 py-5 text-xl font-semibold ${documentType === 'estimate' ? 'bg-[#1e293b] text-white' : 'hover:bg-gray-100'}`}
+          >
+            📋 Estimate
+          </button>
+          <button 
+            onClick={() => setDocumentType('invoice')} 
+            className={`flex-1 py-5 text-xl font-semibold ${documentType === 'invoice' ? 'bg-[#1e293b] text-white' : 'hover:bg-gray-100'}`}
+          >
+            💰 Invoice
+          </button>
         </div>
 
-        {/* Job Info + Phones/Emails */}
+        {/* Job Info */}
         <Card className="mb-8">
           <CardContent className="p-6">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
@@ -343,8 +353,8 @@ export default function Home() {
             <TableBody>
               {items.map((item) => (
                 <TableRow key={item.id}>
-                  <TableCell>
-                    <Textarea value={item.description} onChange={e => updateItem(item.id, 'description', e.target.value)} className="min-h-[100px]" />
+                  <TableCell className="text-black">
+                    <Textarea value={item.description} onChange={e => updateItem(item.id, 'description', e.target.value)} className="min-h-[100px] text-black" />
                   </TableCell>
                   <TableCell><Input type="number" value={item.qty} onChange={e => updateItem(item.id, 'qty', parseFloat(e.target.value) || 0)} /></TableCell>
                   <TableCell><Input value={item.unit} onChange={e => updateItem(item.id, 'unit', e.target.value)} /></TableCell>
@@ -362,7 +372,7 @@ export default function Home() {
             <span className="text-[#10b981]">${amountDue.toFixed(2)}</span>
           </div>
 
-          {/* BUTTONS DIRECTLY UNDER GRAND TOTAL */}
+          {/* BUTTONS UNDER GRAND TOTAL */}
           <div className="p-6 bg-white border-t flex justify-between items-center gap-3 flex-wrap no-print">
             <div className="flex gap-3">
               <Button onClick={() => document.getElementById('photo-camera')?.click()} className="bg-[#10b981]">📷 Take Photo</Button>
@@ -377,7 +387,7 @@ export default function Home() {
           </div>
         </Card>
 
-        {/* Photos & Videos (kept after the main table) */}
+        {/* Photos Section */}
         <Card className="mb-8">
           <CardContent className="p-6">
             <h3 className="text-lg font-semibold mb-3">📸 Photos</h3>
@@ -394,6 +404,7 @@ export default function Home() {
           </CardContent>
         </Card>
 
+        {/* Videos Section */}
         <Card className="mb-8">
           <CardContent className="p-6">
             <h3 className="text-lg font-semibold mb-3">🎥 Videos</h3>
@@ -420,7 +431,6 @@ export default function Home() {
 
         {/* CLEAN PRINT DOCUMENT */}
         <div id="print-document" className="max-w-4xl mx-auto bg-white p-10 shadow-2xl hidden print:block">
-          {/* Professional print layout (same as before) */}
           <div className="flex justify-between border-b pb-6 mb-8">
             <div>
               <h1 className="text-5xl font-bold tracking-tight">{documentType.toUpperCase()}</h1>
