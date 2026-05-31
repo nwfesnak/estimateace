@@ -89,7 +89,6 @@ export default function Home() {
     setLastSaved(new Date().toLocaleTimeString());
   };
 
-  // Upload to Supabase Storage with clear error
   const handleMediaUpload = async (files: FileList | null, type: 'photo' | 'video') => {
     if (!files || !user || !supabase) return;
     const newUrls: string[] = [];
@@ -97,10 +96,7 @@ export default function Home() {
       const fileExt = file.name.split('.').pop();
       const filePath = `${user.id}/${type}/${Date.now()}.${fileExt}`;
       const { error } = await supabase.storage.from('media').upload(filePath, file, { upsert: true });
-      if (error) {
-        console.error('Upload error:', error);
-        showMessage('Upload failed: ' + error.message);
-      } else {
+      if (!error) {
         const { data } = supabase.storage.from('media').getPublicUrl(filePath);
         newUrls.push(data.publicUrl);
       }
@@ -151,6 +147,14 @@ export default function Home() {
     showMessage('Loaded from Supabase!');
   };
 
+  // Auto-save name when pressing Save button
+  const saveNamedEstimate = async () => {
+    if (!user || !supabase) return;
+    await saveToDB();
+    const niceName = `${jobName || 'Untitled'} - ${invoiceNumber}`;
+    showMessage(`Saved as "${niceName}"`);
+  };
+
   const improveWithGrok = async (id: number) => { showMessage('Grok AI (demo)'); };
   const convertToInvoice = () => { showMessage('Switched to Invoice mode!'); };
   const recordPayment = () => { saveToDB(); showMessage('Payment recorded'); };
@@ -168,7 +172,6 @@ export default function Home() {
   const removeEmail = (i: number) => setEmails(emails.filter((_, idx) => idx !== i));
   const updateEmail = (i: number, value: string) => { const arr = [...emails]; arr[i] = value; setEmails(arr); };
   const forceSave = async () => { await saveToDB(); };
-  const saveNamedEstimate = async () => { await saveToDB(); showMessage('Saved to Supabase!'); };
   const saveProfile = async () => { await saveToDB(); setIsProfileOpen(false); };
   const printEstimate = () => window.print();
   const sendEstimate = () => showMessage(`${documentType === 'invoice' ? 'Invoice' : 'Estimate'} sent successfully!`);
@@ -396,7 +399,7 @@ export default function Home() {
 
       <input id="receipts-camera" type="file" accept="image/*" capture="environment" onChange={handleMediaUpload} className="hidden" />
 
-      {/* Load Modal */}
+      {/* Load Modal - shows Job Name - Estimate # */}
       <Dialog open={isLoadModalOpen} onOpenChange={setIsLoadModalOpen}>
         <DialogContent className="max-w-3xl max-h-[80vh]">
           <DialogHeader><DialogTitle>🔍 Load Saved Document</DialogTitle></DialogHeader>
@@ -406,7 +409,7 @@ export default function Home() {
             ) : (
               savedEstimatesList.map((est) => (
                 <div key={est.id} className="flex justify-between p-4 border rounded-lg mb-2">
-                  <div className="font-semibold">{est.invoiceNumber} — {est.jobName}</div>
+                  <div className="font-semibold">{est.jobName || 'Untitled'} — {est.invoiceNumber}</div>
                   <Button size="sm" onClick={() => loadSelectedEstimate(est)}>Load</Button>
                 </div>
               ))
