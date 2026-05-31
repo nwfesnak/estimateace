@@ -274,20 +274,10 @@ export default function Home() {
       `}</style>
 
       <div className="min-h-screen bg-[#f4f4f4] p-4 md:p-8">
-        {/* HEADER - Estimate / Invoice Toggle */}
+        {/* Header */}
         <div className="flex border-b mb-8 bg-white rounded-t-xl overflow-hidden shadow-sm">
-          <button 
-            onClick={() => setDocumentType('estimate')} 
-            className={`flex-1 py-5 text-xl font-semibold ${documentType === 'estimate' ? 'bg-[#1e293b] text-white' : 'hover:bg-gray-100'}`}
-          >
-            📋 Estimate
-          </button>
-          <button 
-            onClick={() => setDocumentType('invoice')} 
-            className={`flex-1 py-5 text-xl font-semibold ${documentType === 'invoice' ? 'bg-[#1e293b] text-white' : 'hover:bg-gray-100'}`}
-          >
-            💰 Invoice
-          </button>
+          <button onClick={() => setDocumentType('estimate')} className={`flex-1 py-5 text-xl font-semibold ${documentType === 'estimate' ? 'bg-[#1e293b] text-white' : 'hover:bg-gray-100'}`}>📋 Estimate</button>
+          <button onClick={() => setDocumentType('invoice')} className={`flex-1 py-5 text-xl font-semibold ${documentType === 'invoice' ? 'bg-[#1e293b] text-white' : 'hover:bg-gray-100'}`}>💰 Invoice</button>
         </div>
 
         {/* Job Info */}
@@ -337,7 +327,7 @@ export default function Home() {
           </CardContent>
         </Card>
 
-        {/* Line Item Table + Grand Total + Buttons Underneath */}
+        {/* Table + Grand Total + Buttons Under Grand Total */}
         <Card className="mb-8">
           <Table>
             <TableHeader>
@@ -366,13 +356,12 @@ export default function Home() {
             </TableBody>
           </Table>
 
-          {/* Grand Total */}
           <div className="p-6 bg-white border-t text-right text-3xl font-bold">
             {documentType === 'invoice' ? 'Amount Due: ' : 'Grand Total: '}
             <span className="text-[#10b981]">${amountDue.toFixed(2)}</span>
           </div>
 
-          {/* BUTTONS UNDER GRAND TOTAL */}
+          {/* Buttons under Grand Total */}
           <div className="p-6 bg-white border-t flex justify-between items-center gap-3 flex-wrap no-print">
             <div className="flex gap-3">
               <Button onClick={() => document.getElementById('photo-camera')?.click()} className="bg-[#10b981]">📷 Take Photo</Button>
@@ -387,7 +376,7 @@ export default function Home() {
           </div>
         </Card>
 
-        {/* Photos Section */}
+        {/* Photos */}
         <Card className="mb-8">
           <CardContent className="p-6">
             <h3 className="text-lg font-semibold mb-3">📸 Photos</h3>
@@ -404,7 +393,7 @@ export default function Home() {
           </CardContent>
         </Card>
 
-        {/* Videos Section */}
+        {/* Videos */}
         <Card className="mb-8">
           <CardContent className="p-6">
             <h3 className="text-lg font-semibold mb-3">🎥 Videos</h3>
@@ -426,6 +415,33 @@ export default function Home() {
           <CardContent className="p-6">
             <h3 className="text-lg font-semibold mb-3">Terms & Conditions</h3>
             <Textarea value={terms} onChange={e => setTerms(e.target.value)} className="min-h-[180px]" />
+          </CardContent>
+        </Card>
+
+        {/* BOTTOM ROW OF BUTTONS - STARTING WITH TEMPLATES */}
+        <Card className="mb-8">
+          <CardContent className="p-6">
+            <h4 className="text-base font-semibold mb-4 text-center md:text-left text-gray-600">Quick Actions</h4>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+              <Button onClick={() => setIsTemplatesOpen(true)} className="h-24 flex flex-col items-center justify-center gap-2 bg-[#3b82f6] hover:bg-[#2563eb] text-white">
+                <span className="text-4xl">📋</span><span className="font-medium">Templates</span>
+              </Button>
+              <Button onClick={saveAsTemplate} className="h-24 flex flex-col items-center justify-center gap-2 bg-[#6b7280] hover:bg-[#4b5563] text-white">
+                <span className="text-4xl">💾</span><span className="font-medium">Save as Template</span>
+              </Button>
+              <Button onClick={() => setIsProfileOpen(true)} className="h-24 flex flex-col items-center justify-center gap-2 bg-[#8b5cf6] hover:bg-[#7c3aed] text-white">
+                <span className="text-4xl">👤</span><span className="font-medium">Profile</span>
+              </Button>
+              <Button className="h-24 flex flex-col items-center justify-center gap-2 bg-[#10b981] hover:bg-[#059669] text-white">
+                <span className="text-4xl">📊</span><span className="font-medium">Dashboard</span>
+              </Button>
+              <Button onClick={openGoogleCalendar} className="h-24 flex flex-col items-center justify-center gap-2 bg-[#4285F4] hover:bg-[#1e40af] text-white">
+                <span className="text-4xl">📅</span><span className="font-medium">Calendar</span>
+              </Button>
+              <Button onClick={() => document.getElementById('receipts-camera')?.click()} className="h-24 flex flex-col items-center justify-center gap-2 bg-[#f59e0b] hover:bg-[#d97706] text-white">
+                <span className="text-4xl">📸</span><span className="font-medium">Receipts</span>
+              </Button>
+            </div>
           </CardContent>
         </Card>
 
@@ -517,6 +533,7 @@ export default function Home() {
       {/* Hidden camera inputs */}
       <input id="photo-camera" type="file" accept="image/*" capture="environment" onChange={e => handleMediaUpload(e.target.files, 'photo')} className="hidden" />
       <input id="video-camera" type="file" accept="video/*" capture="environment" onChange={e => handleMediaUpload(e.target.files, 'video')} className="hidden" />
+      <input id="receipts-camera" type="file" accept="image/*" capture="environment" onChange={e => handleMediaUpload(e.target.files, 'photo')} className="hidden" />
 
       {/* Send Modal */}
       <Dialog open={isSendModalOpen} onOpenChange={setIsSendModalOpen}>
@@ -526,6 +543,82 @@ export default function Home() {
             <Button onClick={sendViaEmail} className="flex-1 bg-[#2563eb]">📧 Send via Email</Button>
             <Button onClick={sendViaText} className="flex-1 bg-[#10b981]">📱 Send via Text</Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Templates Modal */}
+      <Dialog open={isTemplatesOpen} onOpenChange={setIsTemplatesOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader><DialogTitle>📋 Templates</DialogTitle></DialogHeader>
+          <div className="max-h-[400px] overflow-y-auto space-y-3">
+            <div className="font-medium text-sm text-gray-500">Pre-made Templates</div>
+            {[
+              { name: 'Standard Payment Terms', text: '50% deposit due upon signing. Remaining 50% due upon completion.' },
+              { name: 'Warranty', text: 'All workmanship is guaranteed for 12 months from date of completion.' },
+            ].map((tpl, i) => (
+              <div key={i} className="flex justify-between items-center p-3 border rounded-lg hover:bg-gray-50">
+                <div className="flex-1">
+                  <div className="font-medium">{tpl.name}</div>
+                  <div className="text-xs text-gray-500 line-clamp-2">{tpl.text}</div>
+                </div>
+                <Button size="sm" onClick={() => useTemplate(tpl.text)}>Use</Button>
+              </div>
+            ))}
+            {savedTemplates.length > 0 && (
+              <>
+                <div className="font-medium text-sm text-gray-500 mt-6">Your Saved Templates</div>
+                {savedTemplates.map((tpl, i) => (
+                  <div key={i} className="flex justify-between items-center p-3 border rounded-lg hover:bg-gray-50">
+                    <div className="flex-1">
+                      <div className="font-medium">{tpl.name}</div>
+                      <div className="text-xs text-gray-500 line-clamp-2">{tpl.text}</div>
+                    </div>
+                    <Button size="sm" onClick={() => useTemplate(tpl.text)}>Use</Button>
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Profile Modal */}
+      <Dialog open={isProfileOpen} onOpenChange={setIsProfileOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>👤 Company Profile</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div><label className="block text-sm font-semibold mb-1">Name</label><Input value={profile.name} onChange={e => setProfile({...profile, name: e.target.value})} /></div>
+            <div><label className="block text-sm font-semibold mb-1">Company Name</label><Input value={profile.company} onChange={e => setProfile({...profile, company: e.target.value})} /></div>
+            <div><label className="block text-sm font-semibold mb-1">Address</label><Input value={profile.address} onChange={e => setProfile({...profile, address: e.target.value})} /></div>
+            <div><label className="block text-sm font-semibold mb-1">Phone</label><Input value={profile.phone} onChange={e => setProfile({...profile, phone: e.target.value})} /></div>
+            <div><label className="block text-sm font-semibold mb-1">Email</label><Input value={profile.email} onChange={e => setProfile({...profile, email: e.target.value})} /></div>
+            <div><label className="block text-sm font-semibold mb-1">Slogan</label><Input value={profile.slogan} onChange={e => setProfile({...profile, slogan: e.target.value})} /></div>
+          </div>
+          <DialogFooter>
+            <Button onClick={saveProfile} className="bg-[#10b981]">Save Profile</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Load Modal */}
+      <Dialog open={isLoadModalOpen} onOpenChange={setIsLoadModalOpen}>
+        <DialogContent className="max-w-3xl max-h-[80vh]">
+          <DialogHeader><DialogTitle>🔍 Load Saved Document</DialogTitle></DialogHeader>
+          <div className="max-h-[500px] overflow-y-auto">
+            {savedEstimatesList.length === 0 ? (
+              <p className="text-center text-gray-500 py-8">No saved documents yet.</p>
+            ) : (
+              savedEstimatesList.map((est) => (
+                <div key={est.id} className="flex justify-between items-center p-4 border rounded-lg mb-2">
+                  <div className="font-semibold">{est.jobName || 'Untitled'} — {est.invoiceNumber}</div>
+                  <div className="flex gap-2">
+                    <Button size="sm" onClick={() => loadSelectedEstimate(est)}>Load</Button>
+                    <Button size="sm" variant="destructive" onClick={() => deleteSelectedEstimate(est.id)}>Delete</Button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </>
