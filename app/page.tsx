@@ -83,7 +83,13 @@ export default function Home() {
 
   const saveToDB = async () => {
     if (!user || !supabase) return;
-    const data = { user_id: user.id, jobName, address, city, zipCode, phones, emails, date, invoiceNumber, items, terms, profile, documentType, dueDate, paymentStatus, amountPaid, paymentMethod, photoUrls, videoUrls, updated_at: new Date().toISOString() };
+    const data = {
+      user_id: user.id,
+      jobName, address, city, zipCode, phones, emails, date, invoiceNumber, items, terms, profile,
+      documentType, dueDate, paymentStatus, amountPaid, paymentMethod,
+      photoUrls, videoUrls,
+      updated_at: new Date().toISOString(),
+    };
     const { error } = await supabase.from('estimates').upsert({ id: invoiceNumber, ...data });
     if (error) console.error('❌ Save error:', error);
     else setLastSaved(new Date().toLocaleTimeString());
@@ -143,11 +149,11 @@ export default function Home() {
     setPhotoUrls(est.photoUrls || []);
     setVideoUrls(est.videoUrls || []);
     setIsLoadModalOpen(false);
-    showMessage('Loaded!');
+    showMessage('Loaded from Supabase!');
   };
 
   const deleteSelectedEstimate = async (id: string) => {
-    if (!confirm('Delete permanently?')) return;
+    if (!confirm('Delete this document permanently?')) return;
     if (!supabase) return;
     await supabase.from('estimates').delete().eq('id', id);
     await refreshSavedList();
@@ -155,7 +161,7 @@ export default function Home() {
   };
 
   const newEstimate = () => {
-    if (!confirm('Start new document?')) return;
+    if (!confirm('Start a completely new document?')) return;
     setJobName(''); setAddress(''); setCity(''); setZipCode('');
     setPhones(['']); setEmails(['']); setTerms(''); setPhotoUrls([]); setVideoUrls([]);
     setItems([{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
@@ -274,7 +280,7 @@ export default function Home() {
           <button onClick={() => setDocumentType('invoice')} className={`flex-1 py-5 text-xl font-semibold ${documentType === 'invoice' ? 'bg-[#1e293b] text-white' : 'hover:bg-gray-100'}`}>💰 Invoice</button>
         </div>
 
-        {/* Job Info */}
+        {/* Job Info + Phones/Emails */}
         <Card className="mb-8">
           <CardContent className="p-6">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
@@ -321,14 +327,7 @@ export default function Home() {
           </CardContent>
         </Card>
 
-        {/* Action buttons */}
-        <div className="flex gap-3 mb-8 flex-wrap">
-          <Button onClick={newEstimate} className="bg-[#6b7280]">🆕 New Document</Button>
-          <Button onClick={addRow} className="bg-[#10b981]">➕ Add Line Item</Button>
-          <Button onClick={openLoadModal} className="bg-[#3b82f6]">🔍 Load Document</Button>
-        </div>
-
-        {/* Main Table */}
+        {/* Line Item Table + Grand Total + Buttons Underneath */}
         <Card className="mb-8">
           <Table>
             <TableHeader>
@@ -357,13 +356,28 @@ export default function Home() {
             </TableBody>
           </Table>
 
+          {/* Grand Total */}
           <div className="p-6 bg-white border-t text-right text-3xl font-bold">
             {documentType === 'invoice' ? 'Amount Due: ' : 'Grand Total: '}
             <span className="text-[#10b981]">${amountDue.toFixed(2)}</span>
           </div>
+
+          {/* BUTTONS DIRECTLY UNDER GRAND TOTAL */}
+          <div className="p-6 bg-white border-t flex justify-between items-center gap-3 flex-wrap no-print">
+            <div className="flex gap-3">
+              <Button onClick={() => document.getElementById('photo-camera')?.click()} className="bg-[#10b981]">📷 Take Photo</Button>
+              <Button onClick={() => document.getElementById('video-camera')?.click()} className="bg-[#10b981]">📹 Record Video</Button>
+            </div>
+            <div className="flex gap-3 flex-wrap">
+              <Button onClick={saveNamedEstimate} className="bg-[#10b981]">💾 Save</Button>
+              <Button onClick={convertToInvoice} className="bg-[#10b981]">💰 Convert to Invoice</Button>
+              <Button onClick={printDocument} className="bg-[#10b981] font-semibold">🖨️ Print / Preview</Button>
+              <Button onClick={openSendModal} className="bg-[#2563eb]">📧 Send</Button>
+            </div>
+          </div>
         </Card>
 
-        {/* Photos */}
+        {/* Photos & Videos (kept after the main table) */}
         <Card className="mb-8">
           <CardContent className="p-6">
             <h3 className="text-lg font-semibold mb-3">📸 Photos</h3>
@@ -380,7 +394,6 @@ export default function Home() {
           </CardContent>
         </Card>
 
-        {/* Videos */}
         <Card className="mb-8">
           <CardContent className="p-6">
             <h3 className="text-lg font-semibold mb-3">🎥 Videos</h3>
@@ -405,22 +418,9 @@ export default function Home() {
           </CardContent>
         </Card>
 
-        {/* Bottom toolbar with Print button */}
-        <div className="p-6 bg-white border-t flex justify-between items-center gap-3 flex-wrap no-print">
-          <div className="flex gap-3">
-            <Button onClick={() => document.getElementById('photo-camera')?.click()} className="bg-[#10b981]">📷 Take Photo</Button>
-            <Button onClick={() => document.getElementById('video-camera')?.click()} className="bg-[#10b981]">📹 Record Video</Button>
-          </div>
-          <div className="flex gap-3 flex-wrap">
-            <Button onClick={saveNamedEstimate} className="bg-[#10b981]">💾 Save</Button>
-            <Button onClick={convertToInvoice} className="bg-[#10b981]">💰 Convert to Invoice</Button>
-            <Button onClick={printDocument} className="bg-[#10b981] font-semibold">🖨️ Print / Preview</Button>
-            <Button onClick={openSendModal} className="bg-[#2563eb]">📧 Send</Button>
-          </div>
-        </div>
-
         {/* CLEAN PRINT DOCUMENT */}
         <div id="print-document" className="max-w-4xl mx-auto bg-white p-10 shadow-2xl hidden print:block">
+          {/* Professional print layout (same as before) */}
           <div className="flex justify-between border-b pb-6 mb-8">
             <div>
               <h1 className="text-5xl font-bold tracking-tight">{documentType.toUpperCase()}</h1>
@@ -504,7 +504,11 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Modals */}
+      {/* Hidden camera inputs */}
+      <input id="photo-camera" type="file" accept="image/*" capture="environment" onChange={e => handleMediaUpload(e.target.files, 'photo')} className="hidden" />
+      <input id="video-camera" type="file" accept="video/*" capture="environment" onChange={e => handleMediaUpload(e.target.files, 'video')} className="hidden" />
+
+      {/* Send Modal */}
       <Dialog open={isSendModalOpen} onOpenChange={setIsSendModalOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>Send {documentType.toUpperCase()}</DialogTitle></DialogHeader>
@@ -514,10 +518,6 @@ export default function Home() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Hidden camera inputs */}
-      <input id="photo-camera" type="file" accept="image/*" capture="environment" onChange={e => handleMediaUpload(e.target.files, 'photo')} className="hidden" />
-      <input id="video-camera" type="file" accept="video/*" capture="environment" onChange={e => handleMediaUpload(e.target.files, 'video')} className="hidden" />
     </>
   );
 }
