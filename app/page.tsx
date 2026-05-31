@@ -8,6 +8,12 @@ import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 // ==================== IndexedDB Configuration ====================
 const DB_NAME = 'estimateace';
@@ -104,6 +110,11 @@ const deleteSavedEstimate = async (id: string) => {
 
 // ==================== Main Component ====================
 export default function Home() {
+  const [user, setUser] = useState<any>(null);
+  const [showLogin, setShowLogin] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+
   const [documentType, setDocumentType] = useState<'estimate' | 'invoice'>('estimate');
   const [dueDate, setDueDate] = useState('');
   const [paymentStatus, setPaymentStatus] = useState<'pending' | 'paid'>('pending');
@@ -146,116 +157,53 @@ export default function Home() {
   const grandTotal = items.reduce((sum, item) => sum + (item.total || 0), 0);
   const amountDue = Math.max(grandTotal - amountPaid, 0);
 
-  const improveWithGrok = async (id: number) => {
-    const item = items.find((i) => i.id === id);
-    if (!item?.description?.trim()) {
-      alert("Type something first!");
-      return;
-    }
+  // Supabase Auth
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => setUser(session?.user ?? null));
+    const { data: listener } = supabase.auth.onAuthStateChange((_, session) => setUser(session?.user ?? null));
+    return () => listener.subscription.unsubscribe();
+  }, []);
 
-    try {
-      const res = await fetch('/api/grok', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ description: item.description }),
-      });
-
-      const data = await res.json();
-      if (data.suggestion && data.suggestion.length > 10) {
-        updateItem(id, 'description', data.suggestion);
-        alert('✅ Grok improved your line item!');
-      } else {
-        alert('Grok gave a short response – try again with more detail.');
-      }
-    } catch (err) {
-      alert('Could not reach Grok AI. Check GROK_API_KEY in .env.local');
-    }
+  const login = async () => {
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) alert(error.message);
+    else setShowLogin(false);
   };
 
-  const convertToInvoice = () => {
-    if (documentType === 'invoice') return;
-    setDocumentType('invoice');
-    const newNumber = invoiceNumber.replace('EST-', 'INV-');
-    setInvoiceNumber(newNumber);
-
-    const thirtyDays = new Date();
-    thirtyDays.setDate(thirtyDays.getDate() + 30);
-    setDueDate(thirtyDays.toISOString().split('T')[0]);
-
-    setPaymentStatus('pending');
-    setAmountPaid(0);
-    setPaymentMethod('');
-    alert('✅ Switched to Invoice mode!');
+  const signup = async () => {
+    const { error } = await supabase.auth.signUp({ email, password });
+    if (error) alert(error.message);
+    else alert('✅ Check your email to confirm your account!');
   };
 
-  const recordPayment = () => {
-    if (amountPaid >= grandTotal) {
-      setPaymentStatus('paid');
-      alert(`✅ Payment of $${amountPaid.toFixed(2)} recorded via ${paymentMethod || 'Unknown'}. Invoice marked PAID!`);
-    } else {
-      alert(`✅ Partial payment of $${amountPaid.toFixed(2)} recorded. Amount still due: $${amountDue.toFixed(2)}`);
-    }
-    saveToDB();
+  const logout = () => supabase.auth.signOut();
+
+  // Save ALL data to Supabase (job name, address, date, document #, phones, emails, etc.)
+  const saveToDB = async () => {
+    if (!user) return;
+    const data = {
+      user_id: user.id,
+      jobName,
+      address,
+      phones,
+      emails,
+      date,
+      invoiceNumber,
+      items,
+      terms,
+      profile,
+      documentType,
+      dueDate,
+      paymentStatus,
+      amountPaid,
+      paymentMethod,
+      updated_at: new Date().toISOString(),
+    };
+    await supabase.from('estimates').upsert({ id: invoiceNumber, ...data });
+    setLastSaved(new Date().toLocaleTimeString());
   };
 
-  const openGoogleCalendar = () => {
-    const title = encodeURIComponent(`${documentType === 'invoice' ? 'Invoice' : 'Estimate'} - ${jobName || 'New Job'}`);
-    const eventDate = date ? date.replace(/-/g, '') : new Date().toISOString().slice(0, 10).replace(/-/g, '');
-    const startTime = `${eventDate}T080000`;
-    const endTime = `${eventDate}T170000`;
-    const details = encodeURIComponent(`EstimateAce #${invoiceNumber}\nJob: ${jobName}\nAddress: ${address}\n\nCreated with EstimateAce`);
-
-    const url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${startTime}/${endTime}&details=${details}`;
-    window.open(url, '_blank');
-  };
-
-  const addRow = () => setItems([...items, { id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
-  const updateItem = (id: number, field: string, value: any) => {
-    setItems((prev) =>
-      prev.map((item) => {
-        if (item.id === id) {
-          const updated = { ...item, [field]: value };
-          if (field === 'qty' || field === 'price') {
-            updated.total = (updated.qty || 0) * (updated.price || 0);
-          }
-          return updated;
-        }
-        return item;
-      })
-    );
-  };
-
-  const removeRow = (id: number) => setItems((prev) => prev.filter((item) => item.id !== id));
-
-  const newEstimate = async () => {
-    if (!confirm('Start a completely new document?')) return;
-
-    [...photoIds, ...videoIds, ...receiptIds].forEach((id) => deleteMediaFromDB(id));
-
-    const db = await initDB();
-    const tx = db.transaction('currentEstimate', 'readwrite');
-    tx.objectStore('currentEstimate').delete('current');
-
-    setJobName('');
-    setAddress('');
-    setPhones(['']);
-    setEmails(['']);
-    setTerms('');
-    setPhotoIds([]);
-    setVideoIds([]);
-    setReceiptIds([]);
-    setPhotoUrls([]);
-    setVideoUrls([]);
-    setItems([{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
-
-    const savedCount = localStorage.getItem('estimateCount') || '0';
-    const count = parseInt(savedCount) + 1;
-    setInvoiceNumber(documentType === 'estimate' ? `EST-${String(count).padStart(4, '0')}` : `INV-${String(count).padStart(4, '0')}`);
-    localStorage.setItem('estimateCount', count.toString());
-
-    alert('✅ New document started!');
-  };
-
+  // Upload media to Supabase Storage
   const handleMediaUpload = async (files: FileList | null, type: 'photo' | 'video' | 'receipt') => {
     if (!files) return;
 
@@ -323,30 +271,6 @@ export default function Home() {
   useEffect(() => {
     loadMediaPreviews();
   }, [photoIds, videoIds]);
-
-  const saveToDB = async () => {
-    const data = {
-      jobName,
-      address,
-      phones,
-      emails,
-      date,
-      invoiceNumber,
-      items,
-      terms,
-      profile,
-      photoIds,
-      videoIds,
-      receiptIds,
-      documentType,
-      dueDate,
-      paymentStatus,
-      amountPaid,
-      paymentMethod,
-    };
-    await saveEstimateToDB(data);
-    setLastSaved(new Date().toLocaleTimeString());
-  };
 
   const forceSave = async () => {
     await saveToDB();
@@ -520,22 +444,24 @@ export default function Home() {
           </button>
         </div>
 
-        {/* ==================== MODIFIED HEADER ==================== */}
         <div id="estimate-content" className="bg-[#1e293b] text-white p-6 rounded-xl mb-8">
-          <div className="flex justify-start items-start">
+          <div className="flex justify-between items-start">
+            <div>
+              <h1 className="text-4xl font-bold">{documentType === 'invoice' ? 'INVOICE' : 'EstimateAce'}</h1>
+              <span className="text-slate-400">Professional {documentType === 'invoice' ? 'Invoicing' : 'Estimating'}</span>
+            </div>
             {profile.showInHeader && (
-              <div>
-                <div className="font-semibold text-4xl">{profile.company || profile.name}</div>
-                {profile.slogan && <div className="text-2xl italic text-slate-300 mb-1">{profile.slogan}</div>}
-                <div className="text-sm text-slate-300">{profile.address}</div>
-                <div className="text-sm text-slate-300">
+              <div className="text-right text-sm max-w-xs">
+                <div className="font-semibold">{profile.company || profile.name}</div>
+                {profile.slogan && <div className="text-xs italic text-slate-300 mb-1">{profile.slogan}</div>}
+                <div className="text-xs text-slate-300">{profile.address}</div>
+                <div className="text-xs text-slate-300">
                   {profile.phone} • {profile.email}
                 </div>
               </div>
             )}
           </div>
         </div>
-        {/* ==================== END MODIFIED HEADER ==================== */}
 
         <Card className="mb-8">
           <CardContent className="p-6">
