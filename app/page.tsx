@@ -147,31 +147,56 @@ export default function Home() {
     showMessage('Loaded from Supabase!');
   };
 
-  // Auto-save name when pressing Save button
-  const saveNamedEstimate = async () => {
-    if (!user || !supabase) return;
-    await saveToDB();
-    const niceName = `${jobName || 'Untitled'} - ${invoiceNumber}`;
-    showMessage(`Saved as "${niceName}"`);
+  // Delete saved document
+  const deleteSelectedEstimate = async (id: string) => {
+    if (!confirm('Delete this document permanently?')) return;
+    if (!supabase) return;
+    await supabase.from('estimates').delete().eq('id', id);
+    await refreshSavedList();
+    showMessage('Document deleted');
   };
 
-  const improveWithGrok = async (id: number) => { showMessage('Grok AI (demo)'); };
-  const convertToInvoice = () => { showMessage('Switched to Invoice mode!'); };
-  const recordPayment = () => { saveToDB(); showMessage('Payment recorded'); };
-  const openGoogleCalendar = () => { window.open('https://calendar.google.com', '_blank'); };
+  // Auto-increment Document # and set today's date on new document
+  const newEstimate = () => {
+    if (!confirm('Start a completely new document?')) return;
+
+    setJobName('');
+    setAddress('');
+    setPhones(['']);
+    setEmails(['']);
+    setTerms('');
+    setPhotoUrls([]);
+    setVideoUrls([]);
+    setItems([{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
+
+    // Auto today's date
+    const today = new Date().toISOString().split('T')[0];
+    setDate(today);
+
+    // Auto-increment document number
+    const savedCount = parseInt(localStorage.getItem('estimateCount') || '0') + 1;
+    localStorage.setItem('estimateCount', savedCount.toString());
+    const prefix = documentType === 'invoice' ? 'INV' : 'EST';
+    setInvoiceNumber(`${prefix}-${String(savedCount).padStart(4, '0')}`);
+
+    showMessage('New document started!');
+  };
+
   const addRow = () => setItems([...items, { id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
   const updateItem = (id: number, field: string, value: any) => {
     setItems(prev => prev.map(item => item.id === id ? { ...item, [field]: value, total: (field === 'qty' || field === 'price') ? (item.qty || 0) * (item.price || 0) : item.total } : item));
   };
   const removeRow = (id: number) => setItems(prev => prev.filter(item => item.id !== id));
-  const newEstimate = () => { if (confirm('New document?')) { setJobName(''); setAddress(''); setPhones(['']); setEmails(['']); setTerms(''); setPhotoUrls([]); setVideoUrls([]); setItems([{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]); showMessage('New document started!'); } };
+
   const addPhone = () => setPhones([...phones, '']);
   const removePhone = (i: number) => setPhones(phones.filter((_, idx) => idx !== i));
   const updatePhone = (i: number, value: string) => { const arr = [...phones]; arr[i] = value; setPhones(arr); };
   const addEmail = () => setEmails([...emails, '']);
   const removeEmail = (i: number) => setEmails(emails.filter((_, idx) => idx !== i));
   const updateEmail = (i: number, value: string) => { const arr = [...emails]; arr[i] = value; setEmails(arr); };
+
   const forceSave = async () => { await saveToDB(); };
+  const saveNamedEstimate = async () => { await saveToDB(); showMessage(`Saved as "${jobName || 'Untitled'} - ${invoiceNumber}"`); };
   const saveProfile = async () => { await saveToDB(); setIsProfileOpen(false); };
   const printEstimate = () => window.print();
   const sendEstimate = () => showMessage(`${documentType === 'invoice' ? 'Invoice' : 'Estimate'} sent successfully!`);
@@ -399,7 +424,7 @@ export default function Home() {
 
       <input id="receipts-camera" type="file" accept="image/*" capture="environment" onChange={handleMediaUpload} className="hidden" />
 
-      {/* Load Modal - shows Job Name - Estimate # */}
+      {/* Load Modal with Delete button */}
       <Dialog open={isLoadModalOpen} onOpenChange={setIsLoadModalOpen}>
         <DialogContent className="max-w-3xl max-h-[80vh]">
           <DialogHeader><DialogTitle>🔍 Load Saved Document</DialogTitle></DialogHeader>
@@ -408,9 +433,12 @@ export default function Home() {
               <p className="text-center text-gray-500 py-8">No saved documents yet.</p>
             ) : (
               savedEstimatesList.map((est) => (
-                <div key={est.id} className="flex justify-between p-4 border rounded-lg mb-2">
+                <div key={est.id} className="flex justify-between items-center p-4 border rounded-lg mb-2">
                   <div className="font-semibold">{est.jobName || 'Untitled'} — {est.invoiceNumber}</div>
-                  <Button size="sm" onClick={() => loadSelectedEstimate(est)}>Load</Button>
+                  <div className="flex gap-2">
+                    <Button size="sm" onClick={() => loadSelectedEstimate(est)}>Load</Button>
+                    <Button size="sm" variant="destructive" onClick={() => deleteSelectedEstimate(est.id)}>Delete</Button>
+                  </div>
                 </div>
               ))
             )}
