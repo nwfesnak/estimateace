@@ -72,7 +72,6 @@ export default function Home() {
     if (error) alert(error.message); else alert('✅ Account created!');
   };
 
-  // Save to Supabase
   const saveToDB = async () => {
     if (!user || !supabase) return;
     const data = {
@@ -85,7 +84,6 @@ export default function Home() {
     setLastSaved(new Date().toLocaleTimeString());
   };
 
-  // Photos & Videos to Supabase Storage
   const handleMediaUpload = async (files: FileList | null, type: 'photo' | 'video') => {
     if (!files || !user || !supabase) return;
     const newUrls: string[] = [];
@@ -111,7 +109,6 @@ export default function Home() {
     else setVideoUrls(prev => prev.filter((_, i) => i !== index));
   };
 
-  // Load from Supabase
   const refreshSavedList = async () => {
     if (!user || !supabase) return;
     const { data } = await supabase.from('estimates').select('*').eq('user_id', user.id).order('updated_at', { ascending: false });
@@ -142,8 +139,7 @@ export default function Home() {
     alert('✅ Loaded from Supabase!');
   };
 
-  // Original functions
-  const improveWithGrok = async (id: number) => { const item = items.find(i => i.id === id); if (!item?.description?.trim()) return alert("Type something first!"); alert("Grok AI (demo)"); };
+  const improveWithGrok = async (id: number) => { alert('Grok AI (demo)'); };
   const convertToInvoice = () => { alert('✅ Switched to Invoice mode!'); };
   const recordPayment = () => { saveToDB(); alert('Payment recorded'); };
   const openGoogleCalendar = () => { window.open('https://calendar.google.com', '_blank'); };
@@ -296,7 +292,7 @@ export default function Home() {
             </div>
           </div>
 
-          {/* BOTTOM TOOLBAR - THE BUTTONS YOU WERE MISSING */}
+          {/* BOTTOM TOOLBAR - NOW RESTORED */}
           <div className="p-6 bg-white border-t flex justify-between items-center gap-3 flex-wrap">
             <div className="flex gap-3">
               <Button onClick={() => document.getElementById('photo-camera')?.click()} className="bg-[#10b981]">
@@ -321,7 +317,7 @@ export default function Home() {
           </div>
         </Card>
 
-        {/* Photos Card */}
+        {/* Photos */}
         <Card className="mb-8">
           <CardContent className="p-6">
             <h3 className="text-lg font-semibold mb-3">📸 Photos</h3>
@@ -338,7 +334,7 @@ export default function Home() {
           </CardContent>
         </Card>
 
-        {/* Videos Card */}
+        {/* Videos */}
         <Card className="mb-8">
           <CardContent className="p-6">
             <h3 className="text-lg font-semibold mb-3">🎥 Videos</h3>
