@@ -8,21 +8,102 @@ import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { createClient } from '@supabase/supabase-js';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+// ==================== IndexedDB Configuration ====================
+const DB_NAME = 'estimateace';
+const DB_VERSION = 2;
+let dbInstance: IDBDatabase | null = null;
+
+const initDB = async (): Promise<IDBDatabase> => {
+  if (dbInstance) return dbInstance;
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    request.onupgradeneeded = (e) => {
+      const db = (e.target as IDBOpenDBRequest).result;
+      if (!db.objectStoreNames.contains('media')) db.createObjectStore('media', { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('currentEstimate')) db.createObjectStore('currentEstimate', { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('savedEstimates')) db.createObjectStore('savedEstimates', { keyPath: 'id' });
+    };
+    request.onsuccess = (e) => { dbInstance = (e.target as IDBOpenDBRequest).result; resolve(dbInstance); };
+    request.onerror = (e) => reject((e.target as IDBOpenDBRequest).error);
+  });
+};
+
+// ==================== Database Helpers ====================
+const saveEstimateToDB = async (data: any) => {
+  const db = await initDB();
+  const tx = db.transaction('currentEstimate', 'readwrite');
+  tx.objectStore('currentEstimate').put({ id: 'current', ...data });
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => reject(tx.error);
+  });
+};
+
+const loadEstimateFromDB = async (): Promise<any | null> => {
+  const db = await initDB();
+  return new Promise((resolve) => {
+    const tx = db.transaction('currentEstimate', 'readonly');
+    const request = tx.objectStore('currentEstimate').get('current');
+    request.onsuccess = () => resolve(request.result || null);
+    request.onerror = () => resolve(null);
+  });
+};
+
+const saveMediaToDB = async (file: File, type: 'photo' | 'video' | 'receipt'): Promise<string> => {
+  const db = await initDB();
+  const id = `${type}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('media', 'readwrite');
+    tx.objectStore('media').add({ id, blob: file, type });
+    tx.oncomplete = () => resolve(id);
+    tx.onerror = () => reject(tx.error);
+  });
+};
+
+const getMediaFromDB = async (id: string): Promise<string> => {
+  const db = await initDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('media', 'readonly');
+    const request = tx.objectStore('media').get(id);
+    request.onsuccess = () => resolve(request.result ? URL.createObjectURL(request.result.blob) : '');
+    request.onerror = () => reject(request.error);
+  });
+};
+
+const deleteMediaFromDB = async (id: string) => {
+  const db = await initDB();
+  const tx = db.transaction('media', 'readwrite');
+  tx.objectStore('media').delete(id);
+};
+
+const saveAsNamedEstimate = async (name: string, currentData: any) => {
+  const db = await initDB();
+  const id = `saved-${Date.now()}`;
+  const record = { id, name: name || currentData.jobName || 'Untitled', invoiceNumber: currentData.invoiceNumber, jobName: currentData.jobName, date: currentData.date, savedAt: new Date().toISOString(), data: currentData };
+  const tx = db.transaction('savedEstimates', 'readwrite');
+  tx.objectStore('savedEstimates').put(record);
+  return new Promise((resolve) => { tx.oncomplete = () => resolve(true); });
+};
+
+const loadSavedEstimates = async (): Promise<any[]> => {
+  const db = await initDB();
+  return new Promise((resolve) => {
+    const tx = db.transaction('savedEstimates', 'readonly');
+    const request = tx.objectStore('savedEstimates').getAll();
+    request.onsuccess = () => resolve(request.result || []);
+    request.onerror = () => resolve([]);
+  });
+};
+
+const deleteSavedEstimate = async (id: string) => {
+  const db = await initDB();
+  const tx = db.transaction('savedEstimates', 'readwrite');
+  tx.objectStore('savedEstimates').delete(id);
+};
 
 // ==================== Main Component ====================
 export default function Home() {
-  // Supabase user (added - nothing else changed)
-  const [user, setUser] = useState<any>(null);
-  const [showLogin, setShowLogin] = useState(false);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-
   const [documentType, setDocumentType] = useState<'estimate' | 'invoice'>('estimate');
   const [dueDate, setDueDate] = useState('');
   const [paymentStatus, setPaymentStatus] = useState<'pending' | 'paid'>('pending');
@@ -37,6 +118,9 @@ export default function Home() {
   const [invoiceNumber, setInvoiceNumber] = useState('EST-0001');
   const [items, setItems] = useState([{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
   const [terms, setTerms] = useState('');
+  const [photoIds, setPhotoIds] = useState<string[]>([]);
+  const [videoIds, setVideoIds] = useState<string[]>([]);
+  const [receiptIds, setReceiptIds] = useState<string[]>([]);
   const [photoUrls, setPhotoUrls] = useState<string[]>([]);
   const [videoUrls, setVideoUrls] = useState<string[]>([]);
 
@@ -62,96 +146,20 @@ export default function Home() {
   const grandTotal = items.reduce((sum, item) => sum + (item.total || 0), 0);
   const amountDue = Math.max(grandTotal - amountPaid, 0);
 
-  // Supabase Auth (added)
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => setUser(session?.user ?? null));
-    const { data: listener } = supabase.auth.onAuthStateChange((_, session) => setUser(session?.user ?? null));
-    return () => listener.subscription.unsubscribe();
-  }, []);
-
-  const login = async () => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) alert(error.message);
-    else setShowLogin(false);
-  };
-
-  const signup = async () => {
-    const { error } = await supabase.auth.signUp({ email, password });
-    if (error) alert(error.message);
-    else alert('✅ Check your email to confirm your account!');
-  };
-
-  const logout = () => supabase.auth.signOut();
-
-  // Save everything to Supabase (replaces IndexedDB)
-  const saveToDB = async () => {
-    if (!user) return;
-    const data = {
-      user_id: user.id,
-      jobName,
-      address,
-      phones,
-      emails,
-      date,
-      invoiceNumber,
-      items,
-      terms,
-      profile,
-      documentType,
-      dueDate,
-      paymentStatus,
-      amountPaid,
-      paymentMethod,
-      updated_at: new Date().toISOString(),
-    };
-    await supabase.from('estimates').upsert({ id: invoiceNumber, ...data });
-    setLastSaved(new Date().toLocaleTimeString());
-  };
-
-  // Upload media to Supabase Storage (replaces local IndexedDB blobs)
-  const handleMediaUpload = async (files: FileList | null, type: 'photo' | 'video' | 'receipt') => {
-    if (!files || !user) return;
-    const newUrls: string[] = [];
-    for (const file of Array.from(files)) {
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${user.id}/${type}/${Date.now()}.${fileExt}`;
-      const { data } = await supabase.storage.from('media').upload(fileName, file, { upsert: true });
-      if (data) {
-        const publicUrl = supabase.storage.from('media').getPublicUrl(fileName).data.publicUrl;
-        newUrls.push(publicUrl);
-      }
-    }
-    if (type === 'photo') setPhotoUrls((prev) => [...prev, ...newUrls]);
-    else if (type === 'video') setVideoUrls((prev) => [...prev, ...newUrls]);
-    else {
-      // receipt handled the same way
-    }
-    await saveToDB();
-    if (type === 'receipt') alert('✅ Receipt uploaded!');
-  };
-
-  const handlePhotos = (e: React.ChangeEvent<HTMLInputElement>) => handleMediaUpload(e.target.files, 'photo');
-  const handleVideos = (e: React.ChangeEvent<HTMLInputElement>) => handleMediaUpload(e.target.files, 'video');
-  const handleReceipts = (e: React.ChangeEvent<HTMLInputElement>) => handleMediaUpload(e.target.files, 'receipt');
-
-  const removeMedia = (type: 'photo' | 'video' | 'receipt', index: number) => {
-    if (type === 'photo') setPhotoUrls((prev) => prev.filter((_, i) => i !== index));
-    else if (type === 'video') setVideoUrls((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  // All functions below are EXACTLY the same as your original code
   const improveWithGrok = async (id: number) => {
     const item = items.find((i) => i.id === id);
     if (!item?.description?.trim()) {
       alert("Type something first!");
       return;
     }
+
     try {
       const res = await fetch('/api/grok', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ description: item.description }),
       });
+
       const data = await res.json();
       if (data.suggestion && data.suggestion.length > 10) {
         updateItem(id, 'description', data.suggestion);
@@ -169,9 +177,11 @@ export default function Home() {
     setDocumentType('invoice');
     const newNumber = invoiceNumber.replace('EST-', 'INV-');
     setInvoiceNumber(newNumber);
+
     const thirtyDays = new Date();
     thirtyDays.setDate(thirtyDays.getDate() + 30);
     setDueDate(thirtyDays.toISOString().split('T')[0]);
+
     setPaymentStatus('pending');
     setAmountPaid(0);
     setPaymentMethod('');
@@ -194,6 +204,7 @@ export default function Home() {
     const startTime = `${eventDate}T080000`;
     const endTime = `${eventDate}T170000`;
     const details = encodeURIComponent(`EstimateAce #${invoiceNumber}\nJob: ${jobName}\nAddress: ${address}\n\nCreated with EstimateAce`);
+
     const url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${startTime}/${endTime}&details=${details}`;
     window.open(url, '_blank');
   };
@@ -218,15 +229,72 @@ export default function Home() {
 
   const newEstimate = async () => {
     if (!confirm('Start a completely new document?')) return;
+
+    [...photoIds, ...videoIds, ...receiptIds].forEach((id) => deleteMediaFromDB(id));
+
+    const db = await initDB();
+    const tx = db.transaction('currentEstimate', 'readwrite');
+    tx.objectStore('currentEstimate').delete('current');
+
     setJobName('');
     setAddress('');
     setPhones(['']);
     setEmails(['']);
     setTerms('');
+    setPhotoIds([]);
+    setVideoIds([]);
+    setReceiptIds([]);
     setPhotoUrls([]);
     setVideoUrls([]);
     setItems([{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
+
+    const savedCount = localStorage.getItem('estimateCount') || '0';
+    const count = parseInt(savedCount) + 1;
+    setInvoiceNumber(documentType === 'estimate' ? `EST-${String(count).padStart(4, '0')}` : `INV-${String(count).padStart(4, '0')}`);
+    localStorage.setItem('estimateCount', count.toString());
+
     alert('✅ New document started!');
+  };
+
+  const handleMediaUpload = async (files: FileList | null, type: 'photo' | 'video' | 'receipt') => {
+    if (!files) return;
+
+    const newIds: string[] = [];
+    for (const file of Array.from(files)) {
+      const id = await saveMediaToDB(file, type);
+      newIds.push(id);
+    }
+
+    if (type === 'photo') setPhotoIds((prev) => [...prev, ...newIds]);
+    else if (type === 'video') setVideoIds((prev) => [...prev, ...newIds]);
+    else setReceiptIds((prev) => [...prev, ...newIds]);
+
+    await loadMediaPreviews();
+    await saveToDB();
+
+    if (type === 'receipt') {
+      alert('✅ Receipt uploaded!');
+    }
+  };
+
+  const handlePhotos = (e: React.ChangeEvent<HTMLInputElement>) => handleMediaUpload(e.target.files, 'photo');
+  const handleVideos = (e: React.ChangeEvent<HTMLInputElement>) => handleMediaUpload(e.target.files, 'video');
+  const handleReceipts = (e: React.ChangeEvent<HTMLInputElement>) => handleMediaUpload(e.target.files, 'receipt');
+
+  const removeMedia = (type: 'photo' | 'video' | 'receipt', index: number) => {
+    let ids = type === 'photo' ? photoIds : type === 'video' ? videoIds : receiptIds;
+    const idToDelete = ids[index];
+    deleteMediaFromDB(idToDelete);
+
+    if (type === 'photo') {
+      setPhotoIds((prev) => prev.filter((_, i) => i !== index));
+      setPhotoUrls((prev) => prev.filter((_, i) => i !== index));
+    } else if (type === 'video') {
+      setVideoIds((prev) => prev.filter((_, i) => i !== index));
+      setVideoUrls((prev) => prev.filter((_, i) => i !== index));
+    } else {
+      setReceiptIds((prev) => prev.filter((_, i) => i !== index));
+    }
   };
 
   const addPhone = () => setPhones([...phones, '']);
@@ -245,18 +313,120 @@ export default function Home() {
     setEmails(arr);
   };
 
+  const loadMediaPreviews = async () => {
+    const p = await Promise.all(photoIds.map((id) => getMediaFromDB(id)));
+    const v = await Promise.all(videoIds.map((id) => getMediaFromDB(id)));
+    setPhotoUrls(p);
+    setVideoUrls(v);
+  };
+
+  useEffect(() => {
+    loadMediaPreviews();
+  }, [photoIds, videoIds]);
+
+  const saveToDB = async () => {
+    const data = {
+      jobName,
+      address,
+      phones,
+      emails,
+      date,
+      invoiceNumber,
+      items,
+      terms,
+      profile,
+      photoIds,
+      videoIds,
+      receiptIds,
+      documentType,
+      dueDate,
+      paymentStatus,
+      amountPaid,
+      paymentMethod,
+    };
+    await saveEstimateToDB(data);
+    setLastSaved(new Date().toLocaleTimeString());
+  };
+
+  const forceSave = async () => {
+    await saveToDB();
+    setShowSaveConfirmation(true);
+    setTimeout(() => setShowSaveConfirmation(false), 2000);
+  };
+
   const saveNamedEstimate = async () => {
     const name = prompt(`Enter a name for this ${documentType === 'invoice' ? 'invoice' : 'estimate'}`);
     if (!name) return;
-    await saveToDB();
+
+    const currentData = {
+      jobName,
+      address,
+      phones,
+      emails,
+      date,
+      invoiceNumber,
+      items,
+      terms,
+      profile,
+      photoIds,
+      videoIds,
+      receiptIds,
+      documentType,
+      dueDate,
+      paymentStatus,
+      amountPaid,
+      paymentMethod,
+    };
+
+    await saveAsNamedEstimate(name, currentData);
     alert(`✅ Saved as "${name}"`);
+    await refreshSavedList();
   };
 
-  const refreshSavedList = async () => {};
-  const openLoadModal = async () => setIsLoadModalOpen(true);
-  const loadSelectedEstimate = async (saved: any) => {};
-  const deleteSelectedEstimate = async (id: string) => {};
-  const saveProfile = async () => { await saveToDB(); setIsProfileOpen(false); };
+  const refreshSavedList = async () => {
+    const list = await loadSavedEstimates();
+    setSavedEstimatesList(list);
+  };
+
+  const openLoadModal = async () => {
+    await refreshSavedList();
+    setIsLoadModalOpen(true);
+  };
+
+  const loadSelectedEstimate = async (saved: any) => {
+    const data = saved.data;
+    setJobName(data.jobName || '');
+    setAddress(data.address || '');
+    setPhones(data.phones || ['']);
+    setEmails(data.emails || ['']);
+    setDate(data.date || '');
+    setInvoiceNumber(data.invoiceNumber || 'EST-0001');
+    setItems(data.items || [{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
+    setTerms(data.terms || '');
+    setProfile(data.profile || { name: '', company: '', address: '', phone: '', email: '', slogan: '', showInHeader: false, showQuickLineButtons: true });
+    setPhotoIds(data.photoIds || []);
+    setVideoIds(data.videoIds || []);
+    setReceiptIds(data.receiptIds || []);
+    setDocumentType(data.documentType || 'estimate');
+    setDueDate(data.dueDate || '');
+    setPaymentStatus(data.paymentStatus || 'pending');
+    setAmountPaid(data.amountPaid || 0);
+    setPaymentMethod(data.paymentMethod || '');
+    setIsLoadModalOpen(false);
+    alert('✅ Loaded successfully!');
+  };
+
+  const deleteSelectedEstimate = async (id: string) => {
+    if (!confirm('Delete permanently?')) return;
+    await deleteSavedEstimate(id);
+    await refreshSavedList();
+  };
+
+  const saveProfile = async () => {
+    await saveToDB();
+    setIsProfileOpen(false);
+  };
+
   const printEstimate = () => window.print();
   const sendEstimate = () => alert(`✅ ${documentType === 'invoice' ? 'Invoice' : 'Estimate'} sent successfully!`);
 
@@ -269,12 +439,41 @@ export default function Home() {
     if (!terms.trim()) return alert("Please enter some text first");
     const name = prompt("Enter a name for this template:");
     if (!name?.trim()) return;
+
     const newTemplate = { name: name.trim(), text: terms };
     const updated = [...savedTemplates, newTemplate];
     setSavedTemplates(updated);
     localStorage.setItem('templates', JSON.stringify(updated));
     alert(`✅ Template "${name}" saved!`);
   };
+
+  useEffect(() => {
+    loadEstimateFromDB().then((saved) => {
+      if (saved) {
+        setJobName(saved.jobName || '');
+        setAddress(saved.address || '');
+        setPhones(saved.phones || ['']);
+        setEmails(saved.emails || ['']);
+        setDate(saved.date || '');
+        setInvoiceNumber(saved.invoiceNumber || 'EST-0001');
+        setItems(saved.items || [{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
+        setTerms(saved.terms || '');
+        setProfile(saved.profile || { name: '', company: '', address: '', phone: '', email: '', slogan: '', showInHeader: false, showQuickLineButtons: true });
+        setPhotoIds(saved.photoIds || []);
+        setVideoIds(saved.videoIds || []);
+        setReceiptIds(saved.receiptIds || []);
+        setDocumentType(saved.documentType || 'estimate');
+        setDueDate(saved.dueDate || '');
+        setPaymentStatus(saved.paymentStatus || 'pending');
+        setAmountPaid(saved.amountPaid || 0);
+        setPaymentMethod(saved.paymentMethod || '');
+      }
+      if (!date) setDate(new Date().toISOString().split('T')[0]);
+    });
+
+    const savedTemplatesStr = localStorage.getItem('templates');
+    if (savedTemplatesStr) setSavedTemplates(JSON.parse(savedTemplatesStr));
+  }, []);
 
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -288,26 +487,7 @@ export default function Home() {
     return () => {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     };
-  }, [jobName, address, phones, emails, date, invoiceNumber, items, terms, profile, documentType, dueDate, paymentStatus, amountPaid, paymentMethod]);
-
-  // Login screen if not logged in
-  if (!user) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[#f4f4f4]">
-        <Card className="w-full max-w-md">
-          <CardContent className="p-8">
-            <h1 className="text-3xl font-bold text-center mb-8">EstimateAce</h1>
-            <Input placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} className="mb-3" />
-            <Input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} className="mb-6" />
-            <div className="flex gap-3">
-              <Button onClick={login} className="flex-1">Login</Button>
-              <Button onClick={signup} variant="outline" className="flex-1">Sign Up</Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  }, [jobName, address, phones, emails, date, invoiceNumber, items, terms, profile, photoIds, videoIds, receiptIds, documentType, dueDate, paymentStatus, amountPaid, paymentMethod]);
 
   return (
     <div className="min-h-screen bg-[#f4f4f4] p-4 md:p-8">
@@ -340,24 +520,22 @@ export default function Home() {
           </button>
         </div>
 
+        {/* ==================== MODIFIED HEADER ==================== */}
         <div id="estimate-content" className="bg-[#1e293b] text-white p-6 rounded-xl mb-8">
-          <div className="flex justify-between items-start">
-            <div>
-              <h1 className="text-4xl font-bold">{documentType === 'invoice' ? 'INVOICE' : 'EstimateAce'}</h1>
-              <span className="text-slate-400">Professional {documentType === 'invoice' ? 'Invoicing' : 'Estimating'}</span>
-            </div>
+          <div className="flex justify-start items-start">
             {profile.showInHeader && (
-              <div className="text-right text-sm max-w-xs">
-                <div className="font-semibold">{profile.company || profile.name}</div>
-                {profile.slogan && <div className="text-xs italic text-slate-300 mb-1">{profile.slogan}</div>}
-                <div className="text-xs text-slate-300">{profile.address}</div>
-                <div className="text-xs text-slate-300">
+              <div>
+                <div className="font-semibold text-4xl">{profile.company || profile.name}</div>
+                {profile.slogan && <div className="text-2xl italic text-slate-300 mb-1">{profile.slogan}</div>}
+                <div className="text-sm text-slate-300">{profile.address}</div>
+                <div className="text-sm text-slate-300">
                   {profile.phone} • {profile.email}
                 </div>
               </div>
             )}
           </div>
         </div>
+        {/* ==================== END MODIFIED HEADER ==================== */}
 
         <Card className="mb-8">
           <CardContent className="p-6">
@@ -555,7 +733,7 @@ export default function Home() {
           </div>
         </Card>
 
-        {/* PHOTOS SECTION - LARGER ON MOBILE */}
+        {/* PHOTOS SECTION - LARGER ON MOBILE + MULTIPLE PHOTOS NICELY DISPLAYED */}
         <Card className="mb-8">
           <CardContent className="p-6">
             <h3 className="text-lg font-semibold mb-3">📸 Photos</h3>
@@ -590,7 +768,7 @@ export default function Home() {
           </CardContent>
         </Card>
 
-        {/* Videos card */}
+        {/* Videos card (unchanged) */}
         <Card className="mb-8">
           <CardContent className="p-6">
             <h3 className="text-lg font-semibold mb-3">🎥 Videos</h3>
