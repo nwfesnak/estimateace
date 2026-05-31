@@ -265,16 +265,12 @@ export default function Home() {
       newIds.push(id);
     }
 
-    if (type === 'photo') {
-      setPhotoIds((prev) => [...prev, ...newIds]);
-    } else if (type === 'video') {
-      setVideoIds((prev) => [...prev, ...newIds]);
-    } else {
-      setReceiptIds((prev) => [...prev, ...newIds]);
-    }
+    if (type === 'photo') setPhotoIds((prev) => [...prev, ...newIds]);
+    else if (type === 'video') setVideoIds((prev) => [...prev, ...newIds]);
+    else setReceiptIds((prev) => [...prev, ...newIds]);
 
-    // Force immediate preview update so thumbnails appear right away
-    await loadMediaPreviews();
+    await loadMediaPreviews();   // ← thumbnails appear instantly
+    await saveToDB();            // ← everything is saved to database right now
 
     if (type === 'receipt') {
       alert('✅ Receipt uploaded!');
@@ -715,7 +711,7 @@ export default function Home() {
             </div>
           )}
 
-          {/* Bottom toolbar - Take Photo and Record Video to the LEFT of Save Estimate */}
+          {/* Bottom toolbar - Take Photo & Record Video to the LEFT of Save Estimate */}
           <div className="p-6 bg-white border-t flex justify-between items-center gap-3 flex-wrap">
             <div className="flex gap-3">
               <Button onClick={() => document.getElementById('photo-camera')?.click()} className="bg-[#10b981]">
