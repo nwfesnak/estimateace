@@ -55,7 +55,6 @@ export default function Home() {
     alert(clean);
   };
 
-  // Auth
   useEffect(() => {
     if (!supabase) return;
     supabase.auth.getSession().then(({ data }) => setUser(data.session?.user ?? null));
@@ -77,7 +76,6 @@ export default function Home() {
     else showMessage('Account created!');
   };
 
-  // Save with logging
   const saveToDB = async () => {
     if (!user || !supabase) return;
     const data = {
@@ -87,11 +85,10 @@ export default function Home() {
       photoUrls, videoUrls,
       updated_at: new Date().toISOString(),
     };
-    console.log('💾 Saving to Supabase:', data);
     const { error } = await supabase.from('estimates').upsert({ id: invoiceNumber, ...data });
     if (error) {
-      console.error('❌ Supabase 400 Error:', error);
-      showMessage('Save failed – check console for details');
+      console.error('❌ Supabase SAVE ERROR:', error);
+      showMessage('Save failed – check console');
     } else {
       setLastSaved(new Date().toLocaleTimeString());
     }
@@ -152,19 +149,19 @@ export default function Home() {
     setPhotoUrls(est.photoUrls || []);
     setVideoUrls(est.videoUrls || []);
     setIsLoadModalOpen(false);
-    showMessage('Loaded!');
+    showMessage('Loaded from Supabase!');
   };
 
   const deleteSelectedEstimate = async (id: string) => {
-    if (!confirm('Delete permanently?')) return;
+    if (!confirm('Delete this document permanently?')) return;
     if (!supabase) return;
     await supabase.from('estimates').delete().eq('id', id);
     await refreshSavedList();
-    showMessage('Deleted');
+    showMessage('Document deleted');
   };
 
   const newEstimate = () => {
-    if (!confirm('Start new document?')) return;
+    if (!confirm('Start a completely new document?')) return;
     setJobName('');
     setAddress('');
     setPhones(['']);
@@ -202,12 +199,12 @@ export default function Home() {
   const saveNamedEstimate = async () => { await saveToDB(); showMessage(`Saved as "${jobName || 'Untitled'} - ${invoiceNumber}"`); };
   const saveProfile = async () => { await saveToDB(); setIsProfileOpen(false); };
   const printEstimate = () => window.print();
-  const sendEstimate = () => showMessage(`${documentType === 'invoice' ? 'Invoice' : 'Estimate'} sent!`);
+  const sendEstimate = () => showMessage(`${documentType === 'invoice' ? 'Invoice' : 'Estimate'} sent successfully!`);
   const openGoogleCalendar = () => { window.open('https://calendar.google.com', '_blank'); };
   const useTemplate = (text: string) => { setTerms(text); setIsTemplatesOpen(false); };
   const saveAsTemplate = () => {
-    if (!terms.trim()) return showMessage("Enter text first");
-    const name = prompt("Template name:");
+    if (!terms.trim()) return showMessage("Please enter some text first");
+    const name = prompt("Enter a name for this template:");
     if (name) {
       const updated = [...savedTemplates, { name: name.trim(), text: terms }];
       setSavedTemplates(updated);
@@ -293,7 +290,7 @@ export default function Home() {
               </div>
             </div>
 
-            {/* PHONE & EMAIL ROWS */}
+            {/* PHONE AND EMAIL ROWS */}
             <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-8">
               <div>
                 <label className="block text-sm font-semibold mb-3">Phone Numbers</label>
@@ -325,6 +322,7 @@ export default function Home() {
           <Button onClick={openLoadModal} className="bg-[#3b82f6]">🔍 Load Document</Button>
         </div>
 
+        {/* Table + Grand Total + Bottom Toolbar */}
         <Card className="mb-8">
           <style>{`
             @media (max-width: 768px) {
@@ -337,6 +335,7 @@ export default function Home() {
               .description-cell { grid-column: 1 / -1 !important; }
             }
           `}</style>
+
           <Table>
             <TableHeader>
               <TableRow className="bg-[#1e293b] text-white">
@@ -418,7 +417,7 @@ export default function Home() {
           </CardContent>
         </Card>
 
-        {/* Quick Actions */}
+        {/* Disclosures + Quick Actions */}
         <Card className="mb-8">
           <CardContent className="p-6">
             <h3 className="text-lg font-semibold mb-3">Disclosures and Standard Contractor Terms</h3>
