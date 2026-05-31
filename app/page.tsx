@@ -52,13 +52,11 @@ export default function Home() {
   const grandTotal = items.reduce((sum, item) => sum + (item.total || 0), 0);
   const amountDue = Math.max(grandTotal - amountPaid, 0);
 
-  // Clean message function - removes Vercel domain prefix
   const showMessage = (message: string) => {
-    const cleanMessage = message.replace(/^[^\s]*\.vercel\.app says:\s*/i, '').trim();
-    alert(cleanMessage);
+    const clean = message.replace(/^[^\s]*\.vercel\.app says:\s*/i, '').trim();
+    alert(clean);
   };
 
-  // Auth
   useEffect(() => {
     if (!supabase) return;
     supabase.auth.getSession().then(({ data: { session } }) => setUser(session?.user ?? null));
@@ -66,26 +64,12 @@ export default function Home() {
     return () => listener.subscription.unsubscribe();
   }, [supabase]);
 
-  const login = async () => {
-    if (!supabase) return;
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) showMessage(error.message); else setShowLogin(false);
-  };
-
-  const signup = async () => {
-    if (!supabase) return;
-    const { error } = await supabase.auth.signUp({ email, password });
-    if (error) showMessage(error.message); else showMessage('Account created! You can now login.');
-  };
+  const login = async () => { if (supabase) { const { error } = await supabase.auth.signInWithPassword({ email, password }); if (error) showMessage(error.message); else setShowLogin(false); } };
+  const signup = async () => { if (supabase) { const { error } = await supabase.auth.signUp({ email, password }); if (error) showMessage(error.message); else showMessage('Account created!'); } };
 
   const saveToDB = async () => {
     if (!user || !supabase) return;
-    const data = {
-      user_id: user.id,
-      jobName, address, phones, emails, date, invoiceNumber, items, terms, profile,
-      documentType, dueDate, paymentStatus, amountPaid, paymentMethod,
-      updated_at: new Date().toISOString(),
-    };
+    const data = { user_id: user.id, jobName, address, phones, emails, date, invoiceNumber, items, terms, profile, documentType, dueDate, paymentStatus, amountPaid, paymentMethod, updated_at: new Date().toISOString() };
     await supabase.from('estimates').upsert({ id: invoiceNumber, ...data });
     setLastSaved(new Date().toLocaleTimeString());
   };
@@ -121,10 +105,7 @@ export default function Home() {
     setSavedEstimatesList(data || []);
   };
 
-  const openLoadModal = async () => {
-    await refreshSavedList();
-    setIsLoadModalOpen(true);
-  };
+  const openLoadModal = async () => { await refreshSavedList(); setIsLoadModalOpen(true); };
 
   const loadSelectedEstimate = async (est: any) => {
     setJobName(est.jobName || '');
@@ -154,7 +135,7 @@ export default function Home() {
     setItems(prev => prev.map(item => item.id === id ? { ...item, [field]: value, total: (field === 'qty' || field === 'price') ? (item.qty || 0) * (item.price || 0) : item.total } : item));
   };
   const removeRow = (id: number) => setItems(prev => prev.filter(item => item.id !== id));
-  const newEstimate = () => { if (confirm('Start a completely new document?')) { setJobName(''); setAddress(''); setPhones(['']); setEmails(['']); setTerms(''); setPhotoUrls([]); setVideoUrls([]); setItems([{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]); showMessage('New document started!'); } };
+  const newEstimate = () => { if (confirm('New document?')) { setJobName(''); setAddress(''); setPhones(['']); setEmails(['']); setTerms(''); setPhotoUrls([]); setVideoUrls([]); setItems([{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]); showMessage('New document started!'); } };
   const addPhone = () => setPhones([...phones, '']);
   const removePhone = (i: number) => setPhones(phones.filter((_, idx) => idx !== i));
   const updatePhone = (i: number, value: string) => { const arr = [...phones]; arr[i] = value; setPhones(arr); };
@@ -170,7 +151,7 @@ export default function Home() {
   const saveAsTemplate = () => {
     if (!terms.trim()) return showMessage("Please enter some text first");
     const name = prompt("Enter a name for this template:");
-    if (name?.trim()) {
+    if (name) {
       const updated = [...savedTemplates, { name: name.trim(), text: terms }];
       setSavedTemplates(updated);
       localStorage.setItem('templates', JSON.stringify(updated));
@@ -264,6 +245,18 @@ export default function Home() {
         </div>
 
         <Card className="mb-8">
+          <style>{`
+            @media (max-width: 768px) {
+              table, thead, tbody, th, td, tr { display: block !important; }
+              thead tr { display: none !important; }
+              tr { margin-bottom: 24px !important; border: 2px solid #e2e8f0 !important; border-radius: 16px !important; background: white !important; box-shadow: 0 4px 15px rgba(0,0,0,0.1) !important; padding: 18px !important; }
+              td { display: flex !important; flex-direction: column !important; padding: 12px 0 !important; border: none !important; }
+              td:before { content: attr(data-label) !important; font-weight: 700 !important; font-size: 1.05rem !important; color: #1e293b !important; margin-bottom: 8px !important; }
+              .description-cell textarea { min-height: 280px !important; font-size: 1.1rem !important; width: 100% !important; }
+              .description-cell { grid-column: 1 / -1 !important; }
+            }
+          `}</style>
+
           <Table>
             <TableHeader>
               <TableRow className="bg-[#1e293b] text-white">
@@ -278,14 +271,14 @@ export default function Home() {
             <TableBody>
               {items.map((item) => (
                 <TableRow key={item.id}>
-                  <TableCell>
+                  <TableCell data-label="Description" className="description-cell">
                     <Textarea value={item.description} onChange={(e) => updateItem(item.id, 'description', e.target.value)} className="min-h-[100px]" />
                   </TableCell>
-                  <TableCell><Input type="number" value={item.qty} onChange={(e) => updateItem(item.id, 'qty', parseFloat(e.target.value) || 0)} /></TableCell>
-                  <TableCell><Input value={item.unit} onChange={(e) => updateItem(item.id, 'unit', e.target.value)} /></TableCell>
-                  <TableCell><Input type="number" step="0.01" value={item.price} onChange={(e) => updateItem(item.id, 'price', parseFloat(e.target.value) || 0)} /></TableCell>
-                  <TableCell className="text-right font-semibold">${(item.total || 0).toFixed(2)}</TableCell>
-                  <TableCell><Button variant="destructive" size="sm" onClick={() => removeRow(item.id)}>×</Button></TableCell>
+                  <TableCell data-label="Qty"><Input type="number" value={item.qty} onChange={(e) => updateItem(item.id, 'qty', parseFloat(e.target.value) || 0)} /></TableCell>
+                  <TableCell data-label="Unit"><Input value={item.unit} onChange={(e) => updateItem(item.id, 'unit', e.target.value)} /></TableCell>
+                  <TableCell data-label="Price"><Input type="number" step="0.01" value={item.price} onChange={(e) => updateItem(item.id, 'price', parseFloat(e.target.value) || 0)} /></TableCell>
+                  <TableCell data-label="Total" className="text-right font-semibold">${(item.total || 0).toFixed(2)}</TableCell>
+                  <TableCell data-label="Action"><Button variant="destructive" size="sm" onClick={() => removeRow(item.id)}>×</Button></TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -298,27 +291,15 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Bottom toolbar */}
           <div className="p-6 bg-white border-t flex justify-between items-center gap-3 flex-wrap">
             <div className="flex gap-3">
-              <Button onClick={() => document.getElementById('photo-camera')?.click()} className="bg-[#10b981]">
-                📷 Take Photo
-              </Button>
-              <Button onClick={() => document.getElementById('video-camera')?.click()} className="bg-[#10b981]">
-                📹 Record Video
-              </Button>
+              <Button onClick={() => document.getElementById('photo-camera')?.click()} className="bg-[#10b981]">📷 Take Photo</Button>
+              <Button onClick={() => document.getElementById('video-camera')?.click()} className="bg-[#10b981]">📹 Record Video</Button>
             </div>
-
             <div className="flex gap-3 flex-wrap">
-              <Button onClick={saveNamedEstimate} className="bg-[#10b981]">
-                💾 Save {documentType === 'invoice' ? 'Invoice' : 'Estimate'}
-              </Button>
-              <Button onClick={sendEstimate} className="bg-[#2563eb]">
-                📧 Send {documentType === 'invoice' ? 'Invoice' : 'Estimate'}
-              </Button>
-              <Button onClick={printEstimate} className="bg-[#10b981]">
-                🖨️ Print
-              </Button>
+              <Button onClick={saveNamedEstimate} className="bg-[#10b981]">💾 Save {documentType === 'invoice' ? 'Invoice' : 'Estimate'}</Button>
+              <Button onClick={sendEstimate} className="bg-[#2563eb]">📧 Send {documentType === 'invoice' ? 'Invoice' : 'Estimate'}</Button>
+              <Button onClick={printEstimate} className="bg-[#10b981]">🖨️ Print</Button>
             </div>
           </div>
         </Card>
@@ -357,7 +338,7 @@ export default function Home() {
           </CardContent>
         </Card>
 
-        {/* Disclosures + Quick Actions (now fully restored) */}
+        {/* Disclosures + Quick Actions */}
         <Card className="mb-8">
           <CardContent className="p-6">
             <h3 className="text-lg font-semibold mb-3">Disclosures and Standard Contractor Terms</h3>
@@ -366,33 +347,22 @@ export default function Home() {
             <h4 className="text-base font-semibold mb-4 text-center md:text-left text-gray-600">Quick Actions</h4>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
               <Button onClick={() => setIsTemplatesOpen(true)} className="h-24 flex flex-col items-center justify-center gap-2 bg-[#3b82f6] hover:bg-[#2563eb] text-white">
-                <span className="text-4xl">📋</span>
-                <span className="font-medium">Templates</span>
+                <span className="text-4xl">📋</span><span className="font-medium">Templates</span>
               </Button>
-
               <Button onClick={saveAsTemplate} className="h-24 flex flex-col items-center justify-center gap-2 bg-[#6b7280] hover:bg-[#4b5563] text-white">
-                <span className="text-4xl">💾</span>
-                <span className="font-medium">Save as Template</span>
+                <span className="text-4xl">💾</span><span className="font-medium">Save as Template</span>
               </Button>
-
               <Button onClick={() => setIsProfileOpen(true)} className="h-24 flex flex-col items-center justify-center gap-2 bg-[#8b5cf6] hover:bg-[#7c3aed] text-white">
-                <span className="text-4xl">👤</span>
-                <span className="font-medium">Profile</span>
+                <span className="text-4xl">👤</span><span className="font-medium">Profile</span>
               </Button>
-
               <Button className="h-24 flex flex-col items-center justify-center gap-2 bg-[#10b981] hover:bg-[#059669] text-white">
-                <span className="text-4xl">📊</span>
-                <span className="font-medium">Dashboard</span>
+                <span className="text-4xl">📊</span><span className="font-medium">Dashboard</span>
               </Button>
-
               <Button onClick={openGoogleCalendar} className="h-24 flex flex-col items-center justify-center gap-2 bg-[#4285F4] hover:bg-[#1e40af] text-white">
-                <span className="text-4xl">📅</span>
-                <span className="font-medium">Calendar</span>
+                <span className="text-4xl">📅</span><span className="font-medium">Calendar</span>
               </Button>
-
               <Button onClick={() => document.getElementById('receipts-camera')?.click()} className="h-24 flex flex-col items-center justify-center gap-2 bg-[#f59e0b] hover:bg-[#d97706] text-white">
-                <span className="text-4xl">📸</span>
-                <span className="font-medium">Receipts</span>
+                <span className="text-4xl">📸</span><span className="font-medium">Receipts</span>
               </Button>
             </div>
           </CardContent>
