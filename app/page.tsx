@@ -60,7 +60,6 @@ export default function Home() {
     alert(clean);
   };
 
-  // Auth
   useEffect(() => {
     if (!supabase) return;
     supabase.auth.getSession().then(({ data }) => setUser(data.session?.user ?? null));
@@ -84,13 +83,7 @@ export default function Home() {
 
   const saveToDB = async () => {
     if (!user || !supabase) return;
-    const data = {
-      user_id: user.id,
-      jobName, address, city, zipCode, phones, emails, date, invoiceNumber, items, terms, profile,
-      documentType, dueDate, paymentStatus, amountPaid, paymentMethod,
-      photoUrls, videoUrls,
-      updated_at: new Date().toISOString(),
-    };
+    const data = { user_id: user.id, jobName, address, city, zipCode, phones, emails, date, invoiceNumber, items, terms, profile, documentType, dueDate, paymentStatus, amountPaid, paymentMethod, photoUrls, videoUrls, updated_at: new Date().toISOString() };
     const { error } = await supabase.from('estimates').upsert({ id: invoiceNumber, ...data });
     if (error) console.error('❌ Save error:', error);
     else setLastSaved(new Date().toLocaleTimeString());
@@ -150,11 +143,11 @@ export default function Home() {
     setPhotoUrls(est.photoUrls || []);
     setVideoUrls(est.videoUrls || []);
     setIsLoadModalOpen(false);
-    showMessage('Loaded from Supabase!');
+    showMessage('Loaded!');
   };
 
   const deleteSelectedEstimate = async (id: string) => {
-    if (!confirm('Delete this document permanently?')) return;
+    if (!confirm('Delete permanently?')) return;
     if (!supabase) return;
     await supabase.from('estimates').delete().eq('id', id);
     await refreshSavedList();
@@ -162,7 +155,7 @@ export default function Home() {
   };
 
   const newEstimate = () => {
-    if (!confirm('Start a completely new document?')) return;
+    if (!confirm('Start new document?')) return;
     setJobName(''); setAddress(''); setCity(''); setZipCode('');
     setPhones(['']); setEmails(['']); setTerms(''); setPhotoUrls([]); setVideoUrls([]);
     setItems([{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
@@ -275,8 +268,143 @@ export default function Home() {
       `}</style>
 
       <div className="min-h-screen bg-[#f4f4f4] p-4 md:p-8">
-        {/* Normal App UI - everything you already had */}
-        {/* (Job info, table, photos, videos, etc.) */}
+        {/* Document type toggle */}
+        <div className="flex border-b mb-8 bg-white rounded-t-xl overflow-hidden shadow-sm">
+          <button onClick={() => setDocumentType('estimate')} className={`flex-1 py-5 text-xl font-semibold ${documentType === 'estimate' ? 'bg-[#1e293b] text-white' : 'hover:bg-gray-100'}`}>📋 Estimate</button>
+          <button onClick={() => setDocumentType('invoice')} className={`flex-1 py-5 text-xl font-semibold ${documentType === 'invoice' ? 'bg-[#1e293b] text-white' : 'hover:bg-gray-100'}`}>💰 Invoice</button>
+        </div>
+
+        {/* Job Info */}
+        <Card className="mb-8">
+          <CardContent className="p-6">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+              <div>
+                <label className="block text-sm font-semibold mb-2">Job Name / Client</label>
+                <Input value={jobName} onChange={e => setJobName(e.target.value)} className="h-12" />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold mb-2">Address</label>
+                <Input value={address} onChange={e => setAddress(e.target.value)} className="h-12" />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold mb-2">City</label>
+                <Input value={city} onChange={e => setCity(e.target.value)} className="h-12" />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold mb-2">Zip Code</label>
+                <Input value={zipCode} onChange={e => setZipCode(e.target.value)} className="h-12" />
+              </div>
+            </div>
+
+            <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-8">
+              <div>
+                <label className="block text-sm font-semibold mb-3">Phone Numbers</label>
+                {phones.map((phone, i) => (
+                  <div key={i} className="flex gap-2 mb-3">
+                    <Input value={phone} onChange={e => updatePhone(i, e.target.value)} placeholder="Phone number" className="flex-1" />
+                    <Button variant="destructive" size="sm" onClick={() => removePhone(i)}>×</Button>
+                  </div>
+                ))}
+                <Button onClick={addPhone} size="sm" variant="outline">+ Add Phone</Button>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold mb-3">Email Addresses</label>
+                {emails.map((em, i) => (
+                  <div key={i} className="flex gap-2 mb-3">
+                    <Input value={em} onChange={e => updateEmail(i, e.target.value)} placeholder="Email address" className="flex-1" />
+                    <Button variant="destructive" size="sm" onClick={() => removeEmail(i)}>×</Button>
+                  </div>
+                ))}
+                <Button onClick={addEmail} size="sm" variant="outline">+ Add Email</Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Action buttons */}
+        <div className="flex gap-3 mb-8 flex-wrap">
+          <Button onClick={newEstimate} className="bg-[#6b7280]">🆕 New Document</Button>
+          <Button onClick={addRow} className="bg-[#10b981]">➕ Add Line Item</Button>
+          <Button onClick={openLoadModal} className="bg-[#3b82f6]">🔍 Load Document</Button>
+        </div>
+
+        {/* Main Table */}
+        <Card className="mb-8">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-[#1e293b] text-white">
+                <TableHead className="w-[55%]">Description</TableHead>
+                <TableHead className="w-[9%]">Qty</TableHead>
+                <TableHead className="w-[9%]">Unit</TableHead>
+                <TableHead className="w-[9%]">Price</TableHead>
+                <TableHead className="w-[9%] text-right">Total</TableHead>
+                <TableHead className="w-[9%]">Action</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {items.map((item) => (
+                <TableRow key={item.id}>
+                  <TableCell>
+                    <Textarea value={item.description} onChange={e => updateItem(item.id, 'description', e.target.value)} className="min-h-[100px]" />
+                  </TableCell>
+                  <TableCell><Input type="number" value={item.qty} onChange={e => updateItem(item.id, 'qty', parseFloat(e.target.value) || 0)} /></TableCell>
+                  <TableCell><Input value={item.unit} onChange={e => updateItem(item.id, 'unit', e.target.value)} /></TableCell>
+                  <TableCell><Input type="number" step="0.01" value={item.price} onChange={e => updateItem(item.id, 'price', parseFloat(e.target.value) || 0)} /></TableCell>
+                  <TableCell className="text-right font-semibold">${(item.total || 0).toFixed(2)}</TableCell>
+                  <TableCell><Button variant="destructive" size="sm" onClick={() => removeRow(item.id)}>×</Button></TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+
+          <div className="p-6 bg-white border-t text-right text-3xl font-bold">
+            {documentType === 'invoice' ? 'Amount Due: ' : 'Grand Total: '}
+            <span className="text-[#10b981]">${amountDue.toFixed(2)}</span>
+          </div>
+        </Card>
+
+        {/* Photos */}
+        <Card className="mb-8">
+          <CardContent className="p-6">
+            <h3 className="text-lg font-semibold mb-3">📸 Photos</h3>
+            <input type="file" multiple accept="image/*" onChange={e => handleMediaUpload(e.target.files, 'photo')} className="text-sm" />
+            <input id="photo-camera" type="file" accept="image/*" capture="environment" onChange={e => handleMediaUpload(e.target.files, 'photo')} className="hidden" />
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
+              {photoUrls.map((src, i) => (
+                <div key={i} className="relative">
+                  <img src={src} alt="photo" className="w-full h-52 object-cover rounded-xl" />
+                  <Button variant="destructive" size="sm" className="absolute top-2 right-2" onClick={() => removeMedia('photo', i)}>×</Button>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Videos */}
+        <Card className="mb-8">
+          <CardContent className="p-6">
+            <h3 className="text-lg font-semibold mb-3">🎥 Videos</h3>
+            <input type="file" multiple accept="video/*" onChange={e => handleMediaUpload(e.target.files, 'video')} className="text-sm" />
+            <input id="video-camera" type="file" accept="video/*" capture="environment" onChange={e => handleMediaUpload(e.target.files, 'video')} className="hidden" />
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
+              {videoUrls.map((src, i) => (
+                <div key={i} className="relative">
+                  <video src={src} controls className="w-full h-32 object-cover rounded-lg" />
+                  <Button variant="destructive" size="sm" className="absolute top-2 right-2" onClick={() => removeMedia('video', i)}>×</Button>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Terms */}
+        <Card className="mb-8">
+          <CardContent className="p-6">
+            <h3 className="text-lg font-semibold mb-3">Terms & Conditions</h3>
+            <Textarea value={terms} onChange={e => setTerms(e.target.value)} className="min-h-[180px]" />
+          </CardContent>
+        </Card>
+
         {/* Bottom toolbar with Print button */}
         <div className="p-6 bg-white border-t flex justify-between items-center gap-3 flex-wrap no-print">
           <div className="flex gap-3">
@@ -376,16 +504,10 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Hidden camera inputs */}
-      <input id="photo-camera" type="file" accept="image/*" capture="environment" onChange={(e) => handleMediaUpload(e.target.files, 'photo')} className="hidden" />
-      <input id="video-camera" type="file" accept="video/*" capture="environment" onChange={(e) => handleMediaUpload(e.target.files, 'video')} className="hidden" />
-
-      {/* All your modals (Send, Load, Profile, Templates) */}
-      {/* Send Modal */}
+      {/* Modals */}
       <Dialog open={isSendModalOpen} onOpenChange={setIsSendModalOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>Send {documentType.toUpperCase()}</DialogTitle></DialogHeader>
-          {/* ... rest of send modal unchanged ... */}
           <DialogFooter className="flex gap-3">
             <Button onClick={sendViaEmail} className="flex-1 bg-[#2563eb]">📧 Send via Email</Button>
             <Button onClick={sendViaText} className="flex-1 bg-[#10b981]">📱 Send via Text</Button>
@@ -393,9 +515,9 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* Load, Profile, Templates modals - same as before */}
-      {/* (They are unchanged and included in the full file) */}
-
+      {/* Hidden camera inputs */}
+      <input id="photo-camera" type="file" accept="image/*" capture="environment" onChange={e => handleMediaUpload(e.target.files, 'photo')} className="hidden" />
+      <input id="video-camera" type="file" accept="video/*" capture="environment" onChange={e => handleMediaUpload(e.target.files, 'video')} className="hidden" />
     </>
   );
 }
