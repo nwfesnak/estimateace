@@ -292,7 +292,7 @@ export default function Home() {
             </div>
           </div>
 
-          {/* BOTTOM TOOLBAR - NOW RESTORED */}
+          {/* BOTTOM TOOLBAR */}
           <div className="p-6 bg-white border-t flex justify-between items-center gap-3 flex-wrap">
             <div className="flex gap-3">
               <Button onClick={() => document.getElementById('photo-camera')?.click()} className="bg-[#10b981]">
@@ -351,15 +351,49 @@ export default function Home() {
           </CardContent>
         </Card>
 
-        {/* Disclosures */}
+        {/* Disclosures + Quick Actions - FULLY RESTORED */}
         <Card className="mb-8">
           <CardContent className="p-6">
             <h3 className="text-lg font-semibold mb-3">Disclosures and Standard Contractor Terms</h3>
             <Textarea value={terms} onChange={(e) => setTerms(e.target.value)} className="min-h-[180px] mb-8" />
-            <Button onClick={saveAsTemplate} className="bg-[#6b7280]">Save as Template</Button>
+
+            <h4 className="text-base font-semibold mb-4 text-center md:text-left text-gray-600">Quick Actions</h4>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+              <Button onClick={() => setIsTemplatesOpen(true)} className="h-24 flex flex-col items-center justify-center gap-2 bg-[#3b82f6] hover:bg-[#2563eb] text-white">
+                <span className="text-4xl">📋</span>
+                <span className="font-medium">Templates</span>
+              </Button>
+
+              <Button onClick={saveAsTemplate} className="h-24 flex flex-col items-center justify-center gap-2 bg-[#6b7280] hover:bg-[#4b5563] text-white">
+                <span className="text-4xl">💾</span>
+                <span className="font-medium">Save as Template</span>
+              </Button>
+
+              <Button onClick={() => setIsProfileOpen(true)} className="h-24 flex flex-col items-center justify-center gap-2 bg-[#8b5cf6] hover:bg-[#7c3aed] text-white">
+                <span className="text-4xl">👤</span>
+                <span className="font-medium">Profile</span>
+              </Button>
+
+              <Button className="h-24 flex flex-col items-center justify-center gap-2 bg-[#10b981] hover:bg-[#059669] text-white">
+                <span className="text-4xl">📊</span>
+                <span className="font-medium">Dashboard</span>
+              </Button>
+
+              <Button onClick={openGoogleCalendar} className="h-24 flex flex-col items-center justify-center gap-2 bg-[#4285F4] hover:bg-[#1e40af] text-white">
+                <span className="text-4xl">📅</span>
+                <span className="font-medium">Calendar</span>
+              </Button>
+
+              <Button onClick={() => document.getElementById('receipts-camera')?.click()} className="h-24 flex flex-col items-center justify-center gap-2 bg-[#f59e0b] hover:bg-[#d97706] text-white">
+                <span className="text-4xl">📸</span>
+                <span className="font-medium">Receipts</span>
+              </Button>
+            </div>
           </CardContent>
         </Card>
       </div>
+
+      <input id="receipts-camera" type="file" accept="image/*" capture="environment" onChange={handleMediaUpload} className="hidden" />
 
       {/* Load Modal */}
       <Dialog open={isLoadModalOpen} onOpenChange={setIsLoadModalOpen}>
