@@ -143,25 +143,22 @@ export default function Home() {
   const grandTotal = items.reduce((sum, item) => sum + (item.total || 0), 0);
   const amountDue = Math.max(grandTotal - amountPaid, 0);
 
-  // GROK AI - Fixed version
+  // GROK AI
   const improveWithGrok = async (id: number) => {
     const item = items.find(i => i.id === id);
     if (!item?.description?.trim()) return alert("Type something first!");
-
     try {
       const res = await fetch('/api/grok', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ description: item.description })
       });
-
       const data = await res.json();
-
-      if (data.suggestion && data.suggestion.trim().length > 3) {
+      if (data.suggestion && data.suggestion.length > 10) {
         updateItem(id, 'description', data.suggestion);
         alert('✅ Grok improved your line item!');
       } else {
-        alert('Grok returned a suggestion but it was very short. Try typing more in the box.');
+        alert('Grok gave a short response – try again with more detail.');
       }
     } catch (err) {
       alert('Could not reach Grok AI. Check GROK_API_KEY in .env.local');
@@ -201,8 +198,6 @@ export default function Home() {
     const url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${startTime}/${endTime}&details=${details}`;
     window.open(url, '_blank');
   };
-  
- 
   const addRow = () => setItems([...items, { id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
   const updateItem = (id: number, field: string, value: any) => {
     setItems(items.map(item => {
@@ -484,7 +479,7 @@ export default function Home() {
           <Button variant="outline">⚡ Quick Lines</Button>
         </div>
 
-        {/* Table and rest of the UI (unchanged) */}
+        {/* Stacked Table */}
         <Card className="mb-8">
           <style>{`
             @media (max-width: 768px) {
@@ -597,12 +592,209 @@ export default function Home() {
           </div>
         </Card>
 
-        {/* Photos, Videos, Disclosures, Modals - all the rest of your original UI */}
-        {/* (The rest is identical to what you had before - I'm keeping it short here for readability but the full file includes everything) */}
+        {/* Photos */}
+        <Card className="mb-8">
+          <CardContent className="p-6">
+            <h3 className="text-lg font-semibold mb-3">📸 Photos</h3>
+            <div className="flex gap-3 mb-4">
+              <input type="file" multiple accept="image/*" onChange={handlePhotos} className="flex-1 text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-[#10b981] file:text-white hover:file:bg-[#0f9e6e]" />
+              <Button onClick={() => document.getElementById('photo-camera')?.click()} className="bg-[#10b981] px-4">📷 Take Photo</Button>
+            </div>
+            <input id="photo-camera" type="file" accept="image/*" capture="environment" onChange={handlePhotos} className="hidden" />
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {photoUrls.map((src, i) => (
+                <div key={i} className="relative">
+                  <img src={src} alt="photo" className="w-full h-32 object-cover rounded-lg border" />
+                  <Button variant="destructive" size="sm" className="absolute -top-2 -right-2" onClick={() => removeMedia('photo', i)}>×</Button>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
 
-        {/* [All the Photos, Videos, Disclosures, Modals, etc. are included in the full paste - the code above has the critical fixes] */}
+        {/* Videos */}
+        <Card className="mb-8">
+          <CardContent className="p-6">
+            <h3 className="text-lg font-semibold mb-3">🎥 Videos</h3>
+            <div className="flex gap-3 mb-4">
+              <input type="file" multiple accept="video/*" onChange={handleVideos} className="flex-1 text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-[#10b981] file:text-white hover:file:bg-[#0f9e6e]" />
+              <Button onClick={() => document.getElementById('video-camera')?.click()} className="bg-[#10b981] px-4">📹 Record Video</Button>
+            </div>
+            <input id="video-camera" type="file" accept="video/*" capture="camcorder" onChange={handleVideos} className="hidden" />
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {videoUrls.map((src, i) => (
+                <div key={i} className="relative">
+                  <video src={src} controls className="w-full h-32 object-cover rounded-lg border" />
+                  <Button variant="destructive" size="sm" className="absolute -top-2 -right-2" onClick={() => removeMedia('video', i)}>×</Button>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
 
+        {/* === DISCLOSURES BOX + ALL BUTTONS BELOW IT === */}
+        <Card className="mb-8">
+          <CardContent className="p-6">
+            <h3 className="text-lg font-semibold mb-3">Disclosures and Standard Contractor Terms</h3>
+            <Textarea 
+              value={terms} 
+              onChange={(e) => setTerms(e.target.value)} 
+              placeholder="Enter your standard terms, warranties, payment policies, disclosures..." 
+              className="min-h-[180px] mb-8"
+            />
+
+            {/* All requested items as clean buttons below the disclosures */}
+            <h4 className="text-base font-semibold mb-4 text-center md:text-left text-gray-600">Quick Actions</h4>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+              {/* Templates Button */}
+              <Button 
+                onClick={() => setIsTemplatesOpen(true)} 
+                className="h-24 flex flex-col items-center justify-center gap-2 bg-[#3b82f6] hover:bg-[#2563eb] text-white"
+              >
+                <span className="text-4xl">📋</span>
+                <span className="font-medium">Templates</span>
+              </Button>
+
+              {/* Save to Template Button */}
+              <Button 
+                onClick={saveAsTemplate} 
+                className="h-24 flex flex-col items-center justify-center gap-2 bg-[#6b7280] hover:bg-[#4b5563] text-white"
+              >
+                <span className="text-4xl">💾</span>
+                <span className="font-medium">Save as Template</span>
+              </Button>
+
+              {/* Profile Button */}
+              <Button 
+                onClick={() => setIsProfileOpen(true)} 
+                className="h-24 flex flex-col items-center justify-center gap-2 bg-[#8b5cf6] hover:bg-[#7c3aed] text-white"
+              >
+                <span className="text-4xl">👤</span>
+                <span className="font-medium">Profile</span>
+              </Button>
+
+              {/* Dashboard Button */}
+              <Button 
+                className="h-24 flex flex-col items-center justify-center gap-2 bg-[#10b981] hover:bg-[#059669] text-white"
+              >
+                <span className="text-4xl">📊</span>
+                <span className="font-medium">Dashboard</span>
+              </Button>
+
+              {/* Calendar Button */}
+              <Button 
+                onClick={openGoogleCalendar} 
+                className="h-24 flex flex-col items-center justify-center gap-2 bg-[#4285F4] hover:bg-[#1e40af] text-white"
+              >
+                <span className="text-4xl">📅</span>
+                <span className="font-medium">Calendar</span>
+              </Button>
+
+              {/* Receipts Button (kept for functionality) */}
+              <Button 
+                onClick={() => document.getElementById('receipts-camera')?.click()} 
+                className="h-24 flex flex-col items-center justify-center gap-2 bg-[#f59e0b] hover:bg-[#d97706] text-white"
+              >
+                <span className="text-4xl">📸</span>
+                <span className="font-medium">Receipts</span>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       </div>
+
+      <input id="receipts-camera" type="file" accept="image/*" capture="environment" onChange={handleReceipts} className="hidden" />
+
+      {/* Load Modal */}
+      <Dialog open={isLoadModalOpen} onOpenChange={setIsLoadModalOpen}>
+        <DialogContent className="max-w-3xl max-h-[80vh]">
+          <DialogHeader><DialogTitle>🔍 Load Saved Document</DialogTitle></DialogHeader>
+          <div className="max-h-[500px] overflow-y-auto">
+            {savedEstimatesList.length === 0 ? (
+              <p className="text-center text-gray-500 py-8">No saved documents yet.<br />Click “Save” to create one.</p>
+            ) : (
+              <div className="space-y-3">
+                {savedEstimatesList.map((est) => (
+                  <div key={est.id} className="flex items-center justify-between p-4 border rounded-xl hover:bg-gray-50">
+                    <div>
+                      <div className="font-semibold">{est.invoiceNumber} — {est.jobName}</div>
+                      <div className="text-xs text-gray-500">Date: {est.date} • Saved: {new Date(est.savedAt).toLocaleString()}</div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button size="sm" onClick={() => loadSelectedEstimate(est)}>Load</Button>
+                      <Button size="sm" variant="destructive" onClick={() => deleteSelectedEstimate(est.id)}>Delete</Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Profile Modal */}
+      <Dialog open={isProfileOpen} onOpenChange={setIsProfileOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>👤 Company Profile</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div><label className="block text-sm font-semibold mb-1">Name</label><Input value={profile.name} onChange={(e) => setProfile({...profile, name: e.target.value})} /></div>
+            <div><label className="block text-sm font-semibold mb-1">Company Name</label><Input value={profile.company} onChange={(e) => setProfile({...profile, company: e.target.value})} /></div>
+            <div><label className="block text-sm font-semibold mb-1">Address</label><Input value={profile.address} onChange={(e) => setProfile({...profile, address: e.target.value})} /></div>
+            <div><label className="block text-sm font-semibold mb-1">Phone</label><Input value={profile.phone} onChange={(e) => setProfile({...profile, phone: e.target.value})} /></div>
+            <div><label className="block text-sm font-semibold mb-1">Email</label><Input value={profile.email} onChange={(e) => setProfile({...profile, email: e.target.value})} /></div>
+            <div><label className="block text-sm font-semibold mb-1">Slogan</label><Input value={profile.slogan} onChange={(e) => setProfile({...profile, slogan: e.target.value})} /></div>
+            
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium">Display company info in header</label>
+              <input type="checkbox" checked={profile.showInHeader} onChange={(e) => setProfile({...profile, showInHeader: e.target.checked})} className="w-5 h-5 accent-blue-600" />
+            </div>
+
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium">Enable Save Quick Line buttons (💾)</label>
+              <input type="checkbox" checked={profile.showQuickLineButtons} onChange={(e) => setProfile({...profile, showQuickLineButtons: e.target.checked})} className="w-5 h-5 accent-blue-600" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button onClick={saveProfile} className="bg-[#10b981]">Save Profile</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Templates Modal */}
+      <Dialog open={isTemplatesOpen} onOpenChange={setIsTemplatesOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader><DialogTitle>📋 Templates</DialogTitle></DialogHeader>
+          <div className="max-h-[400px] overflow-y-auto space-y-3">
+            <div className="font-medium text-sm text-gray-500">Pre-made Templates</div>
+            {[
+              { name: "Standard Payment Terms", text: "50% deposit due upon signing. Remaining 50% due upon completion." },
+              { name: "Warranty", text: "All workmanship is guaranteed for 12 months from date of completion." }
+            ].map((tpl, i) => (
+              <div key={i} className="flex justify-between items-center p-3 border rounded-lg hover:bg-gray-50">
+                <div className="flex-1">
+                  <div className="font-medium">{tpl.name}</div>
+                  <div className="text-xs text-gray-500 line-clamp-2">{tpl.text}</div>
+                </div>
+                <Button size="sm" onClick={() => useTemplate(tpl.text)}>Use</Button>
+              </div>
+            ))}
+            {savedTemplates.length > 0 && (
+              <>
+                <div className="font-medium text-sm text-gray-500 mt-6">Your Saved Templates</div>
+                {savedTemplates.map((tpl, i) => (
+                  <div key={i} className="flex justify-between items-center p-3 border rounded-lg hover:bg-gray-50">
+                    <div className="flex-1">
+                      <div className="font-medium">{tpl.name}</div>
+                      <div className="text-xs text-gray-500 line-clamp-2">{tpl.text}</div>
+                    </div>
+                    <Button size="sm" onClick={() => useTemplate(tpl.text)}>Use</Button>
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
