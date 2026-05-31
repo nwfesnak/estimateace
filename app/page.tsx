@@ -15,28 +15,20 @@ const DB_VERSION = 2;
 let dbInstance: IDBDatabase | null = null;
 
 const initDB = async (): Promise<IDBDatabase> => {
-  if (dbInstance) return dbInstance;
-
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-
+  if (dbInstance) return dbInstance;  return new Promise((resolve, reject) =>
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = (e) => {
       const db = (e.target as IDBOpenDBRequest).result;
       if (!db.objectStoreNames.contains('media')) db.createObjectStore('media', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('currentEstimate')) db.createObjectStore('currentEstimate', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('savedEstimates')) db.createObjectStore('savedEstimates', { keyPath: 'id' });
     };
-
-    request.onsuccess = (e) => {
-      dbInstance = (e.target as IDBOpenDBRequest).result;
-      resolve(dbInstance);
-    };
-
+    request.onsuccess = (e) => { dbInstance = (e.target as IDBOpenDBRequest).result; resolve(dbInstance); };
     request.onerror = (e) => reject((e.target as IDBOpenDBRequest).error);
   });
 };
 
-// ==================== Database Helpers ====================
+// ==================== Database Helpers (unchanged) ====================
 const saveEstimateToDB = async (data: any) => {
   const db = await initDB();
   const tx = db.transaction('currentEstimate', 'readwrite');
@@ -73,9 +65,7 @@ const getMediaFromDB = async (id: string): Promise<string> => {
   return new Promise((resolve, reject) => {
     const tx = db.transaction('media', 'readonly');
     const request = tx.objectStore('media').get(id);
-    request.onsuccess = () => {
-      resolve(request.result ? URL.createObjectURL(request.result.blob) : '');
-    };
+    request.onsuccess = () => resolve(request.result ? URL.createObjectURL(request.result.blob) : '');
     request.onerror = () => reject(request.error);
   });
 };
@@ -89,20 +79,10 @@ const deleteMediaFromDB = async (id: string) => {
 const saveAsNamedEstimate = async (name: string, currentData: any) => {
   const db = await initDB();
   const id = `saved-${Date.now()}`;
-  const record = {
-    id,
-    name: name || currentData.jobName || 'Untitled',
-    invoiceNumber: currentData.invoiceNumber,
-    jobName: currentData.jobName,
-    date: currentData.date,
-    savedAt: new Date().toISOString(),
-    data: currentData,
-  };
+  const record = { id, name: name || currentData.jobName || 'Untitled', invoiceNumber: currentData.invoiceNumber, jobName: currentData.jobName, date: currentData.date, savedAt: new Date().toISOString(), data: currentData };
   const tx = db.transaction('savedEstimates', 'readwrite');
   tx.objectStore('savedEstimates').put(record);
-  return new Promise((resolve) => {
-    tx.oncomplete = () => resolve(true);
-  });
+  return new Promise((resolve) => { tx.oncomplete = () => resolve(true); });
 };
 
 const loadSavedEstimates = async (): Promise<any[]> => {
@@ -123,25 +103,19 @@ const deleteSavedEstimate = async (id: string) => {
 
 // ==================== Main Component ====================
 export default function Home() {
-  // Document & Payment State
   const [documentType, setDocumentType] = useState<'estimate' | 'invoice'>('estimate');
   const [dueDate, setDueDate] = useState('');
   const [paymentStatus, setPaymentStatus] = useState<'pending' | 'paid'>('pending');
   const [amountPaid, setAmountPaid] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState('');
 
-  // Job Details State
   const [jobName, setJobName] = useState('');
   const [address, setAddress] = useState('');
   const [phones, setPhones] = useState<string[]>(['']);
   const [emails, setEmails] = useState<string[]>(['']);
   const [date, setDate] = useState('');
   const [invoiceNumber, setInvoiceNumber] = useState('EST-0001');
-
-  // Line Items
   const [items, setItems] = useState([{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
-
-  // Terms & Media
   const [terms, setTerms] = useState('');
   const [photoIds, setPhotoIds] = useState<string[]>([]);
   const [videoIds, setVideoIds] = useState<string[]>([]);
@@ -149,7 +123,6 @@ export default function Home() {
   const [photoUrls, setPhotoUrls] = useState<string[]>([]);
   const [videoUrls, setVideoUrls] = useState<string[]>([]);
 
-  // Profile & UI State
   const [profile, setProfile] = useState({
     name: '',
     company: '',
@@ -169,11 +142,9 @@ export default function Home() {
   const [isLoadModalOpen, setIsLoadModalOpen] = useState(false);
   const [savedEstimatesList, setSavedEstimatesList] = useState<any[]>([]);
 
-  // Calculated Values
   const grandTotal = items.reduce((sum, item) => sum + (item.total || 0), 0);
   const amountDue = Math.max(grandTotal - amountPaid, 0);
 
-  // ==================== GROK AI Helper ====================
   const improveWithGrok = async (id: number) => {
     const item = items.find((i) => i.id === id);
     if (!item?.description?.trim()) {
@@ -200,7 +171,6 @@ export default function Home() {
     }
   };
 
-  // ==================== Core Actions ====================
   const convertToInvoice = () => {
     if (documentType === 'invoice') return;
     setDocumentType('invoice');
@@ -238,10 +208,7 @@ export default function Home() {
     window.open(url, '_blank');
   };
 
-  const addRow = () => {
-    setItems([...items, { id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
-  };
-
+  const addRow = () => setItems([...items, { id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
   const updateItem = (id: number, field: string, value: any) => {
     setItems((prev) =>
       prev.map((item) => {
@@ -257,22 +224,17 @@ export default function Home() {
     );
   };
 
-  const removeRow = (id: number) => {
-    setItems((prev) => prev.filter((item) => item.id !== id));
-  };
+  const removeRow = (id: number) => setItems((prev) => prev.filter((item) => item.id !== id));
 
-  // ==================== New Document ====================
   const newEstimate = async () => {
     if (!confirm('Start a completely new document?')) return;
 
-    // Clear media from IndexedDB
     [...photoIds, ...videoIds, ...receiptIds].forEach((id) => deleteMediaFromDB(id));
 
     const db = await initDB();
     const tx = db.transaction('currentEstimate', 'readwrite');
     tx.objectStore('currentEstimate').delete('current');
 
-    // Reset all form state
     setJobName('');
     setAddress('');
     setPhones(['']);
@@ -285,7 +247,6 @@ export default function Home() {
     setVideoUrls([]);
     setItems([{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
 
-    // Increment document counter
     const savedCount = localStorage.getItem('estimateCount') || '0';
     const count = parseInt(savedCount) + 1;
     setInvoiceNumber(documentType === 'estimate' ? `EST-${String(count).padStart(4, '0')}` : `INV-${String(count).padStart(4, '0')}`);
@@ -294,7 +255,6 @@ export default function Home() {
     alert('✅ New document started!');
   };
 
-  // ==================== Media Handling ====================
   const handleMediaUpload = async (files: FileList | null, type: 'photo' | 'video' | 'receipt') => {
     if (!files) return;
 
@@ -333,7 +293,6 @@ export default function Home() {
     }
   };
 
-  // Phone & Email helpers
   const addPhone = () => setPhones([...phones, '']);
   const removePhone = (i: number) => setPhones(phones.filter((_, idx) => idx !== i));
   const updatePhone = (i: number, value: string) => {
@@ -350,7 +309,6 @@ export default function Home() {
     setEmails(arr);
   };
 
-  // Load media previews
   const loadMediaPreviews = async () => {
     const p = await Promise.all(photoIds.map((id) => getMediaFromDB(id)));
     const v = await Promise.all(videoIds.map((id) => getMediaFromDB(id)));
@@ -362,7 +320,6 @@ export default function Home() {
     loadMediaPreviews();
   }, [photoIds, videoIds]);
 
-  // ==================== Save / Load Logic ====================
   const saveToDB = async () => {
     const data = {
       jobName,
@@ -469,7 +426,6 @@ export default function Home() {
   const printEstimate = () => window.print();
   const sendEstimate = () => alert(`✅ ${documentType === 'invoice' ? 'Invoice' : 'Estimate'} sent successfully!`);
 
-  // Templates
   const useTemplate = (text: string) => {
     setTerms(text);
     setIsTemplatesOpen(false);
@@ -487,7 +443,6 @@ export default function Home() {
     alert(`✅ Template "${name}" saved!`);
   };
 
-  // ==================== Initial Load ====================
   useEffect(() => {
     loadEstimateFromDB().then((saved) => {
       if (saved) {
@@ -516,7 +471,6 @@ export default function Home() {
     if (savedTemplatesStr) setSavedTemplates(JSON.parse(savedTemplatesStr));
   }, []);
 
-  // Auto-save with debounce
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const debouncedSave = () => {
@@ -534,7 +488,6 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-[#f4f4f4] p-4 md:p-8">
       <div className="max-w-7xl mx-auto">
-        {/* Status Bar */}
         <div className="bg-white border rounded-xl p-4 mb-6 flex items-center justify-between text-sm">
           <div>
             💾 <span className="font-medium">Last saved:</span> {lastSaved}
@@ -544,7 +497,6 @@ export default function Home() {
           </Button>
         </div>
 
-        {/* Tab Bar */}
         <div className="flex border-b mb-8 bg-white rounded-t-xl overflow-hidden shadow-sm">
           <button
             onClick={() => setDocumentType('estimate')}
@@ -564,7 +516,6 @@ export default function Home() {
           </button>
         </div>
 
-        {/* Header */}
         <div id="estimate-content" className="bg-[#1e293b] text-white p-6 rounded-xl mb-8">
           <div className="flex justify-between items-start">
             <div>
@@ -584,7 +535,6 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Job Details Card */}
         <Card className="mb-8">
           <CardContent className="p-6">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -613,48 +563,26 @@ export default function Home() {
                 <label className="block text-sm font-semibold mb-2">Phone Number(s)</label>
                 {phones.map((phone, i) => (
                   <div key={i} className="flex gap-2 mb-2">
-                    <Input
-                      value={phone}
-                      onChange={(e) => updatePhone(i, e.target.value)}
-                      placeholder="(555) 123-4567"
-                    />
-                    {phones.length > 1 && (
-                      <Button variant="destructive" size="sm" onClick={() => removePhone(i)}>
-                        ×
-                      </Button>
-                    )}
+                    <Input value={phone} onChange={(e) => updatePhone(i, e.target.value)} placeholder="(555) 123-4567" />
+                    {phones.length > 1 && <Button variant="destructive" size="sm" onClick={() => removePhone(i)}>×</Button>}
                   </div>
                 ))}
-                <Button variant="outline" size="sm" onClick={addPhone}>
-                  + Add Phone
-                </Button>
+                <Button variant="outline" size="sm" onClick={addPhone}>+ Add Phone</Button>
               </div>
-
               <div>
                 <label className="block text-sm font-semibold mb-2">Email Address(es)</label>
                 {emails.map((email, i) => (
                   <div key={i} className="flex gap-2 mb-2">
-                    <Input
-                      value={email}
-                      onChange={(e) => updateEmail(i, e.target.value)}
-                      placeholder="client@email.com"
-                    />
-                    {emails.length > 1 && (
-                      <Button variant="destructive" size="sm" onClick={() => removeEmail(i)}>
-                        ×
-                      </Button>
-                    )}
+                    <Input value={email} onChange={(e) => updateEmail(i, e.target.value)} placeholder="client@email.com" />
+                    {emails.length > 1 && <Button variant="destructive" size="sm" onClick={() => removeEmail(i)}>×</Button>}
                   </div>
                 ))}
-                <Button variant="outline" size="sm" onClick={addEmail}>
-                  + Add Email
-                </Button>
+                <Button variant="outline" size="sm" onClick={addEmail}>+ Add Email</Button>
               </div>
             </div>
           </CardContent>
         </Card>
 
-        {/* Toolbar */}
         <div className="flex gap-3 mb-8 flex-wrap">
           <Button onClick={newEstimate} className="bg-[#6b7280]">
             🆕 New {documentType === 'invoice' ? 'Invoice' : 'Estimate'}
@@ -668,7 +596,6 @@ export default function Home() {
           <Button variant="outline">⚡ Quick Lines</Button>
         </div>
 
-        {/* Line Items Table */}
         <Card className="mb-8">
           <style>{`
             @media (max-width: 768px) {
@@ -712,22 +639,13 @@ export default function Home() {
                     </div>
                   </TableCell>
                   <TableCell data-label="Qty" className="text-center">
-                    <Input
-                      type="number"
-                      value={item.qty}
-                      onChange={(e) => updateItem(item.id, 'qty', parseFloat(e.target.value) || 0)}
-                    />
+                    <Input type="number" value={item.qty} onChange={(e) => updateItem(item.id, 'qty', parseFloat(e.target.value) || 0)} />
                   </TableCell>
                   <TableCell data-label="Unit" className="text-center">
                     <Input value={item.unit} onChange={(e) => updateItem(item.id, 'unit', e.target.value)} />
                   </TableCell>
                   <TableCell data-label="Price" className="text-center">
-                    <Input
-                      type="number"
-                      step="0.01"
-                      value={item.price}
-                      onChange={(e) => updateItem(item.id, 'price', parseFloat(e.target.value) || 0)}
-                    />
+                    <Input type="number" step="0.01" value={item.price} onChange={(e) => updateItem(item.id, 'price', parseFloat(e.target.value) || 0)} />
                   </TableCell>
                   <TableCell data-label="Total" className="text-right font-semibold">
                     ${(item.total || 0).toFixed(2)}
@@ -735,13 +653,7 @@ export default function Home() {
                   <TableCell data-label="Action">
                     <div className="flex gap-1">
                       {profile.showQuickLineButtons && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => alert('💾 Saved to Quick Lines!')}
-                          title="Save as Quick Line"
-                          className="text-green-600 hover:text-green-700"
-                        >
+                        <Button size="sm" variant="outline" onClick={() => alert('💾 Saved to Quick Lines!')} className="text-green-600 hover:text-green-700">
                           💾
                         </Button>
                       )}
@@ -762,7 +674,6 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Payment Section (Invoice only) */}
           {documentType === 'invoice' && (
             <div className="p-6 bg-white border-t">
               <h3 className="font-semibold text-lg mb-4">💳 Record Payment</h3>
@@ -784,12 +695,7 @@ export default function Home() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-2">Amount Paid</label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    value={amountPaid}
-                    onChange={(e) => setAmountPaid(parseFloat(e.target.value) || 0)}
-                  />
+                  <Input type="number" step="0.01" value={amountPaid} onChange={(e) => setAmountPaid(parseFloat(e.target.value) || 0)} />
                 </div>
                 <div className="flex items-end">
                   <Button onClick={recordPayment} className="w-full bg-[#10b981]">
@@ -797,13 +703,10 @@ export default function Home() {
                   </Button>
                 </div>
               </div>
-              {paymentStatus === 'paid' && (
-                <div className="mt-4 text-green-600 font-bold text-center text-lg">🎉 INVOICE PAID IN FULL</div>
-              )}
+              {paymentStatus === 'paid' && <div className="mt-4 text-green-600 font-bold text-center text-lg">🎉 INVOICE PAID IN FULL</div>}
             </div>
           )}
 
-          {/* Bottom Actions */}
           <div className="p-6 bg-white border-t flex justify-end gap-3 flex-wrap">
             <Button onClick={saveNamedEstimate} className="bg-[#10b981]">
               💾 Save {documentType === 'invoice' ? 'Invoice' : 'Estimate'}
@@ -817,11 +720,14 @@ export default function Home() {
           </div>
         </Card>
 
-        {/* Photos */}
+        {/* Photos - Take Photo button moved above Choose File */}
         <Card className="mb-8">
           <CardContent className="p-6">
             <h3 className="text-lg font-semibold mb-3">📸 Photos</h3>
             <div className="flex gap-3 mb-4">
+              <Button onClick={() => document.getElementById('photo-camera')?.click()} className="bg-[#10b981] px-4">
+                📷 Take Photo
+              </Button>
               <input
                 type="file"
                 multiple
@@ -829,9 +735,6 @@ export default function Home() {
                 onChange={handlePhotos}
                 className="flex-1 text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-[#10b981] file:text-white hover:file:bg-[#0f9e6e]"
               />
-              <Button onClick={() => document.getElementById('photo-camera')?.click()} className="bg-[#10b981] px-4">
-                📷 Take Photo
-              </Button>
             </div>
             <input id="photo-camera" type="file" accept="image/*" capture="environment" onChange={handlePhotos} className="hidden" />
 
@@ -839,25 +742,21 @@ export default function Home() {
               {photoUrls.map((src, i) => (
                 <div key={i} className="relative">
                   <img src={src} alt="photo" className="w-full h-32 object-cover rounded-lg border" />
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    className="absolute -top-2 -right-2"
-                    onClick={() => removeMedia('photo', i)}
-                  >
-                    ×
-                  </Button>
+                  <Button variant="destructive" size="sm" className="absolute -top-2 -right-2" onClick={() => removeMedia('photo', i)}>×</Button>
                 </div>
               ))}
             </div>
           </CardContent>
         </Card>
 
-        {/* Videos */}
+        {/* Videos - Record Video button moved above Choose File */}
         <Card className="mb-8">
           <CardContent className="p-6">
             <h3 className="text-lg font-semibold mb-3">🎥 Videos</h3>
             <div className="flex gap-3 mb-4">
+              <Button onClick={() => document.getElementById('video-camera')?.click()} className="bg-[#10b981] px-4">
+                📹 Record Video
+              </Button>
               <input
                 type="file"
                 multiple
@@ -865,31 +764,21 @@ export default function Home() {
                 onChange={handleVideos}
                 className="flex-1 text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-[#10b981] file:text-white hover:file:bg-[#0f9e6e]"
               />
-              <Button onClick={() => document.getElementById('video-camera')?.click()} className="bg-[#10b981] px-4">
-                📹 Record Video
-              </Button>
             </div>
-            <input id="video-camera" type="file" accept="video/*" capture="camcorder" onChange={handleVideos} className="hidden" />
+            <input id="video-camera" type="file" accept="video/*" capture="environment" onChange={handleVideos} className="hidden" />
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {videoUrls.map((src, i) => (
                 <div key={i} className="relative">
                   <video src={src} controls className="w-full h-32 object-cover rounded-lg border" />
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    className="absolute -top-2 -right-2"
-                    onClick={() => removeMedia('video', i)}
-                  >
-                    ×
-                  </Button>
+                  <Button variant="destructive" size="sm" className="absolute -top-2 -right-2" onClick={() => removeMedia('video', i)}>×</Button>
                 </div>
               ))}
             </div>
           </CardContent>
         </Card>
 
-        {/* Disclosures & Quick Actions */}
+        {/* Disclosures & Quick Actions - unchanged */}
         <Card className="mb-8">
           <CardContent className="p-6">
             <h3 className="text-lg font-semibold mb-3">Disclosures and Standard Contractor Terms</h3>
@@ -902,26 +791,17 @@ export default function Home() {
 
             <h4 className="text-base font-semibold mb-4 text-center md:text-left text-gray-600">Quick Actions</h4>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-              <Button
-                onClick={() => setIsTemplatesOpen(true)}
-                className="h-24 flex flex-col items-center justify-center gap-2 bg-[#3b82f6] hover:bg-[#2563eb] text-white"
-              >
+              <Button onClick={() => setIsTemplatesOpen(true)} className="h-24 flex flex-col items-center justify-center gap-2 bg-[#3b82f6] hover:bg-[#2563eb] text-white">
                 <span className="text-4xl">📋</span>
                 <span className="font-medium">Templates</span>
               </Button>
 
-              <Button
-                onClick={saveAsTemplate}
-                className="h-24 flex flex-col items-center justify-center gap-2 bg-[#6b7280] hover:bg-[#4b5563] text-white"
-              >
+              <Button onClick={saveAsTemplate} className="h-24 flex flex-col items-center justify-center gap-2 bg-[#6b7280] hover:bg-[#4b5563] text-white">
                 <span className="text-4xl">💾</span>
                 <span className="font-medium">Save as Template</span>
               </Button>
 
-              <Button
-                onClick={() => setIsProfileOpen(true)}
-                className="h-24 flex flex-col items-center justify-center gap-2 bg-[#8b5cf6] hover:bg-[#7c3aed] text-white"
-              >
+              <Button onClick={() => setIsProfileOpen(true)} className="h-24 flex flex-col items-center justify-center gap-2 bg-[#8b5cf6] hover:bg-[#7c3aed] text-white">
                 <span className="text-4xl">👤</span>
                 <span className="font-medium">Profile</span>
               </Button>
@@ -931,18 +811,12 @@ export default function Home() {
                 <span className="font-medium">Dashboard</span>
               </Button>
 
-              <Button
-                onClick={openGoogleCalendar}
-                className="h-24 flex flex-col items-center justify-center gap-2 bg-[#4285F4] hover:bg-[#1e40af] text-white"
-              >
+              <Button onClick={openGoogleCalendar} className="h-24 flex flex-col items-center justify-center gap-2 bg-[#4285F4] hover:bg-[#1e40af] text-white">
                 <span className="text-4xl">📅</span>
                 <span className="font-medium">Calendar</span>
               </Button>
 
-              <Button
-                onClick={() => document.getElementById('receipts-camera')?.click()}
-                className="h-24 flex flex-col items-center justify-center gap-2 bg-[#f59e0b] hover:bg-[#d97706] text-white"
-              >
+              <Button onClick={() => document.getElementById('receipts-camera')?.click()} className="h-24 flex flex-col items-center justify-center gap-2 bg-[#f59e0b] hover:bg-[#d97706] text-white">
                 <span className="text-4xl">📸</span>
                 <span className="font-medium">Receipts</span>
               </Button>
@@ -951,41 +825,26 @@ export default function Home() {
         </Card>
       </div>
 
-      {/* Hidden receipt input */}
       <input id="receipts-camera" type="file" accept="image/*" capture="environment" onChange={handleReceipts} className="hidden" />
 
       {/* Load Modal */}
       <Dialog open={isLoadModalOpen} onOpenChange={setIsLoadModalOpen}>
         <DialogContent className="max-w-3xl max-h-[80vh]">
-          <DialogHeader>
-            <DialogTitle>🔍 Load Saved Document</DialogTitle>
-          </DialogHeader>
+          <DialogHeader><DialogTitle>🔍 Load Saved Document</DialogTitle></DialogHeader>
           <div className="max-h-[500px] overflow-y-auto">
             {savedEstimatesList.length === 0 ? (
-              <p className="text-center text-gray-500 py-8">
-                No saved documents yet.
-                <br />
-                Click “Save” to create one.
-              </p>
+              <p className="text-center text-gray-500 py-8">No saved documents yet.<br />Click “Save” to create one.</p>
             ) : (
               <div className="space-y-3">
                 {savedEstimatesList.map((est) => (
                   <div key={est.id} className="flex items-center justify-between p-4 border rounded-xl hover:bg-gray-50">
                     <div>
-                      <div className="font-semibold">
-                        {est.invoiceNumber} — {est.jobName}
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        Date: {est.date} • Saved: {new Date(est.savedAt).toLocaleString()}
-                      </div>
+                      <div className="font-semibold">{est.invoiceNumber} — {est.jobName}</div>
+                      <div className="text-xs text-gray-500">Date: {est.date} • Saved: {new Date(est.savedAt).toLocaleString()}</div>
                     </div>
                     <div className="flex gap-2">
-                      <Button size="sm" onClick={() => loadSelectedEstimate(est)}>
-                        Load
-                      </Button>
-                      <Button size="sm" variant="destructive" onClick={() => deleteSelectedEstimate(est.id)}>
-                        Delete
-                      </Button>
+                      <Button size="sm" onClick={() => loadSelectedEstimate(est)}>Load</Button>
+                      <Button size="sm" variant="destructive" onClick={() => deleteSelectedEstimate(est.id)}>Delete</Button>
                     </div>
                   </div>
                 ))}
@@ -998,77 +857,25 @@ export default function Home() {
       {/* Profile Modal */}
       <Dialog open={isProfileOpen} onOpenChange={setIsProfileOpen}>
         <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>👤 Company Profile</DialogTitle>
-          </DialogHeader>
+          <DialogHeader><DialogTitle>👤 Company Profile</DialogTitle></DialogHeader>
           <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-semibold mb-1">Name</label>
-              <Input
-                value={profile.name}
-                onChange={(e) => setProfile({ ...profile, name: e.target.value })}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-semibold mb-1">Company Name</label>
-              <Input
-                value={profile.company}
-                onChange={(e) => setProfile({ ...profile, company: e.target.value })}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-semibold mb-1">Address</label>
-              <Input
-                value={profile.address}
-                onChange={(e) => setProfile({ ...profile, address: e.target.value })}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-semibold mb-1">Phone</label>
-              <Input
-                value={profile.phone}
-                onChange={(e) => setProfile({ ...profile, phone: e.target.value })}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-semibold mb-1">Email</label>
-              <Input
-                value={profile.email}
-                onChange={(e) => setProfile({ ...profile, email: e.target.value })}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-semibold mb-1">Slogan</label>
-              <Input
-                value={profile.slogan}
-                onChange={(e) => setProfile({ ...profile, slogan: e.target.value })}
-              />
-            </div>
-
+            <div><label className="block text-sm font-semibold mb-1">Name</label><Input value={profile.name} onChange={(e) => setProfile({...profile, name: e.target.value})} /></div>
+            <div><label className="block text-sm font-semibold mb-1">Company Name</label><Input value={profile.company} onChange={(e) => setProfile({...profile, company: e.target.value})} /></div>
+            <div><label className="block text-sm font-semibold mb-1">Address</label><Input value={profile.address} onChange={(e) => setProfile({...profile, address: e.target.value})} /></div>
+            <div><label className="block text-sm font-semibold mb-1">Phone</label><Input value={profile.phone} onChange={(e) => setProfile({...profile, phone: e.target.value})} /></div>
+            <div><label className="block text-sm font-semibold mb-1">Email</label><Input value={profile.email} onChange={(e) => setProfile({...profile, email: e.target.value})} /></div>
+            <div><label className="block text-sm font-semibold mb-1">Slogan</label><Input value={profile.slogan} onChange={(e) => setProfile({...profile, slogan: e.target.value})} /></div>
             <div className="flex items-center justify-between">
               <label className="text-sm font-medium">Display company info in header</label>
-              <input
-                type="checkbox"
-                checked={profile.showInHeader}
-                onChange={(e) => setProfile({ ...profile, showInHeader: e.target.checked })}
-                className="w-5 h-5 accent-blue-600"
-              />
+              <input type="checkbox" checked={profile.showInHeader} onChange={(e) => setProfile({...profile, showInHeader: e.target.checked})} className="w-5 h-5 accent-blue-600" />
             </div>
-
             <div className="flex items-center justify-between">
               <label className="text-sm font-medium">Enable Save Quick Line buttons (💾)</label>
-              <input
-                type="checkbox"
-                checked={profile.showQuickLineButtons}
-                onChange={(e) => setProfile({ ...profile, showQuickLineButtons: e.target.checked })}
-                className="w-5 h-5 accent-blue-600"
-              />
+              <input type="checkbox" checked={profile.showQuickLineButtons} onChange={(e) => setProfile({...profile, showQuickLineButtons: e.target.checked})} className="w-5 h-5 accent-blue-600" />
             </div>
           </div>
           <DialogFooter>
-            <Button onClick={saveProfile} className="bg-[#10b981]">
-              Save Profile
-            </Button>
+            <Button onClick={saveProfile} className="bg-[#10b981]">Save Profile</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1076,9 +883,7 @@ export default function Home() {
       {/* Templates Modal */}
       <Dialog open={isTemplatesOpen} onOpenChange={setIsTemplatesOpen}>
         <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>📋 Templates</DialogTitle>
-          </DialogHeader>
+          <DialogHeader><DialogTitle>📋 Templates</DialogTitle></DialogHeader>
           <div className="max-h-[400px] overflow-y-auto space-y-3">
             <div className="font-medium text-sm text-gray-500">Pre-made Templates</div>
             {[
@@ -1090,12 +895,9 @@ export default function Home() {
                   <div className="font-medium">{tpl.name}</div>
                   <div className="text-xs text-gray-500 line-clamp-2">{tpl.text}</div>
                 </div>
-                <Button size="sm" onClick={() => useTemplate(tpl.text)}>
-                  Use
-                </Button>
+                <Button size="sm" onClick={() => useTemplate(tpl.text)}>Use</Button>
               </div>
             ))}
-
             {savedTemplates.length > 0 && (
               <>
                 <div className="font-medium text-sm text-gray-500 mt-6">Your Saved Templates</div>
@@ -1105,9 +907,7 @@ export default function Home() {
                       <div className="font-medium">{tpl.name}</div>
                       <div className="text-xs text-gray-500 line-clamp-2">{tpl.text}</div>
                     </div>
-                    <Button size="sm" onClick={() => useTemplate(tpl.text)}>
-                      Use
-                    </Button>
+                    <Button size="sm" onClick={() => useTemplate(tpl.text)}>Use</Button>
                   </div>
                 ))}
               </>
