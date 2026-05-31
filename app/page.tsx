@@ -167,11 +167,9 @@ export default function Home() {
     setVideoUrls([]);
     setItems([{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
 
-    // Auto today's date
     const today = new Date().toISOString().split('T')[0];
     setDate(today);
 
-    // Auto-increment document number
     const savedCount = parseInt(localStorage.getItem('estimateCount') || '0') + 1;
     localStorage.setItem('estimateCount', savedCount.toString());
     const prefix = documentType === 'invoice' ? 'INV' : 'EST';
@@ -186,6 +184,7 @@ export default function Home() {
   };
   const removeRow = (id: number) => setItems(prev => prev.filter(item => item.id !== id));
 
+  // Phone & Email functions (already existed)
   const addPhone = () => setPhones([...phones, '']);
   const removePhone = (i: number) => setPhones(phones.filter((_, idx) => idx !== i));
   const updatePhone = (i: number, value: string) => { const arr = [...phones]; arr[i] = value; setPhones(arr); };
@@ -287,6 +286,43 @@ export default function Home() {
                 </div>
               </div>
             </div>
+
+            {/* ===== PHONE AND EMAIL ROWS BROUGHT BACK ===== */}
+            <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-8">
+              {/* Phones */}
+              <div>
+                <label className="block text-sm font-semibold mb-3">Phone Numbers</label>
+                {phones.map((phone, i) => (
+                  <div key={i} className="flex gap-2 mb-3">
+                    <Input 
+                      value={phone} 
+                      onChange={(e) => updatePhone(i, e.target.value)} 
+                      placeholder="Phone number"
+                      className="flex-1"
+                    />
+                    <Button variant="destructive" size="sm" onClick={() => removePhone(i)}>×</Button>
+                  </div>
+                ))}
+                <Button onClick={addPhone} size="sm" variant="outline">+ Add Phone</Button>
+              </div>
+
+              {/* Emails */}
+              <div>
+                <label className="block text-sm font-semibold mb-3">Email Addresses</label>
+                {emails.map((emailAddr, i) => (
+                  <div key={i} className="flex gap-2 mb-3">
+                    <Input 
+                      value={emailAddr} 
+                      onChange={(e) => updateEmail(i, e.target.value)} 
+                      placeholder="Email address"
+                      className="flex-1"
+                    />
+                    <Button variant="destructive" size="sm" onClick={() => removeEmail(i)}>×</Button>
+                  </div>
+                ))}
+                <Button onClick={addEmail} size="sm" variant="outline">+ Add Email</Button>
+              </div>
+            </div>
           </CardContent>
         </Card>
 
@@ -296,6 +332,7 @@ export default function Home() {
           <Button onClick={openLoadModal} className="bg-[#3b82f6]">🔍 Load Document</Button>
         </div>
 
+        {/* Rest of the code (table, photos, videos, quick actions, modals) is exactly the same as before */}
         <Card className="mb-8">
           <style>{`
             @media (max-width: 768px) {
@@ -356,7 +393,9 @@ export default function Home() {
           </div>
         </Card>
 
-        {/* Photos */}
+        {/* Photos, Videos, Quick Actions, Modals remain exactly as before */}
+        {/* (Photos Card, Videos Card, Disclosures Card, Load Modal, Profile Modal, Templates Modal) */}
+
         <Card className="mb-8">
           <CardContent className="p-6">
             <h3 className="text-lg font-semibold mb-3">📸 Photos</h3>
@@ -373,7 +412,6 @@ export default function Home() {
           </CardContent>
         </Card>
 
-        {/* Videos */}
         <Card className="mb-8">
           <CardContent className="p-6">
             <h3 className="text-lg font-semibold mb-3">🎥 Videos</h3>
@@ -390,7 +428,6 @@ export default function Home() {
           </CardContent>
         </Card>
 
-        {/* Disclosures + Quick Actions */}
         <Card className="mb-8">
           <CardContent className="p-6">
             <h3 className="text-lg font-semibold mb-3">Disclosures and Standard Contractor Terms</h3>
@@ -423,7 +460,7 @@ export default function Home() {
 
       <input id="receipts-camera" type="file" accept="image/*" capture="environment" onChange={handleMediaUpload} className="hidden" />
 
-      {/* Load Modal with Delete button */}
+      {/* Load Modal */}
       <Dialog open={isLoadModalOpen} onOpenChange={setIsLoadModalOpen}>
         <DialogContent className="max-w-3xl max-h-[80vh]">
           <DialogHeader><DialogTitle>🔍 Load Saved Document</DialogTitle></DialogHeader>
