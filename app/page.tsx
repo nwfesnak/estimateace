@@ -52,6 +52,12 @@ export default function Home() {
   const grandTotal = items.reduce((sum, item) => sum + (item.total || 0), 0);
   const amountDue = Math.max(grandTotal - amountPaid, 0);
 
+  // Clean message function - removes Vercel domain prefix
+  const showMessage = (message: string) => {
+    const cleanMessage = message.replace(/^[^\s]*\.vercel\.app says:\s*/i, '').trim();
+    alert(cleanMessage);
+  };
+
   // Auth
   useEffect(() => {
     if (!supabase) return;
@@ -63,13 +69,13 @@ export default function Home() {
   const login = async () => {
     if (!supabase) return;
     const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) alert(error.message); else setShowLogin(false);
+    if (error) showMessage(error.message); else setShowLogin(false);
   };
 
   const signup = async () => {
     if (!supabase) return;
     const { error } = await supabase.auth.signUp({ email, password });
-    if (error) alert(error.message); else alert('✅ Account created!');
+    if (error) showMessage(error.message); else showMessage('Account created! You can now login.');
   };
 
   const saveToDB = async () => {
@@ -136,19 +142,19 @@ export default function Home() {
     setAmountPaid(est.amountPaid || 0);
     setPaymentMethod(est.paymentMethod || '');
     setIsLoadModalOpen(false);
-    alert('✅ Loaded from Supabase!');
+    showMessage('Loaded from Supabase!');
   };
 
-  const improveWithGrok = async (id: number) => { alert('Grok AI (demo)'); };
-  const convertToInvoice = () => { alert('✅ Switched to Invoice mode!'); };
-  const recordPayment = () => { saveToDB(); alert('Payment recorded'); };
+  const improveWithGrok = async (id: number) => { showMessage('Grok AI improvement (demo)'); };
+  const convertToInvoice = () => { showMessage('Switched to Invoice mode!'); };
+  const recordPayment = () => { saveToDB(); showMessage('Payment recorded'); };
   const openGoogleCalendar = () => { window.open('https://calendar.google.com', '_blank'); };
   const addRow = () => setItems([...items, { id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
   const updateItem = (id: number, field: string, value: any) => {
     setItems(prev => prev.map(item => item.id === id ? { ...item, [field]: value, total: (field === 'qty' || field === 'price') ? (item.qty || 0) * (item.price || 0) : item.total } : item));
   };
   const removeRow = (id: number) => setItems(prev => prev.filter(item => item.id !== id));
-  const newEstimate = () => { if (confirm('New document?')) { setJobName(''); setAddress(''); setPhones(['']); setEmails(['']); setTerms(''); setPhotoUrls([]); setVideoUrls([]); setItems([{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]); alert('✅ New document started!'); } };
+  const newEstimate = () => { if (confirm('Start a completely new document?')) { setJobName(''); setAddress(''); setPhones(['']); setEmails(['']); setTerms(''); setPhotoUrls([]); setVideoUrls([]); setItems([{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]); showMessage('New document started!'); } };
   const addPhone = () => setPhones([...phones, '']);
   const removePhone = (i: number) => setPhones(phones.filter((_, idx) => idx !== i));
   const updatePhone = (i: number, value: string) => { const arr = [...phones]; arr[i] = value; setPhones(arr); };
@@ -156,19 +162,19 @@ export default function Home() {
   const removeEmail = (i: number) => setEmails(emails.filter((_, idx) => idx !== i));
   const updateEmail = (i: number, value: string) => { const arr = [...emails]; arr[i] = value; setEmails(arr); };
   const forceSave = async () => { await saveToDB(); };
-  const saveNamedEstimate = async () => { await saveToDB(); alert('✅ Saved to Supabase!'); };
+  const saveNamedEstimate = async () => { await saveToDB(); showMessage('Saved to Supabase!'); };
   const saveProfile = async () => { await saveToDB(); setIsProfileOpen(false); };
   const printEstimate = () => window.print();
-  const sendEstimate = () => alert(`✅ ${documentType === 'invoice' ? 'Invoice' : 'Estimate'} sent!`);
+  const sendEstimate = () => showMessage(`${documentType === 'invoice' ? 'Invoice' : 'Estimate'} sent successfully!`);
   const useTemplate = (text: string) => { setTerms(text); setIsTemplatesOpen(false); };
   const saveAsTemplate = () => {
-    if (!terms.trim()) return alert("Enter text first");
-    const name = prompt("Template name:");
-    if (name) {
+    if (!terms.trim()) return showMessage("Please enter some text first");
+    const name = prompt("Enter a name for this template:");
+    if (name?.trim()) {
       const updated = [...savedTemplates, { name: name.trim(), text: terms }];
       setSavedTemplates(updated);
       localStorage.setItem('templates', JSON.stringify(updated));
-      alert('✅ Template saved!');
+      showMessage(`Template "${name}" saved!`);
     }
   };
 
@@ -292,7 +298,7 @@ export default function Home() {
             </div>
           </div>
 
-          {/* BOTTOM TOOLBAR */}
+          {/* Bottom toolbar */}
           <div className="p-6 bg-white border-t flex justify-between items-center gap-3 flex-wrap">
             <div className="flex gap-3">
               <Button onClick={() => document.getElementById('photo-camera')?.click()} className="bg-[#10b981]">
@@ -351,7 +357,7 @@ export default function Home() {
           </CardContent>
         </Card>
 
-        {/* Disclosures + Quick Actions - FULLY RESTORED */}
+        {/* Disclosures + Quick Actions (now fully restored) */}
         <Card className="mb-8">
           <CardContent className="p-6">
             <h3 className="text-lg font-semibold mb-3">Disclosures and Standard Contractor Terms</h3>
