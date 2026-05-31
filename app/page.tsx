@@ -269,8 +269,8 @@ export default function Home() {
     else if (type === 'video') setVideoIds((prev) => [...prev, ...newIds]);
     else setReceiptIds((prev) => [...prev, ...newIds]);
 
-    await loadMediaPreviews();   // ← thumbnails appear instantly
-    await saveToDB();            // ← everything is saved to database right now
+    await loadMediaPreviews();
+    await saveToDB();
 
     if (type === 'receipt') {
       alert('✅ Receipt uploaded!');
@@ -711,7 +711,6 @@ export default function Home() {
             </div>
           )}
 
-          {/* Bottom toolbar - Take Photo & Record Video to the LEFT of Save Estimate */}
           <div className="p-6 bg-white border-t flex justify-between items-center gap-3 flex-wrap">
             <div className="flex gap-3">
               <Button onClick={() => document.getElementById('photo-camera')?.click()} className="bg-[#10b981]">
@@ -736,7 +735,7 @@ export default function Home() {
           </div>
         </Card>
 
-        {/* Photos card - thumbnails appear here */}
+        {/* PHOTOS SECTION - LARGER ON MOBILE + MULTIPLE PHOTOS NICELY DISPLAYED */}
         <Card className="mb-8">
           <CardContent className="p-6">
             <h3 className="text-lg font-semibold mb-3">📸 Photos</h3>
@@ -749,18 +748,29 @@ export default function Home() {
             />
             <input id="photo-camera" type="file" accept="image/*" capture="environment" onChange={handlePhotos} className="hidden" />
 
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-6 mt-4">
               {photoUrls.map((src, i) => (
                 <div key={i} className="relative">
-                  <img src={src} alt="photo" className="w-full h-32 object-cover rounded-lg border" />
-                  <Button variant="destructive" size="sm" className="absolute -top-2 -right-2" onClick={() => removeMedia('photo', i)}>×</Button>
+                  <img 
+                    src={src} 
+                    alt="photo" 
+                    className="w-full h-52 object-cover rounded-xl border shadow-sm" 
+                  />
+                  <Button 
+                    variant="destructive" 
+                    size="sm" 
+                    className="absolute -top-2 -right-2" 
+                    onClick={() => removeMedia('photo', i)}
+                  >
+                    ×
+                  </Button>
                 </div>
               ))}
             </div>
           </CardContent>
         </Card>
 
-        {/* Videos card - thumbnails appear here */}
+        {/* Videos card (unchanged) */}
         <Card className="mb-8">
           <CardContent className="p-6">
             <h3 className="text-lg font-semibold mb-3">🎥 Videos</h3>
@@ -833,7 +843,7 @@ export default function Home() {
 
       <input id="receipts-camera" type="file" accept="image/*" capture="environment" onChange={handleReceipts} className="hidden" />
 
-      {/* Load Modal */}
+      {/* Load Modal, Profile Modal, Templates Modal unchanged */}
       <Dialog open={isLoadModalOpen} onOpenChange={setIsLoadModalOpen}>
         <DialogContent className="max-w-3xl max-h-[80vh]">
           <DialogHeader><DialogTitle>🔍 Load Saved Document</DialogTitle></DialogHeader>
@@ -860,7 +870,6 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* Profile Modal */}
       <Dialog open={isProfileOpen} onOpenChange={setIsProfileOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle>👤 Company Profile</DialogTitle></DialogHeader>
@@ -886,7 +895,6 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* Templates Modal */}
       <Dialog open={isTemplatesOpen} onOpenChange={setIsTemplatesOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader><DialogTitle>📋 Templates</DialogTitle></DialogHeader>
