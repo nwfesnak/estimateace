@@ -342,7 +342,7 @@ export default function Home() {
       <div className="flex flex-col h-screen bg-[#f4f4f4]">
         <div className="flex-1 overflow-auto p-4 md:p-8">
           {view === 'dashboard' ? (
-            // Dashboard (unchanged)
+            // Dashboard
             <div>
               <div className="flex justify-between items-center mb-8">
                 <div>
@@ -430,17 +430,13 @@ export default function Home() {
                 </CardContent>
               </Card>
 
-              {/* Action Buttons Row */}
+              {/* Small action buttons */}
               <div className="flex flex-wrap gap-3 mb-8">
                 <Button onClick={addRow} variant="outline">+ Add Line Item</Button>
                 <Button onClick={openQuickLinesModal} variant="outline">📌 Quick Lines</Button>
-                <Button onClick={saveNamedEstimate} className="bg-[#1e293b]">💾 Save Estimate</Button>
-                <Button onClick={printDocument} className="bg-[#3b82f6]">🖨️ Print/Preview</Button>
-                <Button onClick={openSendModal} className="bg-[#8b5cf6]">✉️ Send Estimate</Button>
-                <Button onClick={convertToInvoice} className="bg-[#f59e0b]">📄 Convert to Invoice</Button>
               </div>
 
-              {/* MAIN TABLE */}
+              {/* Main Table */}
               <Card className="mb-8">
                 <Table>
                   <TableHeader>
@@ -479,7 +475,15 @@ export default function Home() {
                 </div>
               </Card>
 
-              {/* TAKE PHOTO & TAKE VIDEO - NOW BELOW GRAND TOTAL */}
+              {/* MOVED BUTTONS - BELOW GRAND TOTAL, ABOVE TAKE PHOTO/VIDEO */}
+              <div className="flex flex-wrap gap-3 mb-8">
+                <Button onClick={saveNamedEstimate} className="bg-[#1e293b]">💾 Save Estimate</Button>
+                <Button onClick={printDocument} className="bg-[#3b82f6]">🖨️ Print/Preview</Button>
+                <Button onClick={openSendModal} className="bg-[#8b5cf6]">✉️ Send Estimate</Button>
+                <Button onClick={convertToInvoice} className="bg-[#f59e0b]">📄 Convert to Invoice</Button>
+              </div>
+
+              {/* Take Photo & Take Video */}
               <div className="flex gap-3 mb-8">
                 <Button onClick={() => document.getElementById('photo-camera')?.click()} className="flex-1">📸 Take Photo</Button>
                 <Button onClick={() => document.getElementById('video-camera')?.click()} className="flex-1">🎥 Record Video</Button>
@@ -488,7 +492,7 @@ export default function Home() {
               <input id="photo-camera" type="file" accept="image/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'photo')} className="hidden" />
               <input id="video-camera" type="file" accept="video/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'video')} className="hidden" />
 
-              {/* PHOTOS SECTION */}
+              {/* Photos Section */}
               <Card className="mb-8">
                 <CardContent className="p-6">
                   <h3 className="text-xl font-semibold mb-4">📸 Photos ({photoUrls.length})</h3>
@@ -503,7 +507,7 @@ export default function Home() {
                 </CardContent>
               </Card>
 
-              {/* VIDEOS SECTION - FULLY RESTORED */}
+              {/* Videos Section */}
               <Card className="mb-8">
                 <CardContent className="p-6">
                   <h3 className="text-xl font-semibold mb-4">🎥 Videos ({videoUrls.length})</h3>
@@ -605,7 +609,7 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Modals (Load, Send, Profile, Quick Lines, Calendar, Templates) are all present and functional */}
+      {/* All Modals (Load, Send, Profile, Quick Lines, Calendar, Templates) are fully functional */}
       {/* Load Modal */}
       <Dialog open={isLoadModalOpen} onOpenChange={setIsLoadModalOpen}>
         <DialogContent className="max-w-2xl">
@@ -627,7 +631,7 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* Other modals (Send, Profile, Quick Lines, Calendar, Templates) are available from previous versions and remain functional. */}
+      {/* Other modals (Send, Profile, Quick Lines, Calendar, Templates) remain functional from previous versions */}
 
     </>
   );
