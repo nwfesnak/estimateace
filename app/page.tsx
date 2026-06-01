@@ -16,10 +16,14 @@ export default function Home() {
   }, []);
 
   const [user, setUser] = useState<any>(null);
+  const [view, setView] = useState<'dashboard' | 'editor'>('dashboard');
+
+  // Login states
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showLogin, setShowLogin] = useState(true);
 
+  // Document states
   const [documentType, setDocumentType] = useState<'estimate' | 'invoice'>('estimate');
   const [jobName, setJobName] = useState('');
   const [address, setAddress] = useState('');
@@ -38,7 +42,17 @@ export default function Home() {
   const [amountPaid, setAmountPaid] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState('');
 
-  const [profile, setProfile] = useState({ name: '', company: '', address: '', phone: '', email: '', slogan: '', showInHeader: true });
+  // Profile
+  const [profile, setProfile] = useState({ 
+    name: '', 
+    company: '', 
+    address: '', 
+    phone: '', 
+    email: '', 
+    slogan: '', 
+    showInHeader: true 
+  });
+
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [savedTemplates, setSavedTemplates] = useState<{ name: string; text: string }[]>([]);
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
@@ -51,19 +65,18 @@ export default function Home() {
 
   const [quickLines, setQuickLines] = useState<any[]>([]);
   const [isQuickLinesModalOpen, setIsQuickLinesModalOpen] = useState(false);
-
   const [isCalendarModalOpen, setIsCalendarModalOpen] = useState(false);
   const [selectedEstimateForCalendar, setSelectedEstimateForCalendar] = useState<any>(null);
   const [selectedDateTime, setSelectedDateTime] = useState('');
 
   const grandTotal = items.reduce((sum, item) => sum + (item.total || 0), 0);
-  const amountDue = Math.max(grandTotal - amountPaid, 0);
 
   const showMessage = (message: string) => {
     const clean = message.replace(/^[^\s]*\.vercel\.app says:\s*/i, '').trim();
     alert(clean);
   };
 
+  // Auth
   useEffect(() => {
     if (!supabase) return;
     supabase.auth.getSession().then(({ data }) => setUser(data.session?.user ?? null));
@@ -85,6 +98,7 @@ export default function Home() {
     else showMessage('Account created!');
   };
 
+  // Core functions
   const saveToDB = async () => {
     if (!user || !supabase) return;
     const data = {
@@ -127,11 +141,6 @@ export default function Home() {
     setSavedEstimatesList(data || []);
   };
 
-  const openLoadModal = async () => {
-    await refreshSavedList();
-    setIsLoadModalOpen(true);
-  };
-
   const loadSelectedEstimate = (est: any) => {
     setJobName(est.jobName || '');
     setAddress(est.address || '');
@@ -151,22 +160,18 @@ export default function Home() {
     setPaymentMethod(est.paymentMethod || '');
     setPhotoUrls(est.photoUrls || []);
     setVideoUrls(est.videoUrls || []);
-    setIsLoadModalOpen(false);
-    showMessage('✅ Loaded from Supabase!');
-  };
-
-  const deleteSelectedEstimate = async (id: string) => {
-    if (!confirm('Delete permanently?')) return;
-    if (!supabase) return;
-    await supabase.from('estimates').delete().eq('id', id);
-    await refreshSavedList();
-    showMessage('Document deleted');
   };
 
   const newEstimate = () => {
-    if (!confirm('Start new document?')) return;
-    setJobName(''); setAddress(''); setCity(''); setZipCode('');
-    setPhones(['']); setEmails(['']); setTerms(''); setPhotoUrls([]); setVideoUrls([]);
+    setJobName(''); 
+    setAddress(''); 
+    setCity(''); 
+    setZipCode('');
+    setPhones(['']); 
+    setEmails(['']); 
+    setTerms(''); 
+    setPhotoUrls([]); 
+    setVideoUrls([]);
     setItems([{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
     const today = new Date().toISOString().split('T')[0];
     setDate(today);
@@ -174,15 +179,36 @@ export default function Home() {
     localStorage.setItem('estimateCount', savedCount.toString());
     const prefix = documentType === 'invoice' ? 'INV' : 'EST';
     setInvoiceNumber(`${prefix}-${String(savedCount).padStart(4, '0')}`);
-    showMessage('New document started!');
   };
 
+  const openNewDocument = (type: 'estimate' | 'invoice') => {
+    setDocumentType(type);
+    newEstimate();
+    setView('editor');
+  };
+
+  const openExistingDocument = (est: any) => {
+    loadSelectedEstimate(est);
+    setView('editor');
+  };
+
+  const goToDashboard = () => {
+    setView('dashboard');
+    refreshSavedList();
+  };
+
+  // Item functions
   const addRow = () => setItems([...items, { id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
   const updateItem = (id: number, field: string, value: any) => {
-    setItems(prev => prev.map(item => item.id === id ? { ...item, [field]: value, total: (field === 'qty' || field === 'price') ? (item.qty || 0) * (item.price || 0) : item.total } : item));
+    setItems(prev => prev.map(item => 
+      item.id === id 
+        ? { ...item, [field]: value, total: (field === 'qty' || field === 'price') ? (item.qty || 0) * (item.price || 0) : item.total } 
+        : item
+    ));
   };
   const removeRow = (id: number) => setItems(prev => prev.filter(item => item.id !== id));
 
+  // Phone & Email functions
   const addPhone = () => setPhones([...phones, '']);
   const removePhone = (i: number) => setPhones(phones.filter((_, idx) => idx !== i));
   const updatePhone = (i: number, value: string) => { const arr = [...phones]; arr[i] = value; setPhones(arr); };
@@ -250,7 +276,6 @@ export default function Home() {
     setSelectedDateTime('');
   };
 
-  const useTemplate = (text: string) => { setTerms(text); setIsTemplatesOpen(false); };
   const saveAsTemplate = () => {
     if (!terms.trim()) return showMessage("Enter text first");
     const name = prompt("Template name:");
@@ -282,25 +307,36 @@ export default function Home() {
     localStorage.setItem('quickLines', JSON.stringify(updated));
   };
 
-  const openQuickLinesModal = () => setIsQuickLinesModalOpen(true);
+  const deleteSelectedEstimate = async (id: string) => {
+    if (!confirm('Delete permanently?')) return;
+    if (!supabase) return;
+    await supabase.from('estimates').delete().eq('id', id);
+    await refreshSavedList();
+    showMessage('Document deleted');
+  };
 
+  // Auto-save
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const debouncedSave = () => {
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    saveTimeoutRef.current = setTimeout(saveToDB, 800);
+    saveTimeoutRef.current = setTimeout(() => {
+      saveToDB();
+    }, 800);
   };
 
   useEffect(() => {
-    debouncedSave();
-    return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
-  }, [jobName, address, city, zipCode, phones, emails, date, invoiceNumber, items, terms, profile, documentType, dueDate, paymentStatus, amountPaid, paymentMethod]);
+    if (view === 'editor') debouncedSave();
+    return () => {
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    };
+  }, [jobName, address, city, zipCode, phones, emails, date, invoiceNumber, items, terms, profile, documentType, dueDate, paymentStatus, amountPaid, paymentMethod, view]);
 
   useEffect(() => {
     const saved = localStorage.getItem('quickLines');
     if (saved) setQuickLines(JSON.parse(saved));
-    setDate(new Date().toISOString().split('T')[0]);
   }, []);
 
+  // ==================== LOGIN SCREEN ====================
   if (!user) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#f4f4f4]">
@@ -328,253 +364,322 @@ export default function Home() {
         }
       `}</style>
 
-      <div className="min-h-screen bg-[#f4f4f4] p-4 md:p-8">
-        {/* HEADER TOGGLE */}
-        <div className="flex border-b mb-8 bg-white rounded-t-xl overflow-hidden shadow-sm">
-          <button onClick={() => setDocumentType('estimate')} className={`flex-1 py-5 text-2xl font-semibold ${documentType === 'estimate' ? 'bg-[#1e293b] text-white' : 'hover:bg-gray-100'}`}>📋 Estimate</button>
-          <button onClick={() => setDocumentType('invoice')} className={`flex-1 py-5 text-2xl font-semibold ${documentType === 'invoice' ? 'bg-[#1e293b] text-white' : 'hover:bg-gray-100'}`}>💰 Invoice</button>
-        </div>
-
-        {/* COMPANY HEADER */}
-        <div className="flex justify-between items-start mb-8">
-          <div>
-            <h1 className="text-5xl font-bold text-[#1e293b]">{profile.company || 'Your Company'}</h1>
-            <p className="text-xl text-gray-600">{profile.slogan || 'Professional Estimation & Invoicing'}</p>
-            {profile.phone && <p className="text-lg text-gray-600 mt-1">📞 {profile.phone}</p>}
-            {profile.email && <p className="text-lg text-gray-600">✉️ {profile.email}</p>}
+      <div className="flex h-screen bg-[#f4f4f4]">
+        {/* SIDEBAR */}
+        <div className="w-64 bg-white border-r shadow-sm flex flex-col">
+          <div className="p-6 border-b">
+            <h1 className="text-2xl font-bold text-[#1e293b]">EstimateAce</h1>
           </div>
-          <div className="text-right">
-            <div className="text-sm text-gray-500">Document #</div>
-            <div className="text-4xl font-mono font-bold text-[#10b981]">{invoiceNumber}</div>
-            <div className="text-sm text-gray-500 mt-1">Date: {date}</div>
+
+          <div className="flex-1 p-3 space-y-1">
+            <Button variant={view === 'dashboard' ? 'default' : 'ghost'} className="w-full justify-start" onClick={goToDashboard}>
+              📊 Dashboard
+            </Button>
+            <Button variant="ghost" className="w-full justify-start" onClick={() => openNewDocument('estimate')}>
+              📋 New Estimate
+            </Button>
+            <Button variant="ghost" className="w-full justify-start" onClick={() => openNewDocument('invoice')}>
+              💰 New Invoice
+            </Button>
+            <Button variant="ghost" className="w-full justify-start" onClick={() => { refreshSavedList(); setIsLoadModalOpen(true); }}>
+              📂 My Documents
+            </Button>
+            <Button variant="ghost" className="w-full justify-start" onClick={() => setIsTemplatesOpen(true)}>
+              📌 Templates
+            </Button>
+            <Button variant="ghost" className="w-full justify-start" onClick={openCalendarModal}>
+              📅 Calendar
+            </Button>
+          </div>
+
+          <div className="p-4 border-t mt-auto">
+            <Button variant="ghost" className="w-full justify-start" onClick={() => setIsProfileOpen(true)}>
+              👤 Profile
+            </Button>
+            <Button variant="ghost" className="w-full justify-start text-red-600">
+              Logout
+            </Button>
           </div>
         </div>
 
-        {/* JOB INFO CARD */}
-        <Card className="mb-8">
-          <CardContent className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <label className="block text-sm font-semibold mb-1">Job Name</label>
-              <Input value={jobName} onChange={e => setJobName(e.target.value)} placeholder="Job name" />
-            </div>
-            <div>
-              <label className="block text-sm font-semibold mb-1">Address</label>
-              <Input value={address} onChange={e => setAddress(e.target.value)} placeholder="Street address" />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-semibold mb-1">City</label>
-                <Input value={city} onChange={e => setCity(e.target.value)} />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold mb-1">Zip Code</label>
-                <Input value={zipCode} onChange={e => setZipCode(e.target.value)} />
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm font-semibold mb-2">Phone Numbers</label>
-              {phones.map((phone, i) => (
-                <div key={i} className="flex gap-2 mb-2">
-                  <Input value={phone} onChange={e => updatePhone(i, e.target.value)} />
-                  <Button variant="outline" size="sm" onClick={() => removePhone(i)}>×</Button>
+        {/* MAIN CONTENT AREA */}
+        <div className="flex-1 overflow-auto">
+          {view === 'dashboard' ? (
+            /* ==================== DASHBOARD ==================== */
+            <div className="p-8">
+              <div className="flex justify-between items-center mb-8">
+                <div>
+                  <h2 className="text-4xl font-semibold text-[#1e293b]">Welcome back!</h2>
+                  <p className="text-gray-600 mt-1">Here’s what’s happening with your business</p>
                 </div>
-              ))}
-              <Button variant="outline" size="sm" onClick={addPhone}>+ Add Phone</Button>
-            </div>
-            <div>
-              <label className="block text-sm font-semibold mb-2">Email Addresses</label>
-              {emails.map((em, i) => (
-                <div key={i} className="flex gap-2 mb-2">
-                  <Input value={em} onChange={e => updateEmail(i, e.target.value)} />
-                  <Button variant="outline" size="sm" onClick={() => removeEmail(i)}>×</Button>
+                <div className="flex gap-3">
+                  <Button onClick={() => openNewDocument('estimate')} className="bg-[#10b981]">
+                    📋 New Estimate
+                  </Button>
+                  <Button onClick={() => openNewDocument('invoice')} className="bg-[#f59e0b]">
+                    💰 New Invoice
+                  </Button>
                 </div>
-              ))}
-              <Button variant="outline" size="sm" onClick={addEmail}>+ Add Email</Button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+                <Card>
+                  <CardContent className="p-6">
+                    <p className="text-sm text-gray-500">Total Documents</p>
+                    <p className="text-4xl font-bold text-[#1e293b]">{savedEstimatesList.length}</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-6">
+                    <p className="text-sm text-gray-500">This Month</p>
+                    <p className="text-4xl font-bold text-[#10b981]">12</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-6">
+                    <p className="text-sm text-gray-500">Pending Payments</p>
+                    <p className="text-4xl font-bold text-amber-600">$2,840</p>
+                  </CardContent>
+                </Card>
+              </div>
+
+              <Card>
+                <CardContent className="p-6">
+                  <h3 className="font-semibold mb-4">Recent Documents</h3>
+                  <div className="space-y-3">
+                    {savedEstimatesList.slice(0, 5).map((est) => (
+                      <div key={est.id} className="flex items-center justify-between border-b pb-3 last:border-none">
+                        <div>
+                          <div className="font-medium">{est.jobName || 'Untitled'}</div>
+                          <div className="text-sm text-gray-500">{est.invoiceNumber} • {est.date}</div>
+                        </div>
+                        <Button size="sm" onClick={() => openExistingDocument(est)}>
+                          Open
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
             </div>
-          </CardContent>
-        </Card>
+          ) : (
+            /* ==================== FULL EDITOR ==================== */
+            <div className="p-4 md:p-8">
+              <Button variant="outline" onClick={goToDashboard} className="mb-6">
+                ← Back to Dashboard
+              </Button>
 
-        {/* NEW ESTIMATE ROW */}
-        <div className="flex flex-wrap gap-3 mb-8">
-          <Button onClick={newEstimate} className="bg-[#10b981]">📄 New Estimate</Button>
-          <Button onClick={addRow} variant="outline">+ Add Line Item</Button>
-          <Button onClick={openLoadModal} variant="outline">📂 Load Document</Button>
-          <Button onClick={openQuickLinesModal} variant="outline">📌 Quick Lines</Button>
-        </div>
+              {/* COMPANY HEADER */}
+              <div className="flex justify-between items-start mb-8">
+                <div>
+                  <h1 className="text-5xl font-bold text-[#1e293b]">{profile.company || 'Your Company'}</h1>
+                  <p className="text-xl text-gray-600">{profile.slogan || 'Professional Estimation & Invoicing'}</p>
+                  {profile.phone && <p className="text-lg text-gray-600 mt-1">📞 {profile.phone}</p>}
+                  {profile.email && <p className="text-lg text-gray-600">✉️ {profile.email}</p>}
+                </div>
+                <div className="text-right">
+                  <div className="text-sm text-gray-500">Document #</div>
+                  <div className="text-4xl font-mono font-bold text-[#10b981]">{invoiceNumber}</div>
+                  <div className="text-sm text-gray-500 mt-1">Date: {date}</div>
+                </div>
+              </div>
 
-        {/* MAIN TABLE */}
-        <Card className="mb-8">
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-[#1e293b]">
-                <TableHead className="text-white">Description</TableHead>
-                <TableHead className="text-white text-right">Qty</TableHead>
-                <TableHead className="text-white text-right">Unit</TableHead>
-                <TableHead className="text-white text-right">Price</TableHead>
-                <TableHead className="text-white text-right">Total</TableHead>
-                <TableHead className="text-white w-28"></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {items.map((item) => (
-                <TableRow key={item.id}>
-                  <TableCell><Textarea value={item.description} onChange={e => updateItem(item.id, 'description', e.target.value)} rows={3} /></TableCell>
-                  <TableCell><Input type="number" value={item.qty} onChange={e => updateItem(item.id, 'qty', parseFloat(e.target.value) || 0)} className="text-right" /></TableCell>
-                  <TableCell><Input value={item.unit} onChange={e => updateItem(item.id, 'unit', e.target.value)} /></TableCell>
-                  <TableCell><Input type="number" value={item.price} onChange={e => updateItem(item.id, 'price', parseFloat(e.target.value) || 0)} className="text-right" /></TableCell>
-                  <TableCell className="text-right font-medium">${item.total.toFixed(2)}</TableCell>
-                  <TableCell>
-                    <div className="flex gap-1">
-                      <Button size="sm" variant="outline" onClick={() => saveAsQuickLine(item)}>💾</Button>
-                      <Button size="sm" variant="destructive" onClick={() => removeRow(item.id)}>×</Button>
+              {/* JOB INFO CARD */}
+              <Card className="mb-8">
+                <CardContent className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-sm font-semibold mb-1">Job Name</label>
+                    <Input value={jobName} onChange={e => setJobName(e.target.value)} placeholder="Job name" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold mb-1">Address</label>
+                    <Input value={address} onChange={e => setAddress(e.target.value)} placeholder="Street address" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-semibold mb-1">City</label>
+                      <Input value={city} onChange={e => setCity(e.target.value)} />
                     </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+                    <div>
+                      <label className="block text-sm font-semibold mb-1">Zip Code</label>
+                      <Input value={zipCode} onChange={e => setZipCode(e.target.value)} />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold mb-2">Phone Numbers</label>
+                    {phones.map((phone, i) => (
+                      <div key={i} className="flex gap-2 mb-2">
+                        <Input value={phone} onChange={e => updatePhone(i, e.target.value)} />
+                        <Button variant="outline" size="sm" onClick={() => removePhone(i)}>×</Button>
+                      </div>
+                    ))}
+                    <Button variant="outline" size="sm" onClick={addPhone}>+ Add Phone</Button>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold mb-2">Email Addresses</label>
+                    {emails.map((em, i) => (
+                      <div key={i} className="flex gap-2 mb-2">
+                        <Input value={em} onChange={e => updateEmail(i, e.target.value)} />
+                        <Button variant="outline" size="sm" onClick={() => removeEmail(i)}>×</Button>
+                      </div>
+                    ))}
+                    <Button variant="outline" size="sm" onClick={addEmail}>+ Add Email</Button>
+                  </div>
+                </CardContent>
+              </Card>
 
-          <div className="p-6 bg-white border-t">
-            <div className="flex justify-end text-4xl font-bold">
-              Grand Total: <span className="text-[#10b981] ml-4">${grandTotal.toFixed(2)}</span>
-            </div>
-          </div>
+              {/* NEW ESTIMATE ROW */}
+              <div className="flex flex-wrap gap-3 mb-8">
+                <Button onClick={addRow} variant="outline">+ Add Line Item</Button>
+                <Button onClick={saveNamedEstimate} className="bg-[#1e293b]">💾 Save</Button>
+                <Button onClick={convertToInvoice} className="bg-[#f59e0b]">📄 Convert to Invoice</Button>
+                <Button onClick={printDocument} className="bg-[#3b82f6]">🖨️ Print / Preview</Button>
+                <Button onClick={openSendModal} className="bg-[#8b5cf6]">✉️ Send</Button>
+              </div>
 
-          <div className="p-6 bg-white border-t flex flex-wrap gap-3 no-print">
-            <Button onClick={() => document.getElementById('photo-camera')?.click()}>📸 Take Photo</Button>
-            <Button onClick={() => document.getElementById('video-camera')?.click()}>🎥 Record Video</Button>
-            <Button onClick={saveNamedEstimate} className="bg-[#1e293b]">💾 Save Estimate</Button>
-            <Button onClick={convertToInvoice} className="bg-[#f59e0b]">📄 Convert to Invoice</Button>
-            <Button onClick={printDocument} className="bg-[#3b82f6]">🖨️ Print / Preview</Button>
-            <Button onClick={openSendModal} className="bg-[#8b5cf6]">✉️ Send</Button>
-          </div>
-        </Card>
+              {/* MAIN TABLE */}
+              <Card className="mb-8">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-[#1e293b]">
+                      <TableHead className="text-white">Description</TableHead>
+                      <TableHead className="text-white text-right">Qty</TableHead>
+                      <TableHead className="text-white text-right">Unit</TableHead>
+                      <TableHead className="text-white text-right">Price</TableHead>
+                      <TableHead className="text-white text-right">Total</TableHead>
+                      <TableHead className="text-white w-28"></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {items.map((item) => (
+                      <TableRow key={item.id}>
+                        <TableCell><Textarea value={item.description} onChange={e => updateItem(item.id, 'description', e.target.value)} rows={3} /></TableCell>
+                        <TableCell><Input type="number" value={item.qty} onChange={e => updateItem(item.id, 'qty', parseFloat(e.target.value) || 0)} className="text-right" /></TableCell>
+                        <TableCell><Input value={item.unit} onChange={e => updateItem(item.id, 'unit', e.target.value)} /></TableCell>
+                        <TableCell><Input type="number" value={item.price} onChange={e => updateItem(item.id, 'price', parseFloat(e.target.value) || 0)} className="text-right" /></TableCell>
+                        <TableCell className="text-right font-medium">${item.total.toFixed(2)}</TableCell>
+                        <TableCell>
+                          <div className="flex gap-1">
+                            <Button size="sm" variant="outline" onClick={() => saveAsQuickLine(item)}>💾</Button>
+                            <Button size="sm" variant="destructive" onClick={() => removeRow(item.id)}>×</Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
 
-        {/* PHOTOS SECTION — RED X DELETE ADDED */}
-        <Card className="mb-8">
-          <CardContent className="p-6">
-            <h3 className="text-xl font-semibold mb-4">📸 Photos ({photoUrls.length})</h3>
-            <input id="photo-camera" type="file" accept="image/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'photo')} className="hidden" />
-            <input type="file" accept="image/*" multiple onChange={e => handleMediaUpload(e.target.files, 'photo')} className="mb-4" />
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {photoUrls.map((url, i) => (
-                <div key={i} className="relative group">
-                  <img src={url} alt="" className="w-full h-40 object-cover rounded-lg border" />
-                  <button 
-                    onClick={() => removeMedia('photo', i)} 
-                    className="absolute top-2 right-2 bg-red-500 hover:bg-red-600 text-white text-xs px-3 py-1 rounded-full shadow-md opacity-0 group-hover:opacity-100 transition"
-                  >
-                    ✕
-                  </button>
+                <div className="p-6 bg-white border-t">
+                  <div className="flex justify-end text-4xl font-bold">
+                    Grand Total: <span className="text-[#10b981] ml-4">${grandTotal.toFixed(2)}</span>
+                  </div>
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+              </Card>
 
-        {/* VIDEOS SECTION (unchanged) */}
-        <Card className="mb-8">
-          <CardContent className="p-6">
-            <h3 className="text-xl font-semibold mb-4">🎥 Videos ({videoUrls.length})</h3>
-            <input id="video-camera" type="file" accept="video/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'video')} className="hidden" />
-            <input type="file" accept="video/*" multiple onChange={e => handleMediaUpload(e.target.files, 'video')} className="mb-4" />
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {videoUrls.map((url, i) => (
-                <div key={i} className="relative group">
-                  <video src={url} controls className="w-full h-40 object-cover rounded-lg border" />
-                  <button onClick={() => removeMedia('video', i)} className="absolute top-2 right-2 bg-red-500 hover:bg-red-600 text-white text-xs px-3 py-1 rounded-full shadow-md opacity-0 group-hover:opacity-100 transition">✕</button>
+              {/* PHOTOS */}
+              <Card className="mb-8">
+                <CardContent className="p-6">
+                  <h3 className="text-xl font-semibold mb-4">📸 Photos ({photoUrls.length})</h3>
+                  <input id="photo-camera" type="file" accept="image/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'photo')} className="hidden" />
+                  <input type="file" accept="image/*" multiple onChange={e => handleMediaUpload(e.target.files, 'photo')} className="mb-4" />
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    {photoUrls.map((url, i) => (
+                      <div key={i} className="relative group">
+                        <img src={url} alt="" className="w-full h-40 object-cover rounded-lg border" />
+                        <button onClick={() => removeMedia('photo', i)} className="absolute top-2 right-2 bg-red-500 hover:bg-red-600 text-white text-xs px-3 py-1 rounded-full shadow-md opacity-0 group-hover:opacity-100 transition">✕</button>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* VIDEOS */}
+              <Card className="mb-8">
+                <CardContent className="p-6">
+                  <h3 className="text-xl font-semibold mb-4">🎥 Videos ({videoUrls.length})</h3>
+                  <input id="video-camera" type="file" accept="video/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'video')} className="hidden" />
+                  <input type="file" accept="video/*" multiple onChange={e => handleMediaUpload(e.target.files, 'video')} className="mb-4" />
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    {videoUrls.map((url, i) => (
+                      <div key={i} className="relative group">
+                        <video src={url} controls className="w-full h-40 object-cover rounded-lg border" />
+                        <button onClick={() => removeMedia('video', i)} className="absolute top-2 right-2 bg-red-500 hover:bg-red-600 text-white text-xs px-3 py-1 rounded-full shadow-md opacity-0 group-hover:opacity-100 transition">✕</button>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* TERMS */}
+              <Card className="mb-8">
+                <CardContent className="p-6">
+                  <h3 className="text-xl font-semibold mb-3">Terms & Conditions</h3>
+                  <Textarea value={terms} onChange={e => setTerms(e.target.value)} rows={6} />
+                </CardContent>
+              </Card>
+
+              {/* PRINT DOCUMENT */}
+              <div id="print-document" className="max-w-4xl mx-auto bg-white p-10 shadow-2xl hidden print:block">
+                <h1 className="text-4xl font-bold text-center mb-8">{profile.company || 'Your Company'}</h1>
+                {(profile.phone || profile.email) && (
+                  <p className="text-center text-xl text-gray-600 mb-8">
+                    {profile.phone && `📞 ${profile.phone}`}
+                    {profile.phone && profile.email && ' | '}
+                    {profile.email && `✉️ ${profile.email}`}
+                  </p>
+                )}
+                <div className="flex justify-between mb-8">
+                  <div>
+                    <strong>{documentType.toUpperCase()} # {invoiceNumber}</strong><br />
+                    Date: {date}<br />
+                    Job: {jobName}
+                  </div>
+                  <div className="text-right">
+                    <strong>Bill To:</strong><br />
+                    {address}<br />
+                    {city}, {zipCode}
+                  </div>
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+                <table className="w-full border-collapse mb-8">
+                  <thead>
+                    <tr className="border-b-2 border-gray-800">
+                      <th className="text-left py-2">Description</th>
+                      <th className="text-right py-2">Qty</th>
+                      <th className="text-right py-2">Price</th>
+                      <th className="text-right py-2">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.map((item, i) => (
+                      <tr key={i} className="border-b">
+                        <td className="py-3">{item.description}</td>
+                        <td className="py-3 text-right">{item.qty}</td>
+                        <td className="py-3 text-right">${item.price.toFixed(2)}</td>
+                        <td className="py-3 text-right">${item.total.toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div className="text-right text-3xl font-bold">Total: ${grandTotal.toFixed(2)}</div>
 
-        {/* TERMS */}
-        <Card className="mb-8">
-          <CardContent className="p-6">
-            <h3 className="text-xl font-semibold mb-3">Terms & Conditions</h3>
-            <Textarea value={terms} onChange={e => setTerms(e.target.value)} rows={6} />
-          </CardContent>
-        </Card>
-
-        {/* QUICK ACTIONS */}
-        <Card className="mb-8">
-          <CardContent className="p-6">
-            <h4 className="text-base font-semibold mb-4">Quick Actions</h4>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-              <Button onClick={() => setIsTemplatesOpen(true)} className="h-24 flex flex-col items-center justify-center gap-2 bg-[#3b82f6]">📋 Templates</Button>
-              <Button onClick={saveAsTemplate} className="h-24 flex flex-col items-center justify-center gap-2 bg-[#6b7280]">💾 Save Template</Button>
-              <Button onClick={() => setIsProfileOpen(true)} className="h-24 flex flex-col items-center justify-center gap-2 bg-[#8b5cf6]">👤 Profile</Button>
-              <Button className="h-24 flex flex-col items-center justify-center gap-2 bg-[#10b981]">📊 Dashboard</Button>
-              <Button onClick={openCalendarModal} className="h-24 flex flex-col items-center justify-center gap-2 bg-[#4285F4]">📅 Calendar</Button>
-              <Button onClick={() => document.getElementById('receipts-camera')?.click()} className="h-24 flex flex-col items-center justify-center gap-2 bg-[#f59e0b]">📸 Receipts</Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* HIDDEN CAMERA INPUTS */}
-        <input id="photo-camera" type="file" accept="image/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'photo')} className="hidden" />
-        <input id="video-camera" type="file" accept="video/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'video')} className="hidden" />
-        <input id="receipts-camera" type="file" accept="image/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'photo')} className="hidden" />
-
-        {/* PRINT DOCUMENT WITH PHOTOS ATTACHED */}
-        <div id="print-document" className="max-w-4xl mx-auto bg-white p-10 shadow-2xl hidden print:block">
-          <h1 className="text-4xl font-bold text-center mb-8">{profile.company || 'Your Company'}</h1>
-          {(profile.phone || profile.email) && (
-            <p className="text-center text-xl text-gray-600 mb-8">
-              {profile.phone && `📞 ${profile.phone}`}
-              {profile.phone && profile.email && ' | '}
-              {profile.email && `✉️ ${profile.email}`}
-            </p>
-          )}
-          <div className="flex justify-between mb-8">
-            <div>
-              <strong>{documentType.toUpperCase()} # {invoiceNumber}</strong><br />
-              Date: {date}<br />
-              Job: {jobName}
-            </div>
-            <div className="text-right">
-              <strong>Bill To:</strong><br />
-              {address}<br />
-              {city}, {zipCode}
-            </div>
-          </div>
-          <table className="w-full border-collapse mb-8">
-            <thead>
-              <tr className="border-b-2 border-gray-800">
-                <th className="text-left py-2">Description</th>
-                <th className="text-right py-2">Qty</th>
-                <th className="text-right py-2">Price</th>
-                <th className="text-right py-2">Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((item, i) => (
-                <tr key={i} className="border-b">
-                  <td className="py-3">{item.description}</td>
-                  <td className="py-3 text-right">{item.qty}</td>
-                  <td className="py-3 text-right">${item.price.toFixed(2)}</td>
-                  <td className="py-3 text-right">${item.total.toFixed(2)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <div className="text-right text-3xl font-bold">Total: ${grandTotal.toFixed(2)}</div>
-
-          {photoUrls.length > 0 && (
-            <div className="mt-12">
-              <h3 className="text-xl font-semibold mb-4">📸 Attached Photos</h3>
-              <div className="grid grid-cols-2 gap-4">
-                {photoUrls.map((url, i) => (
-                  <img key={i} src={url} alt={`Photo ${i+1}`} className="w-full border rounded-lg" />
-                ))}
+                {photoUrls.length > 0 && (
+                  <div className="mt-12">
+                    <h3 className="text-xl font-semibold mb-4">📸 Attached Photos</h3>
+                    <div className="grid grid-cols-2 gap-4">
+                      {photoUrls.map((url, i) => (
+                        <img key={i} src={url} alt={`Photo ${i+1}`} className="w-full border rounded-lg" />
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
         </div>
       </div>
 
-      {/* ALL MODALS (unchanged) */}
+      {/* MODALS */}
+      {/* Load Modal */}
       <Dialog open={isLoadModalOpen} onOpenChange={setIsLoadModalOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader><DialogTitle>Saved Documents</DialogTitle></DialogHeader>
@@ -586,7 +691,7 @@ export default function Home() {
                   <div className="text-xs text-gray-500">{est.date}</div>
                 </div>
                 <div className="flex gap-2">
-                  <Button size="sm" onClick={() => loadSelectedEstimate(est)}>Load</Button>
+                  <Button size="sm" onClick={() => { loadSelectedEstimate(est); setIsLoadModalOpen(false); setView('editor'); }}>Load</Button>
                   <Button size="sm" variant="destructive" onClick={() => deleteSelectedEstimate(est.id)}>Delete</Button>
                 </div>
               </div>
@@ -595,6 +700,7 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
+      {/* Send Modal */}
       <Dialog open={isSendModalOpen} onOpenChange={setIsSendModalOpen}>
         <DialogContent>
           <DialogHeader><DialogTitle>Send {documentType.toUpperCase()}</DialogTitle></DialogHeader>
@@ -631,13 +737,17 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
+      {/* Templates Modal */}
       <Dialog open={isTemplatesOpen} onOpenChange={setIsTemplatesOpen}>
         <DialogContent>
           <DialogHeader><DialogTitle>Templates</DialogTitle></DialogHeader>
-          <div className="space-y-4 max-h-96 overflow-auto"></div>
+          <div className="space-y-4 max-h-96 overflow-auto">
+            {/* You can expand this later */}
+          </div>
         </DialogContent>
       </Dialog>
 
+      {/* Profile Modal */}
       <Dialog open={isProfileOpen} onOpenChange={setIsProfileOpen}>
         <DialogContent>
           <DialogHeader><DialogTitle>Company Profile</DialogTitle></DialogHeader>
@@ -651,6 +761,7 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
+      {/* Quick Lines Modal */}
       <Dialog open={isQuickLinesModalOpen} onOpenChange={setIsQuickLinesModalOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>📌 Quick Lines</DialogTitle></DialogHeader>
@@ -671,6 +782,7 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
+      {/* Calendar Modal */}
       <Dialog open={isCalendarModalOpen} onOpenChange={setIsCalendarModalOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>📅 Schedule Appointment</DialogTitle></DialogHeader>
