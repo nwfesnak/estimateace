@@ -38,7 +38,7 @@ export default function Home() {
   const [photoUrls, setPhotoUrls] = useState<string[]>([]);
   const [videoUrls, setVideoUrls] = useState<string[]>([]);
   const [receiptUrls, setReceiptUrls] = useState<string[]>([]);
-  const [signatureDataUrl, setSignatureDataUrl] = useState<string>(''); // ← digital signature added here
+  const [signatureDataUrl, setSignatureDataUrl] = useState<string>('');
 
   const [dueDate, setDueDate] = useState('');
   const [paymentStatus, setPaymentStatus] = useState<'pending' | 'paid'>('pending');
@@ -190,14 +190,14 @@ export default function Home() {
     setPhotoUrls(est.photoUrls || []);
     setVideoUrls(est.videoUrls || []);
     setReceiptUrls(est.receiptUrls || []);
-    setSignatureDataUrl(est.signatureDataUrl || ''); // ← digital signature loaded
+    setSignatureDataUrl(est.signatureDataUrl || '');
   };
 
   const newEstimate = () => {
     setJobName(''); setAddress(''); setCity(''); setZipCode('');
     setPhones(['']); setEmails(['']); setTerms('');
     setPhotoUrls([]); setVideoUrls([]); setReceiptUrls([]);
-    setSignatureDataUrl(''); // ← digital signature reset
+    setSignatureDataUrl('');
     setItems([{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
     const today = new Date().toISOString().split('T')[0];
     setDate(today);
@@ -406,7 +406,7 @@ export default function Home() {
   }, [view]);
 
   // ──────────────────────────────────────────────────────────────
-  // DIGITAL SIGNATURE FUNCTIONALITY (added only here)
+  // DIGITAL SIGNATURE FUNCTIONALITY (with touch support added)
   // ──────────────────────────────────────────────────────────────
   const signatureCanvasRef = useRef<HTMLCanvasElement>(null);
   const isDrawing = useRef(false);
@@ -449,8 +449,39 @@ export default function Home() {
     if (!canvas) return;
     const dataUrl = canvas.toDataURL('image/png');
     setSignatureDataUrl(dataUrl);
-    saveToDB(); // save immediately
+    saveToDB();
     showMessage('✅ Digital signature saved');
+  };
+
+  // Touch support handlers (added only here)
+  const startDrawingTouch = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    const canvas = signatureCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    isDrawing.current = true;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.touches[0].clientX - rect.left;
+    const y = e.touches[0].clientY - rect.top;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+  };
+
+  const drawTouch = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    const canvas = signatureCanvasRef.current;
+    if (!canvas || !isDrawing.current) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.touches[0].clientX - rect.left;
+    const y = e.touches[0].clientY - rect.top;
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#1e293b';
+    ctx.lineTo(x, y);
+    ctx.stroke();
   };
 
   if (!user) {
@@ -725,7 +756,7 @@ export default function Home() {
                 </CardContent>
               </Card>
 
-              {/* DIGITAL SIGNATURE SECTION - added here only */}
+              {/* DIGITAL SIGNATURE SECTION */}
               <Card className="mb-8">
                 <CardContent className="p-6">
                   <h3 className="text-xl font-semibold mb-4">✍️ Digital Signature</h3>
@@ -739,6 +770,9 @@ export default function Home() {
                       onMouseMove={draw}
                       onMouseUp={stopDrawing}
                       onMouseLeave={stopDrawing}
+                      onTouchStart={startDrawingTouch}
+                      onTouchMove={drawTouch}
+                      onTouchEnd={stopDrawing}
                     />
                     <div className="flex gap-3 mt-4">
                       <Button variant="outline" onClick={clearSignature} className="flex-1">Clear Signature</Button>
@@ -748,7 +782,7 @@ export default function Home() {
                 </CardContent>
               </Card>
 
-              {/* PRINT PREVIEW - digital signature added here only */}
+              {/* PRINT PREVIEW */}
               <div id="print-document" className="max-w-4xl mx-auto bg-white p-10 shadow-2xl hidden print:block">
                 <h1 className="text-4xl font-bold text-center mb-8">{profile.company || 'Your Company'}</h1>
                 {(profile.phone || profile.email) && (
@@ -808,7 +842,6 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* Digital signature in PDF */}
                 {signatureDataUrl && (
                   <div className="mt-12">
                     <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Digital Signature</h3>
