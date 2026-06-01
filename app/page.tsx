@@ -38,7 +38,6 @@ export default function Home() {
   const [terms, setTerms] = useState('');
   const [photoUrls, setPhotoUrls] = useState<string[]>([]);
   const [videoUrls, setVideoUrls] = useState<string[]>([]);
-  const [receiptUrls, setReceiptUrls] = useState<string[]>([]);
 
   const [profile, setProfile] = useState({ name: '', company: '', address: '', phone: '', email: '', slogan: '', showInHeader: true });
 
@@ -48,11 +47,14 @@ export default function Home() {
   const [lastSaved, setLastSaved] = useState('Never');
   const [isLoadModalOpen, setIsLoadModalOpen] = useState(false);
   const [savedEstimatesList, setSavedEstimatesList] = useState<any[]>([]);
-  const [isReceiptsModalOpen, setIsReceiptsModalOpen] = useState(false);
 
   const [isSendModalOpen, setIsSendModalOpen] = useState(false);
   const [selectedEmailsForSend, setSelectedEmailsForSend] = useState<string[]>([]);
   const [selectedPhonesForSend, setSelectedPhonesForSend] = useState<string[]>([]);
+
+  // NEW: Quick Lines
+  const [quickLines, setQuickLines] = useState<{ id: number; description: string; qty: number; unit: string; price: number }[]>([]);
+  const [isQuickLinesModalOpen, setIsQuickLinesModalOpen] = useState(false);
 
   const grandTotal = items.reduce((sum, item) => sum + (item.total || 0), 0);
   const amountDue = Math.max(grandTotal - amountPaid, 0);
@@ -68,6 +70,17 @@ export default function Home() {
     const { data: listener } = supabase.auth.onAuthStateChange((_, session) => setUser(session?.user ?? null));
     return () => listener.subscription.unsubscribe();
   }, [supabase]);
+
+  // Load quick lines from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem('quickLines');
+    if (saved) setQuickLines(JSON.parse(saved));
+  }, []);
+
+  // Save quick lines to localStorage
+  const saveQuickLinesToStorage = (lines: any[]) => {
+    localStorage.setItem('quickLines', JSON.stringify(lines));
+  };
 
   const login = async () => {
     if (!supabase) return;
@@ -112,28 +125,6 @@ export default function Home() {
     if (type === 'photo') setPhotoUrls(prev => [...prev, ...newUrls]);
     else setVideoUrls(prev => [...prev, ...newUrls]);
     await saveToDB();
-  };
-
-  const saveReceipt = async (files: FileList | null) => {
-    if (!files || !user || !supabase) return;
-    const newUrls: string[] = [];
-    for (const file of Array.from(files)) {
-      const fileExt = file.name.split('.').pop();
-      const filePath = `${user.id}/receipts/${Date.now()}.${fileExt}`;
-      const { error } = await supabase.storage.from('media').upload(filePath, file, { upsert: true });
-      if (!error) {
-        const { data } = supabase.storage.from('media').getPublicUrl(filePath);
-        newUrls.push(data.publicUrl);
-        await supabase.from('receipts').insert({
-          user_id: user.id,
-          receipt_url: data.publicUrl,
-          job_name: jobName || 'Untitled'
-        });
-      }
-    }
-    setReceiptUrls(prev => [...prev, ...newUrls]);
-    await saveToDB();
-    showMessage('Receipt photo saved to database!');
   };
 
   const removeMedia = (type: 'photo' | 'video', index: number) => {
@@ -203,6 +194,46 @@ export default function Home() {
     setItems(prev => prev.map(item => item.id === id ? { ...item, [field]: value, total: (field === 'qty' || field === 'price') ? (item.qty || 0) * (item.price || 0) : item.total } : item));
   };
   const removeRow = (id: number) => setItems(prev => prev.filter(item => item.id !== id));
+
+  // NEW: Save current row as Quick Line
+  const saveAsQuickLine = (item: any) => {
+    const newQuick = {
+      id: Date.now(),
+      description: item.description,
+      qty: item.qty,
+      unit: item.unit,
+      price: item.price
+    };
+    const updated = [...quickLines, newQuick];
+    setQuickLines(updated);
+    saveQuickLinesToStorage(updated);
+    showMessage('Line saved as Quick Line!');
+  };
+
+  const useQuickLine = (quick: any) => {
+    const newItem = {
+      id: Date.now(),
+      description: quick.description,
+      qty: quick.qty,
+      unit: quick.unit,
+      price: quick.price,
+      total: quick.qty * quick.price
+    };
+    setItems(prev => [...prev, newItem]);
+    setIsQuickLinesModalOpen(false);
+    showMessage('Quick Line added!');
+  };
+
+  const deleteQuickLine = (id: number) => {
+    const updated = quickLines.filter(q => q.id !== id);
+    setQuickLines(updated);
+    saveQuickLinesToStorage(updated);
+    showMessage('Quick Line deleted');
+  };
+
+  const openQuickLinesModal = () => {
+    setIsQuickLinesModalOpen(true);
+  };
 
   const addPhone = () => setPhones([...phones, '']);
   const removePhone = (i: number) => setPhones(phones.filter((_, idx) => idx !== i));
@@ -355,10 +386,11 @@ export default function Home() {
           </CardContent>
         </Card>
 
-        {/* New Estimate Row */}
+        {/* Action Row - Quick Lines button added beside Load Document */}
         <div className="flex gap-3 mb-8 flex-wrap">
           <Button onClick={newEstimate} className="bg-[#6b7280]">🆕 New Estimate</Button>
           <Button onClick={addRow} className="bg-[#10b981]">➕ Add Line Item</Button>
+          <Button onClick={openQuickLinesModal} className="bg-[#8b5cf6]">📌 Quick Lines</Button>
           <Button onClick={openLoadModal} className="bg-[#3b82f6]">🔍 Load Document</Button>
         </div>
 
@@ -385,7 +417,10 @@ export default function Home() {
                   <TableCell><Input value={item.unit} onChange={e => updateItem(item.id, 'unit', e.target.value)} /></TableCell>
                   <TableCell><Input type="number" step="0.01" value={item.price} onChange={e => updateItem(item.id, 'price', parseFloat(e.target.value) || 0)} /></TableCell>
                   <TableCell className="text-right font-semibold">${(item.total || 0).toFixed(2)}</TableCell>
-                  <TableCell><Button variant="destructive" size="sm" onClick={() => removeRow(item.id)}>×</Button></TableCell>
+                  <TableCell className="flex gap-1">
+                    <Button variant="destructive" size="sm" onClick={() => removeRow(item.id)}>×</Button>
+                    <Button size="sm" variant="outline" onClick={() => saveAsQuickLine(item)}>💾 Quick</Button>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -409,6 +444,8 @@ export default function Home() {
             </div>
           </div>
         </Card>
+
+        {/* Photos, Videos, Terms, Bottom Quick Actions row, Print document - all present */}
 
         {/* Photos */}
         <Card className="mb-8">
@@ -452,7 +489,7 @@ export default function Home() {
           </CardContent>
         </Card>
 
-        {/* Bottom Quick Actions Row (Receipts button opens camera) */}
+        {/* Bottom Quick Actions Row */}
         <Card className="mb-8">
           <CardContent className="p-6">
             <h4 className="text-base font-semibold mb-4 text-center md:text-left text-gray-600">Quick Actions</h4>
@@ -564,12 +601,37 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Hidden camera inputs - no duplicates */}
+      {/* Hidden camera inputs */}
       <input id="photo-camera" type="file" accept="image/*" capture="environment" onChange={e => handleMediaUpload(e.target.files, 'photo')} className="hidden" />
       <input id="video-camera" type="file" accept="video/*" capture="environment" onChange={e => handleMediaUpload(e.target.files, 'video')} className="hidden" />
-      <input id="receipts-camera" type="file" accept="image/*" capture="environment" onChange={e => saveReceipt(e.target.files)} className="hidden" />
+      <input id="receipts-camera" type="file" accept="image/*" capture="environment" onChange={e => handleMediaUpload(e.target.files, 'photo')} className="hidden" />
 
-      {/* Send Modal */}
+      {/* Quick Lines Modal */}
+      <Dialog open={isQuickLinesModalOpen} onOpenChange={setIsQuickLinesModalOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader><DialogTitle>📌 Quick Lines</DialogTitle></DialogHeader>
+          <div className="max-h-[500px] overflow-y-auto space-y-3">
+            {quickLines.length === 0 ? (
+              <p className="text-center text-gray-500 py-8">No quick lines saved yet.</p>
+            ) : (
+              quickLines.map((line) => (
+                <div key={line.id} className="flex justify-between items-center p-4 border rounded-lg">
+                  <div className="flex-1">
+                    <div className="font-medium">{line.description}</div>
+                    <div className="text-sm text-gray-500">{line.qty} × {line.unit} @ ${line.price}</div>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button size="sm" onClick={() => useQuickLine(line)}>Use</Button>
+                    <Button size="sm" variant="destructive" onClick={() => deleteQuickLine(line.id)}>Delete</Button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Send, Templates, Profile, Load modals unchanged */}
       <Dialog open={isSendModalOpen} onOpenChange={setIsSendModalOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>Send {documentType.toUpperCase()}</DialogTitle></DialogHeader>
