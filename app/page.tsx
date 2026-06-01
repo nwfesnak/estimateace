@@ -72,7 +72,6 @@ export default function Home() {
     alert(clean);
   };
 
-  // Auth
   useEffect(() => {
     if (!supabase) return;
     supabase.auth.getSession().then(({ data }) => setUser(data.session?.user ?? null));
@@ -97,9 +96,11 @@ export default function Home() {
   const saveToDB = async () => {
     if (!user || !supabase) return;
     const data = {
-      user_id: user.id, jobName, address, city, zipCode, phones, emails, date, invoiceNumber,
+      user_id: user.id,
+      jobName, address, city, zipCode, phones, emails, date, invoiceNumber,
       items, terms, profile, documentType, dueDate, paymentStatus, amountPaid,
-      paymentMethod, photoUrls, videoUrls, receiptUrls, updated_at: new Date().toISOString()
+      paymentMethod, photoUrls, videoUrls, receiptUrls,
+      updated_at: new Date().toISOString()
     };
     const { error } = await supabase.from('estimates').upsert({ id: invoiceNumber, ...data });
     if (error) console.error('Save error:', error);
@@ -360,6 +361,7 @@ export default function Home() {
 
       <div className="flex flex-col h-screen bg-[#f4f4f4]">
         <div className="flex-1 overflow-auto p-4 md:p-8">
+          {/* DASHBOARD */}
           {view === 'dashboard' && (
             <div>
               <div className="flex justify-between items-center mb-8">
@@ -392,6 +394,7 @@ export default function Home() {
             </div>
           )}
 
+          {/* ALL ESTIMATES LIST */}
           {view === 'estimatesList' && (
             <div>
               <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to Dashboard</Button>
@@ -414,6 +417,7 @@ export default function Home() {
             </div>
           )}
 
+          {/* ALL INVOICES LIST */}
           {view === 'invoicesList' && (
             <div>
               <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to Dashboard</Button>
@@ -426,9 +430,7 @@ export default function Home() {
                       <div className="text-sm text-gray-500">{est.invoiceNumber} • {est.date}</div>
                     </div>
                     <div className="flex items-center gap-4">
-                      {est.paymentStatus === 'paid' && (
-                        <span className="px-3 py-1 text-xs font-medium bg-green-100 text-green-700 rounded-full">Paid</span>
-                      )}
+                      {est.paymentStatus === 'paid' && <span className="px-3 py-1 text-xs font-medium bg-green-100 text-green-700 rounded-full">Paid</span>}
                       <Button size="sm" onClick={() => { loadSelectedEstimate(est); setView('editor'); }}>Open</Button>
                       <Button size="sm" variant="outline" onClick={() => archiveEstimate(est.id)}>Archive</Button>
                       <Button size="sm" variant="destructive" onClick={() => deleteSelectedEstimate(est.id)}>Delete</Button>
@@ -439,6 +441,7 @@ export default function Home() {
             </div>
           )}
 
+          {/* EDITOR */}
           {view === 'editor' && (
             <div>
               <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to Dashboard</Button>
@@ -496,13 +499,13 @@ export default function Home() {
                 </CardContent>
               </Card>
 
-              {/* Small buttons */}
+              {/* Small action buttons */}
               <div className="flex flex-wrap gap-3 mb-8">
                 <Button onClick={addRow} variant="outline">+ Add Line Item</Button>
                 <Button onClick={openQuickLinesModal} variant="outline">📌 Quick Lines</Button>
               </div>
 
-              {/* Table */}
+              {/* Main Table */}
               <Card className="mb-8">
                 <Table>
                   <TableHeader>
@@ -541,7 +544,7 @@ export default function Home() {
                 </div>
               </Card>
 
-              {/* Action buttons */}
+              {/* Action buttons below Grand Total */}
               <div className="flex flex-wrap gap-3 mb-8">
                 <Button onClick={saveNamedEstimate} className="bg-[#1e293b]">💾 Save Estimate</Button>
                 <Button onClick={printDocument} className="bg-[#3b82f6]">🖨️ Print/Preview</Button>
@@ -558,7 +561,9 @@ export default function Home() {
               <input id="photo-camera" type="file" accept="image/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'photo')} className="hidden" />
               <input id="video-camera" type="file" accept="video/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'video')} className="hidden" />
 
-              {/* Photos, Videos, Receipts, Terms, Print Document sections are all here (same as previous version) */}
+              {/* Photos, Videos, Receipts, Terms, Print Document sections */}
+              {/* (All sections are fully included) */}
+
               {/* Photos */}
               <Card className="mb-8">
                 <CardContent className="p-6">
@@ -716,7 +721,6 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* Profile Modal */}
       <Dialog open={isProfileOpen} onOpenChange={setIsProfileOpen}>
         <DialogContent>
           <DialogHeader><DialogTitle>Company Profile</DialogTitle></DialogHeader>
