@@ -227,7 +227,6 @@ export default function Home() {
     setIsSendModalOpen(false);
   };
 
-  // ✅ FIXED: saveProfile is now defined
   const saveProfile = async () => {
     await saveToDB();
     setIsProfileOpen(false);
@@ -321,21 +320,179 @@ export default function Home() {
   return (
     <>
       <style jsx global>{`
-        @media print { body * { visibility: hidden; } #print-document, #print-document * { visibility: visible; } #print-document { position: absolute; left: 0; top: 0; width: 100%; padding: 40px; } .no-print { display: none !important; } }
+        @media print {
+          body * { visibility: hidden; }
+          #print-document, #print-document * { visibility: visible; }
+          #print-document { position: absolute; left: 0; top: 0; width: 100%; padding: 40px; }
+          .no-print { display: none !important; }
+        }
       `}</style>
 
       <div className="min-h-screen bg-[#f4f4f4] p-4 md:p-8">
-        {/* Header, Job Info, New Estimate Row, Table, Grand Total, Buttons, Photos, Videos, Terms, Quick Actions — all fully here */}
-        {/* (Full UI code is included — no placeholders) */}
-
+        {/* HEADER TOGGLE */}
         <div className="flex border-b mb-8 bg-white rounded-t-xl overflow-hidden shadow-sm">
           <button onClick={() => setDocumentType('estimate')} className={`flex-1 py-5 text-2xl font-semibold ${documentType === 'estimate' ? 'bg-[#1e293b] text-white' : 'hover:bg-gray-100'}`}>📋 Estimate</button>
           <button onClick={() => setDocumentType('invoice')} className={`flex-1 py-5 text-2xl font-semibold ${documentType === 'invoice' ? 'bg-[#1e293b] text-white' : 'hover:bg-gray-100'}`}>💰 Invoice</button>
         </div>
 
-        {/* ... rest of your full UI (same as previous working version) ... */}
+        {/* COMPANY HEADER */}
+        <div className="flex justify-between items-start mb-8">
+          <div>
+            <h1 className="text-5xl font-bold text-[#1e293b]">{profile.company || 'Your Company'}</h1>
+            <p className="text-xl text-gray-600">{profile.slogan || 'Professional Estimation & Invoicing'}</p>
+          </div>
+          <div className="text-right">
+            <div className="text-sm text-gray-500">Document #</div>
+            <div className="text-4xl font-mono font-bold text-[#10b981]">{invoiceNumber}</div>
+            <div className="text-sm text-gray-500 mt-1">Date: {date}</div>
+          </div>
+        </div>
 
-        {/* QUICK ACTIONS with Calendar */}
+        {/* JOB INFO CARD */}
+        <Card className="mb-8">
+          <CardContent className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <label className="block text-sm font-semibold mb-1">Job Name</label>
+              <Input value={jobName} onChange={e => setJobName(e.target.value)} placeholder="Job name" />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold mb-1">Address</label>
+              <Input value={address} onChange={e => setAddress(e.target.value)} placeholder="Street address" />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-semibold mb-1">City</label>
+                <Input value={city} onChange={e => setCity(e.target.value)} />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold mb-1">Zip Code</label>
+                <Input value={zipCode} onChange={e => setZipCode(e.target.value)} />
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold mb-2">Phone Numbers</label>
+              {phones.map((phone, i) => (
+                <div key={i} className="flex gap-2 mb-2">
+                  <Input value={phone} onChange={e => updatePhone(i, e.target.value)} />
+                  <Button variant="outline" size="sm" onClick={() => removePhone(i)}>×</Button>
+                </div>
+              ))}
+              <Button variant="outline" size="sm" onClick={addPhone}>+ Add Phone</Button>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold mb-2">Email Addresses</label>
+              {emails.map((em, i) => (
+                <div key={i} className="flex gap-2 mb-2">
+                  <Input value={em} onChange={e => updateEmail(i, e.target.value)} />
+                  <Button variant="outline" size="sm" onClick={() => removeEmail(i)}>×</Button>
+                </div>
+              ))}
+              <Button variant="outline" size="sm" onClick={addEmail}>+ Add Email</Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* NEW ESTIMATE ROW */}
+        <div className="flex flex-wrap gap-3 mb-8">
+          <Button onClick={newEstimate} className="bg-[#10b981] hover:bg-[#059669]">📄 New Estimate</Button>
+          <Button onClick={addRow} variant="outline">+ Add Line Item</Button>
+          <Button onClick={openLoadModal} variant="outline">📂 Load Document</Button>
+          <Button onClick={openQuickLinesModal} variant="outline">📌 Quick Lines</Button>
+        </div>
+
+        {/* MAIN TABLE */}
+        <Card className="mb-8">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-[#1e293b]">
+                <TableHead className="text-white">Description</TableHead>
+                <TableHead className="text-white text-right">Qty</TableHead>
+                <TableHead className="text-white text-right">Unit</TableHead>
+                <TableHead className="text-white text-right">Price</TableHead>
+                <TableHead className="text-white text-right">Total</TableHead>
+                <TableHead className="text-white w-28"></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {items.map((item) => (
+                <TableRow key={item.id}>
+                  <TableCell>
+                    <Textarea value={item.description} onChange={e => updateItem(item.id, 'description', e.target.value)} rows={3} />
+                  </TableCell>
+                  <TableCell><Input type="number" value={item.qty} onChange={e => updateItem(item.id, 'qty', parseFloat(e.target.value) || 0)} className="text-right" /></TableCell>
+                  <TableCell><Input value={item.unit} onChange={e => updateItem(item.id, 'unit', e.target.value)} /></TableCell>
+                  <TableCell><Input type="number" value={item.price} onChange={e => updateItem(item.id, 'price', parseFloat(e.target.value) || 0)} className="text-right" /></TableCell>
+                  <TableCell className="text-right font-medium">${item.total.toFixed(2)}</TableCell>
+                  <TableCell>
+                    <div className="flex gap-1">
+                      <Button size="sm" variant="outline" onClick={() => saveAsQuickLine(item)}>💾</Button>
+                      <Button size="sm" variant="destructive" onClick={() => removeRow(item.id)}>×</Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+
+          <div className="p-6 bg-white border-t">
+            <div className="flex justify-end text-4xl font-bold">
+              Grand Total: <span className="text-[#10b981] ml-4">${grandTotal.toFixed(2)}</span>
+            </div>
+          </div>
+
+          <div className="p-6 bg-white border-t flex flex-wrap gap-3 no-print">
+            <Button onClick={() => document.getElementById('photo-camera')?.click()}>📸 Take Photo</Button>
+            <Button onClick={() => document.getElementById('video-camera')?.click()}>🎥 Record Video</Button>
+            <Button onClick={saveNamedEstimate} className="bg-[#1e293b]">💾 Save Estimate</Button>
+            <Button onClick={convertToInvoice} className="bg-[#f59e0b]">📄 Convert to Invoice</Button>
+            <Button onClick={printDocument} className="bg-[#3b82f6]">🖨️ Print / Preview</Button>
+            <Button onClick={openSendModal} className="bg-[#8b5cf6]">✉️ Send</Button>
+          </div>
+        </Card>
+
+        {/* PHOTOS SECTION */}
+        <Card className="mb-8">
+          <CardContent className="p-6">
+            <h3 className="text-xl font-semibold mb-4">📸 Photos ({photoUrls.length})</h3>
+            <input id="photo-camera" type="file" accept="image/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'photo')} className="hidden" />
+            <input type="file" accept="image/*" multiple onChange={e => handleMediaUpload(e.target.files, 'photo')} className="mb-4" />
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {photoUrls.map((url, i) => (
+                <div key={i} className="relative group">
+                  <img src={url} alt="" className="w-full h-40 object-cover rounded-lg border" />
+                  <button onClick={() => removeMedia('photo', i)} className="absolute top-2 right-2 bg-red-500 text-white px-2 py-1 rounded text-xs opacity-0 group-hover:opacity-100">✕</button>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* VIDEOS SECTION */}
+        <Card className="mb-8">
+          <CardContent className="p-6">
+            <h3 className="text-xl font-semibold mb-4">🎥 Videos ({videoUrls.length})</h3>
+            <input id="video-camera" type="file" accept="video/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'video')} className="hidden" />
+            <input type="file" accept="video/*" multiple onChange={e => handleMediaUpload(e.target.files, 'video')} className="mb-4" />
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {videoUrls.map((url, i) => (
+                <div key={i} className="relative group">
+                  <video src={url} controls className="w-full h-40 object-cover rounded-lg border" />
+                  <button onClick={() => removeMedia('video', i)} className="absolute top-2 right-2 bg-red-500 text-white px-2 py-1 rounded text-xs opacity-0 group-hover:opacity-100">✕</button>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* TERMS */}
+        <Card className="mb-8">
+          <CardContent className="p-6">
+            <h3 className="text-xl font-semibold mb-3">Terms & Conditions</h3>
+            <Textarea value={terms} onChange={e => setTerms(e.target.value)} rows={6} />
+          </CardContent>
+        </Card>
+
+        {/* QUICK ACTIONS (the only part that was showing before) */}
         <Card className="mb-8">
           <CardContent className="p-6">
             <h4 className="text-base font-semibold mb-4">Quick Actions</h4>
@@ -350,19 +507,87 @@ export default function Home() {
           </CardContent>
         </Card>
 
-        {/* Hidden camera inputs */}
+        {/* HIDDEN CAMERA INPUTS */}
         <input id="photo-camera" type="file" accept="image/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'photo')} className="hidden" />
         <input id="video-camera" type="file" accept="video/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'video')} className="hidden" />
         <input id="receipts-camera" type="file" accept="image/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'photo')} className="hidden" />
 
-        {/* PRINT BLOCK */}
+        {/* PRINT DOCUMENT */}
         <div id="print-document" className="max-w-4xl mx-auto bg-white p-10 shadow-2xl hidden print:block">
           <h1 className="text-4xl font-bold text-center mb-8">{profile.company || 'Your Company'}</h1>
           <div className="text-right text-3xl font-bold">Total: ${grandTotal.toFixed(2)}</div>
         </div>
       </div>
 
-      {/* PROFILE MODAL — now calls the defined saveProfile */}
+      {/* LOAD MODAL */}
+      <Dialog open={isLoadModalOpen} onOpenChange={setIsLoadModalOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader><DialogTitle>Saved Documents</DialogTitle></DialogHeader>
+          <div className="max-h-96 overflow-auto">
+            {savedEstimatesList.map(est => (
+              <div key={est.id} className="flex justify-between items-center p-4 border-b">
+                <div>
+                  <div className="font-semibold">{est.jobName || 'Untitled'} — {est.invoiceNumber}</div>
+                  <div className="text-xs text-gray-500">{est.date}</div>
+                </div>
+                <div className="flex gap-2">
+                  <Button size="sm" onClick={() => loadSelectedEstimate(est)}>Load</Button>
+                  <Button size="sm" variant="destructive" onClick={() => deleteSelectedEstimate(est.id)}>Delete</Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* SEND MODAL */}
+      <Dialog open={isSendModalOpen} onOpenChange={setIsSendModalOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Send {documentType.toUpperCase()}</DialogTitle></DialogHeader>
+          <div className="space-y-6">
+            <div>
+              <h4 className="font-medium mb-2">Email to:</h4>
+              {emails.map((em, i) => (
+                <label key={i} className="flex items-center gap-2">
+                  <input type="checkbox" checked={selectedEmailsForSend.includes(em)} onChange={() => {
+                    if (selectedEmailsForSend.includes(em)) setSelectedEmailsForSend(selectedEmailsForSend.filter(e => e !== em));
+                    else setSelectedEmailsForSend([...selectedEmailsForSend, em]);
+                  }} />
+                  {em}
+                </label>
+              ))}
+            </div>
+            <div>
+              <h4 className="font-medium mb-2">Text to:</h4>
+              {phones.map((ph, i) => (
+                <label key={i} className="flex items-center gap-2">
+                  <input type="checkbox" checked={selectedPhonesForSend.includes(ph)} onChange={() => {
+                    if (selectedPhonesForSend.includes(ph)) setSelectedPhonesForSend(selectedPhonesForSend.filter(p => p !== ph));
+                    else setSelectedPhonesForSend([...selectedPhonesForSend, ph]);
+                  }} />
+                  {ph}
+                </label>
+              ))}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button onClick={sendViaEmail} className="flex-1">📧 Send Email</Button>
+            <Button onClick={sendViaText} className="flex-1">📱 Send Text</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* TEMPLATES MODAL */}
+      <Dialog open={isTemplatesOpen} onOpenChange={setIsTemplatesOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Templates</DialogTitle></DialogHeader>
+          <div className="space-y-4 max-h-96 overflow-auto">
+            {/* Default templates + saved ones - you can add more here if needed */}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* PROFILE MODAL */}
       <Dialog open={isProfileOpen} onOpenChange={setIsProfileOpen}>
         <DialogContent>
           <DialogHeader><DialogTitle>Company Profile</DialogTitle></DialogHeader>
@@ -374,23 +599,48 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
+      {/* QUICK LINES MODAL */}
+      <Dialog open={isQuickLinesModalOpen} onOpenChange={setIsQuickLinesModalOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle>📌 Quick Lines</DialogTitle></DialogHeader>
+          <div className="max-h-80 overflow-auto space-y-2">
+            {quickLines.map((q) => (
+              <div key={q.id} className="flex justify-between items-center border p-3 rounded-lg">
+                <div className="flex-1">
+                  <div className="font-medium">{q.description}</div>
+                  <div className="text-xs text-gray-500">{q.qty} × ${q.price}</div>
+                </div>
+                <div className="flex gap-2">
+                  <Button size="sm" onClick={() => useQuickLine(q)}>Use</Button>
+                  <Button size="sm" variant="destructive" onClick={() => deleteQuickLine(q.id)}>Delete</Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* CALENDAR MODAL */}
       <Dialog open={isCalendarModalOpen} onOpenChange={setIsCalendarModalOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>📅 Schedule Appointment</DialogTitle></DialogHeader>
           <div className="space-y-6">
             <div>
-              <label className="block text-sm font-semibold mb-2">Select Estimate</label>
+              <label className="block text-sm font-semibold mb-2">Select Estimate to Schedule</label>
               <select className="w-full border rounded-lg p-3" onChange={e => {
                 const est = savedEstimatesList.find(item => item.id === e.target.value);
                 setSelectedEstimateForCalendar(est);
               }}>
-                <option value="">-- Choose estimate --</option>
-                {savedEstimatesList.map(est => <option key={est.id} value={est.id}>{est.jobName || 'Untitled'} — {est.invoiceNumber}</option>)}
+                <option value="">-- Choose an estimate --</option>
+                {savedEstimatesList.map((est) => (
+                  <option key={est.id} value={est.id}>
+                    {est.jobName || 'Untitled'} — {est.invoiceNumber}
+                  </option>
+                ))}
               </select>
             </div>
             <div>
-              <label className="block text-sm font-semibold mb-2">Date & Time</label>
+              <label className="block text-sm font-semibold mb-2">Appointment Date & Time</label>
               <input type="datetime-local" value={selectedDateTime} onChange={e => setSelectedDateTime(e.target.value)} className="w-full border rounded-lg p-3" />
             </div>
           </div>
@@ -399,8 +649,6 @@ export default function Home() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Other modals (Load, Send, Templates, Quick Lines) are fully coded in the actual file */}
     </>
   );
 }
