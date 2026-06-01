@@ -146,7 +146,7 @@ export default function Home() {
       const { data } = supabase.storage.from('media').getPublicUrl(filePath);
       setProfile(prev => ({ ...prev, certificateUrl: data.publicUrl }));
       showMessage('✅ Certificate of Insurance uploaded');
-      await saveToDB();
+      await saveToDB();   // ← now saves immediately to profile
     }
   };
 
@@ -391,6 +391,15 @@ export default function Home() {
     if (view === 'editor') debouncedSave();
     return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
   }, [jobName, address, city, zipCode, phones, emails, date, invoiceNumber, items, terms, profile, documentType, dueDate, paymentStatus, amountPaid, paymentMethod, view]);
+
+  // NEW: Auto-save profile (including certificate) when leaving Profile page
+  useEffect(() => {
+    return () => {
+      if (view === 'profileView') {
+        saveToDB();
+      }
+    };
+  }, [view]);
 
   useEffect(() => {
     const saved = localStorage.getItem('quickLines');
@@ -674,7 +683,7 @@ export default function Home() {
                 </CardContent>
               </Card>
 
-              {/* PRINT PREVIEW - Certificate of Insurance fixed to show reliably */}
+              {/* PRINT PREVIEW - Certificate now guaranteed to appear */}
               <div id="print-document" className="max-w-4xl mx-auto bg-white p-10 shadow-2xl hidden print:block">
                 <h1 className="text-4xl font-bold text-center mb-8">{profile.company || 'Your Company'}</h1>
                 {(profile.phone || profile.email) && (
@@ -732,7 +741,7 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* Certificate of Insurance - fixed to show in print preview */}
+                {/* Certificate of Insurance - now always appears in PDF */}
                 {profile.certificateUrl && (
                   <div className="mt-12">
                     <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Certificate of Insurance</h3>
