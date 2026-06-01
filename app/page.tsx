@@ -7,7 +7,6 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { Switch } from '@/components/ui/switch';
 import { createClient } from '@supabase/supabase-js';
 
 export default function Home() {
@@ -45,7 +44,7 @@ export default function Home() {
   const [amountPaid, setAmountPaid] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState('');
 
-  // Profile (with new fields)
+  // Profile
   const [profile, setProfile] = useState({ 
     name: '', company: '', address: '', phone: '', email: '', slogan: '',
     disclosure: '',
@@ -377,7 +376,7 @@ export default function Home() {
 
       <div className="flex flex-col h-screen bg-[#f4f4f4]">
         <div className="flex-1 overflow-auto p-4 md:p-8">
-          {/* DASHBOARD */}
+          {/* DASHBOARD, ESTIMATES LIST, INVOICES LIST, EDITOR remain unchanged */}
           {view === 'dashboard' && (
             <div>
               <div className="flex justify-between items-center mb-8">
@@ -410,7 +409,6 @@ export default function Home() {
             </div>
           )}
 
-          {/* ESTIMATES LIST */}
           {view === 'estimatesList' && (
             <div>
               <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to Dashboard</Button>
@@ -433,7 +431,6 @@ export default function Home() {
             </div>
           )}
 
-          {/* INVOICES LIST */}
           {view === 'invoicesList' && (
             <div>
               <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to Dashboard</Button>
@@ -457,7 +454,6 @@ export default function Home() {
             </div>
           )}
 
-          {/* EDITOR */}
           {view === 'editor' && (
             <div>
               <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to Dashboard</Button>
@@ -571,7 +567,6 @@ export default function Home() {
               <input id="photo-camera" type="file" accept="image/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'photo')} className="hidden" />
               <input id="video-camera" type="file" accept="video/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'video')} className="hidden" />
 
-              {/* Photos */}
               <Card className="mb-8">
                 <CardContent className="p-6">
                   <h3 className="text-xl font-semibold mb-4">📸 Photos ({photoUrls.length})</h3>
@@ -586,7 +581,6 @@ export default function Home() {
                 </CardContent>
               </Card>
 
-              {/* Videos */}
               <Card className="mb-8">
                 <CardContent className="p-6">
                   <h3 className="text-xl font-semibold mb-4">🎥 Videos ({videoUrls.length})</h3>
@@ -601,7 +595,6 @@ export default function Home() {
                 </CardContent>
               </Card>
 
-              {/* Receipts */}
               <Card className="mb-8">
                 <CardContent className="p-6">
                   <h3 className="text-xl font-semibold mb-4">📄 Receipts ({receiptUrls.length})</h3>
@@ -620,7 +613,6 @@ export default function Home() {
                 </CardContent>
               </Card>
 
-              {/* Terms */}
               <Card className="mb-8">
                 <CardContent className="p-6">
                   <h3 className="text-xl font-semibold mb-3">Terms & Conditions</h3>
@@ -628,7 +620,6 @@ export default function Home() {
                 </CardContent>
               </Card>
 
-              {/* Print Document */}
               <div id="print-document" className="max-w-4xl mx-auto bg-white p-10 shadow-2xl hidden print:block">
                 <h1 className="text-4xl font-bold text-center mb-8">{profile.company || 'Your Company'}</h1>
                 {(profile.phone || profile.email) && (
@@ -704,15 +695,21 @@ export default function Home() {
                     </div>
                   </div>
 
+                  {/* Native Toggle for Quick Save */}
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="font-semibold">Quick Save (Auto-save)</p>
                       <p className="text-sm text-gray-500">Automatically save changes while editing</p>
                     </div>
-                    <Switch 
-                      checked={profile.autoSaveEnabled} 
-                      onCheckedChange={(checked) => setProfile(prev => ({ ...prev, autoSaveEnabled: checked }))}
-                    />
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input 
+                        type="checkbox" 
+                        checked={profile.autoSaveEnabled} 
+                        onChange={(e) => setProfile(prev => ({ ...prev, autoSaveEnabled: e.target.checked }))}
+                        className="sr-only peer"
+                      />
+                      <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]"></div>
+                    </label>
                   </div>
 
                   <div>
