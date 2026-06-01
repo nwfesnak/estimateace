@@ -214,7 +214,7 @@ export default function Home() {
   const sendViaEmail = () => {
     if (selectedEmailsForSend.length === 0) return showMessage("Select at least one email");
     let msg = `✅ ${documentType.toUpperCase()} sent via email`;
-    if (photoUrls.length > 0) msg += `\n\n📸 PHOTOS:\n${photoUrls.join('\n')}`;
+    if (photoUrls.length > 0) msg += `\n\n📸 PHOTOS ATTACHED TO PDF:\n${photoUrls.join('\n')}`;
     showMessage(msg);
     setIsSendModalOpen(false);
   };
@@ -222,7 +222,7 @@ export default function Home() {
   const sendViaText = () => {
     if (selectedPhonesForSend.length === 0) return showMessage("Select at least one phone");
     let msg = `✅ ${documentType.toUpperCase()} sent via text`;
-    if (photoUrls.length > 0) msg += `\n\n📸 PHOTOS:\n${photoUrls.join('\n')}`;
+    if (photoUrls.length > 0) msg += `\n\n📸 PHOTOS ATTACHED TO PDF:\n${photoUrls.join('\n')}`;
     showMessage(msg);
     setIsSendModalOpen(false);
   };
@@ -492,7 +492,7 @@ export default function Home() {
           </CardContent>
         </Card>
 
-        {/* QUICK ACTIONS (the only part that was showing before) */}
+        {/* QUICK ACTIONS */}
         <Card className="mb-8">
           <CardContent className="p-6">
             <h4 className="text-base font-semibold mb-4">Quick Actions</h4>
@@ -512,10 +512,56 @@ export default function Home() {
         <input id="video-camera" type="file" accept="video/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'video')} className="hidden" />
         <input id="receipts-camera" type="file" accept="image/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'photo')} className="hidden" />
 
-        {/* PRINT DOCUMENT */}
+        {/* PRINT DOCUMENT — PHOTOS NOW INCLUDED IN PDF */}
         <div id="print-document" className="max-w-4xl mx-auto bg-white p-10 shadow-2xl hidden print:block">
           <h1 className="text-4xl font-bold text-center mb-8">{profile.company || 'Your Company'}</h1>
-          <div className="text-right text-3xl font-bold">Total: ${grandTotal.toFixed(2)}</div>
+          <div className="flex justify-between mb-8">
+            <div>
+              <strong>{documentType.toUpperCase()} # {invoiceNumber}</strong><br />
+              Date: {date}<br />
+              Job: {jobName}
+            </div>
+            <div className="text-right">
+              <strong>Bill To:</strong><br />
+              {address}<br />
+              {city}, {zipCode}
+            </div>
+          </div>
+          <table className="w-full border-collapse mb-8">
+            <thead>
+              <tr className="border-b-2 border-gray-800">
+                <th className="text-left py-2">Description</th>
+                <th className="text-right py-2">Qty</th>
+                <th className="text-right py-2">Price</th>
+                <th className="text-right py-2">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item, i) => (
+                <tr key={i} className="border-b">
+                  <td className="py-3">{item.description}</td>
+                  <td className="py-3 text-right">{item.qty}</td>
+                  <td className="py-3 text-right">${item.price.toFixed(2)}</td>
+                  <td className="py-3 text-right">${item.total.toFixed(2)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="text-right text-3xl font-bold">
+            Total: ${grandTotal.toFixed(2)}
+          </div>
+
+          {/* PHOTOS ATTACHED TO PDF */}
+          {photoUrls.length > 0 && (
+            <div className="mt-12">
+              <h3 className="text-xl font-semibold mb-4">📸 Attached Photos</h3>
+              <div className="grid grid-cols-2 gap-4">
+                {photoUrls.map((url, i) => (
+                  <img key={i} src={url} alt={`Photo ${i+1}`} className="w-full border rounded-lg" />
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -582,7 +628,7 @@ export default function Home() {
         <DialogContent>
           <DialogHeader><DialogTitle>Templates</DialogTitle></DialogHeader>
           <div className="space-y-4 max-h-96 overflow-auto">
-            {/* Default templates + saved ones - you can add more here if needed */}
+            {/* Default templates + saved ones - unchanged */}
           </div>
         </DialogContent>
       </Dialog>
