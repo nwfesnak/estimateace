@@ -348,7 +348,6 @@ export default function Home() {
         {/* MAIN CONTENT */}
         <div className="flex-1 overflow-auto">
           {view === 'dashboard' ? (
-            /* DASHBOARD */
             <div className="p-8">
               <div className="flex justify-between items-center mb-8">
                 <div>
@@ -398,7 +397,6 @@ export default function Home() {
               </Card>
             </div>
           ) : (
-            /* FULL EDITOR */
             <div className="p-4 md:p-8">
               <Button variant="outline" onClick={goToDashboard} className="mb-6">
                 ← Back to Dashboard
@@ -510,7 +508,7 @@ export default function Home() {
                 </div>
               </Card>
 
-              {/* Photos, Videos, Terms, Print Document sections (same as before) */}
+              {/* PHOTOS */}
               <Card className="mb-8">
                 <CardContent className="p-6">
                   <h3 className="text-xl font-semibold mb-4">📸 Photos ({photoUrls.length})</h3>
@@ -527,6 +525,7 @@ export default function Home() {
                 </CardContent>
               </Card>
 
+              {/* VIDEOS */}
               <Card className="mb-8">
                 <CardContent className="p-6">
                   <h3 className="text-xl font-semibold mb-4">🎥 Videos ({videoUrls.length})</h3>
@@ -543,6 +542,7 @@ export default function Home() {
                 </CardContent>
               </Card>
 
+              {/* TERMS */}
               <Card className="mb-8">
                 <CardContent className="p-6">
                   <h3 className="text-xl font-semibold mb-3">Terms & Conditions</h3>
@@ -593,6 +593,7 @@ export default function Home() {
                   </tbody>
                 </table>
                 <div className="text-right text-3xl font-bold">Total: ${grandTotal.toFixed(2)}</div>
+
                 {photoUrls.length > 0 && (
                   <div className="mt-12">
                     <h3 className="text-xl font-semibold mb-4">📸 Attached Photos</h3>
@@ -608,33 +609,67 @@ export default function Home() {
           )}
         </div>
 
-        {/* HORIZONTAL BOTTOM NAV - ICONS ONLY */}
-        <div className="bg-white border-t shadow-inner flex items-center justify-around py-3 px-2">
-          <button onClick={goToDashboard} className={`flex flex-col items-center flex-1 ${view === 'dashboard' ? 'text-[#10b981]' : 'text-gray-500'}`}>
-            <span className="text-3xl">📊</span>
+        {/* BOTTOM NAVIGATION WITH ICONS + LABELS */}
+        <div className="bg-white border-t shadow-inner flex items-center justify-around py-2 px-1 text-xs">
+          <button 
+            onClick={goToDashboard} 
+            className={`flex flex-col items-center flex-1 py-1 ${view === 'dashboard' ? 'text-[#10b981]' : 'text-gray-500'}`}
+          >
+            <span className="text-3xl mb-0.5">📊</span>
+            <span>Dashboard</span>
           </button>
-          <button onClick={() => openNewDocument('estimate')} className="flex flex-col items-center flex-1 text-gray-500">
-            <span className="text-3xl">📋</span>
+
+          <button 
+            onClick={() => openNewDocument('estimate')} 
+            className="flex flex-col items-center flex-1 py-1 text-gray-500"
+          >
+            <span className="text-3xl mb-0.5">📋</span>
+            <span>Estimate</span>
           </button>
-          <button onClick={() => openNewDocument('invoice')} className="flex flex-col items-center flex-1 text-gray-500">
-            <span className="text-3xl">💰</span>
+
+          <button 
+            onClick={() => openNewDocument('invoice')} 
+            className="flex flex-col items-center flex-1 py-1 text-gray-500"
+          >
+            <span className="text-3xl mb-0.5">💰</span>
+            <span>Invoice</span>
           </button>
-          <button onClick={() => { refreshSavedList(); setIsLoadModalOpen(true); }} className="flex flex-col items-center flex-1 text-gray-500">
-            <span className="text-3xl">📂</span>
+
+          <button 
+            onClick={() => { refreshSavedList(); setIsLoadModalOpen(true); }} 
+            className="flex flex-col items-center flex-1 py-1 text-gray-500"
+          >
+            <span className="text-3xl mb-0.5">📂</span>
+            <span>Docs</span>
           </button>
-          <button onClick={() => setIsTemplatesOpen(true)} className="flex flex-col items-center flex-1 text-gray-500">
-            <span className="text-3xl">📌</span>
+
+          <button 
+            onClick={() => setIsTemplatesOpen(true)} 
+            className="flex flex-col items-center flex-1 py-1 text-gray-500"
+          >
+            <span className="text-3xl mb-0.5">📌</span>
+            <span>Templates</span>
           </button>
-          <button onClick={openCalendarModal} className="flex flex-col items-center flex-1 text-gray-500">
-            <span className="text-3xl">📅</span>
+
+          <button 
+            onClick={openCalendarModal} 
+            className="flex flex-col items-center flex-1 py-1 text-gray-500"
+          >
+            <span className="text-3xl mb-0.5">📅</span>
+            <span>Calendar</span>
           </button>
-          <button onClick={() => setIsProfileOpen(true)} className="flex flex-col items-center flex-1 text-gray-500">
-            <span className="text-3xl">👤</span>
+
+          <button 
+            onClick={() => setIsProfileOpen(true)} 
+            className="flex flex-col items-center flex-1 py-1 text-gray-500"
+          >
+            <span className="text-3xl mb-0.5">👤</span>
+            <span>Profile</span>
           </button>
         </div>
       </div>
 
-      {/* ALL MODALS (unchanged) */}
+      {/* MODALS */}
       <Dialog open={isLoadModalOpen} onOpenChange={setIsLoadModalOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader><DialogTitle>Saved Documents</DialogTitle></DialogHeader>
