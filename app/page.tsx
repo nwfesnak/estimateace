@@ -44,7 +44,7 @@ export default function Home() {
   const [amountPaid, setAmountPaid] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState('');
 
-  // Profile + Teammates
+  // Profile
   const [profile, setProfile] = useState({ 
     name: '', company: '', address: '', phone: '', email: '', slogan: '',
     disclosure: '',
@@ -348,13 +348,6 @@ export default function Home() {
     if (saved) setQuickLines(JSON.parse(saved));
   }, []);
 
-  // Auto-refresh lists
-  useEffect(() => {
-    if (view === 'estimatesList' || view === 'invoicesList') {
-      refreshSavedList();
-    }
-  }, [view]);
-
   if (!user) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#f4f4f4]">
@@ -627,6 +620,23 @@ export default function Home() {
                 </CardContent>
               </Card>
 
+              {/* Certificate of Insurance - now at the bottom of every estimate and invoice */}
+              {profile.certificateUrl && (
+                <Card className="mb-8">
+                  <CardContent className="p-6">
+                    <h3 className="text-xl font-semibold mb-4">Certificate of Insurance</h3>
+                    <a href={profile.certificateUrl} target="_blank" rel="noopener noreferrer">
+                      <img 
+                        src={profile.certificateUrl} 
+                        alt="Certificate of Insurance" 
+                        className="max-h-96 mx-auto border rounded-lg shadow"
+                      />
+                    </a>
+                    <p className="text-xs text-gray-500 mt-4 text-center">Click image to open full size</p>
+                  </CardContent>
+                </Card>
+              )}
+
               <div id="print-document" className="max-w-4xl mx-auto bg-white p-10 shadow-2xl hidden print:block">
                 <h1 className="text-4xl font-bold text-center mb-8">{profile.company || 'Your Company'}</h1>
                 {(profile.phone || profile.email) && (
@@ -667,6 +677,18 @@ export default function Home() {
                   </tbody>
                 </table>
                 <div className="text-right text-3xl font-bold">Total: ${grandTotal.toFixed(2)}</div>
+
+                {/* Certificate in print view - at the bottom */}
+                {profile.certificateUrl && (
+                  <div className="mt-12">
+                    <h3 className="text-xl font-semibold mb-4">Certificate of Insurance</h3>
+                    <img 
+                      src={profile.certificateUrl} 
+                      alt="Certificate of Insurance" 
+                      className="max-h-96 mx-auto border rounded-lg shadow"
+                    />
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -737,22 +759,21 @@ export default function Home() {
                     />
                   </div>
 
-                  {/* Certificate of Insurance - now at the very bottom of the page */}
                   {profile.certificateUrl && (
-                    <div className="mt-12 border-2 border-dashed border-gray-300 rounded-2xl p-8 text-center">
-                      <h3 className="font-semibold text-lg mb-4">Certificate of Insurance</h3>
-                      <a href={profile.certificateUrl} target="_blank" rel="noopener noreferrer" className="block">
+                    <div className="mt-8 border rounded-lg p-6">
+                      <h3 className="font-semibold mb-4">Certificate of Insurance</h3>
+                      <a href={profile.certificateUrl} target="_blank" rel="noopener noreferrer">
                         <img 
                           src={profile.certificateUrl} 
                           alt="Certificate of Insurance" 
-                          className="max-h-96 mx-auto rounded-lg shadow-lg border"
+                          className="max-h-96 mx-auto border rounded-lg shadow"
                         />
                       </a>
-                      <p className="text-xs text-gray-500 mt-4">Click image to open full size</p>
+                      <p className="text-xs text-gray-500 mt-2 text-center">Click image to open full size</p>
                     </div>
                   )}
 
-                  <Button onClick={saveProfile} className="w-full bg-[#10b981] mt-8">Save Profile</Button>
+                  <Button onClick={saveProfile} className="w-full bg-[#10b981]">Save Profile</Button>
                 </CardContent>
               </Card>
             </div>
