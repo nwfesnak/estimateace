@@ -256,18 +256,13 @@ export default function Home() {
     setIsSendModalOpen(true);
   };
 
-  // ──────────────────────────────────────────────────────────────
-  // ONLY CHANGED: sendViaEmail & sendViaText (signature now populates in PDF)
-  // ──────────────────────────────────────────────────────────────
   const sendViaEmail = () => {
     if (selectedEmailsForSend.length === 0) return showMessage("Select at least one email");
-    // Simulate sent PDF with signature
     let msg = `✅ ${documentType.toUpperCase()} sent via email (includes photos + signature)`;
     if (photoUrls.length > 0) msg += `\n\n📸 PHOTOS ATTACHED TO PDF:\n${photoUrls.join('\n')}`;
     if (signatureDataUrl) msg += `\n\n✍️ Signature attached to PDF`;
     showMessage(msg);
 
-    // Recipient clicks "Approved" button
     if (confirm("Recipient viewed the PDF.\nClick OK to Approve Signature")) {
       showMessage("✅ Recipient clicked APPROVED\nNotification sent to you: Signature approved!");
     }
@@ -281,7 +276,6 @@ export default function Home() {
     if (signatureDataUrl) msg += `\n\n✍️ Signature attached to PDF`;
     showMessage(msg);
 
-    // Recipient clicks "Approved" button
     if (confirm("Recipient viewed the PDF.\nClick OK to Approve Signature")) {
       showMessage("✅ Recipient clicked APPROVED\nNotification sent to you: Signature approved!");
     }
@@ -795,7 +789,7 @@ export default function Home() {
                 </CardContent>
               </Card>
 
-              {/* PRINT PREVIEW (sent PDF) - signature now clearly labeled "Signature" */}
+              {/* PRINT PREVIEW - Disclosure now appears automatically like Certificate */}
               <div id="print-document" className="max-w-4xl mx-auto bg-white p-10 shadow-2xl hidden print:block">
                 <h1 className="text-4xl font-bold text-center mb-8">{profile.company || 'Your Company'}</h1>
                 {(profile.phone || profile.email) && (
@@ -855,7 +849,16 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* Signature now clearly labeled "Signature" and always shows in sent PDF */}
+                {/* Disclosure now populates automatically like Certificate */}
+                {profile.disclosure && (
+                  <div className="mt-12">
+                    <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Disclosure / Notes</h3>
+                    <div className="text-gray-700 leading-relaxed whitespace-pre-wrap border rounded-xl p-6 bg-gray-50">
+                      {profile.disclosure}
+                    </div>
+                  </div>
+                )}
+
                 {signatureDataUrl && (
                   <div className="mt-12">
                     <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Signature</h3>
