@@ -37,7 +37,8 @@ export default function Home() {
   const [terms, setTerms] = useState('');
   const [photoUrls, setPhotoUrls] = useState<string[]>([]);
   const [videoUrls, setVideoUrls] = useState<string[]>([]);
-  const [receiptUrls, setReceiptUrls] = useState<string[]>([]);   // ← New: Receipts
+  const [receiptUrls, setReceiptUrls] = useState<string[]>([]);   // ← New
+
   const [dueDate, setDueDate] = useState('');
   const [paymentStatus, setPaymentStatus] = useState<'pending' | 'paid'>('pending');
   const [amountPaid, setAmountPaid] = useState(0);
@@ -96,9 +97,11 @@ export default function Home() {
   const saveToDB = async () => {
     if (!user || !supabase) return;
     const data = {
-      user_id: user.id, jobName, address, city, zipCode, phones, emails, date, invoiceNumber,
+      user_id: user.id,
+      jobName, address, city, zipCode, phones, emails, date, invoiceNumber,
       items, terms, profile, documentType, dueDate, paymentStatus, amountPaid,
-      paymentMethod, photoUrls, videoUrls, receiptUrls, updated_at: new Date().toISOString()
+      paymentMethod, photoUrls, videoUrls, receiptUrls,   // ← included
+      updated_at: new Date().toISOString()
     };
     const { error } = await supabase.from('estimates').upsert({ id: invoiceNumber, ...data });
     if (error) console.error('Save error:', error);
@@ -155,12 +158,13 @@ export default function Home() {
     setPaymentMethod(est.paymentMethod || '');
     setPhotoUrls(est.photoUrls || []);
     setVideoUrls(est.videoUrls || []);
-    setReceiptUrls(est.receiptUrls || []);        // ← New
+    setReceiptUrls(est.receiptUrls || []);   // ← New
   };
 
   const newEstimate = () => {
     setJobName(''); setAddress(''); setCity(''); setZipCode('');
-    setPhones(['']); setEmails(['']); setTerms(''); setPhotoUrls([]); setVideoUrls([]); setReceiptUrls([]);
+    setPhones(['']); setEmails(['']); setTerms(''); 
+    setPhotoUrls([]); setVideoUrls([]); setReceiptUrls([]);   // ← New
     setItems([{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
     const today = new Date().toISOString().split('T')[0];
     setDate(today);
