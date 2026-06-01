@@ -44,12 +44,13 @@ export default function Home() {
   const [amountPaid, setAmountPaid] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState('');
 
-  // Profile
+  // Profile + Teammates
   const [profile, setProfile] = useState({ 
     name: '', company: '', address: '', phone: '', email: '', slogan: '',
     disclosure: '',
     certificateUrl: '',
-    autoSaveEnabled: true
+    autoSaveEnabled: true,
+    teammates: [] as { email: string; role: 'full' | 'limited' }[]
   });
 
   const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -413,7 +414,7 @@ export default function Home() {
               <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to Dashboard</Button>
               <h2 className="text-3xl font-semibold mb-6">All Estimates</h2>
               <div className="space-y-4">
-                {savedEstimatesList.filter(est => est.documentType === 'estimate').map((est) => (
+                {savedEstimatesList.filter(est => est.documentType === 'estimate' || est.invoiceNumber?.startsWith('EST')).map((est) => (
                   <div key={est.id} className="flex justify-between items-center border p-4 rounded-lg bg-white">
                     <div>
                       <div className="font-medium">{est.jobName || 'Untitled'}</div>
@@ -435,8 +436,7 @@ export default function Home() {
               <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to Dashboard</Button>
               <h2 className="text-3xl font-semibold mb-6">All Invoices</h2>
               <div className="space-y-4">
-                {/* ONLY THIS LINE WAS CHANGED */}
-                {savedEstimatesList.filter(est => est.invoiceNumber?.startsWith('INV')).map((est) => (
+                {savedEstimatesList.filter(est => est.documentType === 'invoice' || est.invoiceNumber?.startsWith('INV')).map((est) => (
                   <div key={est.id} className="flex justify-between items-center border p-4 rounded-lg bg-white">
                     <div className="flex-1">
                       <div className="font-medium">{est.jobName || 'Untitled'}</div>
@@ -521,6 +521,7 @@ export default function Home() {
                       <TableHead className="text-white">Description</TableHead>
                       <TableHead className="text-white text-right">Qty</TableHead>
                       <TableHead className="text-white text-right">Unit</TableHead>
+                      {/* Price column hidden for limited access (demo - owner sees full) */}
                       <TableHead className="text-white text-right">Price</TableHead>
                       <TableHead className="text-white text-right">Total</TableHead>
                       <TableHead className="text-white w-28"></TableHead>
@@ -664,6 +665,7 @@ export default function Home() {
             </div>
           )}
 
+          {/* PROFILE FULL PAGE */}
           {view === 'profileView' && (
             <div>
               <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to Dashboard</Button>
@@ -743,6 +745,66 @@ export default function Home() {
                       <p className="text-xs text-gray-500 mt-2 text-center">Click image to view full size</p>
                     </div>
                   )}
+
+                  {/* === TEAMMATES SECTION === */}
+                  <div className="border-t pt-8">
+                    <h3 className="font-semibold mb-4">Teammates</h3>
+                    <div className="flex gap-2 mb-6">
+                      <Input 
+                        placeholder="teammate@email.com" 
+                        id="teammate-email"
+                        className="flex-1"
+                      />
+                      <Button 
+                        onClick={() => {
+                          const input = document.getElementById('teammate-email') as HTMLInputElement;
+                          if (!input.value) return;
+                          const newTeammate = { email: input.value.trim(), role: 'limited' as 'full' | 'limited' };
+                          setProfile(prev => ({ ...prev, teammates: [...(prev.teammates || []), newTeammate] }));
+                          input.value = '';
+                        }}
+                      >
+                        Add Teammate
+                      </Button>
+                    </div>
+
+                    <div className="space-y-3">
+                      {profile.teammates && profile.teammates.map((tm, index) => (
+                        <div key={index} className="flex items-center justify-between border p-4 rounded-lg">
+                          <div className="font-medium">{tm.email}</div>
+                          <div className="flex items-center gap-6">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm">Full</span>
+                              <label className="relative inline-flex items-center cursor-pointer">
+                                <input 
+                                  type="checkbox" 
+                                  checked={tm.role === 'full'}
+                                  onChange={() => {
+                                    const updated = [...profile.teammates];
+                                    updated[index].role = updated[index].role === 'full' ? 'limited' : 'full';
+                                    setProfile(prev => ({ ...prev, teammates: updated }));
+                                  }}
+                                  className="sr-only peer"
+                                />
+                                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]"></div>
+                              </label>
+                              <span className="text-sm">Limited</span>
+                            </div>
+                            <Button 
+                              variant="destructive" 
+                              size="sm"
+                              onClick={() => {
+                                const updated = profile.teammates.filter((_, i) => i !== index);
+                                setProfile(prev => ({ ...prev, teammates: updated }));
+                              }}
+                            >
+                              Remove
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
 
                   <Button onClick={saveProfile} className="w-full bg-[#10b981]">Save Profile</Button>
                 </CardContent>
