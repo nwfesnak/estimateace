@@ -376,7 +376,6 @@ export default function Home() {
 
       <div className="flex flex-col h-screen bg-[#f4f4f4]">
         <div className="flex-1 overflow-auto p-4 md:p-8">
-          {/* DASHBOARD, ESTIMATES LIST, INVOICES LIST, EDITOR remain unchanged */}
           {view === 'dashboard' && (
             <div>
               <div className="flex justify-between items-center mb-8">
@@ -436,7 +435,8 @@ export default function Home() {
               <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to Dashboard</Button>
               <h2 className="text-3xl font-semibold mb-6">All Invoices</h2>
               <div className="space-y-4">
-                {savedEstimatesList.filter(est => est.documentType === 'invoice').map((est) => (
+                {/* ONLY THIS LINE WAS CHANGED */}
+                {savedEstimatesList.filter(est => est.invoiceNumber?.startsWith('INV')).map((est) => (
                   <div key={est.id} className="flex justify-between items-center border p-4 rounded-lg bg-white">
                     <div className="flex-1">
                       <div className="font-medium">{est.jobName || 'Untitled'}</div>
@@ -664,7 +664,6 @@ export default function Home() {
             </div>
           )}
 
-          {/* FULL PROFILE PAGE */}
           {view === 'profileView' && (
             <div>
               <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to Dashboard</Button>
@@ -695,7 +694,6 @@ export default function Home() {
                     </div>
                   </div>
 
-                  {/* Native Toggle for Quick Save */}
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="font-semibold">Quick Save (Auto-save)</p>
