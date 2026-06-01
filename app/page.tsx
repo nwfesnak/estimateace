@@ -16,7 +16,7 @@ export default function Home() {
   }, []);
 
   const [user, setUser] = useState<any>(null);
-  const [view, setView] = useState<'dashboard' | 'editor' | 'estimatesList' | 'invoicesList' | 'profileView'>('dashboard');
+  const [view, setView] = useState<'dashboard' | 'editor' | 'estimatesList' | 'invoicesList' | 'profileView' | 'archivesView'>('dashboard');
 
   // Login
   const [email, setEmail] = useState('');
@@ -59,6 +59,7 @@ export default function Home() {
   const [lastSaved, setLastSaved] = useState('Never');
   const [isLoadModalOpen, setIsLoadModalOpen] = useState(false);
   const [savedEstimatesList, setSavedEstimatesList] = useState<any[]>([]);
+  const [archivesList, setArchivesList] = useState<any[]>([]);
   const [isSendModalOpen, setIsSendModalOpen] = useState(false);
   const [selectedEmailsForSend, setSelectedEmailsForSend] = useState<string[]>([]);
   const [selectedPhonesForSend, setSelectedPhonesForSend] = useState<string[]>([]);
@@ -68,6 +69,15 @@ export default function Home() {
   const [isCalendarModalOpen, setIsCalendarModalOpen] = useState(false);
   const [selectedEstimateForCalendar, setSelectedEstimateForCalendar] = useState<any>(null);
   const [selectedDateTime, setSelectedDateTime] = useState('');
+
+  // NEW: Export options state (only used in profile)
+  const [exportOptions, setExportOptions] = useState({
+    estimates: true,
+    invoices: true,
+    archives: true,
+    photos: true,
+    videos: true
+  });
 
   const grandTotal = items.reduce((sum, item) => sum + (item.total || 0), 0);
 
@@ -152,6 +162,12 @@ export default function Home() {
     if (!user || !supabase) return;
     const { data } = await supabase.from('estimates').select('*').eq('user_id', user.id).order('updated_at', { ascending: false });
     setSavedEstimatesList(data || []);
+  };
+
+  const refreshArchivesList = async () => {
+    if (!user || !supabase) return;
+    const { data } = await supabase.from('archive-est').select('*').eq('user_id', user.id).order('archived_at', { ascending: false });
+    setArchivesList(data || []);
   };
 
   const loadSelectedEstimate = (est: any) => {
@@ -331,6 +347,41 @@ export default function Home() {
     refreshSavedList();
   };
 
+  // NEW: Selective Export
+  const exportData = async () => {
+    if (!user || !supabase) return;
+
+    let csv = 'Type,InvoiceNumber,JobName,Date,Address,City,ZipCode,GrandTotal,PhotoUrls,VideoUrls\n';
+
+    if (exportOptions.estimates || exportOptions.invoices) {
+      const { data: docs } = await supabase.from('estimates').select('*').eq('user_id', user.id);
+      (docs || []).forEach(doc => {
+        if ((exportOptions.estimates && (doc.documentType === 'estimate' || doc.invoiceNumber?.startsWith('EST'))) ||
+            (exportOptions.invoices && (doc.documentType === 'invoice' || doc.invoiceNumber?.startsWith('INV')))) {
+          const total = doc.items ? doc.items.reduce((sum: number, item: any) => sum + (item.total || 0), 0) : 0;
+          csv += `"${doc.documentType || 'estimate'}","${doc.invoiceNumber || ''}","${doc.jobName || ''}","${doc.date || ''}","${doc.address || ''}","${doc.city || ''}","${doc.zipCode || ''}",${total},"${(doc.photoUrls || []).join('; ')}","${(doc.videoUrls || []).join('; ')}"\n`;
+        }
+      });
+    }
+
+    if (exportOptions.archives) {
+      const { data: archives } = await supabase.from('archive-est').select('*').eq('user_id', user.id);
+      (archives || []).forEach(arch => {
+        const total = arch.items ? arch.items.reduce((sum: number, item: any) => sum + (item.total || 0), 0) : 0;
+        csv += `"archive","${arch.invoiceNumber || ''}","${arch.jobName || ''}","${arch.date || ''}","${arch.address || ''}","${arch.city || ''}","${arch.zipCode || ''}",${total},"${(arch.photoUrls || []).join('; ')}","${(arch.videoUrls || []).join('; ')}"\n`;
+      });
+    }
+
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `EstimateAce_Export_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showMessage('✅ Selected data exported as CSV');
+  };
+
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const debouncedSave = () => {
     if (!profile.autoSaveEnabled) return;
@@ -347,6 +398,12 @@ export default function Home() {
     const saved = localStorage.getItem('quickLines');
     if (saved) setQuickLines(JSON.parse(saved));
   }, []);
+
+  // Auto-refresh lists
+  useEffect(() => {
+    if (view === 'estimatesList' || view === 'invoicesList') refreshSavedList();
+    if (view === 'archivesView') refreshArchivesList();
+  }, [view]);
 
   if (!user) {
     return (
@@ -620,23 +677,6 @@ export default function Home() {
                 </CardContent>
               </Card>
 
-              {/* Certificate of Insurance - now at the bottom of every estimate and invoice */}
-              {profile.certificateUrl && (
-                <Card className="mb-8">
-                  <CardContent className="p-6">
-                    <h3 className="text-xl font-semibold mb-4">Certificate of Insurance</h3>
-                    <a href={profile.certificateUrl} target="_blank" rel="noopener noreferrer">
-                      <img 
-                        src={profile.certificateUrl} 
-                        alt="Certificate of Insurance" 
-                        className="max-h-96 mx-auto border rounded-lg shadow"
-                      />
-                    </a>
-                    <p className="text-xs text-gray-500 mt-4 text-center">Click image to open full size</p>
-                  </CardContent>
-                </Card>
-              )}
-
               <div id="print-document" className="max-w-4xl mx-auto bg-white p-10 shadow-2xl hidden print:block">
                 <h1 className="text-4xl font-bold text-center mb-8">{profile.company || 'Your Company'}</h1>
                 {(profile.phone || profile.email) && (
@@ -677,18 +717,6 @@ export default function Home() {
                   </tbody>
                 </table>
                 <div className="text-right text-3xl font-bold">Total: ${grandTotal.toFixed(2)}</div>
-
-                {/* Certificate in print view - at the bottom */}
-                {profile.certificateUrl && (
-                  <div className="mt-12">
-                    <h3 className="text-xl font-semibold mb-4">Certificate of Insurance</h3>
-                    <img 
-                      src={profile.certificateUrl} 
-                      alt="Certificate of Insurance" 
-                      className="max-h-96 mx-auto border rounded-lg shadow"
-                    />
-                  </div>
-                )}
               </div>
             </div>
           )}
@@ -763,24 +791,109 @@ export default function Home() {
                     <div className="mt-8 border rounded-lg p-6">
                       <h3 className="font-semibold mb-4">Certificate of Insurance</h3>
                       <a href={profile.certificateUrl} target="_blank" rel="noopener noreferrer">
-                        <img 
-                          src={profile.certificateUrl} 
-                          alt="Certificate of Insurance" 
-                          className="max-h-96 mx-auto border rounded-lg shadow"
-                        />
+                        <img src={profile.certificateUrl} alt="Certificate of Insurance" className="max-h-96 mx-auto border rounded-lg shadow" />
                       </a>
                       <p className="text-xs text-gray-500 mt-2 text-center">Click image to open full size</p>
                     </div>
                   )}
+
+                  {/* Teammates section unchanged */}
+                  <div className="border-t pt-8">
+                    <h3 className="font-semibold mb-4">Teammates</h3>
+                    <div className="flex gap-2 mb-6">
+                      <Input placeholder="teammate@email.com" id="teammate-email" className="flex-1" />
+                      <Button onClick={() => {
+                        const input = document.getElementById('teammate-email') as HTMLInputElement;
+                        if (!input.value) return;
+                        const newTeammate = { email: input.value.trim(), role: 'limited' as 'full' | 'limited' };
+                        setProfile(prev => ({ ...prev, teammates: [...(prev.teammates || []), newTeammate] }));
+                        input.value = '';
+                      }}>Add</Button>
+                    </div>
+                    <div className="space-y-3">
+                      {profile.teammates && profile.teammates.map((tm, index) => (
+                        <div key={index} className="flex items-center justify-between border p-4 rounded-lg">
+                          <div className="font-medium">{tm.email}</div>
+                          <div className="flex items-center gap-6">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm">Full</span>
+                              <label className="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" checked={tm.role === 'full'} onChange={() => {
+                                  const updated = [...profile.teammates];
+                                  updated[index].role = updated[index].role === 'full' ? 'limited' : 'full';
+                                  setProfile(prev => ({ ...prev, teammates: updated }));
+                                }} className="sr-only peer" />
+                                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]"></div>
+                              </label>
+                              <span className="text-sm">Limited</span>
+                            </div>
+                            <Button variant="destructive" size="sm" onClick={() => {
+                              const updated = profile.teammates.filter((_, i) => i !== index);
+                              setProfile(prev => ({ ...prev, teammates: updated }));
+                            }}>Remove</Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* NEW SELECTIVE EXPORT SECTION */}
+                  <div className="border-t pt-8">
+                    <h3 className="font-semibold mb-4">Export Data</h3>
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+                      <label className="flex items-center gap-2">
+                        <input type="checkbox" checked={exportOptions.estimates} onChange={e => setExportOptions(prev => ({...prev, estimates: e.target.checked}))} />
+                        Estimates
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <input type="checkbox" checked={exportOptions.invoices} onChange={e => setExportOptions(prev => ({...prev, invoices: e.target.checked}))} />
+                        Invoices
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <input type="checkbox" checked={exportOptions.archives} onChange={e => setExportOptions(prev => ({...prev, archives: e.target.checked}))} />
+                        Archives
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <input type="checkbox" checked={exportOptions.photos} onChange={e => setExportOptions(prev => ({...prev, photos: e.target.checked}))} />
+                        Photos
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <input type="checkbox" checked={exportOptions.videos} onChange={e => setExportOptions(prev => ({...prev, videos: e.target.checked}))} />
+                        Videos
+                      </label>
+                    </div>
+                    <Button onClick={exportData} className="w-full bg-[#10b981]">Export Selected Data (CSV)</Button>
+                  </div>
 
                   <Button onClick={saveProfile} className="w-full bg-[#10b981]">Save Profile</Button>
                 </CardContent>
               </Card>
             </div>
           )}
+
+          {view === 'archivesView' && (
+            <div>
+              <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to Dashboard</Button>
+              <h2 className="text-3xl font-semibold mb-6">Archived Documents</h2>
+              <div className="space-y-4">
+                {archivesList.map((est) => (
+                  <div key={est.id} className="flex justify-between items-center border p-4 rounded-lg bg-white">
+                    <div>
+                      <div className="font-medium">{est.jobName || 'Untitled'}</div>
+                      <div className="text-sm text-gray-500">{est.invoiceNumber} • Archived: {new Date(est.archived_at).toLocaleDateString()}</div>
+                    </div>
+                    <div className="flex gap-3">
+                      <Button size="sm" onClick={() => { loadSelectedEstimate(est); setView('editor'); }}>Open</Button>
+                      <Button size="sm" variant="destructive" onClick={() => deleteSelectedEstimate(est.id)}>Delete</Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* Bottom Navigation */}
+        {/* Bottom Navigation (unchanged) */}
         <div className="bg-white border-t shadow-inner flex items-center justify-around py-2 px-1 text-xs">
           <button onClick={goToDashboard} className={`flex flex-col items-center flex-1 py-1 ${view === 'dashboard' ? 'text-[#10b981]' : 'text-gray-500'}`}>
             <span className="text-3xl mb-0.5">📊</span>
