@@ -38,6 +38,7 @@ export default function Home() {
   const [terms, setTerms] = useState('');
   const [photoUrls, setPhotoUrls] = useState<string[]>([]);
   const [videoUrls, setVideoUrls] = useState<string[]>([]);
+  const [receiptUrls, setReceiptUrls] = useState<string[]>([]);
 
   const [profile, setProfile] = useState({ name: '', company: '', address: '', phone: '', email: '', slogan: '', showInHeader: true });
 
@@ -47,6 +48,7 @@ export default function Home() {
   const [lastSaved, setLastSaved] = useState('Never');
   const [isLoadModalOpen, setIsLoadModalOpen] = useState(false);
   const [savedEstimatesList, setSavedEstimatesList] = useState<any[]>([]);
+  const [isReceiptsModalOpen, setIsReceiptsModalOpen] = useState(false);
 
   const [isSendModalOpen, setIsSendModalOpen] = useState(false);
   const [selectedEmailsForSend, setSelectedEmailsForSend] = useState<string[]>([]);
@@ -110,6 +112,28 @@ export default function Home() {
     if (type === 'photo') setPhotoUrls(prev => [...prev, ...newUrls]);
     else setVideoUrls(prev => [...prev, ...newUrls]);
     await saveToDB();
+  };
+
+  const saveReceipt = async (files: FileList | null) => {
+    if (!files || !user || !supabase) return;
+    const newUrls: string[] = [];
+    for (const file of Array.from(files)) {
+      const fileExt = file.name.split('.').pop();
+      const filePath = `${user.id}/receipts/${Date.now()}.${fileExt}`;
+      const { error } = await supabase.storage.from('media').upload(filePath, file, { upsert: true });
+      if (!error) {
+        const { data } = supabase.storage.from('media').getPublicUrl(filePath);
+        newUrls.push(data.publicUrl);
+        await supabase.from('receipts').insert({
+          user_id: user.id,
+          receipt_url: data.publicUrl,
+          job_name: jobName || 'Untitled'
+        });
+      }
+    }
+    setReceiptUrls(prev => [...prev, ...newUrls]);
+    await saveToDB();
+    showMessage('Receipt photo saved to database!');
   };
 
   const removeMedia = (type: 'photo' | 'video', index: number) => {
@@ -428,7 +452,7 @@ export default function Home() {
           </CardContent>
         </Card>
 
-        {/* BOTTOM QUICK ACTIONS ROW (starting with Templates) */}
+        {/* Bottom Quick Actions Row (Receipts button opens camera) */}
         <Card className="mb-8">
           <CardContent className="p-6">
             <h4 className="text-base font-semibold mb-4 text-center md:text-left text-gray-600">Quick Actions</h4>
@@ -540,10 +564,10 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Hidden camera inputs */}
+      {/* Hidden camera inputs - no duplicates */}
       <input id="photo-camera" type="file" accept="image/*" capture="environment" onChange={e => handleMediaUpload(e.target.files, 'photo')} className="hidden" />
       <input id="video-camera" type="file" accept="video/*" capture="environment" onChange={e => handleMediaUpload(e.target.files, 'video')} className="hidden" />
-      <input id="receipts-camera" type="file" accept="image/*" capture="environment" onChange={e => handleMediaUpload(e.target.files, 'photo')} className="hidden" />
+      <input id="receipts-camera" type="file" accept="image/*" capture="environment" onChange={e => saveReceipt(e.target.files)} className="hidden" />
 
       {/* Send Modal */}
       <Dialog open={isSendModalOpen} onOpenChange={setIsSendModalOpen}>
