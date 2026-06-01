@@ -38,6 +38,7 @@ export default function Home() {
   const [photoUrls, setPhotoUrls] = useState<string[]>([]);
   const [videoUrls, setVideoUrls] = useState<string[]>([]);
   const [receiptUrls, setReceiptUrls] = useState<string[]>([]);
+  const [signatureDataUrl, setSignatureDataUrl] = useState<string>(''); // ← digital signature added here
 
   const [dueDate, setDueDate] = useState('');
   const [paymentStatus, setPaymentStatus] = useState<'pending' | 'paid'>('pending');
@@ -112,7 +113,7 @@ export default function Home() {
       user_id: user.id,
       jobName, address, city, zipCode, phones, emails, date, invoiceNumber,
       items, terms, profile, documentType, dueDate, paymentStatus, amountPaid,
-      paymentMethod, photoUrls, videoUrls, receiptUrls, updated_at: new Date().toISOString()
+      paymentMethod, photoUrls, videoUrls, receiptUrls, signatureDataUrl, updated_at: new Date().toISOString()
     };
     const { error } = await supabase.from('estimates').upsert({ id: invoiceNumber, ...data });
     if (error) console.error('Save error:', error);
@@ -146,7 +147,7 @@ export default function Home() {
       const { data } = supabase.storage.from('media').getPublicUrl(filePath);
       setProfile(prev => ({ ...prev, certificateUrl: data.publicUrl }));
       showMessage('✅ Certificate of Insurance uploaded');
-      await saveToDB();   // ← now saves immediately to profile
+      await saveToDB();
     }
   };
 
@@ -189,12 +190,14 @@ export default function Home() {
     setPhotoUrls(est.photoUrls || []);
     setVideoUrls(est.videoUrls || []);
     setReceiptUrls(est.receiptUrls || []);
+    setSignatureDataUrl(est.signatureDataUrl || ''); // ← digital signature loaded
   };
 
   const newEstimate = () => {
     setJobName(''); setAddress(''); setCity(''); setZipCode('');
     setPhones(['']); setEmails(['']); setTerms('');
     setPhotoUrls([]); setVideoUrls([]); setReceiptUrls([]);
+    setSignatureDataUrl(''); // ← digital signature reset
     setItems([{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
     const today = new Date().toISOString().split('T')[0];
     setDate(today);
@@ -392,15 +395,6 @@ export default function Home() {
     return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
   }, [jobName, address, city, zipCode, phones, emails, date, invoiceNumber, items, terms, profile, documentType, dueDate, paymentStatus, amountPaid, paymentMethod, view]);
 
-  // NEW: Auto-save profile (including certificate) when leaving Profile page
-  useEffect(() => {
-    return () => {
-      if (view === 'profileView') {
-        saveToDB();
-      }
-    };
-  }, [view]);
-
   useEffect(() => {
     const saved = localStorage.getItem('quickLines');
     if (saved) setQuickLines(JSON.parse(saved));
@@ -410,6 +404,54 @@ export default function Home() {
     if (view === 'estimatesList' || view === 'invoicesList') refreshSavedList();
     if (view === 'archivesView') refreshArchivesList();
   }, [view]);
+
+  // ──────────────────────────────────────────────────────────────
+  // DIGITAL SIGNATURE FUNCTIONALITY (added only here)
+  // ──────────────────────────────────────────────────────────────
+  const signatureCanvasRef = useRef<HTMLCanvasElement>(null);
+  const isDrawing = useRef(false);
+
+  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = signatureCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    isDrawing.current = true;
+    ctx.beginPath();
+    ctx.moveTo(e.nativeEvent.offsetX, e.nativeEvent.offsetY);
+  };
+
+  const draw = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = signatureCanvasRef.current;
+    if (!canvas || !isDrawing.current) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#1e293b';
+    ctx.lineTo(e.nativeEvent.offsetX, e.nativeEvent.offsetY);
+    ctx.stroke();
+  };
+
+  const stopDrawing = () => {
+    isDrawing.current = false;
+  };
+
+  const clearSignature = () => {
+    const canvas = signatureCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+  };
+
+  const saveSignature = () => {
+    const canvas = signatureCanvasRef.current;
+    if (!canvas) return;
+    const dataUrl = canvas.toDataURL('image/png');
+    setSignatureDataUrl(dataUrl);
+    saveToDB(); // save immediately
+    showMessage('✅ Digital signature saved');
+  };
 
   if (!user) {
     return (
@@ -683,7 +725,30 @@ export default function Home() {
                 </CardContent>
               </Card>
 
-              {/* PRINT PREVIEW - Certificate now guaranteed to appear */}
+              {/* DIGITAL SIGNATURE SECTION - added here only */}
+              <Card className="mb-8">
+                <CardContent className="p-6">
+                  <h3 className="text-xl font-semibold mb-4">✍️ Digital Signature</h3>
+                  <div className="border-2 border-dashed border-gray-300 rounded-2xl p-4 bg-white">
+                    <canvas
+                      ref={signatureCanvasRef}
+                      width="620"
+                      height="220"
+                      className="w-full border border-gray-300 rounded-xl cursor-crosshair touch-none"
+                      onMouseDown={startDrawing}
+                      onMouseMove={draw}
+                      onMouseUp={stopDrawing}
+                      onMouseLeave={stopDrawing}
+                    />
+                    <div className="flex gap-3 mt-4">
+                      <Button variant="outline" onClick={clearSignature} className="flex-1">Clear Signature</Button>
+                      <Button onClick={saveSignature} className="flex-1 bg-[#10b981]">Save Signature</Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* PRINT PREVIEW - digital signature added here only */}
               <div id="print-document" className="max-w-4xl mx-auto bg-white p-10 shadow-2xl hidden print:block">
                 <h1 className="text-4xl font-bold text-center mb-8">{profile.company || 'Your Company'}</h1>
                 {(profile.phone || profile.email) && (
@@ -730,26 +795,24 @@ export default function Home() {
                     <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Attached Photos</h3>
                     <div className="grid grid-cols-2 gap-6">
                       {photoUrls.map((url, i) => (
-                        <img 
-                          key={i} 
-                          src={url} 
-                          alt={`Photo ${i + 1}`} 
-                          className="w-full border rounded-xl shadow-sm max-h-64 object-contain"
-                        />
+                        <img key={i} src={url} alt={`Photo ${i + 1}`} className="w-full border rounded-xl shadow-sm max-h-64 object-contain" />
                       ))}
                     </div>
                   </div>
                 )}
 
-                {/* Certificate of Insurance - now always appears in PDF */}
                 {profile.certificateUrl && (
                   <div className="mt-12">
                     <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Certificate of Insurance</h3>
-                    <img 
-                      src={profile.certificateUrl} 
-                      alt="Certificate of Insurance" 
-                      className="max-h-96 mx-auto border rounded-lg shadow"
-                    />
+                    <img src={profile.certificateUrl} alt="Certificate of Insurance" className="max-h-96 mx-auto border rounded-lg shadow" />
+                  </div>
+                )}
+
+                {/* Digital signature in PDF */}
+                {signatureDataUrl && (
+                  <div className="mt-12">
+                    <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Digital Signature</h3>
+                    <img src={signatureDataUrl} alt="Digital Signature" className="max-h-48 mx-auto border rounded-lg shadow" />
                   </div>
                 )}
               </div>
