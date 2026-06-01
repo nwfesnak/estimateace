@@ -16,7 +16,7 @@ export default function Home() {
   }, []);
 
   const [user, setUser] = useState<any>(null);
-  const [view, setView] = useState<'dashboard' | 'editor' | 'estimatesList'>('dashboard');
+  const [view, setView] = useState<'dashboard' | 'editor' | 'estimatesList' | 'invoicesList'>('dashboard');
 
   // Login
   const [email, setEmail] = useState('');
@@ -97,8 +97,7 @@ export default function Home() {
   const saveToDB = async () => {
     if (!user || !supabase) return;
     const data = {
-      user_id: user.id,
-      jobName, address, city, zipCode, phones, emails, date, invoiceNumber,
+      user_id: user.id, jobName, address, city, zipCode, phones, emails, date, invoiceNumber,
       items, terms, profile, documentType, dueDate, paymentStatus, amountPaid,
       paymentMethod, photoUrls, videoUrls, receiptUrls, updated_at: new Date().toISOString()
     };
@@ -301,7 +300,7 @@ export default function Home() {
   };
 
   const archiveEstimate = async (id: string) => {
-    if (!confirm('Archive this estimate?')) return;
+    if (!confirm('Archive this document?')) return;
     if (!user || !supabase) return;
 
     const { data: est } = await supabase.from('estimates').select('*').eq('id', id).single();
@@ -312,7 +311,7 @@ export default function Home() {
     if (error) return console.error(error);
 
     await supabase.from('estimates').delete().eq('id', id);
-    showMessage('Estimate archived');
+    showMessage('Document archived successfully');
     refreshSavedList();
   };
 
@@ -398,13 +397,38 @@ export default function Home() {
               <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to Dashboard</Button>
               <h2 className="text-3xl font-semibold mb-6">All Estimates</h2>
               <div className="space-y-4">
-                {savedEstimatesList.map((est) => (
+                {savedEstimatesList.filter(est => est.documentType === 'estimate').map((est) => (
                   <div key={est.id} className="flex justify-between items-center border p-4 rounded-lg bg-white">
                     <div>
                       <div className="font-medium">{est.jobName || 'Untitled'}</div>
                       <div className="text-sm text-gray-500">{est.invoiceNumber} • {est.date}</div>
                     </div>
                     <div className="flex gap-3">
+                      <Button size="sm" onClick={() => { loadSelectedEstimate(est); setView('editor'); }}>Open</Button>
+                      <Button size="sm" variant="outline" onClick={() => archiveEstimate(est.id)}>Archive</Button>
+                      <Button size="sm" variant="destructive" onClick={() => deleteSelectedEstimate(est.id)}>Delete</Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {view === 'invoicesList' && (
+            <div>
+              <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to Dashboard</Button>
+              <h2 className="text-3xl font-semibold mb-6">All Invoices</h2>
+              <div className="space-y-4">
+                {savedEstimatesList.filter(est => est.documentType === 'invoice').map((est) => (
+                  <div key={est.id} className="flex justify-between items-center border p-4 rounded-lg bg-white">
+                    <div className="flex-1">
+                      <div className="font-medium">{est.jobName || 'Untitled'}</div>
+                      <div className="text-sm text-gray-500">{est.invoiceNumber} • {est.date}</div>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      {est.paymentStatus === 'paid' && (
+                        <span className="px-3 py-1 text-xs font-medium bg-green-100 text-green-700 rounded-full">Paid</span>
+                      )}
                       <Button size="sm" onClick={() => { loadSelectedEstimate(est); setView('editor'); }}>Open</Button>
                       <Button size="sm" variant="outline" onClick={() => archiveEstimate(est.id)}>Archive</Button>
                       <Button size="sm" variant="destructive" onClick={() => deleteSelectedEstimate(est.id)}>Delete</Button>
@@ -517,7 +541,7 @@ export default function Home() {
                 </div>
               </Card>
 
-              {/* Action buttons below Grand Total */}
+              {/* Action buttons */}
               <div className="flex flex-wrap gap-3 mb-8">
                 <Button onClick={saveNamedEstimate} className="bg-[#1e293b]">💾 Save Estimate</Button>
                 <Button onClick={printDocument} className="bg-[#3b82f6]">🖨️ Print/Preview</Button>
@@ -534,6 +558,7 @@ export default function Home() {
               <input id="photo-camera" type="file" accept="image/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'photo')} className="hidden" />
               <input id="video-camera" type="file" accept="video/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'video')} className="hidden" />
 
+              {/* Photos, Videos, Receipts, Terms, Print Document sections are all here (same as previous version) */}
               {/* Photos */}
               <Card className="mb-8">
                 <CardContent className="p-6">
@@ -647,7 +672,7 @@ export default function Home() {
             <span className="text-3xl mb-0.5">📋</span>
             <span>Estimate</span>
           </button>
-          <button onClick={() => openNewDocument('invoice')} className="flex flex-col items-center flex-1 py-1 text-gray-500">
+          <button onClick={() => setView('invoicesList')} className="flex flex-col items-center flex-1 py-1 text-gray-500">
             <span className="text-3xl mb-0.5">💰</span>
             <span>Invoice</span>
           </button>
@@ -670,7 +695,7 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Load Modal */}
+      {/* Modals */}
       <Dialog open={isLoadModalOpen} onOpenChange={setIsLoadModalOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader><DialogTitle>Saved Documents</DialogTitle></DialogHeader>
@@ -704,8 +729,6 @@ export default function Home() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Send Modal, Quick Lines Modal, Calendar Modal, Templates Modal can be added from your previous version if needed. They are all functional. */}
 
     </>
   );
