@@ -210,13 +210,10 @@ export default function Home() {
     setIsSendModalOpen(true);
   };
 
-  // UPDATED: Photos are now attached (as public links)
   const sendViaEmail = () => {
     if (selectedEmailsForSend.length === 0) return showMessage("Please select at least one email");
     let msg = `✅ ${documentType.toUpperCase()} sent via email to: ${selectedEmailsForSend.join(', ')}`;
-    if (photoUrls.length > 0) {
-      msg += `\n\n📸 PHOTOS ATTACHED:\n${photoUrls.join('\n')}`;
-    }
+    if (photoUrls.length > 0) msg += `\n\n📸 PHOTOS ATTACHED:\n${photoUrls.join('\n')}`;
     showMessage(msg);
     setIsSendModalOpen(false);
   };
@@ -224,9 +221,7 @@ export default function Home() {
   const sendViaText = () => {
     if (selectedPhonesForSend.length === 0) return showMessage("Please select at least one phone number");
     let msg = `✅ ${documentType.toUpperCase()} sent via text to: ${selectedPhonesForSend.join(', ')}`;
-    if (photoUrls.length > 0) {
-      msg += `\n\n📸 PHOTOS ATTACHED (click links):\n${photoUrls.join('\n')}`;
-    }
+    if (photoUrls.length > 0) msg += `\n\n📸 PHOTOS ATTACHED:\n${photoUrls.join('\n')}`;
     showMessage(msg);
     setIsSendModalOpen(false);
   };
@@ -289,10 +284,144 @@ export default function Home() {
           <button onClick={() => setDocumentType('invoice')} className={`flex-1 py-5 text-xl font-semibold ${documentType === 'invoice' ? 'bg-[#1e293b] text-white' : 'hover:bg-gray-100'}`}>💰 Invoice</button>
         </div>
 
-        {/* Job Info, Phones, Emails, Table, Grand Total, Buttons under Grand Total, Photos, Videos, Terms — all unchanged from last version */}
-        {/* (Full UI is included — no truncation) */}
+        {/* Job Info Card */}
+        <Card className="mb-8">
+          <CardContent className="p-6">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+              <div>
+                <label className="block text-sm font-semibold mb-2">Job Name / Client</label>
+                <Input value={jobName} onChange={e => setJobName(e.target.value)} className="h-12" />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold mb-2">Address</label>
+                <Input value={address} onChange={e => setAddress(e.target.value)} className="h-12" />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold mb-2">City</label>
+                <Input value={city} onChange={e => setCity(e.target.value)} className="h-12" />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold mb-2">Zip Code</label>
+                <Input value={zipCode} onChange={e => setZipCode(e.target.value)} className="h-12" />
+              </div>
+            </div>
 
-        {/* BOTTOM ROW STARTING WITH TEMPLATES (kept from your last request) */}
+            <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-8">
+              <div>
+                <label className="block text-sm font-semibold mb-3">Phone Numbers</label>
+                {phones.map((phone, i) => (
+                  <div key={i} className="flex gap-2 mb-3">
+                    <Input value={phone} onChange={e => updatePhone(i, e.target.value)} placeholder="Phone number" className="flex-1" />
+                    <Button variant="destructive" size="sm" onClick={() => removePhone(i)}>×</Button>
+                  </div>
+                ))}
+                <Button onClick={addPhone} size="sm" variant="outline">+ Add Phone</Button>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold mb-3">Email Addresses</label>
+                {emails.map((em, i) => (
+                  <div key={i} className="flex gap-2 mb-3">
+                    <Input value={em} onChange={e => updateEmail(i, e.target.value)} placeholder="Email address" className="flex-1" />
+                    <Button variant="destructive" size="sm" onClick={() => removeEmail(i)}>×</Button>
+                  </div>
+                ))}
+                <Button onClick={addEmail} size="sm" variant="outline">+ Add Email</Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Table + Grand Total + Buttons Under Grand Total */}
+        <Card className="mb-8">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-[#1e293b] text-white">
+                <TableHead className="w-[55%]">Description</TableHead>
+                <TableHead className="w-[9%]">Qty</TableHead>
+                <TableHead className="w-[9%]">Unit</TableHead>
+                <TableHead className="w-[9%]">Price</TableHead>
+                <TableHead className="w-[9%] text-right">Total</TableHead>
+                <TableHead className="w-[9%]">Action</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {items.map((item) => (
+                <TableRow key={item.id}>
+                  <TableCell className="text-black">
+                    <Textarea value={item.description} onChange={e => updateItem(item.id, 'description', e.target.value)} className="min-h-[100px] text-black" />
+                  </TableCell>
+                  <TableCell><Input type="number" value={item.qty} onChange={e => updateItem(item.id, 'qty', parseFloat(e.target.value) || 0)} /></TableCell>
+                  <TableCell><Input value={item.unit} onChange={e => updateItem(item.id, 'unit', e.target.value)} /></TableCell>
+                  <TableCell><Input type="number" step="0.01" value={item.price} onChange={e => updateItem(item.id, 'price', parseFloat(e.target.value) || 0)} /></TableCell>
+                  <TableCell className="text-right font-semibold">${(item.total || 0).toFixed(2)}</TableCell>
+                  <TableCell><Button variant="destructive" size="sm" onClick={() => removeRow(item.id)}>×</Button></TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+
+          <div className="p-6 bg-white border-t text-right text-3xl font-bold">
+            {documentType === 'invoice' ? 'Amount Due: ' : 'Grand Total: '}
+            <span className="text-[#10b981]">${amountDue.toFixed(2)}</span>
+          </div>
+
+          <div className="p-6 bg-white border-t flex justify-between items-center gap-3 flex-wrap no-print">
+            <div className="flex gap-3">
+              <Button onClick={() => document.getElementById('photo-camera')?.click()} className="bg-[#10b981]">📷 Take Photo</Button>
+              <Button onClick={() => document.getElementById('video-camera')?.click()} className="bg-[#10b981]">📹 Record Video</Button>
+            </div>
+            <div className="flex gap-3 flex-wrap">
+              <Button onClick={saveNamedEstimate} className="bg-[#10b981]">💾 Save</Button>
+              <Button onClick={convertToInvoice} className="bg-[#10b981]">💰 Convert to Invoice</Button>
+              <Button onClick={printDocument} className="bg-[#10b981] font-semibold">🖨️ Print / Preview</Button>
+              <Button onClick={openSendModal} className="bg-[#2563eb]">📧 Send</Button>
+            </div>
+          </div>
+        </Card>
+
+        {/* Photos */}
+        <Card className="mb-8">
+          <CardContent className="p-6">
+            <h3 className="text-lg font-semibold mb-3">📸 Photos</h3>
+            <input type="file" multiple accept="image/*" onChange={e => handleMediaUpload(e.target.files, 'photo')} className="text-sm" />
+            <input id="photo-camera" type="file" accept="image/*" capture="environment" onChange={e => handleMediaUpload(e.target.files, 'photo')} className="hidden" />
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
+              {photoUrls.map((src, i) => (
+                <div key={i} className="relative">
+                  <img src={src} alt="photo" className="w-full h-52 object-cover rounded-xl" />
+                  <Button variant="destructive" size="sm" className="absolute top-2 right-2" onClick={() => removeMedia('photo', i)}>×</Button>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Videos */}
+        <Card className="mb-8">
+          <CardContent className="p-6">
+            <h3 className="text-lg font-semibold mb-3">🎥 Videos</h3>
+            <input type="file" multiple accept="video/*" onChange={e => handleMediaUpload(e.target.files, 'video')} className="text-sm" />
+            <input id="video-camera" type="file" accept="video/*" capture="environment" onChange={e => handleMediaUpload(e.target.files, 'video')} className="hidden" />
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
+              {videoUrls.map((src, i) => (
+                <div key={i} className="relative">
+                  <video src={src} controls className="w-full h-32 object-cover rounded-lg" />
+                  <Button variant="destructive" size="sm" className="absolute top-2 right-2" onClick={() => removeMedia('video', i)}>×</Button>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Terms */}
+        <Card className="mb-8">
+          <CardContent className="p-6">
+            <h3 className="text-lg font-semibold mb-3">Terms & Conditions</h3>
+            <Textarea value={terms} onChange={e => setTerms(e.target.value)} className="min-h-[180px]" />
+          </CardContent>
+        </Card>
+
+        {/* BOTTOM QUICK ACTIONS ROW (starting with Templates) */}
         <Card className="mb-8">
           <CardContent className="p-6">
             <h4 className="text-base font-semibold mb-4 text-center md:text-left text-gray-600">Quick Actions</h4>
@@ -321,7 +450,86 @@ export default function Home() {
 
         {/* CLEAN PRINT DOCUMENT */}
         <div id="print-document" className="max-w-4xl mx-auto bg-white p-10 shadow-2xl hidden print:block">
-          {/* ... same clean print layout as before ... */}
+          <div className="flex justify-between border-b pb-6 mb-8">
+            <div>
+              <h1 className="text-5xl font-bold tracking-tight">{documentType.toUpperCase()}</h1>
+              <p className="text-2xl text-gray-600 mt-1">#{invoiceNumber} • {date}</p>
+            </div>
+            {profile.showInHeader && (
+              <div className="text-right">
+                <div className="text-3xl font-bold">{profile.company || profile.name}</div>
+                {profile.slogan && <div className="italic text-lg">{profile.slogan}</div>}
+                <div className="text-sm mt-3">{profile.address}</div>
+                <div className="text-sm">{profile.phone} • {profile.email}</div>
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-12 mb-10">
+            <div>
+              <div className="uppercase text-xs tracking-widest text-gray-500 mb-1">Bill To</div>
+              <div className="font-semibold text-xl">{jobName}</div>
+              <div>{address}</div>
+              <div>{city} {zipCode}</div>
+            </div>
+            <div className="text-right">
+              <div className="uppercase text-xs tracking-widest text-gray-500 mb-1">Date</div>
+              <div className="text-xl">{date}</div>
+            </div>
+          </div>
+
+          <table className="w-full border-collapse mb-10">
+            <thead>
+              <tr className="border-b-2 border-gray-800">
+                <th className="text-left py-4 font-semibold">Description</th>
+                <th className="w-20 text-center py-4 font-semibold">Qty</th>
+                <th className="w-24 text-center py-4 font-semibold">Unit</th>
+                <th className="w-28 text-right py-4 font-semibold">Price</th>
+                <th className="w-28 text-right py-4 font-semibold">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item) => (
+                <tr key={item.id} className="border-b">
+                  <td className="py-4">{item.description}</td>
+                  <td className="py-4 text-center">{item.qty}</td>
+                  <td className="py-4 text-center">{item.unit}</td>
+                  <td className="py-4 text-right">${Number(item.price).toFixed(2)}</td>
+                  <td className="py-4 text-right font-medium">${Number(item.total).toFixed(2)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <div className="flex justify-end">
+            <div className="w-80">
+              <div className="flex justify-between py-3 text-xl">
+                <span className="font-semibold">Total</span>
+                <span className="font-bold">${grandTotal.toFixed(2)}</span>
+              </div>
+              {documentType === 'invoice' && amountPaid > 0 && (
+                <div className="flex justify-between py-3 text-xl">
+                  <span className="font-semibold">Paid</span>
+                  <span className="font-bold text-green-600">-${amountPaid.toFixed(2)}</span>
+                </div>
+              )}
+              <div className="flex justify-between py-4 border-t-2 border-gray-800 text-3xl font-bold">
+                <span>{documentType === 'invoice' ? 'Amount Due' : 'Total Due'}</span>
+                <span>${amountDue.toFixed(2)}</span>
+              </div>
+            </div>
+          </div>
+
+          {terms && (
+            <div className="mt-16 border-t pt-8">
+              <div className="font-semibold mb-3">Terms &amp; Conditions</div>
+              <div className="text-sm leading-relaxed whitespace-pre-wrap">{terms}</div>
+            </div>
+          )}
+
+          <div className="text-center text-xs text-gray-400 mt-16">
+            Thank you for your business • {profile.company || profile.name}
+          </div>
         </div>
       </div>
 
@@ -341,7 +549,81 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* Load, Profile, Templates modals unchanged */}
+      {/* Templates Modal */}
+      <Dialog open={isTemplatesOpen} onOpenChange={setIsTemplatesOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader><DialogTitle>📋 Templates</DialogTitle></DialogHeader>
+          <div className="max-h-[400px] overflow-y-auto space-y-3">
+            <div className="font-medium text-sm text-gray-500">Pre-made Templates</div>
+            {[
+              { name: 'Standard Payment Terms', text: '50% deposit due upon signing. Remaining 50% due upon completion.' },
+              { name: 'Warranty', text: 'All workmanship is guaranteed for 12 months from date of completion.' },
+            ].map((tpl, i) => (
+              <div key={i} className="flex justify-between items-center p-3 border rounded-lg hover:bg-gray-50">
+                <div className="flex-1">
+                  <div className="font-medium">{tpl.name}</div>
+                  <div className="text-xs text-gray-500 line-clamp-2">{tpl.text}</div>
+                </div>
+                <Button size="sm" onClick={() => useTemplate(tpl.text)}>Use</Button>
+              </div>
+            ))}
+            {savedTemplates.length > 0 && (
+              <>
+                <div className="font-medium text-sm text-gray-500 mt-6">Your Saved Templates</div>
+                {savedTemplates.map((tpl, i) => (
+                  <div key={i} className="flex justify-between items-center p-3 border rounded-lg hover:bg-gray-50">
+                    <div className="flex-1">
+                      <div className="font-medium">{tpl.name}</div>
+                      <div className="text-xs text-gray-500 line-clamp-2">{tpl.text}</div>
+                    </div>
+                    <Button size="sm" onClick={() => useTemplate(tpl.text)}>Use</Button>
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Profile Modal */}
+      <Dialog open={isProfileOpen} onOpenChange={setIsProfileOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>👤 Company Profile</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div><label className="block text-sm font-semibold mb-1">Name</label><Input value={profile.name} onChange={e => setProfile({...profile, name: e.target.value})} /></div>
+            <div><label className="block text-sm font-semibold mb-1">Company Name</label><Input value={profile.company} onChange={e => setProfile({...profile, company: e.target.value})} /></div>
+            <div><label className="block text-sm font-semibold mb-1">Address</label><Input value={profile.address} onChange={e => setProfile({...profile, address: e.target.value})} /></div>
+            <div><label className="block text-sm font-semibold mb-1">Phone</label><Input value={profile.phone} onChange={e => setProfile({...profile, phone: e.target.value})} /></div>
+            <div><label className="block text-sm font-semibold mb-1">Email</label><Input value={profile.email} onChange={e => setProfile({...profile, email: e.target.value})} /></div>
+            <div><label className="block text-sm font-semibold mb-1">Slogan</label><Input value={profile.slogan} onChange={e => setProfile({...profile, slogan: e.target.value})} /></div>
+          </div>
+          <DialogFooter>
+            <Button onClick={saveProfile} className="bg-[#10b981]">Save Profile</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Load Modal */}
+      <Dialog open={isLoadModalOpen} onOpenChange={setIsLoadModalOpen}>
+        <DialogContent className="max-w-3xl max-h-[80vh]">
+          <DialogHeader><DialogTitle>🔍 Load Saved Document</DialogTitle></DialogHeader>
+          <div className="max-h-[500px] overflow-y-auto">
+            {savedEstimatesList.length === 0 ? (
+              <p className="text-center text-gray-500 py-8">No saved documents yet.</p>
+            ) : (
+              savedEstimatesList.map((est) => (
+                <div key={est.id} className="flex justify-between items-center p-4 border rounded-lg mb-2">
+                  <div className="font-semibold">{est.jobName || 'Untitled'} — {est.invoiceNumber}</div>
+                  <div className="flex gap-2">
+                    <Button size="sm" onClick={() => loadSelectedEstimate(est)}>Load</Button>
+                    <Button size="sm" variant="destructive" onClick={() => deleteSelectedEstimate(est.id)}>Delete</Button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
