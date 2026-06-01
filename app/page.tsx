@@ -70,7 +70,7 @@ export default function Home() {
     alert(clean);
   };
 
-  // ==================== AUTH ====================
+  // Auth & Core functions (same as before)
   useEffect(() => {
     if (!supabase) return;
     supabase.auth.getSession().then(({ data }) => setUser(data.session?.user ?? null));
@@ -92,7 +92,6 @@ export default function Home() {
     else showMessage('Account created!');
   };
 
-  // ==================== CORE FUNCTIONS ====================
   const saveToDB = async () => {
     if (!user || !supabase) return;
     const data = {
@@ -341,10 +340,9 @@ export default function Home() {
       `}</style>
 
       <div className="flex flex-col h-screen bg-[#f4f4f4]">
-        {/* MAIN CONTENT */}
         <div className="flex-1 overflow-auto p-4 md:p-8">
           {view === 'dashboard' ? (
-            /* DASHBOARD */
+            // Dashboard content (unchanged)
             <div>
               <div className="flex justify-between items-center mb-8">
                 <div>
@@ -352,28 +350,12 @@ export default function Home() {
                   <p className="text-gray-600 mt-1">Here’s what’s happening with your business</p>
                 </div>
               </div>
-
+              {/* Stats and recent documents */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
-                <Card>
-                  <CardContent className="p-6">
-                    <p className="text-sm text-gray-500">Total Documents</p>
-                    <p className="text-4xl font-bold text-[#1e293b]">{savedEstimatesList.length}</p>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="p-6">
-                    <p className="text-sm text-gray-500">This Month</p>
-                    <p className="text-4xl font-bold text-[#10b981]">12</p>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="p-6">
-                    <p className="text-sm text-gray-500">Pending Payments</p>
-                    <p className="text-4xl font-bold text-amber-600">$2,840</p>
-                  </CardContent>
-                </Card>
+                <Card><CardContent className="p-6"><p className="text-sm text-gray-500">Total Documents</p><p className="text-4xl font-bold text-[#1e293b]">{savedEstimatesList.length}</p></CardContent></Card>
+                <Card><CardContent className="p-6"><p className="text-sm text-gray-500">This Month</p><p className="text-4xl font-bold text-[#10b981]">12</p></CardContent></Card>
+                <Card><CardContent className="p-6"><p className="text-sm text-gray-500">Pending Payments</p><p className="text-4xl font-bold text-amber-600">$2,840</p></CardContent></Card>
               </div>
-
               <Card>
                 <CardContent className="p-6">
                   <h3 className="font-semibold mb-4">Recent Documents</h3>
@@ -392,7 +374,7 @@ export default function Home() {
               </Card>
             </div>
           ) : (
-            /* EDITOR */
+            // EDITOR
             <div>
               <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to Dashboard</Button>
 
@@ -449,10 +431,8 @@ export default function Home() {
                 </CardContent>
               </Card>
 
-              {/* ACTION BUTTONS - NOW INCLUDES TAKE PHOTO & TAKE VIDEO */}
+              {/* Main Action Buttons (without camera buttons) */}
               <div className="flex flex-wrap gap-3 mb-8">
-                <Button onClick={() => document.getElementById('photo-camera')?.click()}>📸 Take Photo</Button>
-                <Button onClick={() => document.getElementById('video-camera')?.click()}>🎥 Record Video</Button>
                 <Button onClick={addRow} variant="outline">+ Add Line Item</Button>
                 <Button onClick={() => { refreshSavedList(); setIsLoadModalOpen(true); }} variant="outline">📂 Load Document</Button>
                 <Button onClick={openQuickLinesModal} variant="outline">📌 Quick Lines</Button>
@@ -461,10 +441,6 @@ export default function Home() {
                 <Button onClick={printDocument} className="bg-[#3b82f6]">🖨️ Print / Preview</Button>
                 <Button onClick={openSendModal} className="bg-[#8b5cf6]">✉️ Send</Button>
               </div>
-
-              {/* Hidden Camera Inputs */}
-              <input id="photo-camera" type="file" accept="image/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'photo')} className="hidden" />
-              <input id="video-camera" type="file" accept="video/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'video')} className="hidden" />
 
               {/* MAIN TABLE */}
               <Card className="mb-8">
@@ -505,7 +481,21 @@ export default function Home() {
                 </div>
               </Card>
 
-              {/* Photos Section */}
+              {/* TAKE PHOTO & TAKE VIDEO BUTTONS - MOVED HERE */}
+              <div className="flex gap-3 mb-6">
+                <Button onClick={() => document.getElementById('photo-camera')?.click()} className="flex-1">
+                  📸 Take Photo
+                </Button>
+                <Button onClick={() => document.getElementById('video-camera')?.click()} className="flex-1">
+                  🎥 Record Video
+                </Button>
+              </div>
+
+              {/* Hidden camera inputs */}
+              <input id="photo-camera" type="file" accept="image/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'photo')} className="hidden" />
+              <input id="video-camera" type="file" accept="video/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'video')} className="hidden" />
+
+              {/* PHOTOS SECTION */}
               <Card className="mb-8">
                 <CardContent className="p-6">
                   <h3 className="text-xl font-semibold mb-4">📸 Photos ({photoUrls.length})</h3>
@@ -520,7 +510,7 @@ export default function Home() {
                 </CardContent>
               </Card>
 
-              {/* Videos Section */}
+              {/* VIDEOS SECTION */}
               <Card className="mb-8">
                 <CardContent className="p-6">
                   <h3 className="text-xl font-semibold mb-4">🎥 Videos ({videoUrls.length})</h3>
@@ -548,9 +538,7 @@ export default function Home() {
                 <h1 className="text-4xl font-bold text-center mb-8">{profile.company || 'Your Company'}</h1>
                 {(profile.phone || profile.email) && (
                   <p className="text-center text-xl text-gray-600 mb-8">
-                    {profile.phone && `📞 ${profile.phone}`}
-                    {profile.phone && profile.email && ' | '}
-                    {profile.email && `✉️ ${profile.email}`}
+                    {profile.phone && `📞 ${profile.phone}`}{profile.phone && profile.email && ' | '}{profile.email && `✉️ ${profile.email}`}
                   </p>
                 )}
                 <div className="flex justify-between mb-8">
@@ -591,7 +579,7 @@ export default function Home() {
           )}
         </div>
 
-        {/* BOTTOM NAV */}
+        {/* BOTTOM NAVIGATION */}
         <div className="bg-white border-t shadow-inner flex items-center justify-around py-2 px-1 text-xs">
           <button onClick={goToDashboard} className={`flex flex-col items-center flex-1 py-1 ${view === 'dashboard' ? 'text-[#10b981]' : 'text-gray-500'}`}>
             <span className="text-3xl mb-0.5">📊</span>
@@ -624,7 +612,7 @@ export default function Home() {
         </div>
       </div>
 
-      {/* MODALS (all included) */}
+      {/* Modals */}
       <Dialog open={isLoadModalOpen} onOpenChange={setIsLoadModalOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader><DialogTitle>Saved Documents</DialogTitle></DialogHeader>
@@ -645,7 +633,7 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* Add the rest of your modals (Send, Profile, Quick Lines, Calendar, Templates) here if needed - they are the same as previous versions */}
+      {/* Add other modals (Send, Profile, Quick Lines, Calendar, Templates) as needed from previous versions */}
 
       <Dialog open={isProfileOpen} onOpenChange={setIsProfileOpen}>
         <DialogContent>
@@ -660,7 +648,7 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* Quick Lines, Send, Calendar, Templates modals can be added from previous code if you need them expanded. */}
+      {/* You can add the remaining modals here if you need them fully expanded. */}
 
     </>
   );
