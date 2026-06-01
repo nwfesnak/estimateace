@@ -70,7 +70,7 @@ export default function Home() {
   const [selectedEstimateForCalendar, setSelectedEstimateForCalendar] = useState<any>(null);
   const [selectedDateTime, setSelectedDateTime] = useState('');
 
-  // NEW: Export options state (only used in profile)
+  // Export options state
   const [exportOptions, setExportOptions] = useState({
     estimates: true,
     invoices: true,
@@ -347,7 +347,6 @@ export default function Home() {
     refreshSavedList();
   };
 
-  // NEW: Selective Export
   const exportData = async () => {
     if (!user || !supabase) return;
 
@@ -399,7 +398,6 @@ export default function Home() {
     if (saved) setQuickLines(JSON.parse(saved));
   }, []);
 
-  // Auto-refresh lists
   useEffect(() => {
     if (view === 'estimatesList' || view === 'invoicesList') refreshSavedList();
     if (view === 'archivesView') refreshArchivesList();
@@ -677,7 +675,7 @@ export default function Home() {
                 </CardContent>
               </Card>
 
-              {/* PRINT PREVIEW - ONLY THIS SECTION WAS CHANGED */}
+              {/* PRINT PREVIEW - Certificate of Insurance restored here */}
               <div id="print-document" className="max-w-4xl mx-auto bg-white p-10 shadow-2xl hidden print:block">
                 <h1 className="text-4xl font-bold text-center mb-8">{profile.company || 'Your Company'}</h1>
                 {(profile.phone || profile.email) && (
@@ -719,7 +717,7 @@ export default function Home() {
                 </table>
                 <div className="text-right text-3xl font-bold">Total: ${grandTotal.toFixed(2)}</div>
 
-                {/* PHOTOS NOW APPEAR IN PRINT PREVIEW / PDF */}
+                {/* Photos in print preview */}
                 {photoUrls.length > 0 && (
                   <div className="mt-12">
                     <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Attached Photos</h3>
@@ -733,6 +731,18 @@ export default function Home() {
                         />
                       ))}
                     </div>
+                  </div>
+                )}
+
+                {/* Certificate of Insurance - restored in print preview */}
+                {profile.certificateUrl && (
+                  <div className="mt-12">
+                    <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Certificate of Insurance</h3>
+                    <img 
+                      src={profile.certificateUrl} 
+                      alt="Certificate of Insurance" 
+                      className="max-h-96 mx-auto border rounded-lg shadow"
+                    />
                   </div>
                 )}
               </div>
@@ -909,7 +919,7 @@ export default function Home() {
           )}
         </div>
 
-        {/* Bottom Navigation (unchanged) */}
+        {/* Bottom Navigation */}
         <div className="bg-white border-t shadow-inner flex items-center justify-around py-2 px-1 text-xs">
           <button onClick={goToDashboard} className={`flex flex-col items-center flex-1 py-1 ${view === 'dashboard' ? 'text-[#10b981]' : 'text-gray-500'}`}>
             <span className="text-3xl mb-0.5">📊</span>
