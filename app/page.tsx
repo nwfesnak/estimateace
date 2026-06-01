@@ -98,7 +98,6 @@ export default function Home() {
     else showMessage('Account created!');
   };
 
-  // Core functions
   const saveToDB = async () => {
     if (!user || !supabase) return;
     const data = {
@@ -163,15 +162,8 @@ export default function Home() {
   };
 
   const newEstimate = () => {
-    setJobName(''); 
-    setAddress(''); 
-    setCity(''); 
-    setZipCode('');
-    setPhones(['']); 
-    setEmails(['']); 
-    setTerms(''); 
-    setPhotoUrls([]); 
-    setVideoUrls([]);
+    setJobName(''); setAddress(''); setCity(''); setZipCode('');
+    setPhones(['']); setEmails(['']); setTerms(''); setPhotoUrls([]); setVideoUrls([]);
     setItems([{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
     const today = new Date().toISOString().split('T')[0];
     setDate(today);
@@ -197,18 +189,12 @@ export default function Home() {
     refreshSavedList();
   };
 
-  // Item functions
   const addRow = () => setItems([...items, { id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
   const updateItem = (id: number, field: string, value: any) => {
-    setItems(prev => prev.map(item => 
-      item.id === id 
-        ? { ...item, [field]: value, total: (field === 'qty' || field === 'price') ? (item.qty || 0) * (item.price || 0) : item.total } 
-        : item
-    ));
+    setItems(prev => prev.map(item => item.id === id ? { ...item, [field]: value, total: (field === 'qty' || field === 'price') ? (item.qty || 0) * (item.price || 0) : item.total } : item));
   };
   const removeRow = (id: number) => setItems(prev => prev.filter(item => item.id !== id));
 
-  // Phone & Email functions
   const addPhone = () => setPhones([...phones, '']);
   const removePhone = (i: number) => setPhones(phones.filter((_, idx) => idx !== i));
   const updatePhone = (i: number, value: string) => { const arr = [...phones]; arr[i] = value; setPhones(arr); };
@@ -315,20 +301,15 @@ export default function Home() {
     showMessage('Document deleted');
   };
 
-  // Auto-save
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const debouncedSave = () => {
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    saveTimeoutRef.current = setTimeout(() => {
-      saveToDB();
-    }, 800);
+    saveTimeoutRef.current = setTimeout(saveToDB, 800);
   };
 
   useEffect(() => {
     if (view === 'editor') debouncedSave();
-    return () => {
-      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    };
+    return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
   }, [jobName, address, city, zipCode, phones, emails, date, invoiceNumber, items, terms, profile, documentType, dueDate, paymentStatus, amountPaid, paymentMethod, view]);
 
   useEffect(() => {
@@ -336,7 +317,6 @@ export default function Home() {
     if (saved) setQuickLines(JSON.parse(saved));
   }, []);
 
-  // ==================== LOGIN SCREEN ====================
   if (!user) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#f4f4f4]">
@@ -364,61 +344,16 @@ export default function Home() {
         }
       `}</style>
 
-      <div className="flex h-screen bg-[#f4f4f4]">
-        {/* SIDEBAR */}
-        <div className="w-64 bg-white border-r shadow-sm flex flex-col">
-          <div className="p-6 border-b">
-            <h1 className="text-2xl font-bold text-[#1e293b]">EstimateAce</h1>
-          </div>
-
-          <div className="flex-1 p-3 space-y-1">
-            <Button variant={view === 'dashboard' ? 'default' : 'ghost'} className="w-full justify-start" onClick={goToDashboard}>
-              📊 Dashboard
-            </Button>
-            <Button variant="ghost" className="w-full justify-start" onClick={() => openNewDocument('estimate')}>
-              📋 New Estimate
-            </Button>
-            <Button variant="ghost" className="w-full justify-start" onClick={() => openNewDocument('invoice')}>
-              💰 New Invoice
-            </Button>
-            <Button variant="ghost" className="w-full justify-start" onClick={() => { refreshSavedList(); setIsLoadModalOpen(true); }}>
-              📂 My Documents
-            </Button>
-            <Button variant="ghost" className="w-full justify-start" onClick={() => setIsTemplatesOpen(true)}>
-              📌 Templates
-            </Button>
-            <Button variant="ghost" className="w-full justify-start" onClick={openCalendarModal}>
-              📅 Calendar
-            </Button>
-          </div>
-
-          <div className="p-4 border-t mt-auto">
-            <Button variant="ghost" className="w-full justify-start" onClick={() => setIsProfileOpen(true)}>
-              👤 Profile
-            </Button>
-            <Button variant="ghost" className="w-full justify-start text-red-600">
-              Logout
-            </Button>
-          </div>
-        </div>
-
-        {/* MAIN CONTENT AREA */}
+      <div className="flex flex-col h-screen bg-[#f4f4f4]">
+        {/* MAIN CONTENT */}
         <div className="flex-1 overflow-auto">
           {view === 'dashboard' ? (
-            /* ==================== DASHBOARD ==================== */
+            /* DASHBOARD */
             <div className="p-8">
               <div className="flex justify-between items-center mb-8">
                 <div>
                   <h2 className="text-4xl font-semibold text-[#1e293b]">Welcome back!</h2>
                   <p className="text-gray-600 mt-1">Here’s what’s happening with your business</p>
-                </div>
-                <div className="flex gap-3">
-                  <Button onClick={() => openNewDocument('estimate')} className="bg-[#10b981]">
-                    📋 New Estimate
-                  </Button>
-                  <Button onClick={() => openNewDocument('invoice')} className="bg-[#f59e0b]">
-                    💰 New Invoice
-                  </Button>
                 </div>
               </div>
 
@@ -463,7 +398,7 @@ export default function Home() {
               </Card>
             </div>
           ) : (
-            /* ==================== FULL EDITOR ==================== */
+            /* FULL EDITOR */
             <div className="p-4 md:p-8">
               <Button variant="outline" onClick={goToDashboard} className="mb-6">
                 ← Back to Dashboard
@@ -528,7 +463,6 @@ export default function Home() {
                 </CardContent>
               </Card>
 
-              {/* NEW ESTIMATE ROW */}
               <div className="flex flex-wrap gap-3 mb-8">
                 <Button onClick={addRow} variant="outline">+ Add Line Item</Button>
                 <Button onClick={saveNamedEstimate} className="bg-[#1e293b]">💾 Save</Button>
@@ -576,7 +510,7 @@ export default function Home() {
                 </div>
               </Card>
 
-              {/* PHOTOS */}
+              {/* Photos, Videos, Terms, Print Document sections (same as before) */}
               <Card className="mb-8">
                 <CardContent className="p-6">
                   <h3 className="text-xl font-semibold mb-4">📸 Photos ({photoUrls.length})</h3>
@@ -593,7 +527,6 @@ export default function Home() {
                 </CardContent>
               </Card>
 
-              {/* VIDEOS */}
               <Card className="mb-8">
                 <CardContent className="p-6">
                   <h3 className="text-xl font-semibold mb-4">🎥 Videos ({videoUrls.length})</h3>
@@ -610,7 +543,6 @@ export default function Home() {
                 </CardContent>
               </Card>
 
-              {/* TERMS */}
               <Card className="mb-8">
                 <CardContent className="p-6">
                   <h3 className="text-xl font-semibold mb-3">Terms & Conditions</h3>
@@ -661,7 +593,6 @@ export default function Home() {
                   </tbody>
                 </table>
                 <div className="text-right text-3xl font-bold">Total: ${grandTotal.toFixed(2)}</div>
-
                 {photoUrls.length > 0 && (
                   <div className="mt-12">
                     <h3 className="text-xl font-semibold mb-4">📸 Attached Photos</h3>
@@ -676,10 +607,34 @@ export default function Home() {
             </div>
           )}
         </div>
+
+        {/* HORIZONTAL BOTTOM NAV - ICONS ONLY */}
+        <div className="bg-white border-t shadow-inner flex items-center justify-around py-3 px-2">
+          <button onClick={goToDashboard} className={`flex flex-col items-center flex-1 ${view === 'dashboard' ? 'text-[#10b981]' : 'text-gray-500'}`}>
+            <span className="text-3xl">📊</span>
+          </button>
+          <button onClick={() => openNewDocument('estimate')} className="flex flex-col items-center flex-1 text-gray-500">
+            <span className="text-3xl">📋</span>
+          </button>
+          <button onClick={() => openNewDocument('invoice')} className="flex flex-col items-center flex-1 text-gray-500">
+            <span className="text-3xl">💰</span>
+          </button>
+          <button onClick={() => { refreshSavedList(); setIsLoadModalOpen(true); }} className="flex flex-col items-center flex-1 text-gray-500">
+            <span className="text-3xl">📂</span>
+          </button>
+          <button onClick={() => setIsTemplatesOpen(true)} className="flex flex-col items-center flex-1 text-gray-500">
+            <span className="text-3xl">📌</span>
+          </button>
+          <button onClick={openCalendarModal} className="flex flex-col items-center flex-1 text-gray-500">
+            <span className="text-3xl">📅</span>
+          </button>
+          <button onClick={() => setIsProfileOpen(true)} className="flex flex-col items-center flex-1 text-gray-500">
+            <span className="text-3xl">👤</span>
+          </button>
+        </div>
       </div>
 
-      {/* MODALS */}
-      {/* Load Modal */}
+      {/* ALL MODALS (unchanged) */}
       <Dialog open={isLoadModalOpen} onOpenChange={setIsLoadModalOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader><DialogTitle>Saved Documents</DialogTitle></DialogHeader>
@@ -700,7 +655,6 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* Send Modal */}
       <Dialog open={isSendModalOpen} onOpenChange={setIsSendModalOpen}>
         <DialogContent>
           <DialogHeader><DialogTitle>Send {documentType.toUpperCase()}</DialogTitle></DialogHeader>
@@ -737,17 +691,13 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* Templates Modal */}
       <Dialog open={isTemplatesOpen} onOpenChange={setIsTemplatesOpen}>
         <DialogContent>
           <DialogHeader><DialogTitle>Templates</DialogTitle></DialogHeader>
-          <div className="space-y-4 max-h-96 overflow-auto">
-            {/* You can expand this later */}
-          </div>
+          <div className="space-y-4 max-h-96 overflow-auto"></div>
         </DialogContent>
       </Dialog>
 
-      {/* Profile Modal */}
       <Dialog open={isProfileOpen} onOpenChange={setIsProfileOpen}>
         <DialogContent>
           <DialogHeader><DialogTitle>Company Profile</DialogTitle></DialogHeader>
@@ -761,7 +711,6 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* Quick Lines Modal */}
       <Dialog open={isQuickLinesModalOpen} onOpenChange={setIsQuickLinesModalOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>📌 Quick Lines</DialogTitle></DialogHeader>
@@ -782,7 +731,6 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* Calendar Modal */}
       <Dialog open={isCalendarModalOpen} onOpenChange={setIsCalendarModalOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>📅 Schedule Appointment</DialogTitle></DialogHeader>
