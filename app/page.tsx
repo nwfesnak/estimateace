@@ -677,6 +677,7 @@ export default function Home() {
                 </CardContent>
               </Card>
 
+              {/* PRINT PREVIEW - ONLY THIS SECTION WAS CHANGED */}
               <div id="print-document" className="max-w-4xl mx-auto bg-white p-10 shadow-2xl hidden print:block">
                 <h1 className="text-4xl font-bold text-center mb-8">{profile.company || 'Your Company'}</h1>
                 {(profile.phone || profile.email) && (
@@ -717,6 +718,23 @@ export default function Home() {
                   </tbody>
                 </table>
                 <div className="text-right text-3xl font-bold">Total: ${grandTotal.toFixed(2)}</div>
+
+                {/* PHOTOS NOW APPEAR IN PRINT PREVIEW / PDF */}
+                {photoUrls.length > 0 && (
+                  <div className="mt-12">
+                    <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Attached Photos</h3>
+                    <div className="grid grid-cols-2 gap-6">
+                      {photoUrls.map((url, i) => (
+                        <img 
+                          key={i} 
+                          src={url} 
+                          alt={`Photo ${i + 1}`} 
+                          className="w-full border rounded-xl shadow-sm max-h-64 object-contain"
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -797,7 +815,6 @@ export default function Home() {
                     </div>
                   )}
 
-                  {/* Teammates section unchanged */}
                   <div className="border-t pt-8">
                     <h3 className="font-semibold mb-4">Teammates</h3>
                     <div className="flex gap-2 mb-6">
@@ -837,7 +854,6 @@ export default function Home() {
                     </div>
                   </div>
 
-                  {/* NEW SELECTIVE EXPORT SECTION */}
                   <div className="border-t pt-8">
                     <h3 className="font-semibold mb-4">Export Data</h3>
                     <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
