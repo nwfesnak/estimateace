@@ -394,7 +394,7 @@ export default function Home() {
 
         {/* NEW ESTIMATE ROW */}
         <div className="flex flex-wrap gap-3 mb-8">
-          <Button onClick={newEstimate} className="bg-[#10b981] hover:bg-[#059669]">📄 New Estimate</Button>
+          <Button onClick={newEstimate} className="bg-[#10b981]">📄 New Estimate</Button>
           <Button onClick={addRow} variant="outline">+ Add Line Item</Button>
           <Button onClick={openLoadModal} variant="outline">📂 Load Document</Button>
           <Button onClick={openQuickLinesModal} variant="outline">📌 Quick Lines</Button>
@@ -416,9 +416,7 @@ export default function Home() {
             <TableBody>
               {items.map((item) => (
                 <TableRow key={item.id}>
-                  <TableCell>
-                    <Textarea value={item.description} onChange={e => updateItem(item.id, 'description', e.target.value)} rows={3} />
-                  </TableCell>
+                  <TableCell><Textarea value={item.description} onChange={e => updateItem(item.id, 'description', e.target.value)} rows={3} /></TableCell>
                   <TableCell><Input type="number" value={item.qty} onChange={e => updateItem(item.id, 'qty', parseFloat(e.target.value) || 0)} className="text-right" /></TableCell>
                   <TableCell><Input value={item.unit} onChange={e => updateItem(item.id, 'unit', e.target.value)} /></TableCell>
                   <TableCell><Input type="number" value={item.price} onChange={e => updateItem(item.id, 'price', parseFloat(e.target.value) || 0)} className="text-right" /></TableCell>
@@ -450,7 +448,7 @@ export default function Home() {
           </div>
         </Card>
 
-        {/* PHOTOS SECTION */}
+        {/* PHOTOS SECTION — RED X DELETE ADDED */}
         <Card className="mb-8">
           <CardContent className="p-6">
             <h3 className="text-xl font-semibold mb-4">📸 Photos ({photoUrls.length})</h3>
@@ -460,14 +458,19 @@ export default function Home() {
               {photoUrls.map((url, i) => (
                 <div key={i} className="relative group">
                   <img src={url} alt="" className="w-full h-40 object-cover rounded-lg border" />
-                  <button onClick={() => removeMedia('photo', i)} className="absolute top-2 right-2 bg-red-500 text-white px-2 py-1 rounded text-xs opacity-0 group-hover:opacity-100">✕</button>
+                  <button 
+                    onClick={() => removeMedia('photo', i)} 
+                    className="absolute top-2 right-2 bg-red-500 hover:bg-red-600 text-white text-xs px-3 py-1 rounded-full shadow-md opacity-0 group-hover:opacity-100 transition"
+                  >
+                    ✕
+                  </button>
                 </div>
               ))}
             </div>
           </CardContent>
         </Card>
 
-        {/* VIDEOS SECTION */}
+        {/* VIDEOS SECTION (unchanged) */}
         <Card className="mb-8">
           <CardContent className="p-6">
             <h3 className="text-xl font-semibold mb-4">🎥 Videos ({videoUrls.length})</h3>
@@ -477,7 +480,7 @@ export default function Home() {
               {videoUrls.map((url, i) => (
                 <div key={i} className="relative group">
                   <video src={url} controls className="w-full h-40 object-cover rounded-lg border" />
-                  <button onClick={() => removeMedia('video', i)} className="absolute top-2 right-2 bg-red-500 text-white px-2 py-1 rounded text-xs opacity-0 group-hover:opacity-100">✕</button>
+                  <button onClick={() => removeMedia('video', i)} className="absolute top-2 right-2 bg-red-500 hover:bg-red-600 text-white text-xs px-3 py-1 rounded-full shadow-md opacity-0 group-hover:opacity-100 transition">✕</button>
                 </div>
               ))}
             </div>
@@ -512,7 +515,7 @@ export default function Home() {
         <input id="video-camera" type="file" accept="video/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'video')} className="hidden" />
         <input id="receipts-camera" type="file" accept="image/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'photo')} className="hidden" />
 
-        {/* PRINT DOCUMENT — PHOTOS NOW INCLUDED IN PDF */}
+        {/* PRINT DOCUMENT WITH PHOTOS ATTACHED */}
         <div id="print-document" className="max-w-4xl mx-auto bg-white p-10 shadow-2xl hidden print:block">
           <h1 className="text-4xl font-bold text-center mb-8">{profile.company || 'Your Company'}</h1>
           <div className="flex justify-between mb-8">
@@ -547,11 +550,8 @@ export default function Home() {
               ))}
             </tbody>
           </table>
-          <div className="text-right text-3xl font-bold">
-            Total: ${grandTotal.toFixed(2)}
-          </div>
+          <div className="text-right text-3xl font-bold">Total: ${grandTotal.toFixed(2)}</div>
 
-          {/* PHOTOS ATTACHED TO PDF */}
           {photoUrls.length > 0 && (
             <div className="mt-12">
               <h3 className="text-xl font-semibold mb-4">📸 Attached Photos</h3>
@@ -565,7 +565,7 @@ export default function Home() {
         </div>
       </div>
 
-      {/* LOAD MODAL */}
+      {/* ALL MODALS (unchanged) */}
       <Dialog open={isLoadModalOpen} onOpenChange={setIsLoadModalOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader><DialogTitle>Saved Documents</DialogTitle></DialogHeader>
@@ -586,7 +586,6 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* SEND MODAL */}
       <Dialog open={isSendModalOpen} onOpenChange={setIsSendModalOpen}>
         <DialogContent>
           <DialogHeader><DialogTitle>Send {documentType.toUpperCase()}</DialogTitle></DialogHeader>
@@ -623,17 +622,13 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* TEMPLATES MODAL */}
       <Dialog open={isTemplatesOpen} onOpenChange={setIsTemplatesOpen}>
         <DialogContent>
           <DialogHeader><DialogTitle>Templates</DialogTitle></DialogHeader>
-          <div className="space-y-4 max-h-96 overflow-auto">
-            {/* Default templates + saved ones - unchanged */}
-          </div>
+          <div className="space-y-4 max-h-96 overflow-auto"></div>
         </DialogContent>
       </Dialog>
 
-      {/* PROFILE MODAL */}
       <Dialog open={isProfileOpen} onOpenChange={setIsProfileOpen}>
         <DialogContent>
           <DialogHeader><DialogTitle>Company Profile</DialogTitle></DialogHeader>
@@ -645,7 +640,6 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* QUICK LINES MODAL */}
       <Dialog open={isQuickLinesModalOpen} onOpenChange={setIsQuickLinesModalOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>📌 Quick Lines</DialogTitle></DialogHeader>
@@ -666,7 +660,6 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* CALENDAR MODAL */}
       <Dialog open={isCalendarModalOpen} onOpenChange={setIsCalendarModalOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>📅 Schedule Appointment</DialogTitle></DialogHeader>
