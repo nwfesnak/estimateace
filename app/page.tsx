@@ -340,6 +340,8 @@ export default function Home() {
           <div>
             <h1 className="text-5xl font-bold text-[#1e293b]">{profile.company || 'Your Company'}</h1>
             <p className="text-xl text-gray-600">{profile.slogan || 'Professional Estimation & Invoicing'}</p>
+            {profile.phone && <p className="text-lg text-gray-600 mt-1">📞 {profile.phone}</p>}
+            {profile.email && <p className="text-lg text-gray-600">✉️ {profile.email}</p>}
           </div>
           <div className="text-right">
             <div className="text-sm text-gray-500">Document #</div>
@@ -518,6 +520,13 @@ export default function Home() {
         {/* PRINT DOCUMENT WITH PHOTOS ATTACHED */}
         <div id="print-document" className="max-w-4xl mx-auto bg-white p-10 shadow-2xl hidden print:block">
           <h1 className="text-4xl font-bold text-center mb-8">{profile.company || 'Your Company'}</h1>
+          {(profile.phone || profile.email) && (
+            <p className="text-center text-xl text-gray-600 mb-8">
+              {profile.phone && `📞 ${profile.phone}`}
+              {profile.phone && profile.email && ' | '}
+              {profile.email && `✉️ ${profile.email}`}
+            </p>
+          )}
           <div className="flex justify-between mb-8">
             <div>
               <strong>{documentType.toUpperCase()} # {invoiceNumber}</strong><br />
@@ -633,7 +642,9 @@ export default function Home() {
         <DialogContent>
           <DialogHeader><DialogTitle>Company Profile</DialogTitle></DialogHeader>
           <Input placeholder="Company Name" value={profile.company} onChange={e => setProfile({...profile, company: e.target.value})} className="mb-3" />
-          <Input placeholder="Slogan" value={profile.slogan} onChange={e => setProfile({...profile, slogan: e.target.value})} className="mb-6" />
+          <Input placeholder="Slogan" value={profile.slogan} onChange={e => setProfile({...profile, slogan: e.target.value})} className="mb-3" />
+          <Input placeholder="Phone Number" value={profile.phone} onChange={e => setProfile({...profile, phone: e.target.value})} className="mb-3" />
+          <Input placeholder="Email Address" value={profile.email} onChange={e => setProfile({...profile, email: e.target.value})} className="mb-6" />
           <DialogFooter>
             <Button onClick={saveProfile}>Save Profile</Button>
           </DialogFooter>
