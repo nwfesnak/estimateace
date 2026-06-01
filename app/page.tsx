@@ -99,8 +99,7 @@ export default function Home() {
       user_id: user.id,
       jobName, address, city, zipCode, phones, emails, date, invoiceNumber,
       items, terms, profile, documentType, dueDate, paymentStatus, amountPaid,
-      paymentMethod, photoUrls, videoUrls, receiptUrls,
-      updated_at: new Date().toISOString()
+      paymentMethod, photoUrls, videoUrls, receiptUrls, updated_at: new Date().toISOString()
     };
     const { error } = await supabase.from('estimates').upsert({ id: invoiceNumber, ...data });
     if (error) console.error('Save error:', error);
@@ -361,7 +360,6 @@ export default function Home() {
 
       <div className="flex flex-col h-screen bg-[#f4f4f4]">
         <div className="flex-1 overflow-auto p-4 md:p-8">
-          {/* DASHBOARD */}
           {view === 'dashboard' && (
             <div>
               <div className="flex justify-between items-center mb-8">
@@ -394,7 +392,6 @@ export default function Home() {
             </div>
           )}
 
-          {/* ALL ESTIMATES LIST */}
           {view === 'estimatesList' && (
             <div>
               <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to Dashboard</Button>
@@ -417,7 +414,6 @@ export default function Home() {
             </div>
           )}
 
-          {/* ALL INVOICES LIST */}
           {view === 'invoicesList' && (
             <div>
               <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to Dashboard</Button>
@@ -441,12 +437,10 @@ export default function Home() {
             </div>
           )}
 
-          {/* EDITOR */}
           {view === 'editor' && (
             <div>
               <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to Dashboard</Button>
 
-              {/* Company Header */}
               <div className="flex justify-between items-start mb-8">
                 <div>
                   <h1 className="text-5xl font-bold text-[#1e293b]">{profile.company || 'Your Company'}</h1>
@@ -461,7 +455,6 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Job Info Card */}
               <Card className="mb-8">
                 <CardContent className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
@@ -499,13 +492,11 @@ export default function Home() {
                 </CardContent>
               </Card>
 
-              {/* Small action buttons */}
               <div className="flex flex-wrap gap-3 mb-8">
                 <Button onClick={addRow} variant="outline">+ Add Line Item</Button>
                 <Button onClick={openQuickLinesModal} variant="outline">📌 Quick Lines</Button>
               </div>
 
-              {/* Main Table */}
               <Card className="mb-8">
                 <Table>
                   <TableHeader>
@@ -544,7 +535,6 @@ export default function Home() {
                 </div>
               </Card>
 
-              {/* Action buttons below Grand Total */}
               <div className="flex flex-wrap gap-3 mb-8">
                 <Button onClick={saveNamedEstimate} className="bg-[#1e293b]">💾 Save Estimate</Button>
                 <Button onClick={printDocument} className="bg-[#3b82f6]">🖨️ Print/Preview</Button>
@@ -552,7 +542,6 @@ export default function Home() {
                 <Button onClick={convertToInvoice} className="bg-[#f59e0b]">📄 Convert to Invoice</Button>
               </div>
 
-              {/* Take Photo & Take Video */}
               <div className="flex gap-3 mb-8">
                 <Button onClick={() => document.getElementById('photo-camera')?.click()} className="flex-1">📸 Take Photo</Button>
                 <Button onClick={() => document.getElementById('video-camera')?.click()} className="flex-1">🎥 Record Video</Button>
@@ -560,9 +549,6 @@ export default function Home() {
 
               <input id="photo-camera" type="file" accept="image/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'photo')} className="hidden" />
               <input id="video-camera" type="file" accept="video/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'video')} className="hidden" />
-
-              {/* Photos, Videos, Receipts, Terms, Print Document sections */}
-              {/* (All sections are fully included) */}
 
               {/* Photos */}
               <Card className="mb-8">
@@ -700,7 +686,7 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Modals */}
+      {/* Load Modal */}
       <Dialog open={isLoadModalOpen} onOpenChange={setIsLoadModalOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader><DialogTitle>Saved Documents</DialogTitle></DialogHeader>
@@ -721,6 +707,7 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
+      {/* Profile Modal */}
       <Dialog open={isProfileOpen} onOpenChange={setIsProfileOpen}>
         <DialogContent>
           <DialogHeader><DialogTitle>Company Profile</DialogTitle></DialogHeader>
