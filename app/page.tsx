@@ -1027,7 +1027,6 @@ export default function Home() {
             </div>
           )}
 
-          {/* NEW REPORTS PAGE */}
           {view === 'reportsView' && (
             <div>
               <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to Dashboard</Button>
@@ -1094,6 +1093,33 @@ export default function Home() {
                   )}
                 </CardContent>
               </Card>
+
+              {/* NEW TAB + SCROLL-DOWN MENU FOR ARCHIVES */}
+              <div className="max-w-2xl mx-auto mt-10">
+                <Button 
+                  onClick={() => refreshArchivesList()}
+                  className="mb-4 w-full bg-[#1e293b] text-white"
+                >
+                  📂 Retrieve Archives
+                </Button>
+                <select 
+                  className="w-full border rounded-xl p-4 text-lg"
+                  onChange={e => {
+                    const selectedArchive = archivesList.find(arch => arch.id === e.target.value);
+                    if (selectedArchive) {
+                      showMessage(`📂 Opened archive: ${selectedArchive.jobName || 'Untitled'} — ${selectedArchive.invoiceNumber}`);
+                      // You can extend this later to load the archive into editor if needed
+                    }
+                  }}
+                >
+                  <option value="">— Scroll to select an archived item —</option>
+                  {archivesList.map(arch => (
+                    <option key={arch.id} value={arch.id}>
+                      {arch.jobName || 'Untitled'} — {arch.invoiceNumber} (Archived: {new Date(arch.archived_at).toLocaleDateString()})
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
           )}
 
@@ -1247,7 +1273,7 @@ export default function Home() {
           )}
         </div>
 
-        {/* Bottom Navigation - Templates changed to Reports */}
+        {/* Bottom Navigation */}
         <div className="bg-white border-t shadow-inner flex items-center justify-around py-2 px-1 text-xs">
           <button onClick={goToDashboard} className={`flex flex-col items-center flex-1 py-1 ${view === 'dashboard' ? 'text-[#10b981]' : 'text-gray-500'}`}>
             <span className="text-3xl mb-0.5">📊</span>
