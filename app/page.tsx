@@ -46,7 +46,7 @@ export default function Home() {
   const [amountPaid, setAmountPaid] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState('');
 
-  // Profile - now persists company info globally
+  // Profile
   const [profile, setProfile] = useState({ 
     name: '', company: '', address: '', phone: '', email: '', slogan: '',
     disclosure: '',
@@ -93,6 +93,11 @@ export default function Home() {
     const { data: listener } = supabase.auth.onAuthStateChange((_, session) => setUser(session?.user ?? null));
     return () => listener.subscription.unsubscribe();
   }, [supabase]);
+
+  // NEW: Load latest profile on login (company info + auto-save toggle now persist)
+  useEffect(() => {
+    if (user) loadLatestProfile();
+  }, [user]);
 
   const login = async () => {
     if (!supabase) return;
@@ -195,7 +200,6 @@ export default function Home() {
     setReceiverSignatureDataUrl(est.receiverSignatureDataUrl || '');
   };
 
-  // Load latest saved profile (company info persists globally)
   const loadLatestProfile = async () => {
     if (!user || !supabase) return;
     const { data } = await supabase
@@ -222,7 +226,7 @@ export default function Home() {
     localStorage.setItem('estimateCount', savedCount.toString());
     const prefix = documentType === 'invoice' ? 'INV' : 'EST';
     setInvoiceNumber(`${prefix}-${String(savedCount).padStart(4, '0')}`);
-    loadLatestProfile(); // ← company name, slogan, phone, email, address now auto-load
+    loadLatestProfile();
   };
 
   const openNewDocument = (type: 'estimate' | 'invoice') => {
@@ -270,8 +274,10 @@ export default function Home() {
     setView('sendPreview');
   };
 
+  // UPDATED: saveProfile now refreshes profile immediately so company info + auto-save toggle persist
   const saveProfile = async () => {
     await saveToDB();
+    await loadLatestProfile();
     showMessage('✅ Profile saved!');
   };
 
@@ -666,7 +672,6 @@ export default function Home() {
             <div>
               <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to Dashboard</Button>
 
-              {/* Company info header - now auto-populates from saved profile */}
               <div className="flex justify-between items-start mb-8">
                 <div>
                   <h1 className="text-5xl font-bold text-[#1e293b]">{profile.company || 'Your Company'}</h1>
@@ -829,7 +834,6 @@ export default function Home() {
                 </CardContent>
               </Card>
 
-              {/* DIGITAL SIGNATURE SECTION */}
               <Card className="mb-8">
                 <CardContent className="p-6">
                   <h3 className="text-xl font-semibold mb-4">✍️ Digital Signature</h3>
@@ -855,7 +859,6 @@ export default function Home() {
                 </CardContent>
               </Card>
 
-              {/* PRINT PREVIEW */}
               <div id="print-document" className="max-w-4xl mx-auto bg-white p-10 shadow-2xl hidden print:block">
                 <h1 className="text-4xl font-bold text-center mb-8">{profile.company || 'Your Company'}</h1>
                 {(profile.phone || profile.email) && (
@@ -1103,7 +1106,6 @@ export default function Home() {
             </div>
           )}
 
-          {/* SEND PREVIEW PAGE */}
           {view === 'sendPreview' && (
             <div className="max-w-4xl mx-auto">
               <Button variant="outline" onClick={() => setView('editor')} className="mb-6">← Back to Editor</Button>
