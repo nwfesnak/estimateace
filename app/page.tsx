@@ -607,16 +607,6 @@ export default function Home() {
                 <Button onClick={printDocument} className="bg-[#3b82f6]">🖨️ Print/Preview</Button>
                 <Button onClick={openSendPreview} className="bg-[#8b5cf6]">✉️ Send Estimate</Button>
                 <Button onClick={convertToInvoice} className="bg-[#f59e0b]">📄 Convert to Invoice</Button>
-                {/* Send to All Parties button - added exactly as requested */}
-                <Button 
-                  onClick={() => { 
-                    setSelectedEmailsForSend([...emails]); 
-                    setSelectedPhonesForSend([...phones]); 
-                    setIsSendModalOpen(true); 
-                  }} 
-                  className="bg-[#f97316]">
-                  📧 Send to All Parties
-                </Button>
               </div>
 
               <div className="flex gap-3 mb-8">
@@ -945,6 +935,17 @@ export default function Home() {
               <Button variant="outline" onClick={() => setView('editor')} className="mb-6">← Back to Editor</Button>
               <h2 className="text-3xl font-semibold mb-6">Preview of what will be sent</h2>
 
+              {/* NEW BUTTON ADDED ONLY HERE - opens popup to choose emails & phones */}
+              <Button 
+                onClick={() => { 
+                  setSelectedEmailsForSend([...emails]); 
+                  setSelectedPhonesForSend([...phones]); 
+                  setIsSendModalOpen(true); 
+                }} 
+                className="mb-6 bg-[#f97316] text-white px-8 py-3 text-lg">
+                📧 Choose Recipients & Send
+              </Button>
+
               <div className="bg-white p-10 shadow-2xl rounded-2xl border mb-8">
                 <h1 className="text-4xl font-bold text-center mb-8">{profile.company || 'Your Company'}</h1>
                 {(profile.phone || profile.email) && (
@@ -1086,35 +1087,48 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* Send to All Parties Modal - updated to send to ALL by default */}
+      {/* Send Recipients Popup - re-used for preview page */}
       <Dialog open={isSendModalOpen} onOpenChange={setIsSendModalOpen}>
         <DialogContent>
-          <DialogHeader><DialogTitle>📧 Send Estimate to ALL Parties</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>📧 Choose Recipients for this Estimate</DialogTitle></DialogHeader>
           <div className="space-y-6">
             <div>
-              <h4 className="font-semibold mb-2">All Emails on this ticket ({emails.length})</h4>
+              <h4 className="font-semibold mb-2">Select Emails</h4>
               {emails.map((em, i) => (
-                <label key={i} className="flex items-center gap-2">
-                  <input type="checkbox" checked={true} readOnly /> {em || '(empty)'}
+                <label key={i} className="flex items-center gap-2 mb-1">
+                  <input 
+                    type="checkbox" 
+                    checked={selectedEmailsForSend.includes(em)}
+                    onChange={() => {
+                      setSelectedEmailsForSend(prev => prev.includes(em) ? prev.filter(e => e !== em) : [...prev, em]);
+                    }}
+                  />
+                  {em || '(empty)'}
                 </label>
               ))}
             </div>
             <div>
-              <h4 className="font-semibold mb-2">All Phones on this ticket ({phones.length})</h4>
+              <h4 className="font-semibold mb-2">Select Phone Numbers</h4>
               {phones.map((ph, i) => (
-                <label key={i} className="flex items-center gap-2">
-                  <input type="checkbox" checked={true} readOnly /> {ph || '(empty)'}
+                <label key={i} className="flex items-center gap-2 mb-1">
+                  <input 
+                    type="checkbox" 
+                    checked={selectedPhonesForSend.includes(ph)}
+                    onChange={() => {
+                      setSelectedPhonesForSend(prev => prev.includes(ph) ? prev.filter(p => p !== ph) : [...prev, ph]);
+                    }}
+                  />
+                  {ph || '(empty)'}
                 </label>
               ))}
             </div>
-            <p className="text-green-600 font-medium">✅ This will send to EVERY email and EVERY phone listed above.</p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsSendModalOpen(false)}>Cancel</Button>
             <Button onClick={() => {
-              showMessage(`✅ Estimate successfully sent to ALL parties on the ticket!\n\nEmails: ${emails.join(', ') || 'none'}\nPhones: ${phones.join(', ') || 'none'}`);
+              showMessage(`✅ Estimate sent to selected recipients!\nEmails: ${selectedEmailsForSend.join(', ') || 'none'}\nPhones: ${selectedPhonesForSend.join(', ') || 'none'}`);
               setIsSendModalOpen(false);
-            }} className="bg-[#10b981]">Send to All Parties Now</Button>
+            }} className="bg-[#10b981]">Send Now</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
