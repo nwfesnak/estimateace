@@ -44,11 +44,12 @@ export default function Home() {
   const [amountPaid, setAmountPaid] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState('');
 
-  // Profile
+  // Profile (added depositAmount)
   const [profile, setProfile] = useState({ 
     name: '', company: '', address: '', phone: '', email: '', slogan: '',
     disclosure: '',
     certificateUrl: '',
+    depositAmount: 0,
     autoSaveEnabled: true,
     teammates: [] as { email: string; role: 'full' | 'limited' }[]
   });
@@ -710,6 +711,21 @@ export default function Home() {
                 </table>
                 <div className="text-right text-3xl font-bold">Total: ${grandTotal.toFixed(2)}</div>
 
+                {profile.disclosure && (
+                  <div className="mt-12">
+                    <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Disclosure / Notes</h3>
+                    <div className="text-gray-700 leading-relaxed whitespace-pre-wrap border rounded-xl p-6 bg-gray-50">
+                      {profile.disclosure}
+                    </div>
+                  </div>
+                )}
+
+                {/* Approved button / section for PDF - placed exactly below Disclosure and above Certificate */}
+                <div className="mt-12 text-center border-2 border-dashed border-[#10b981] rounded-3xl p-8">
+                  <div className="text-4xl font-bold text-[#10b981]">✅ Approved</div>
+                  <div className="mt-4 text-xl">Deposit due: <span className="font-semibold">${(profile.depositAmount || 0).toFixed(2)}</span></div>
+                </div>
+
                 {photoUrls.length > 0 && (
                   <div className="mt-12">
                     <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Attached Photos</h3>
@@ -725,15 +741,6 @@ export default function Home() {
                   <div className="mt-12">
                     <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Certificate of Insurance</h3>
                     <img src={profile.certificateUrl} alt="Certificate of Insurance" className="max-h-96 mx-auto border rounded-lg shadow" />
-                  </div>
-                )}
-
-                {profile.disclosure && (
-                  <div className="mt-12">
-                    <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Disclosure / Notes</h3>
-                    <div className="text-gray-700 leading-relaxed whitespace-pre-wrap border rounded-xl p-6 bg-gray-50">
-                      {profile.disclosure}
-                    </div>
                   </div>
                 )}
               </div>
@@ -793,6 +800,17 @@ export default function Home() {
                       onChange={e => setProfile({...profile, disclosure: e.target.value})} 
                       rows={4}
                       placeholder="Enter any disclosure text here..."
+                    />
+                  </div>
+
+                  {/* New deposit field - added only here */}
+                  <div>
+                    <label className="block text-sm font-semibold mb-2">Default Deposit Amount (for Approved estimates)</label>
+                    <Input 
+                      type="number" 
+                      value={profile.depositAmount || 0} 
+                      onChange={e => setProfile({...profile, depositAmount: parseFloat(e.target.value) || 0})}
+                      placeholder="0.00"
                     />
                   </div>
 
@@ -963,6 +981,21 @@ export default function Home() {
                     </div>
                   </div>
                 )}
+
+                {/* Approved button - placed exactly below Disclosure/Notes and above Certificate of Insurance */}
+                <div className="mt-12 text-center">
+                  <Button 
+                    onClick={() => {
+                      const deposit = profile.depositAmount || 0;
+                      if (confirm(`✅ Estimate Approved!\n\nDeposit due: $${deposit.toFixed(2)}\n\nWould you like to pay the deposit now?`)) {
+                        alert(`💳 Deposit of $${deposit.toFixed(2)} has been paid!\n\nThank you – the estimate is now fully approved and paid.`);
+                      }
+                    }}
+                    className="w-full text-3xl py-8 bg-[#10b981] hover:bg-[#0ea16b] text-white font-semibold rounded-3xl shadow-lg"
+                  >
+                    Approved
+                  </Button>
+                </div>
 
                 {photoUrls.length > 0 && (
                   <div className="mt-12">
