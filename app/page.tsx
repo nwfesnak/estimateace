@@ -39,6 +39,7 @@ export default function Home() {
   const [photoUrls, setPhotoUrls] = useState<string[]>([]);
   const [videoUrls, setVideoUrls] = useState<string[]>([]);
   const [receiptUrls, setReceiptUrls] = useState<string[]>([]);
+  const [receiptDetails, setReceiptDetails] = useState<any[]>([]); // new: extracted data
 
   const [dueDate, setDueDate] = useState('');
   const [paymentStatus, setPaymentStatus] = useState<'pending' | 'paid'>('pending');
@@ -98,6 +99,11 @@ export default function Home() {
   const [selectedEstimateForCalendar, setSelectedEstimateForCalendar] = useState<any>(null);
   const [selectedDateTime, setSelectedDateTime] = useState('');
 
+  // Receipt extraction modal
+  const [isReceiptExtractModalOpen, setIsReceiptExtractModalOpen] = useState(false);
+  const [currentReceiptUrl, setCurrentReceiptUrl] = useState('');
+  const [tempReceiptData, setTempReceiptData] = useState({ date: '', vendor: '', amount: 0, notes: '' });
+
   const [exportOptions, setExportOptions] = useState({
     estimates: true,
     invoices: true,
@@ -138,7 +144,7 @@ export default function Home() {
       user_id: user.id,
       jobName, address, city, state, zipCode, phones, emails, date, invoiceNumber,
       items, terms, profile, documentType, dueDate, paymentStatus, amountPaid,
-      paymentMethod, photoUrls, videoUrls, receiptUrls,
+      paymentMethod, photoUrls, videoUrls, receiptUrls, receiptDetails,
       laborHours, laborRate, laborFixedAmount, useHourlyLabor, laborAmount,
       taxRate, taxAmount,
       updated_at: new Date().toISOString()
@@ -162,8 +168,32 @@ export default function Home() {
     }
     if (type === 'photo') setPhotoUrls(prev => [...prev, ...newUrls]);
     else if (type === 'video') setVideoUrls(prev => [...prev, ...newUrls]);
-    else if (type === 'receipt') setReceiptUrls(prev => [...prev, ...newUrls]);
+    else if (type === 'receipt') {
+      setReceiptUrls(prev => [...prev, ...newUrls]);
+      // Auto-open extraction modal for the first new receipt
+      if (newUrls.length > 0) {
+        setCurrentReceiptUrl(newUrls[0]);
+        setTempReceiptData({ date: '', vendor: '', amount: 0, notes: '' });
+        setIsReceiptExtractModalOpen(true);
+      }
+    }
     await saveToDB();
+  };
+
+  // Save extracted receipt data
+  const saveReceiptExtraction = () => {
+    if (!currentReceiptUrl) return;
+    const newDetail = {
+      url: currentReceiptUrl,
+      date: tempReceiptData.date,
+      vendor: tempReceiptData.vendor,
+      amount: parseFloat(tempReceiptData.amount.toString()) || 0,
+      notes: tempReceiptData.notes
+    };
+    setReceiptDetails(prev => [...prev, newDetail]);
+    setIsReceiptExtractModalOpen(false);
+    saveToDB();
+    showMessage('✅ Receipt data saved to database for reports');
   };
 
   const handleCertificateUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -182,7 +212,10 @@ export default function Home() {
   const removeMedia = (type: 'photo' | 'video' | 'receipt', index: number) => {
     if (type === 'photo') setPhotoUrls(prev => prev.filter((_, i) => i !== index));
     else if (type === 'video') setVideoUrls(prev => prev.filter((_, i) => i !== index));
-    else if (type === 'receipt') setReceiptUrls(prev => prev.filter((_, i) => i !== index));
+    else if (type === 'receipt') {
+      setReceiptUrls(prev => prev.filter((_, i) => i !== index));
+      setReceiptDetails(prev => prev.filter((_, i) => i !== index));
+    }
     saveToDB();
   };
 
@@ -219,6 +252,7 @@ export default function Home() {
     setPhotoUrls(est.photoUrls || []);
     setVideoUrls(est.videoUrls || []);
     setReceiptUrls(est.receiptUrls || []);
+    setReceiptDetails(est.receiptDetails || []);
     setLaborHours(est.laborHours || 0);
     setLaborRate(est.laborRate || 0);
     setLaborFixedAmount(est.laborFixedAmount || 0);
@@ -241,7 +275,7 @@ export default function Home() {
   const newEstimate = () => {
     setJobName(''); setAddress(''); setCity(''); setState(''); setZipCode('');
     setPhones(['']); setEmails(['']); setTerms('');
-    setPhotoUrls([]); setVideoUrls([]); setReceiptUrls([]);
+    setPhotoUrls([]); setVideoUrls([]); setReceiptUrls([]); setReceiptDetails([]);
     setItems([{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
     setLaborHours(0); setLaborRate(0); setLaborFixedAmount(0); setUseHourlyLabor(true);
     const today = new Date().toISOString().split('T')[0];
@@ -269,8 +303,6 @@ export default function Home() {
   const openQuickLinesModal = () => setIsQuickLinesModalOpen(true);
 
   const addRow = () => setItems([...items, { id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
-  
-  // Fixed math calculation (only change to this function)
   const updateItem = (id: number, field: string, value: any) => {
     setItems(prev => prev.map(item => {
       if (item.id === id) {
@@ -285,7 +317,6 @@ export default function Home() {
       return item;
     }));
   };
-
   const removeRow = (id: number) => setItems(prev => prev.filter(item => item.id !== id));
 
   const addPhone = () => setPhones([...phones, '']);
@@ -434,7 +465,7 @@ export default function Home() {
   useEffect(() => {
     if (view === 'editor') debouncedSave();
     return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
-  }, [jobName, address, city, state, zipCode, phones, emails, date, invoiceNumber, items, terms, profile, documentType, dueDate, paymentStatus, amountPaid, paymentMethod, view]);
+  }, [jobName, address, city, state, zipCode, phones, emails, date, invoiceNumber, items, terms, profile, documentType, dueDate, paymentStatus, amountPaid, paymentMethod, view, receiptDetails]);
 
   useEffect(() => {
     const saved = localStorage.getItem('quickLines');
@@ -613,7 +644,6 @@ export default function Home() {
                 <Button onClick={openQuickLinesModal} variant="outline">📌 Quick Lines</Button>
               </div>
 
-              {/* ONLY THE TABLE WAS CHANGED */}
               <Card className="mb-8">
                 <div className="overflow-x-auto">
                   <Table className="min-w-[800px]">
@@ -845,6 +875,7 @@ export default function Home() {
 
               <Card className="mb-8">
                 <CardContent className="p-8 space-y-8">
+                  {/* ... existing profile fields unchanged ... */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
                       <label className="block text-sm font-semibold mb-2">Company Name</label>
@@ -991,6 +1022,69 @@ export default function Home() {
                   </div>
 
                   <Button onClick={saveProfile} className="w-full bg-[#10b981]">Save Profile</Button>
+                </CardContent>
+              </Card>
+
+              {/* NEW REPORTS SECTION - only for full access */}
+              <Card>
+                <CardContent className="p-8">
+                  <h3 className="text-2xl font-semibold mb-6 flex items-center gap-3">
+                    📊 Receipt & Labor Reports
+                    <span className="text-xs bg-[#10b981] text-white px-3 py-1 rounded-full">Full Access Only</span>
+                  </h3>
+                  <div className="overflow-x-auto mb-8">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Date</TableHead>
+                          <TableHead>Vendor</TableHead>
+                          <TableHead className="text-right">Receipt Amount</TableHead>
+                          <TableHead className="text-right">Labor</TableHead>
+                          <TableHead className="text-right">Grand Total Charged</TableHead>
+                          <TableHead className="text-right font-semibold">Net (Charged - Receipts - Labor)</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {savedEstimatesList.flatMap(est => 
+                          (est.receiptDetails || []).map((rec: any, idx: number) => {
+                            const labor = est.laborAmount || 0;
+                            const net = (est.grandTotal || 0) - rec.amount - labor;
+                            return (
+                              <TableRow key={`${est.id}-${idx}`}>
+                                <TableCell>{rec.date || '—'}</TableCell>
+                                <TableCell>{rec.vendor || '—'}</TableCell>
+                                <TableCell className="text-right">${rec.amount.toFixed(2)}</TableCell>
+                                <TableCell className="text-right">${labor.toFixed(2)}</TableCell>
+                                <TableCell className="text-right">${(est.grandTotal || 0).toFixed(2)}</TableCell>
+                                <TableCell className={`text-right font-semibold ${net >= 0 ? 'text-[#10b981]' : 'text-red-500'}`}>
+                                  ${net.toFixed(2)}
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+
+                  {/* Simple CSS bar graph */}
+                  <h4 className="font-semibold mb-4">Profit Overview (last 5 receipts)</h4>
+                  <div className="flex gap-6 items-end h-64 border rounded-2xl p-6 bg-gray-50">
+                    {savedEstimatesList.slice(0, 5).map((est, i) => {
+                      const totalReceipts = (est.receiptDetails || []).reduce((sum: number, r: any) => sum + (r.amount || 0), 0);
+                      const labor = est.laborAmount || 0;
+                      const profit = (est.grandTotal || 0) - totalReceipts - labor;
+                      const max = Math.max(1, Math.abs(profit) * 2);
+                      const height = Math.min(100, Math.abs(profit) / max * 100);
+                      return (
+                        <div key={i} className="flex-1 flex flex-col items-center gap-2">
+                          <div className={`w-full bg-gradient-to-t ${profit >= 0 ? 'from-[#10b981] to-emerald-400' : 'from-red-400 to-red-500'} rounded-t`} style={{ height: `${height}%` }}></div>
+                          <div className="text-xs text-center">${profit.toFixed(0)}</div>
+                          <div className="text-[10px] text-gray-500 text-center">{est.jobName?.slice(0,8) || 'Doc'}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </CardContent>
               </Card>
             </div>
@@ -1288,6 +1382,37 @@ export default function Home() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsLaborModalOpen(false)}>Cancel</Button>
             <Button onClick={() => { setIsLaborModalOpen(false); showMessage(`✅ Labor of $${laborAmount.toFixed(2)} added`); }} className="bg-[#14b8a6]">Save Labor</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Receipt Extraction Modal (new) */}
+      <Dialog open={isReceiptExtractModalOpen} onOpenChange={setIsReceiptExtractModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>📄 Extract Receipt Information</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-6 py-4">
+            <div>
+              <label className="block text-sm font-semibold mb-1">Receipt Date</label>
+              <Input type="date" value={tempReceiptData.date} onChange={e => setTempReceiptData({...tempReceiptData, date: e.target.value})} />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold mb-1">Vendor / Store</label>
+              <Input value={tempReceiptData.vendor} onChange={e => setTempReceiptData({...tempReceiptData, vendor: e.target.value})} />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold mb-1">Total Amount</label>
+              <Input type="number" value={tempReceiptData.amount} onChange={e => setTempReceiptData({...tempReceiptData, amount: parseFloat(e.target.value) || 0})} />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold mb-1">Notes / Items</label>
+              <Textarea value={tempReceiptData.notes} onChange={e => setTempReceiptData({...tempReceiptData, notes: e.target.value})} rows={3} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsReceiptExtractModalOpen(false)}>Cancel</Button>
+            <Button onClick={saveReceiptExtraction} className="bg-[#10b981]">Save to Database</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
