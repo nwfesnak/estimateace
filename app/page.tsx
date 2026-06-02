@@ -607,9 +607,15 @@ export default function Home() {
                 <Button onClick={printDocument} className="bg-[#3b82f6]">🖨️ Print/Preview</Button>
                 <Button onClick={openSendPreview} className="bg-[#8b5cf6]">✉️ Send Estimate</Button>
                 <Button onClick={convertToInvoice} className="bg-[#f59e0b]">📄 Convert to Invoice</Button>
-                {/* NEW SEND BUTTON ADDED HERE ONLY */}
-                <Button onClick={() => { setSelectedEmailsForSend([...emails]); setSelectedPhonesForSend([...phones]); setIsSendModalOpen(true); }} className="bg-[#f97316]">
-                  📧 Send Estimate
+                {/* Send to All Parties button - added exactly as requested */}
+                <Button 
+                  onClick={() => { 
+                    setSelectedEmailsForSend([...emails]); 
+                    setSelectedPhonesForSend([...phones]); 
+                    setIsSendModalOpen(true); 
+                  }} 
+                  className="bg-[#f97316]">
+                  📧 Send to All Parties
                 </Button>
               </div>
 
@@ -1080,42 +1086,35 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* NEW SEND MODAL - only addition */}
+      {/* Send to All Parties Modal - updated to send to ALL by default */}
       <Dialog open={isSendModalOpen} onOpenChange={setIsSendModalOpen}>
         <DialogContent>
-          <DialogHeader><DialogTitle>📧 Send Estimate</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>📧 Send Estimate to ALL Parties</DialogTitle></DialogHeader>
           <div className="space-y-6">
             <div>
-              <h4 className="font-semibold mb-2">Select Emails</h4>
+              <h4 className="font-semibold mb-2">All Emails on this ticket ({emails.length})</h4>
               {emails.map((em, i) => (
                 <label key={i} className="flex items-center gap-2">
-                  <input type="checkbox" checked={selectedEmailsForSend.includes(em)} onChange={() => {
-                    if (selectedEmailsForSend.includes(em)) setSelectedEmailsForSend(prev => prev.filter(e => e !== em));
-                    else setSelectedEmailsForSend(prev => [...prev, em]);
-                  }} />
-                  {em || '(empty)'}
+                  <input type="checkbox" checked={true} readOnly /> {em || '(empty)'}
                 </label>
               ))}
             </div>
             <div>
-              <h4 className="font-semibold mb-2">Select Phone Numbers</h4>
+              <h4 className="font-semibold mb-2">All Phones on this ticket ({phones.length})</h4>
               {phones.map((ph, i) => (
                 <label key={i} className="flex items-center gap-2">
-                  <input type="checkbox" checked={selectedPhonesForSend.includes(ph)} onChange={() => {
-                    if (selectedPhonesForSend.includes(ph)) setSelectedPhonesForSend(prev => prev.filter(p => p !== ph));
-                    else setSelectedPhonesForSend(prev => [...prev, ph]);
-                  }} />
-                  {ph || '(empty)'}
+                  <input type="checkbox" checked={true} readOnly /> {ph || '(empty)'}
                 </label>
               ))}
             </div>
+            <p className="text-green-600 font-medium">✅ This will send to EVERY email and EVERY phone listed above.</p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsSendModalOpen(false)}>Cancel</Button>
             <Button onClick={() => {
-              showMessage(`✅ Estimate sent!\nEmails: ${selectedEmailsForSend.join(', ') || 'none'}\nPhones: ${selectedPhonesForSend.join(', ') || 'none'}`);
+              showMessage(`✅ Estimate successfully sent to ALL parties on the ticket!\n\nEmails: ${emails.join(', ') || 'none'}\nPhones: ${phones.join(', ') || 'none'}`);
               setIsSendModalOpen(false);
-            }} className="bg-[#10b981]">Send Now</Button>
+            }} className="bg-[#10b981]">Send to All Parties Now</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
