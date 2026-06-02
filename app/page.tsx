@@ -44,12 +44,12 @@ export default function Home() {
   const [amountPaid, setAmountPaid] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState('');
 
-  // Profile (added depositAmount)
+  // Profile (deposit is now a percentage)
   const [profile, setProfile] = useState({ 
     name: '', company: '', address: '', phone: '', email: '', slogan: '',
     disclosure: '',
     certificateUrl: '',
-    depositAmount: 0,
+    depositPercentage: 10,
     autoSaveEnabled: true,
     teammates: [] as { email: string; role: 'full' | 'limited' }[]
   });
@@ -720,10 +720,13 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* Approved button / section for PDF - placed exactly below Disclosure and above Certificate */}
+                {/* Approved button - now shows percentage of total */}
                 <div className="mt-12 text-center border-2 border-dashed border-[#10b981] rounded-3xl p-8">
                   <div className="text-4xl font-bold text-[#10b981]">✅ Approved</div>
-                  <div className="mt-4 text-xl">Deposit due: <span className="font-semibold">${(profile.depositAmount || 0).toFixed(2)}</span></div>
+                  <div className="mt-4 text-xl">
+                    Deposit due: <span className="font-semibold">${(grandTotal * (profile.depositPercentage || 0) / 100).toFixed(2)}</span> 
+                    <span className="text-sm text-gray-500 ml-2">({profile.depositPercentage || 0}% of total)</span>
+                  </div>
                 </div>
 
                 {photoUrls.length > 0 && (
@@ -803,14 +806,14 @@ export default function Home() {
                     />
                   </div>
 
-                  {/* New deposit field - added only here */}
+                  {/* Deposit is now percentage */}
                   <div>
-                    <label className="block text-sm font-semibold mb-2">Default Deposit Amount (for Approved estimates)</label>
+                    <label className="block text-sm font-semibold mb-2">Default Deposit Percentage (%) of total bill</label>
                     <Input 
                       type="number" 
-                      value={profile.depositAmount || 0} 
-                      onChange={e => setProfile({...profile, depositAmount: parseFloat(e.target.value) || 0})}
-                      placeholder="0.00"
+                      value={profile.depositPercentage || 0} 
+                      onChange={e => setProfile({...profile, depositPercentage: parseFloat(e.target.value) || 0})}
+                      placeholder="10"
                     />
                   </div>
 
@@ -982,12 +985,12 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* Approved button - placed exactly below Disclosure/Notes and above Certificate of Insurance */}
+                {/* Approved button - now percentage of total */}
                 <div className="mt-12 text-center">
                   <Button 
                     onClick={() => {
-                      const deposit = profile.depositAmount || 0;
-                      if (confirm(`✅ Estimate Approved!\n\nDeposit due: $${deposit.toFixed(2)}\n\nWould you like to pay the deposit now?`)) {
+                      const deposit = grandTotal * (profile.depositPercentage || 0) / 100;
+                      if (confirm(`✅ Estimate Approved!\n\nDeposit due: $${deposit.toFixed(2)} (${profile.depositPercentage || 0}% of total)\n\nWould you like to pay the deposit now?`)) {
                         alert(`💳 Deposit of $${deposit.toFixed(2)} has been paid!\n\nThank you – the estimate is now fully approved and paid.`);
                       }
                     }}
