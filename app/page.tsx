@@ -94,11 +94,6 @@ export default function Home() {
     return () => listener.subscription.unsubscribe();
   }, [supabase]);
 
-  // NEW: Load latest profile on login (company info + auto-save toggle now persist)
-  useEffect(() => {
-    if (user) loadLatestProfile();
-  }, [user]);
-
   const login = async () => {
     if (!supabase) return;
     const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -274,7 +269,6 @@ export default function Home() {
     setView('sendPreview');
   };
 
-  // UPDATED: saveProfile now refreshes profile immediately so company info + auto-save toggle persist
   const saveProfile = async () => {
     await saveToDB();
     await loadLatestProfile();
@@ -1106,6 +1100,7 @@ export default function Home() {
             </div>
           )}
 
+          {/* SEND PREVIEW PAGE - ONLY THIS SECTION CHANGED */}
           {view === 'sendPreview' && (
             <div className="max-w-4xl mx-auto">
               <Button variant="outline" onClick={() => setView('editor')} className="mb-6">← Back to Editor</Button>
@@ -1152,6 +1147,7 @@ export default function Home() {
                 </table>
                 <div className="text-right text-3xl font-bold">Total: ${grandTotal.toFixed(2)}</div>
 
+                {/* Disclosure right below Total */}
                 {profile.disclosure && (
                   <div className="mt-12">
                     <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Disclosure / Notes</h3>
@@ -1161,6 +1157,7 @@ export default function Home() {
                   </div>
                 )}
 
+                {/* Digital Signature RIGHT UNDERNEATH Disclosure */}
                 {signatureDataUrl && (
                   <div className="mt-12">
                     <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Signature</h3>
@@ -1168,6 +1165,7 @@ export default function Home() {
                   </div>
                 )}
 
+                {/* Photos below Digital Signature */}
                 {photoUrls.length > 0 && (
                   <div className="mt-12">
                     <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Attached Photos</h3>
@@ -1179,6 +1177,7 @@ export default function Home() {
                   </div>
                 )}
 
+                {/* Certificate of Insurance below Photos */}
                 {profile.certificateUrl && (
                   <div className="mt-12">
                     <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Certificate of Insurance</h3>
@@ -1187,6 +1186,7 @@ export default function Home() {
                 )}
               </div>
 
+              {/* Receiver Digital Signature */}
               <Card className="mb-8">
                 <CardContent className="p-6">
                   <h3 className="text-xl font-semibold mb-4">Receiver Digital Signature</h3>
