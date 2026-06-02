@@ -28,7 +28,7 @@ export default function Home() {
   const [jobName, setJobName] = useState('');
   const [address, setAddress] = useState('');
   const [city, setCity] = useState('');
-  const [state, setState] = useState(''); // new for taxes
+  const [state, setState] = useState('');
   const [zipCode, setZipCode] = useState('');
   const [phones, setPhones] = useState<string[]>(['']);
   const [emails, setEmails] = useState<string[]>(['']);
@@ -269,9 +269,23 @@ export default function Home() {
   const openQuickLinesModal = () => setIsQuickLinesModalOpen(true);
 
   const addRow = () => setItems([...items, { id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
+  
+  // Fixed math calculation (only change to this function)
   const updateItem = (id: number, field: string, value: any) => {
-    setItems(prev => prev.map(item => item.id === id ? { ...item, [field]: value, total: (field === 'qty' || field === 'price') ? (item.qty || 0) * (item.price || 0) : item.total } : item));
+    setItems(prev => prev.map(item => {
+      if (item.id === id) {
+        const updatedItem = { ...item, [field]: value };
+        if (field === 'qty' || field === 'price') {
+          const qty = field === 'qty' ? (parseFloat(value) || 0) : (item.qty || 0);
+          const price = field === 'price' ? (parseFloat(value) || 0) : (item.price || 0);
+          updatedItem.total = qty * price;
+        }
+        return updatedItem;
+      }
+      return item;
+    }));
   };
+
   const removeRow = (id: number) => setItems(prev => prev.filter(item => item.id !== id));
 
   const addPhone = () => setPhones([...phones, '']);
@@ -599,39 +613,67 @@ export default function Home() {
                 <Button onClick={openQuickLinesModal} variant="outline">📌 Quick Lines</Button>
               </div>
 
+              {/* ONLY THE TABLE WAS CHANGED */}
               <Card className="mb-8">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-[#1e293b]">
-                      <TableHead className="text-white">Description</TableHead>
-                      <TableHead className="text-white text-right">Qty</TableHead>
-                      <TableHead className="text-white text-right">Unit</TableHead>
-                      <TableHead className="text-white text-right">Price</TableHead>
-                      <TableHead className="text-white text-right">Total</TableHead>
-                      <TableHead className="text-white w-28"></TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {items.map((item) => (
-                      <TableRow key={item.id}>
-                        <TableCell><Textarea value={item.description} onChange={e => updateItem(item.id, 'description', e.target.value)} rows={3} /></TableCell>
-                        <TableCell><Input type="number" value={item.qty} onChange={e => updateItem(item.id, 'qty', parseFloat(e.target.value) || 0)} className="text-right" /></TableCell>
-                        <TableCell><Input value={item.unit} onChange={e => updateItem(item.id, 'unit', e.target.value)} /></TableCell>
-                        <TableCell><Input type="number" value={item.price} onChange={e => updateItem(item.id, 'price', parseFloat(e.target.value) || 0)} className="text-right" /></TableCell>
-                        <TableCell className="text-right font-medium">${item.total.toFixed(2)}</TableCell>
-                        <TableCell>
-                          <div className="flex gap-1">
-                            <Button size="sm" variant="outline" onClick={() => saveAsQuickLine(item)}>💾</Button>
-                            <Button size="sm" variant="destructive" onClick={() => removeRow(item.id)}>×</Button>
-                          </div>
-                        </TableCell>
+                <div className="overflow-x-auto">
+                  <Table className="min-w-[800px]">
+                    <TableHeader>
+                      <TableRow className="bg-[#1e293b]">
+                        <TableHead className="text-white w-1/2 min-w-[320px]">Description</TableHead>
+                        <TableHead className="text-white text-right w-20">Qty</TableHead>
+                        <TableHead className="text-white text-right w-20">Unit</TableHead>
+                        <TableHead className="text-white text-right w-24">Price</TableHead>
+                        <TableHead className="text-white text-right w-28">Total</TableHead>
+                        <TableHead className="text-white w-16"></TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHeader>
+                    <TableBody>
+                      {items.map((item) => (
+                        <TableRow key={item.id}>
+                          <TableCell>
+                            <Textarea 
+                              value={item.description} 
+                              onChange={e => updateItem(item.id, 'description', e.target.value)} 
+                              rows={5}
+                              className="resize-y min-h-[120px]"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Input 
+                              type="number" 
+                              value={item.qty} 
+                              onChange={e => updateItem(item.id, 'qty', parseFloat(e.target.value) || 0)} 
+                              className="text-right" 
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Input 
+                              value={item.unit} 
+                              onChange={e => updateItem(item.id, 'unit', e.target.value)} 
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Input 
+                              type="number" 
+                              value={item.price} 
+                              onChange={e => updateItem(item.id, 'price', parseFloat(e.target.value) || 0)} 
+                              className="text-right" 
+                            />
+                          </TableCell>
+                          <TableCell className="text-right font-medium">${(item.total || 0).toFixed(2)}</TableCell>
+                          <TableCell>
+                            <div className="flex gap-1">
+                              <Button size="sm" variant="outline" onClick={() => saveAsQuickLine(item)}>💾</Button>
+                              <Button size="sm" variant="destructive" onClick={() => removeRow(item.id)}>×</Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
 
                 <div className="p-6 bg-white border-t">
-                  {/* Taxes line added above Grand Total */}
                   <div className="flex justify-end text-2xl font-semibold mb-2">
                     Taxes ({state || '—'} {taxRate}%): <span className="text-[#14b8a6] ml-4">${taxAmount.toFixed(2)}</span>
                   </div>
