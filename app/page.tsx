@@ -16,7 +16,7 @@ export default function Home() {
   }, []);
 
   const [user, setUser] = useState<any>(null);
-  const [view, setView] = useState<'dashboard' | 'editor' | 'estimatesList' | 'invoicesList' | 'profileView' | 'archivesView' | 'sendPreview'>('dashboard');
+  const [view, setView] = useState<'dashboard' | 'editor' | 'estimatesList' | 'invoicesList' | 'profileView' | 'archivesView' | 'sendPreview' | 'calendarView'>('dashboard');
 
   // Login
   const [email, setEmail] = useState('');
@@ -607,7 +607,6 @@ export default function Home() {
                 <Button onClick={printDocument} className="bg-[#3b82f6]">🖨️ Print/Preview</Button>
                 <Button onClick={openSendPreview} className="bg-[#8b5cf6]">✉️ Send Estimate</Button>
                 <Button onClick={convertToInvoice} className="bg-[#f59e0b]">📄 Convert to Invoice</Button>
-                <Button onClick={openCalendarModal} className="bg-[#14b8a6]">📅 Schedule</Button>
               </div>
 
               <div className="flex gap-3 mb-8">
@@ -1058,9 +1057,37 @@ export default function Home() {
               </div>
             </div>
           )}
+
+          {/* NEW: Calendar view to see the schedule - added ONLY here */}
+          {view === 'calendarView' && (
+            <div>
+              <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to Dashboard</Button>
+              <h2 className="text-3xl font-semibold mb-6">📅 Your Schedule</h2>
+              <Card>
+                <CardContent className="p-6">
+                  <h3 className="font-semibold mb-4">Upcoming / Scheduled Appointments</h3>
+                  <div className="space-y-4">
+                    {savedEstimatesList.slice(0, 8).map((est) => (
+                      <div key={est.id} className="flex justify-between items-center border-b pb-3 last:border-none">
+                        <div>
+                          <div className="font-medium">{est.jobName || 'Untitled Estimate'}</div>
+                          <div className="text-sm text-gray-500">{est.date} • {est.invoiceNumber}</div>
+                        </div>
+                        <Button size="sm" onClick={() => { loadSelectedEstimate(est); setView('editor'); }}>Open</Button>
+                      </div>
+                    ))}
+                    {savedEstimatesList.length === 0 && (
+                      <p className="text-gray-500 italic">No scheduled items yet. Use the Schedule button in the editor to add one.</p>
+                    )}
+                  </div>
+                  <Button onClick={openCalendarModal} className="mt-8 w-full">+ Schedule New Appointment</Button>
+                </CardContent>
+              </Card>
+            </div>
+          )}
         </div>
 
-        {/* Bottom Navigation */}
+        {/* Bottom Navigation - ONLY the Calendar button was changed */}
         <div className="bg-white border-t shadow-inner flex items-center justify-around py-2 px-1 text-xs">
           <button onClick={goToDashboard} className={`flex flex-col items-center flex-1 py-1 ${view === 'dashboard' ? 'text-[#10b981]' : 'text-gray-500'}`}>
             <span className="text-3xl mb-0.5">📊</span>
@@ -1082,7 +1109,7 @@ export default function Home() {
             <span className="text-3xl mb-0.5">📌</span>
             <span>Templates</span>
           </button>
-          <button onClick={openCalendarModal} className="flex flex-col items-center flex-1 py-1 text-gray-500">
+          <button onClick={() => setView('calendarView')} className="flex flex-col items-center flex-1 py-1 text-gray-500">
             <span className="text-3xl mb-0.5">📅</span>
             <span>Calendar</span>
           </button>
@@ -1160,7 +1187,7 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* Calendar modal (already existed) */}
+      {/* Calendar modal (for scheduling new appointments) */}
       <Dialog open={isCalendarModalOpen} onOpenChange={setIsCalendarModalOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>📅 Schedule Appointment</DialogTitle></DialogHeader>
