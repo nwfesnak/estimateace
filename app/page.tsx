@@ -1087,7 +1087,7 @@ export default function Home() {
             </div>
           )}
 
-          {/* SEND PREVIEW PAGE */}
+          {/* SEND PREVIEW PAGE - ONLY THIS SECTION WAS CHANGED */}
           {view === 'sendPreview' && (
             <div className="max-w-4xl mx-auto">
               <Button variant="outline" onClick={() => setView('editor')} className="mb-6">← Back to Editor</Button>
@@ -1134,6 +1134,25 @@ export default function Home() {
                 </table>
                 <div className="text-right text-3xl font-bold">Total: ${grandTotal.toFixed(2)}</div>
 
+                {/* Disclosure right below Total */}
+                {profile.disclosure && (
+                  <div className="mt-12">
+                    <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Disclosure / Notes</h3>
+                    <div className="text-gray-700 leading-relaxed whitespace-pre-wrap border rounded-xl p-6 bg-gray-50">
+                      {profile.disclosure}
+                    </div>
+                  </div>
+                )}
+
+                {/* Sender Digital Signature */}
+                {signatureDataUrl && (
+                  <div className="mt-12">
+                    <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Signature</h3>
+                    <img src={signatureDataUrl} alt="Signature" className="max-h-48 mx-auto border rounded-lg shadow" />
+                  </div>
+                )}
+
+                {/* Photos under digital signature */}
                 {photoUrls.length > 0 && (
                   <div className="mt-12">
                     <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Attached Photos</h3>
@@ -1145,31 +1164,16 @@ export default function Home() {
                   </div>
                 )}
 
+                {/* Certificate of Insurance under photos */}
                 {profile.certificateUrl && (
                   <div className="mt-12">
                     <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Certificate of Insurance</h3>
                     <img src={profile.certificateUrl} alt="Certificate of Insurance" className="max-h-96 mx-auto border rounded-lg shadow" />
                   </div>
                 )}
-
-                {profile.disclosure && (
-                  <div className="mt-12">
-                    <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Disclosure / Notes</h3>
-                    <div className="text-gray-700 leading-relaxed whitespace-pre-wrap border rounded-xl p-6 bg-gray-50">
-                      {profile.disclosure}
-                    </div>
-                  </div>
-                )}
-
-                {signatureDataUrl && (
-                  <div className="mt-12">
-                    <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Signature</h3>
-                    <img src={signatureDataUrl} alt="Signature" className="max-h-48 mx-auto border rounded-lg shadow" />
-                  </div>
-                )}
               </div>
 
-              {/* Receiver Signature */}
+              {/* Receiver Digital Signature (unchanged) */}
               <Card className="mb-8">
                 <CardContent className="p-6">
                   <h3 className="text-xl font-semibold mb-4">Receiver Digital Signature</h3>
