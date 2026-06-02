@@ -28,6 +28,7 @@ export default function Home() {
   const [jobName, setJobName] = useState('');
   const [address, setAddress] = useState('');
   const [city, setCity] = useState('');
+  const [state, setState] = useState(''); // new for taxes
   const [zipCode, setZipCode] = useState('');
   const [phones, setPhones] = useState<string[]>(['']);
   const [emails, setEmails] = useState<string[]>(['']);
@@ -51,6 +52,24 @@ export default function Home() {
   const [laborFixedAmount, setLaborFixedAmount] = useState(0);
   const [useHourlyLabor, setUseHourlyLabor] = useState(true);
   const laborAmount = useHourlyLabor ? laborHours * laborRate : laborFixedAmount;
+
+  // Tax states
+  const taxRates: { [key: string]: number } = {
+    'AL': 4, 'AK': 0, 'AZ': 5.6, 'AR': 6.5, 'CA': 7.25,
+    'CO': 2.9, 'CT': 6.35, 'DE': 0, 'FL': 6, 'GA': 4,
+    'HI': 4, 'ID': 6, 'IL': 6.25, 'IN': 7, 'IA': 6,
+    'KS': 6.5, 'KY': 6, 'LA': 4.45, 'ME': 5.5, 'MD': 6,
+    'MA': 6.25, 'MI': 6, 'MN': 6.875, 'MS': 7, 'MO': 4.225,
+    'MT': 0, 'NE': 5.5, 'NV': 6.85, 'NH': 0, 'NJ': 6.625,
+    'NM': 5.125, 'NY': 4, 'NC': 4.75, 'ND': 5, 'OH': 5.75,
+    'OK': 4.5, 'OR': 0, 'PA': 6, 'RI': 7, 'SC': 6,
+    'SD': 4.5, 'TN': 7, 'TX': 6.25, 'UT': 4.85, 'VT': 6,
+    'VA': 4.3, 'WA': 6.5, 'WV': 6, 'WI': 5, 'WY': 4,
+  };
+  const taxRate = taxRates[state.toUpperCase()] || 7;
+  const subtotal = items.reduce((sum, item) => sum + (item.total || 0), 0) + laborAmount;
+  const taxAmount = subtotal * (taxRate / 100);
+  const grandTotal = subtotal + taxAmount;
 
   // Profile
   const [profile, setProfile] = useState({ 
@@ -87,8 +106,6 @@ export default function Home() {
     videos: true
   });
 
-  const grandTotal = items.reduce((sum, item) => sum + (item.total || 0), 0) + laborAmount;
-
   const showMessage = (message: string) => {
     const clean = message.replace(/^[^\s]*\.vercel\.app says:\s*/i, '').trim();
     alert(clean);
@@ -119,10 +136,11 @@ export default function Home() {
     if (!user || !supabase) return;
     const data = {
       user_id: user.id,
-      jobName, address, city, zipCode, phones, emails, date, invoiceNumber,
+      jobName, address, city, state, zipCode, phones, emails, date, invoiceNumber,
       items, terms, profile, documentType, dueDate, paymentStatus, amountPaid,
       paymentMethod, photoUrls, videoUrls, receiptUrls,
       laborHours, laborRate, laborFixedAmount, useHourlyLabor, laborAmount,
+      taxRate, taxAmount,
       updated_at: new Date().toISOString()
     };
     const { error } = await supabase.from('estimates').upsert({ id: invoiceNumber, ...data });
@@ -184,6 +202,7 @@ export default function Home() {
     setJobName(est.jobName || '');
     setAddress(est.address || '');
     setCity(est.city || '');
+    setState(est.state || '');
     setZipCode(est.zipCode || '');
     setPhones(est.phones || ['']);
     setEmails(est.emails || ['']);
@@ -220,14 +239,11 @@ export default function Home() {
   };
 
   const newEstimate = () => {
-    setJobName(''); setAddress(''); setCity(''); setZipCode('');
+    setJobName(''); setAddress(''); setCity(''); setState(''); setZipCode('');
     setPhones(['']); setEmails(['']); setTerms('');
     setPhotoUrls([]); setVideoUrls([]); setReceiptUrls([]);
     setItems([{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
-    setLaborHours(0);
-    setLaborRate(0);
-    setLaborFixedAmount(0);
-    setUseHourlyLabor(true);
+    setLaborHours(0); setLaborRate(0); setLaborFixedAmount(0); setUseHourlyLabor(true);
     const today = new Date().toISOString().split('T')[0];
     setDate(today);
     const savedCount = parseInt(localStorage.getItem('estimateCount') || '0') + 1;
@@ -404,7 +420,7 @@ export default function Home() {
   useEffect(() => {
     if (view === 'editor') debouncedSave();
     return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
-  }, [jobName, address, city, zipCode, phones, emails, date, invoiceNumber, items, terms, profile, documentType, dueDate, paymentStatus, amountPaid, paymentMethod, view]);
+  }, [jobName, address, city, state, zipCode, phones, emails, date, invoiceNumber, items, terms, profile, documentType, dueDate, paymentStatus, amountPaid, paymentMethod, view]);
 
   useEffect(() => {
     const saved = localStorage.getItem('quickLines');
@@ -550,8 +566,9 @@ export default function Home() {
                     <label className="block text-sm font-semibold mb-1">Address</label>
                     <Input value={address} onChange={e => setAddress(e.target.value)} placeholder="Street address" />
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-3 gap-4">
                     <div><label className="block text-sm font-semibold mb-1">City</label><Input value={city} onChange={e => setCity(e.target.value)} /></div>
+                    <div><label className="block text-sm font-semibold mb-1">State</label><Input value={state} onChange={e => setState(e.target.value)} placeholder="CA" /></div>
                     <div><label className="block text-sm font-semibold mb-1">Zip Code</label><Input value={zipCode} onChange={e => setZipCode(e.target.value)} /></div>
                   </div>
                   <div>
@@ -614,6 +631,10 @@ export default function Home() {
                 </Table>
 
                 <div className="p-6 bg-white border-t">
+                  {/* Taxes line added above Grand Total */}
+                  <div className="flex justify-end text-2xl font-semibold mb-2">
+                    Taxes ({state || '—'} {taxRate}%): <span className="text-[#14b8a6] ml-4">${taxAmount.toFixed(2)}</span>
+                  </div>
                   <div className="flex justify-end text-4xl font-bold">
                     Grand Total: <span className="text-[#10b981] ml-4">${grandTotal.toFixed(2)}</span>
                   </div>
@@ -669,7 +690,6 @@ export default function Home() {
                   <Button onClick={() => document.getElementById('receipts-camera')?.click()} className="mb-4">
                     📄 Scan / Take Photo of Receipt
                   </Button>
-                  {/* Labor button added exactly below the receipt scan button */}
                   <Button onClick={() => setIsLaborModalOpen(true)} className="mb-4 bg-[#14b8a6]">
                     💼 Labor
                   </Button>
@@ -708,7 +728,7 @@ export default function Home() {
                   <div className="text-right">
                     <strong>Bill To:</strong><br />
                     {address}<br />
-                    {city}, {zipCode}
+                    {city}, {state} {zipCode}
                   </div>
                 </div>
                 <table className="w-full border-collapse mb-8">
@@ -731,13 +751,12 @@ export default function Home() {
                     ))}
                   </tbody>
                 </table>
-                <div className="text-right text-3xl font-bold">Total: ${grandTotal.toFixed(2)}</div>
 
                 {laborAmount > 0 && (
-                  <div className="mt-6 text-right text-2xl font-semibold text-[#14b8a6]">
-                    Labor: ${laborAmount.toFixed(2)}
-                  </div>
+                  <div className="text-right text-2xl font-semibold text-[#14b8a6]">Labor: ${laborAmount.toFixed(2)}</div>
                 )}
+                <div className="text-right text-2xl font-semibold text-[#14b8a6]">Taxes ({state || '—'} {taxRate}%): ${taxAmount.toFixed(2)}</div>
+                <div className="text-right text-4xl font-bold">Total: ${grandTotal.toFixed(2)}</div>
 
                 {profile.disclosure && (
                   <div className="mt-12">
@@ -989,7 +1008,7 @@ export default function Home() {
                   <div className="text-right">
                     <strong>Bill To:</strong><br />
                     {address}<br />
-                    {city}, {zipCode}
+                    {city}, {state} {zipCode}
                   </div>
                 </div>
                 <table className="w-full border-collapse mb-8">
@@ -1194,19 +1213,11 @@ export default function Home() {
           <div className="space-y-6 py-4">
             <div className="flex items-center gap-4">
               <label className="flex items-center gap-2 cursor-pointer">
-                <input 
-                  type="radio" 
-                  checked={useHourlyLabor} 
-                  onChange={() => setUseHourlyLabor(true)}
-                />
+                <input type="radio" checked={useHourlyLabor} onChange={() => setUseHourlyLabor(true)} />
                 Hourly
               </label>
               <label className="flex items-center gap-2 cursor-pointer">
-                <input 
-                  type="radio" 
-                  checked={!useHourlyLabor} 
-                  onChange={() => setUseHourlyLabor(false)}
-                />
+                <input type="radio" checked={!useHourlyLabor} onChange={() => setUseHourlyLabor(false)} />
                 Fixed Amount
               </label>
             </div>
@@ -1215,19 +1226,11 @@ export default function Home() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-semibold mb-1">Hours</label>
-                  <Input 
-                    type="number" 
-                    value={laborHours} 
-                    onChange={e => setLaborHours(parseFloat(e.target.value) || 0)} 
-                  />
+                  <Input type="number" value={laborHours} onChange={e => setLaborHours(parseFloat(e.target.value) || 0)} />
                 </div>
                 <div>
                   <label className="block text-sm font-semibold mb-1">Hourly Rate</label>
-                  <Input 
-                    type="number" 
-                    value={laborRate} 
-                    onChange={e => setLaborRate(parseFloat(e.target.value) || 0)} 
-                  />
+                  <Input type="number" value={laborRate} onChange={e => setLaborRate(parseFloat(e.target.value) || 0)} />
                 </div>
                 <div className="col-span-2 text-right text-xl font-semibold">
                   Labor Total: <span className="text-[#14b8a6]">${(laborHours * laborRate).toFixed(2)}</span>
@@ -1236,25 +1239,13 @@ export default function Home() {
             ) : (
               <div>
                 <label className="block text-sm font-semibold mb-1">Fixed Labor Amount</label>
-                <Input 
-                  type="number" 
-                  value={laborFixedAmount} 
-                  onChange={e => setLaborFixedAmount(parseFloat(e.target.value) || 0)} 
-                />
+                <Input type="number" value={laborFixedAmount} onChange={e => setLaborFixedAmount(parseFloat(e.target.value) || 0)} />
               </div>
             )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsLaborModalOpen(false)}>Cancel</Button>
-            <Button 
-              onClick={() => {
-                setIsLaborModalOpen(false);
-                showMessage(`✅ Labor of $${laborAmount.toFixed(2)} added to job`);
-              }}
-              className="bg-[#14b8a6]"
-            >
-              Save Labor
-            </Button>
+            <Button onClick={() => { setIsLaborModalOpen(false); showMessage(`✅ Labor of $${laborAmount.toFixed(2)} added`); }} className="bg-[#14b8a6]">Save Labor</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
