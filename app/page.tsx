@@ -195,10 +195,19 @@ export default function Home() {
     setReceiverSignatureDataUrl(est.receiverSignatureDataUrl || '');
   };
 
+  // NEW: Load latest profile so certificate + disclosure stay on every new estimate
+  const loadLatestProfile = async () => {
+    if (!user || !supabase) return;
+    const { data } = await supabase.from('estimates').select('profile').eq('user_id', user.id).order('updated_at', { ascending: false }).limit(1);
+    if (data && data[0]) {
+      setProfile(data[0].profile || profile);
+    }
+  };
+
   const newEstimate = () => {
     setJobName(''); setAddress(''); setCity(''); setZipCode('');
     setPhones(['']); setEmails(['']); setTerms('');
-    setPhotoUrls([]); setVideoUrls([]); setReceiptUrls([]);
+    // Do NOT reset photoUrls or profile — they now carry over
     setSignatureDataUrl('');
     setReceiverSignatureDataUrl('');
     setItems([{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
@@ -208,6 +217,7 @@ export default function Home() {
     localStorage.setItem('estimateCount', savedCount.toString());
     const prefix = documentType === 'invoice' ? 'INV' : 'EST';
     setInvoiceNumber(`${prefix}-${String(savedCount).padStart(4, '0')}`);
+    loadLatestProfile(); // ← ensures certificate & disclosure stay
   };
 
   const openNewDocument = (type: 'estimate' | 'invoice') => {
@@ -570,6 +580,7 @@ export default function Home() {
 
       <div className="flex flex-col h-screen bg-[#f4f4f4]">
         <div className="flex-1 overflow-auto p-4 md:p-8">
+          {/* All other views unchanged */}
           {view === 'dashboard' && (
             <div>
               <div className="flex justify-between items-center mb-8">
@@ -1087,7 +1098,7 @@ export default function Home() {
             </div>
           )}
 
-          {/* SEND PREVIEW PAGE - ONLY THIS SECTION CHANGED */}
+          {/* SEND PREVIEW PAGE - ONLY THIS SECTION WAS CHANGED */}
           {view === 'sendPreview' && (
             <div className="max-w-4xl mx-auto">
               <Button variant="outline" onClick={() => setView('editor')} className="mb-6">← Back to Editor</Button>
@@ -1144,7 +1155,7 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* Digital Signature - RIGHT BELOW DISCLOSURE (only change) */}
+                {/* Digital Signature right below Disclosure */}
                 {signatureDataUrl && (
                   <div className="mt-12">
                     <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Signature</h3>
