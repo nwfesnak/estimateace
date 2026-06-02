@@ -16,7 +16,7 @@ export default function Home() {
   }, []);
 
   const [user, setUser] = useState<any>(null);
-  const [view, setView] = useState<'dashboard' | 'editor' | 'estimatesList' | 'invoicesList' | 'profileView' | 'archivesView' | 'sendPreview'>('dashboard');
+  const [view, setView] = useState<'dashboard' | 'editor' | 'estimatesList' | 'invoicesList' | 'profileView' | 'archivesView' | 'sendPreview' | 'reportsView'>('dashboard');
 
   // Login
   const [email, setEmail] = useState('');
@@ -39,7 +39,7 @@ export default function Home() {
   const [photoUrls, setPhotoUrls] = useState<string[]>([]);
   const [videoUrls, setVideoUrls] = useState<string[]>([]);
   const [receiptUrls, setReceiptUrls] = useState<string[]>([]);
-  const [receiptDetails, setReceiptDetails] = useState<any[]>([]); // new: extracted data
+  const [receiptDetails, setReceiptDetails] = useState<any[]>([]);
 
   const [dueDate, setDueDate] = useState('');
   const [paymentStatus, setPaymentStatus] = useState<'pending' | 'paid'>('pending');
@@ -112,6 +112,9 @@ export default function Home() {
     videos: true
   });
 
+  // Reports view selected estimate
+  const [selectedReportJob, setSelectedReportJob] = useState<any>(null);
+
   const showMessage = (message: string) => {
     const clean = message.replace(/^[^\s]*\.vercel\.app says:\s*/i, '').trim();
     alert(clean);
@@ -170,7 +173,6 @@ export default function Home() {
     else if (type === 'video') setVideoUrls(prev => [...prev, ...newUrls]);
     else if (type === 'receipt') {
       setReceiptUrls(prev => [...prev, ...newUrls]);
-      // Auto-open extraction modal for the first new receipt
       if (newUrls.length > 0) {
         setCurrentReceiptUrl(newUrls[0]);
         setTempReceiptData({ date: '', vendor: '', amount: 0, notes: '' });
@@ -180,7 +182,6 @@ export default function Home() {
     await saveToDB();
   };
 
-  // Save extracted receipt data
   const saveReceiptExtraction = () => {
     if (!currentReceiptUrl) return;
     const newDetail = {
@@ -193,7 +194,7 @@ export default function Home() {
     setReceiptDetails(prev => [...prev, newDetail]);
     setIsReceiptExtractModalOpen(false);
     saveToDB();
-    showMessage('✅ Receipt data saved to database for reports');
+    showMessage('✅ Receipt data saved to database');
   };
 
   const handleCertificateUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -875,7 +876,6 @@ export default function Home() {
 
               <Card className="mb-8">
                 <CardContent className="p-8 space-y-8">
-                  {/* ... existing profile fields unchanged ... */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
                       <label className="block text-sm font-semibold mb-2">Company Name</label>
@@ -1024,67 +1024,74 @@ export default function Home() {
                   <Button onClick={saveProfile} className="w-full bg-[#10b981]">Save Profile</Button>
                 </CardContent>
               </Card>
+            </div>
+          )}
 
-              {/* NEW REPORTS SECTION - only for full access */}
-              <Card>
+          {/* NEW REPORTS PAGE */}
+          {view === 'reportsView' && (
+            <div>
+              <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to Dashboard</Button>
+              <h2 className="text-3xl font-semibold mb-8">📊 Professional Reports</h2>
+
+              <Card className="max-w-2xl mx-auto">
                 <CardContent className="p-8">
-                  <h3 className="text-2xl font-semibold mb-6 flex items-center gap-3">
-                    📊 Receipt & Labor Reports
-                    <span className="text-xs bg-[#10b981] text-white px-3 py-1 rounded-full">Full Access Only</span>
-                  </h3>
-                  <div className="overflow-x-auto mb-8">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Date</TableHead>
-                          <TableHead>Vendor</TableHead>
-                          <TableHead className="text-right">Receipt Amount</TableHead>
-                          <TableHead className="text-right">Labor</TableHead>
-                          <TableHead className="text-right">Grand Total Charged</TableHead>
-                          <TableHead className="text-right font-semibold">Net (Charged - Receipts - Labor)</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {savedEstimatesList.flatMap(est => 
-                          (est.receiptDetails || []).map((rec: any, idx: number) => {
-                            const labor = est.laborAmount || 0;
-                            const net = (est.grandTotal || 0) - rec.amount - labor;
-                            return (
-                              <TableRow key={`${est.id}-${idx}`}>
-                                <TableCell>{rec.date || '—'}</TableCell>
-                                <TableCell>{rec.vendor || '—'}</TableCell>
-                                <TableCell className="text-right">${rec.amount.toFixed(2)}</TableCell>
-                                <TableCell className="text-right">${labor.toFixed(2)}</TableCell>
-                                <TableCell className="text-right">${(est.grandTotal || 0).toFixed(2)}</TableCell>
-                                <TableCell className={`text-right font-semibold ${net >= 0 ? 'text-[#10b981]' : 'text-red-500'}`}>
-                                  ${net.toFixed(2)}
-                                </TableCell>
-                              </TableRow>
-                            );
-                          })
-                        )}
-                      </TableBody>
-                    </Table>
-                  </div>
+                  <label className="block text-sm font-semibold mb-3">Select Job / Estimate with Deposit Paid</label>
+                  <select 
+                    className="w-full border rounded-xl p-4 text-lg"
+                    onChange={e => {
+                      const selected = savedEstimatesList.find(est => est.id === e.target.value);
+                      setSelectedReportJob(selected || null);
+                    }}
+                  >
+                    <option value="">— Choose a paid deposit job —</option>
+                    {savedEstimatesList
+                      .filter(est => (est.amountPaid || 0) > 0)
+                      .map(est => (
+                        <option key={est.id} value={est.id}>
+                          {est.jobName || 'Untitled'} — {est.invoiceNumber} (Deposit: ${(est.amountPaid || 0).toFixed(2)})
+                        </option>
+                      ))}
+                  </select>
 
-                  {/* Simple CSS bar graph */}
-                  <h4 className="font-semibold mb-4">Profit Overview (last 5 receipts)</h4>
-                  <div className="flex gap-6 items-end h-64 border rounded-2xl p-6 bg-gray-50">
-                    {savedEstimatesList.slice(0, 5).map((est, i) => {
-                      const totalReceipts = (est.receiptDetails || []).reduce((sum: number, r: any) => sum + (r.amount || 0), 0);
-                      const labor = est.laborAmount || 0;
-                      const profit = (est.grandTotal || 0) - totalReceipts - labor;
-                      const max = Math.max(1, Math.abs(profit) * 2);
-                      const height = Math.min(100, Math.abs(profit) / max * 100);
-                      return (
-                        <div key={i} className="flex-1 flex flex-col items-center gap-2">
-                          <div className={`w-full bg-gradient-to-t ${profit >= 0 ? 'from-[#10b981] to-emerald-400' : 'from-red-400 to-red-500'} rounded-t`} style={{ height: `${height}%` }}></div>
-                          <div className="text-xs text-center">${profit.toFixed(0)}</div>
-                          <div className="text-[10px] text-gray-500 text-center">{est.jobName?.slice(0,8) || 'Doc'}</div>
+                  {selectedReportJob && (
+                    <div className="mt-10 space-y-8">
+                      <div className="grid grid-cols-2 gap-6">
+                        <div className="bg-white border rounded-2xl p-6 text-center">
+                          <div className="text-sm text-gray-500">Total Receipts</div>
+                          <div className="text-5xl font-bold text-[#10b981] mt-2">
+                            ${(selectedReportJob.receiptDetails || []).reduce((sum: number, r: any) => sum + (r.amount || 0), 0).toFixed(2)}
+                          </div>
                         </div>
-                      );
-                    })}
-                  </div>
+                        <div className="bg-white border rounded-2xl p-6 text-center">
+                          <div className="text-sm text-gray-500">Labor Cost</div>
+                          <div className="text-5xl font-bold text-[#14b8a6] mt-2">
+                            ${selectedReportJob.laborAmount ? selectedReportJob.laborAmount.toFixed(2) : '0.00'}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="bg-white border-2 border-[#1e293b] rounded-3xl p-8">
+                        <div className="flex justify-between items-baseline">
+                          <div>
+                            <div className="text-2xl font-semibold">Gross Total Charged</div>
+                            <div className="text-6xl font-bold text-[#1e293b]">${(selectedReportJob.grandTotal || 0).toFixed(2)}</div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-sm text-gray-500">Deposit Paid</div>
+                            <div className="text-5xl font-bold text-[#10b981]">${(selectedReportJob.amountPaid || 0).toFixed(2)}</div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="text-center text-4xl font-bold text-[#10b981]">
+                        Net Profit: ${(
+                          (selectedReportJob.grandTotal || 0) - 
+                          (selectedReportJob.receiptDetails || []).reduce((sum: number, r: any) => sum + (r.amount || 0), 0) - 
+                          (selectedReportJob.laborAmount || 0)
+                        ).toFixed(2)}
+                      </div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </div>
@@ -1240,7 +1247,7 @@ export default function Home() {
           )}
         </div>
 
-        {/* Bottom Navigation */}
+        {/* Bottom Navigation - Templates changed to Reports */}
         <div className="bg-white border-t shadow-inner flex items-center justify-around py-2 px-1 text-xs">
           <button onClick={goToDashboard} className={`flex flex-col items-center flex-1 py-1 ${view === 'dashboard' ? 'text-[#10b981]' : 'text-gray-500'}`}>
             <span className="text-3xl mb-0.5">📊</span>
@@ -1258,9 +1265,9 @@ export default function Home() {
             <span className="text-3xl mb-0.5">📄</span>
             <span>New Estimate</span>
           </button>
-          <button onClick={() => setIsTemplatesOpen(true)} className="flex flex-col items-center flex-1 py-1 text-gray-500">
-            <span className="text-3xl mb-0.5">📌</span>
-            <span>Templates</span>
+          <button onClick={() => setView('reportsView')} className="flex flex-col items-center flex-1 py-1 text-gray-500">
+            <span className="text-3xl mb-0.5">📊</span>
+            <span>Reports</span>
           </button>
           <button onClick={openCalendarModal} className="flex flex-col items-center flex-1 py-1 text-gray-500">
             <span className="text-3xl mb-0.5">📅</span>
@@ -1386,7 +1393,7 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* Receipt Extraction Modal (new) */}
+      {/* Receipt Extraction Modal */}
       <Dialog open={isReceiptExtractModalOpen} onOpenChange={setIsReceiptExtractModalOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
