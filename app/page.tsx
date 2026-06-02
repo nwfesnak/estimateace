@@ -720,7 +720,6 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* Approved button - now shows percentage of total */}
                 <div className="mt-12 text-center border-2 border-dashed border-[#10b981] rounded-3xl p-8">
                   <div className="text-4xl font-bold text-[#10b981]">✅ Approved</div>
                   <div className="mt-4 text-xl">
@@ -806,7 +805,6 @@ export default function Home() {
                     />
                   </div>
 
-                  {/* Deposit is now percentage */}
                   <div>
                     <label className="block text-sm font-semibold mb-2">Default Deposit Percentage (%) of total bill</label>
                     <Input 
@@ -933,9 +931,10 @@ export default function Home() {
           {view === 'sendPreview' && (
             <div className="max-w-4xl mx-auto">
               <Button variant="outline" onClick={() => setView('editor')} className="mb-6">← Back to Editor</Button>
-              <h2 className="text-3xl font-semibold mb-6">Preview of what will be sent</h2>
+              <h2 className="text-3xl font-semibold mb-6">
+                {documentType === 'invoice' ? '📄 Invoice Preview & Final Payment' : 'Preview of what will be sent'}
+              </h2>
 
-              {/* NEW BUTTON ADDED ONLY HERE - opens popup to choose emails & phones */}
               <Button 
                 onClick={() => { 
                   setSelectedEmailsForSend([...emails]); 
@@ -996,7 +995,7 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* Approved button - now shows percentage of total */}
+                {/* Approved button */}
                 <div className="mt-12 text-center">
                   <Button 
                     onClick={() => {
@@ -1010,6 +1009,31 @@ export default function Home() {
                     Approved
                   </Button>
                 </div>
+
+                {/* ONLY added here for the Convert to Invoice page */}
+                {documentType === 'invoice' && (
+                  <div className="mt-12 p-8 border-4 border-dashed border-[#f59e0b] rounded-3xl bg-amber-50">
+                    <h3 className="text-3xl font-bold text-center text-[#f59e0b]">💰 Invoice Payment Section</h3>
+                    <p className="text-center text-xl mt-3">
+                      Deposit paid on estimate: <strong>{profile.depositPercentage}%</strong><br />
+                      Remainder due: <strong>{100 - (profile.depositPercentage || 0)}%</strong> = <span className="font-bold text-2xl"> ${(grandTotal * (100 - (profile.depositPercentage || 0)) / 100).toFixed(2)}</span>
+                    </p>
+                    <Button 
+                      onClick={() => {
+                        const remainder = grandTotal * (100 - (profile.depositPercentage || 0)) / 100;
+                        if (confirm(`Pay the remaining $${remainder.toFixed(2)} now?\n\nThis will mark the invoice as fully paid.`)) {
+                          alert(`✅ Payment of $${remainder.toFixed(2)} received!\n\nInvoice is now 100% PAID and marked complete.\nThank you!`);
+                          setPaymentStatus('paid');
+                          setAmountPaid(grandTotal);
+                          showMessage('Invoice marked PAID and saved');
+                        }
+                      }}
+                      className="w-full mt-6 py-8 text-2xl font-bold bg-[#f59e0b] hover:bg-orange-600 text-white rounded-3xl">
+                      Pay Remainder Now (${(grandTotal * (100 - (profile.depositPercentage || 0)) / 100).toFixed(2)})
+                    </Button>
+                    <p className="text-center text-xs text-gray-500 mt-3">Clicking this completes the invoice conversion</p>
+                  </div>
+                )}
 
                 {photoUrls.length > 0 && (
                   <div className="mt-12">
@@ -1087,7 +1111,7 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* Send Recipients Popup - re-used for preview page */}
+      {/* Send Recipients Popup */}
       <Dialog open={isSendModalOpen} onOpenChange={setIsSendModalOpen}>
         <DialogContent>
           <DialogHeader><DialogTitle>📧 Choose Recipients for this Estimate</DialogTitle></DialogHeader>
