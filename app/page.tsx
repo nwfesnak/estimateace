@@ -1100,7 +1100,7 @@ export default function Home() {
             </div>
           )}
 
-          {/* SEND PREVIEW PAGE - ONLY THIS SECTION CHANGED */}
+          {/* SEND PREVIEW PAGE - ONLY THIS SECTION WAS CHANGED */}
           {view === 'sendPreview' && (
             <div className="max-w-4xl mx-auto">
               <Button variant="outline" onClick={() => setView('editor')} className="mb-6">← Back to Editor</Button>
@@ -1157,7 +1157,7 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* Digital Signature RIGHT UNDERNEATH Disclosure */}
+                {/* Digital Signature right underneath Disclosure */}
                 {signatureDataUrl && (
                   <div className="mt-12">
                     <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Signature</h3>
@@ -1165,7 +1165,7 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* Photos below Digital Signature */}
+                {/* Photos */}
                 {photoUrls.length > 0 && (
                   <div className="mt-12">
                     <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Attached Photos</h3>
@@ -1177,7 +1177,7 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* Certificate of Insurance below Photos */}
+                {/* Certificate of Insurance moved down one section (now after Photos) */}
                 {profile.certificateUrl && (
                   <div className="mt-12">
                     <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Certificate of Insurance</h3>
