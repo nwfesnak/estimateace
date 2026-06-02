@@ -1144,7 +1144,7 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* Digital Signature below Disclosure */}
+                {/* Digital Signature - RIGHT BELOW DISCLOSURE (only change) */}
                 {signatureDataUrl && (
                   <div className="mt-12">
                     <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Signature</h3>
