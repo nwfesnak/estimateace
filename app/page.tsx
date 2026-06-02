@@ -995,20 +995,22 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* Approved button */}
-                <div className="mt-12 text-center">
-                  <Button 
-                    onClick={() => {
-                      const deposit = grandTotal * (profile.depositPercentage || 0) / 100;
-                      if (confirm(`✅ Estimate Approved!\n\nDeposit due: $${deposit.toFixed(2)} (${profile.depositPercentage || 0}% of total)\n\nWould you like to pay the deposit now?`)) {
-                        alert(`💳 Deposit of $${deposit.toFixed(2)} has been paid!\n\nThank you – the estimate is now fully approved and paid.`);
-                      }
-                    }}
-                    className="w-full text-3xl py-8 bg-[#10b981] hover:bg-[#0ea16b] text-white font-semibold rounded-3xl shadow-lg"
-                  >
-                    Approved
-                  </Button>
-                </div>
+                {/* Approved button removed ONLY on the invoice page as requested */}
+                {documentType !== 'invoice' && (
+                  <div className="mt-12 text-center">
+                    <Button 
+                      onClick={() => {
+                        const deposit = grandTotal * (profile.depositPercentage || 0) / 100;
+                        if (confirm(`✅ Estimate Approved!\n\nDeposit due: $${deposit.toFixed(2)} (${profile.depositPercentage || 0}% of total)\n\nWould you like to pay the deposit now?`)) {
+                          alert(`💳 Deposit of $${deposit.toFixed(2)} has been paid!\n\nThank you – the estimate is now fully approved and paid.`);
+                        }
+                      }}
+                      className="w-full text-3xl py-8 bg-[#10b981] hover:bg-[#0ea16b] text-white font-semibold rounded-3xl shadow-lg"
+                    >
+                      Approved
+                    </Button>
+                  </div>
+                )}
 
                 {/* ONLY added here for the Convert to Invoice page */}
                 {documentType === 'invoice' && (
