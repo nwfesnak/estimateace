@@ -46,7 +46,7 @@ export default function Home() {
   const [amountPaid, setAmountPaid] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState('');
 
-  // Profile
+  // Profile - now persists company info globally
   const [profile, setProfile] = useState({ 
     name: '', company: '', address: '', phone: '', email: '', slogan: '',
     disclosure: '',
@@ -195,19 +195,24 @@ export default function Home() {
     setReceiverSignatureDataUrl(est.receiverSignatureDataUrl || '');
   };
 
-  // NEW: Load latest profile so certificate + disclosure stay on every new estimate
+  // Load latest saved profile (company info persists globally)
   const loadLatestProfile = async () => {
     if (!user || !supabase) return;
-    const { data } = await supabase.from('estimates').select('profile').eq('user_id', user.id).order('updated_at', { ascending: false }).limit(1);
-    if (data && data[0]) {
-      setProfile(data[0].profile || profile);
+    const { data } = await supabase
+      .from('estimates')
+      .select('profile')
+      .eq('user_id', user.id)
+      .order('updated_at', { ascending: false })
+      .limit(1);
+    if (data && data[0] && data[0].profile) {
+      setProfile(data[0].profile);
     }
   };
 
   const newEstimate = () => {
     setJobName(''); setAddress(''); setCity(''); setZipCode('');
     setPhones(['']); setEmails(['']); setTerms('');
-    // Do NOT reset photoUrls or profile — they now carry over
+    setPhotoUrls([]); setVideoUrls([]); setReceiptUrls([]);
     setSignatureDataUrl('');
     setReceiverSignatureDataUrl('');
     setItems([{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
@@ -217,7 +222,7 @@ export default function Home() {
     localStorage.setItem('estimateCount', savedCount.toString());
     const prefix = documentType === 'invoice' ? 'INV' : 'EST';
     setInvoiceNumber(`${prefix}-${String(savedCount).padStart(4, '0')}`);
-    loadLatestProfile(); // ← ensures certificate & disclosure stay
+    loadLatestProfile(); // ← company name, slogan, phone, email, address now auto-load
   };
 
   const openNewDocument = (type: 'estimate' | 'invoice') => {
@@ -580,7 +585,6 @@ export default function Home() {
 
       <div className="flex flex-col h-screen bg-[#f4f4f4]">
         <div className="flex-1 overflow-auto p-4 md:p-8">
-          {/* All other views unchanged */}
           {view === 'dashboard' && (
             <div>
               <div className="flex justify-between items-center mb-8">
@@ -662,6 +666,7 @@ export default function Home() {
             <div>
               <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to Dashboard</Button>
 
+              {/* Company info header - now auto-populates from saved profile */}
               <div className="flex justify-between items-start mb-8">
                 <div>
                   <h1 className="text-5xl font-bold text-[#1e293b]">{profile.company || 'Your Company'}</h1>
@@ -1098,7 +1103,7 @@ export default function Home() {
             </div>
           )}
 
-          {/* SEND PREVIEW PAGE - ONLY THIS SECTION WAS CHANGED */}
+          {/* SEND PREVIEW PAGE */}
           {view === 'sendPreview' && (
             <div className="max-w-4xl mx-auto">
               <Button variant="outline" onClick={() => setView('editor')} className="mb-6">← Back to Editor</Button>
@@ -1145,7 +1150,6 @@ export default function Home() {
                 </table>
                 <div className="text-right text-3xl font-bold">Total: ${grandTotal.toFixed(2)}</div>
 
-                {/* Disclosure right below Total */}
                 {profile.disclosure && (
                   <div className="mt-12">
                     <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Disclosure / Notes</h3>
@@ -1155,7 +1159,6 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* Digital Signature right below Disclosure */}
                 {signatureDataUrl && (
                   <div className="mt-12">
                     <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Signature</h3>
@@ -1163,7 +1166,6 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* Photos below Digital Signature */}
                 {photoUrls.length > 0 && (
                   <div className="mt-12">
                     <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Attached Photos</h3>
@@ -1175,7 +1177,6 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* Certificate of Insurance below Photos */}
                 {profile.certificateUrl && (
                   <div className="mt-12">
                     <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Certificate of Insurance</h3>
@@ -1184,7 +1185,6 @@ export default function Home() {
                 )}
               </div>
 
-              {/* Receiver Digital Signature */}
               <Card className="mb-8">
                 <CardContent className="p-6">
                   <h3 className="text-xl font-semibold mb-4">Receiver Digital Signature</h3>
