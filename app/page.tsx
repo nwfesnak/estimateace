@@ -38,8 +38,6 @@ export default function Home() {
   const [photoUrls, setPhotoUrls] = useState<string[]>([]);
   const [videoUrls, setVideoUrls] = useState<string[]>([]);
   const [receiptUrls, setReceiptUrls] = useState<string[]>([]);
-  const [signatureDataUrl, setSignatureDataUrl] = useState<string>('');
-  const [receiverSignatureDataUrl, setReceiverSignatureDataUrl] = useState<string>('');
 
   const [dueDate, setDueDate] = useState('');
   const [paymentStatus, setPaymentStatus] = useState<'pending' | 'paid'>('pending');
@@ -114,7 +112,7 @@ export default function Home() {
       user_id: user.id,
       jobName, address, city, zipCode, phones, emails, date, invoiceNumber,
       items, terms, profile, documentType, dueDate, paymentStatus, amountPaid,
-      paymentMethod, photoUrls, videoUrls, receiptUrls, signatureDataUrl, receiverSignatureDataUrl, updated_at: new Date().toISOString()
+      paymentMethod, photoUrls, videoUrls, receiptUrls, updated_at: new Date().toISOString()
     };
     const { error } = await supabase.from('estimates').upsert({ id: invoiceNumber, ...data });
     if (error) console.error('Save error:', error);
@@ -191,8 +189,6 @@ export default function Home() {
     setPhotoUrls(est.photoUrls || []);
     setVideoUrls(est.videoUrls || []);
     setReceiptUrls(est.receiptUrls || []);
-    setSignatureDataUrl(est.signatureDataUrl || '');
-    setReceiverSignatureDataUrl(est.receiverSignatureDataUrl || '');
   };
 
   const loadLatestProfile = async () => {
@@ -212,8 +208,6 @@ export default function Home() {
     setJobName(''); setAddress(''); setCity(''); setZipCode('');
     setPhones(['']); setEmails(['']); setTerms('');
     setPhotoUrls([]); setVideoUrls([]); setReceiptUrls([]);
-    setSignatureDataUrl('');
-    setReceiverSignatureDataUrl('');
     setItems([{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
     const today = new Date().toISOString().split('T')[0];
     setDate(today);
@@ -402,159 +396,6 @@ export default function Home() {
     if (view === 'estimatesList' || view === 'invoicesList') refreshSavedList();
     if (view === 'archivesView') refreshArchivesList();
   }, [view]);
-
-  // DIGITAL SIGNATURE (sender)
-  const signatureCanvasRef = useRef<HTMLCanvasElement>(null);
-  const isDrawing = useRef(false);
-
-  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = signatureCanvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    isDrawing.current = true;
-    ctx.beginPath();
-    ctx.moveTo(e.nativeEvent.offsetX, e.nativeEvent.offsetY);
-  };
-
-  const draw = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = signatureCanvasRef.current;
-    if (!canvas || !isDrawing.current) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    ctx.lineWidth = 3;
-    ctx.lineCap = 'round';
-    ctx.strokeStyle = '#1e293b';
-    ctx.lineTo(e.nativeEvent.offsetX, e.nativeEvent.offsetY);
-    ctx.stroke();
-  };
-
-  const stopDrawing = () => {
-    isDrawing.current = false;
-  };
-
-  const clearSignature = () => {
-    const canvas = signatureCanvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
-  };
-
-  const saveSignature = () => {
-    const canvas = signatureCanvasRef.current;
-    if (!canvas) return;
-    const dataUrl = canvas.toDataURL('image/png');
-    setSignatureDataUrl(dataUrl);
-    saveToDB();
-    showMessage('✅ Digital signature saved');
-  };
-
-  const startDrawingTouch = (e: React.TouchEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    const canvas = signatureCanvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    isDrawing.current = true;
-    const rect = canvas.getBoundingClientRect();
-    const x = e.touches[0].clientX - rect.left;
-    const y = e.touches[0].clientY - rect.top;
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-  };
-
-  const drawTouch = (e: React.TouchEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    const canvas = signatureCanvasRef.current;
-    if (!canvas || !isDrawing.current) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = e.touches[0].clientX - rect.left;
-    const y = e.touches[0].clientY - rect.top;
-    ctx.lineWidth = 3;
-    ctx.lineCap = 'round';
-    ctx.strokeStyle = '#1e293b';
-    ctx.lineTo(x, y);
-    ctx.stroke();
-  };
-
-  // RECEIVER SIGNATURE
-  const receiverCanvasRef = useRef<HTMLCanvasElement>(null);
-  const isReceiverDrawing = useRef(false);
-
-  const startReceiverDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = receiverCanvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    isReceiverDrawing.current = true;
-    ctx.beginPath();
-    ctx.moveTo(e.nativeEvent.offsetX, e.nativeEvent.offsetY);
-  };
-
-  const drawReceiver = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = receiverCanvasRef.current;
-    if (!canvas || !isReceiverDrawing.current) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    ctx.lineWidth = 3;
-    ctx.lineCap = 'round';
-    ctx.strokeStyle = '#1e293b';
-    ctx.lineTo(e.nativeEvent.offsetX, e.nativeEvent.offsetY);
-    ctx.stroke();
-  };
-
-  const stopReceiverDrawing = () => {
-    isReceiverDrawing.current = false;
-  };
-
-  const startReceiverTouch = (e: React.TouchEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    const canvas = receiverCanvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    isReceiverDrawing.current = true;
-    const rect = canvas.getBoundingClientRect();
-    const x = e.touches[0].clientX - rect.left;
-    const y = e.touches[0].clientY - rect.top;
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-  };
-
-  const drawReceiverTouch = (e: React.TouchEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    const canvas = receiverCanvasRef.current;
-    if (!canvas || !isReceiverDrawing.current) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = e.touches[0].clientX - rect.left;
-    const y = e.touches[0].clientY - rect.top;
-    ctx.lineWidth = 3;
-    ctx.lineCap = 'round';
-    ctx.strokeStyle = '#1e293b';
-    ctx.lineTo(x, y);
-    ctx.stroke();
-  };
-
-  const clearReceiverSignature = () => {
-    const canvas = receiverCanvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
-  };
-
-  const approveEstimate = () => {
-    const canvas = receiverCanvasRef.current;
-    let receiverSig = '';
-    if (canvas) receiverSig = canvas.toDataURL('image/png');
-    setReceiverSignatureDataUrl(receiverSig);
-    saveToDB();
-    showMessage("✅ Estimate approved by receiver!\nNotification sent to you.");
-    setView('editor');
-  };
 
   if (!user) {
     return (
@@ -828,31 +669,6 @@ export default function Home() {
                 </CardContent>
               </Card>
 
-              <Card className="mb-8">
-                <CardContent className="p-6">
-                  <h3 className="text-xl font-semibold mb-4">✍️ Digital Signature</h3>
-                  <div className="border-2 border-dashed border-gray-300 rounded-2xl p-4 bg-white">
-                    <canvas
-                      ref={signatureCanvasRef}
-                      width="620"
-                      height="220"
-                      className="w-full border border-gray-300 rounded-xl cursor-crosshair touch-none"
-                      onMouseDown={startDrawing}
-                      onMouseMove={draw}
-                      onMouseUp={stopDrawing}
-                      onMouseLeave={stopDrawing}
-                      onTouchStart={startDrawingTouch}
-                      onTouchMove={drawTouch}
-                      onTouchEnd={stopDrawing}
-                    />
-                    <div className="flex gap-3 mt-4">
-                      <Button variant="outline" onClick={clearSignature} className="flex-1">Clear Signature</Button>
-                      <Button onClick={saveSignature} className="flex-1 bg-[#10b981]">Save Signature</Button>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
               <div id="print-document" className="max-w-4xl mx-auto bg-white p-10 shadow-2xl hidden print:block">
                 <h1 className="text-4xl font-bold text-center mb-8">{profile.company || 'Your Company'}</h1>
                 {(profile.phone || profile.email) && (
@@ -918,13 +734,6 @@ export default function Home() {
                     <div className="text-gray-700 leading-relaxed whitespace-pre-wrap border rounded-xl p-6 bg-gray-50">
                       {profile.disclosure}
                     </div>
-                  </div>
-                )}
-
-                {signatureDataUrl && (
-                  <div className="mt-12">
-                    <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Signature</h3>
-                    <img src={signatureDataUrl} alt="Signature" className="max-h-48 mx-auto border rounded-lg shadow" />
                   </div>
                 )}
               </div>
@@ -1100,7 +909,6 @@ export default function Home() {
             </div>
           )}
 
-          {/* SEND PREVIEW PAGE - ONLY THIS SECTION WAS CHANGED */}
           {view === 'sendPreview' && (
             <div className="max-w-4xl mx-auto">
               <Button variant="outline" onClick={() => setView('editor')} className="mb-6">← Back to Editor</Button>
@@ -1147,7 +955,6 @@ export default function Home() {
                 </table>
                 <div className="text-right text-3xl font-bold">Total: ${grandTotal.toFixed(2)}</div>
 
-                {/* Disclosure right below Total */}
                 {profile.disclosure && (
                   <div className="mt-12">
                     <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Disclosure / Notes</h3>
@@ -1157,15 +964,6 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* Digital Signature right underneath Disclosure */}
-                {signatureDataUrl && (
-                  <div className="mt-12">
-                    <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Signature</h3>
-                    <img src={signatureDataUrl} alt="Signature" className="max-h-48 mx-auto border rounded-lg shadow" />
-                  </div>
-                )}
-
-                {/* Photos */}
                 {photoUrls.length > 0 && (
                   <div className="mt-12">
                     <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Attached Photos</h3>
@@ -1177,7 +975,6 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* Certificate of Insurance moved down one section (now after Photos) */}
                 {profile.certificateUrl && (
                   <div className="mt-12">
                     <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Certificate of Insurance</h3>
@@ -1185,32 +982,6 @@ export default function Home() {
                   </div>
                 )}
               </div>
-
-              {/* Receiver Digital Signature */}
-              <Card className="mb-8">
-                <CardContent className="p-6">
-                  <h3 className="text-xl font-semibold mb-4">Receiver Digital Signature</h3>
-                  <div className="border-2 border-dashed border-gray-300 rounded-2xl p-4 bg-white">
-                    <canvas
-                      ref={receiverCanvasRef}
-                      width="620"
-                      height="220"
-                      className="w-full border border-gray-300 rounded-xl cursor-crosshair touch-none"
-                      onMouseDown={startReceiverDrawing}
-                      onMouseMove={drawReceiver}
-                      onMouseUp={stopReceiverDrawing}
-                      onMouseLeave={stopReceiverDrawing}
-                      onTouchStart={startReceiverTouch}
-                      onTouchMove={drawReceiverTouch}
-                      onTouchEnd={stopReceiverDrawing}
-                    />
-                    <div className="flex gap-3 mt-4">
-                      <Button variant="outline" onClick={clearReceiverSignature} className="flex-1">Clear</Button>
-                      <Button onClick={approveEstimate} className="flex-1 bg-[#10b981]">Approve & Send</Button>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
             </div>
           )}
         </div>
