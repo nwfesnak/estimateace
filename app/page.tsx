@@ -154,7 +154,10 @@ export default function Home() {
     };
     const { error } = await supabase.from('estimates').upsert({ id: invoiceNumber, ...data });
     if (error) console.error('Save error:', error);
-    else setLastSaved(new Date().toLocaleTimeString());
+    else {
+      setLastSaved(new Date().toLocaleTimeString());
+      refreshSavedList();   // ← THIS LINE WAS ADDED - now saved estimates appear in the tab
+    }
   };
 
   const handleMediaUpload = async (files: FileList | null, type: 'photo' | 'video' | 'receipt') => {
@@ -473,7 +476,6 @@ export default function Home() {
     if (saved) setQuickLines(JSON.parse(saved));
   }, []);
 
-  // NEW: Refresh data automatically when on dashboard (and the list views)
   useEffect(() => {
     if (view === 'dashboard' || view === 'estimatesList' || view === 'invoicesList') refreshSavedList();
     if (view === 'archivesView') refreshArchivesList();
