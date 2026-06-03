@@ -156,7 +156,7 @@ export default function Home() {
     if (error) console.error('Save error:', error);
     else {
       setLastSaved(new Date().toLocaleTimeString());
-      refreshSavedList();   // ← THIS LINE WAS ADDED - now saved estimates appear in the tab
+      refreshSavedList();
     }
   };
 
@@ -358,7 +358,6 @@ export default function Home() {
     setIsCalendarModalOpen(true);
   };
 
-  // ====================== FIXED CALENDAR FUNCTION ======================
   const scheduleAppointment = () => {
     if (!selectedEstimateForCalendar || !selectedDateTime) return showMessage("Select estimate and date/time");
 
@@ -483,7 +482,7 @@ export default function Home() {
     if (view === 'archivesView') refreshArchivesList();
   }, [view]);
 
-  // Dashboard calculations (only used on dashboard view)
+  // Dashboard calculations
   const estimatesCount = savedEstimatesList.filter(est => 
     est.documentType === 'estimate' || est.invoiceNumber?.startsWith('EST')
   ).length;
@@ -1212,7 +1211,6 @@ export default function Home() {
                 </CardContent>
               </Card>
 
-              {/* NEW TAB + SCROLL-DOWN MENU FOR ARCHIVES */}
               <div className="max-w-2xl mx-auto mt-10">
                 <Button 
                   onClick={() => refreshArchivesList()}
@@ -1335,11 +1333,14 @@ export default function Home() {
                         const deposit = grandTotal * (profile.depositPercentage || 0) / 100;
                         if (confirm(`✅ Estimate Approved!\n\nDeposit due: $${deposit.toFixed(2)} (${profile.depositPercentage || 0}% of total)\n\nWould you like to pay the deposit now?`)) {
                           alert(`💳 Deposit of $${deposit.toFixed(2)} has been paid!\n\nThank you – the estimate is now fully approved and paid.`);
+                          setPaymentStatus('paid');
+                          setAmountPaid(deposit);
+                          saveToDB();
                         }
                       }}
                       className="w-full text-3xl py-8 bg-[#10b981] hover:bg-[#0ea16b] text-white font-semibold rounded-3xl shadow-lg"
                     >
-                      Approved
+                      Pay Deposit Now
                     </Button>
                   </div>
                 )}
@@ -1354,15 +1355,15 @@ export default function Home() {
                     <Button 
                       onClick={() => {
                         const remainder = grandTotal * (100 - (profile.depositPercentage || 0)) / 100;
-                        if (confirm(`Pay the remaining $${remainder.toFixed(2)} now?\n\nThis will mark the invoice as fully paid.`)) {
+                        if (confirm(`Pay the Balance Now $${remainder.toFixed(2)}?\n\nThis will mark the invoice as fully paid.`)) {
                           alert(`✅ Payment of $${remainder.toFixed(2)} received!\n\nInvoice is now 100% PAID and marked complete.\nThank you!`);
                           setPaymentStatus('paid');
                           setAmountPaid(grandTotal);
-                          showMessage('Invoice marked PAID and saved');
+                          saveToDB();
                         }
                       }}
                       className="w-full mt-6 py-8 text-2xl font-bold bg-[#f59e0b] hover:bg-orange-600 text-white rounded-3xl">
-                      Pay Remainder Now (${(grandTotal * (100 - (profile.depositPercentage || 0)) / 100).toFixed(2)})
+                      Pay the Balance Now (${(grandTotal * (100 - (profile.depositPercentage || 0)) / 100).toFixed(2)})
                     </Button>
                     <p className="text-center text-xs text-gray-500 mt-3">Clicking this completes the invoice conversion</p>
                   </div>
@@ -1447,7 +1448,7 @@ export default function Home() {
       {/* Send Recipients Popup */}
       <Dialog open={isSendModalOpen} onOpenChange={setIsSendModalOpen}>
         <DialogContent>
-          <DialogHeader><DialogTitle>📧 Choose Recipients for this Estimate</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>📧 Choose Recipients for this {documentType === 'invoice' ? 'Invoice' : 'Estimate'}</DialogTitle></DialogHeader>
           <div className="space-y-6">
             <div>
               <h4 className="font-semibold mb-2">Select Emails</h4>
@@ -1483,7 +1484,14 @@ export default function Home() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsSendModalOpen(false)}>Cancel</Button>
             <Button onClick={() => {
-              showMessage(`✅ Estimate sent to selected recipients!\nEmails: ${selectedEmailsForSend.join(', ') || 'none'}\nPhones: ${selectedPhonesForSend.join(', ') || 'none'}`);
+              const isInvoice = documentType === 'invoice';
+              let msg = `✅ ${isInvoice ? 'Invoice' : 'Estimate'} sent to selected recipients!\nEmails: ${selectedEmailsForSend.join(', ') || 'none'}\nPhones: ${selectedPhonesForSend.join(', ') || 'none'}`;
+
+              if (isInvoice) {
+                msg += `\n\n💰 Pay the Balance Now: https://your-payment-link.com/pay?invoice=${invoiceNumber}`;
+              }
+
+              showMessage(msg);
               setIsSendModalOpen(false);
             }} className="bg-[#10b981]">Send Now</Button>
           </DialogFooter>
