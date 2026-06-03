@@ -148,7 +148,7 @@ export default function Home() {
       jobName, address, city, state, zipCode, phones, emails, date, invoiceNumber,
       items, terms, profile, documentType, dueDate, paymentStatus, amountPaid,
       paymentMethod, photoUrls, videoUrls, receiptUrls, receiptDetails,
-      laborHours, laborRate, laborFixedAmount, useHourlyLabor, laborAmount,
+      laborHours, laborRate, laborFixedAmount, useHourlyLabor,
       taxRate, taxAmount,
       updated_at: new Date().toISOString()
     };
@@ -156,7 +156,7 @@ export default function Home() {
     if (error) console.error('Save error:', error);
     else {
       setLastSaved(new Date().toLocaleTimeString());
-      refreshSavedList();   // ← this line makes the new estimate appear instantly in the Estimates tab
+      refreshSavedList();
     }
   };
 
