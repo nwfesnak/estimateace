@@ -148,7 +148,6 @@ export default function Home() {
       jobName, address, city, state, zipCode, phones, emails, date, invoiceNumber,
       items, terms, profile, documentType, dueDate, paymentStatus, amountPaid,
       paymentMethod, photoUrls, videoUrls, receiptUrls, receiptDetails,
-      laborHours, laborRate, laborFixedAmount, useHourlyLabor,
       taxRate, taxAmount,
       updated_at: new Date().toISOString()
     };
