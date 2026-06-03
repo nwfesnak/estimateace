@@ -473,10 +473,48 @@ export default function Home() {
     if (saved) setQuickLines(JSON.parse(saved));
   }, []);
 
+  // NEW: Refresh data automatically when on dashboard (and the list views)
   useEffect(() => {
-    if (view === 'estimatesList' || view === 'invoicesList') refreshSavedList();
+    if (view === 'dashboard' || view === 'estimatesList' || view === 'invoicesList') refreshSavedList();
     if (view === 'archivesView') refreshArchivesList();
   }, [view]);
+
+  // Dashboard calculations (only used on dashboard view)
+  const estimatesCount = savedEstimatesList.filter(est => 
+    est.documentType === 'estimate' || est.invoiceNumber?.startsWith('EST')
+  ).length;
+
+  const outstandingInvoices = savedEstimatesList.filter(est => 
+    (est.documentType === 'invoice' || est.invoiceNumber?.startsWith('INV')) && 
+    est.paymentStatus === 'pending'
+  );
+
+  const calculateGrandTotal = (doc: any): number => {
+    if (!doc || !doc.items) return 0;
+    const itemsTotal = doc.items.reduce((sum: number, item: any) => {
+      return sum + (item.total || (item.qty || 0) * (item.price || 0));
+    }, 0);
+    const laborAmountDoc = doc.laborAmount ?? 
+      (doc.useHourlyLabor ? (doc.laborHours || 0) * (doc.laborRate || 0) : (doc.laborFixedAmount || 0));
+    const subtotal = itemsTotal + laborAmountDoc;
+    const docTaxRate = doc.taxRate ?? (taxRates[doc.state?.toUpperCase() || ''] || 7);
+    const taxAmountDoc = subtotal * (docTaxRate / 100);
+    return subtotal + taxAmountDoc;
+  };
+
+  const totalOutstanding = outstandingInvoices.reduce((sum, inv) => sum + calculateGrandTotal(inv), 0);
+
+  const currentYear = new Date().getFullYear();
+  const salesYTD = savedEstimatesList
+    .filter(doc => {
+      if (!doc.date) return false;
+      const docDate = new Date(doc.date);
+      if (isNaN(docDate.getTime())) return false;
+      return docDate.getFullYear() === currentYear &&
+             (doc.documentType === 'invoice' || doc.invoiceNumber?.startsWith('INV')) &&
+             doc.paymentStatus === 'paid';
+    })
+    .reduce((sum, doc) => sum + calculateGrandTotal(doc), 0);
 
   if (!user) {
     return (
@@ -515,25 +553,101 @@ export default function Home() {
                   <p className="text-gray-600 mt-1">Here’s what’s happening with your business</p>
                 </div>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
-                <Card><CardContent className="p-6"><p className="text-sm text-gray-500">Total Documents</p><p className="text-4xl font-bold text-[#1e293b]">{savedEstimatesList.length}</p></CardContent></Card>
-                <Card><CardContent className="p-6"><p className="text-sm text-gray-500">This Month</p><p className="text-4xl font-bold text-[#10b981]">12</p></CardContent></Card>
-                <Card><CardContent className="p-6"><p className="text-sm text-gray-500">Pending Payments</p><p className="text-4xl font-bold text-amber-600">$2,840</p></CardContent></Card>
-              </div>
+
+              {/* 1. Total Estimates Written (Not Archived) */}
+              <Card className="mb-8">
+                <CardContent className="p-6">
+                  <h3 className="font-semibold mb-4 flex items-center gap-2">
+                    📋 Total Estimates Written (Not Archived)
+                  </h3>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-3/4">Metric</TableHead>
+                        <TableHead className="text-right">Count</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      <TableRow>
+                        <TableCell className="font-medium">Active Estimates</TableCell>
+                        <TableCell className="text-right text-4xl font-bold text-[#10b981]">
+                          {estimatesCount}
+                        </TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+
+              {/* 2. All Outstanding Invoices */}
+              <Card className="mb-8">
+                <CardContent className="p-6">
+                  <h3 className="font-semibold mb-4 flex items-center gap-2">
+                    💰 All Outstanding Invoices
+                  </h3>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Invoice #</TableHead>
+                          <TableHead>Job Name</TableHead>
+                          <TableHead className="text-right">Amount Due</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {outstandingInvoices.length === 0 ? (
+                          <TableRow>
+                            <TableCell colSpan={3} className="text-center py-8 text-gray-500">
+                              No outstanding invoices
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          outstandingInvoices.map((inv) => (
+                            <TableRow key={inv.id}>
+                              <TableCell className="font-medium">{inv.invoiceNumber}</TableCell>
+                              <TableCell>{inv.jobName || 'Untitled'}</TableCell>
+                              <TableCell className="text-right font-semibold">
+                                ${calculateGrandTotal(inv).toFixed(2)}
+                              </TableCell>
+                            </TableRow>
+                          ))
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  {outstandingInvoices.length > 0 && (
+                    <div className="mt-6 flex justify-end items-baseline gap-2 text-xl">
+                      <span className="text-gray-600">Total Outstanding:</span>
+                      <span className="font-bold text-amber-600">${totalOutstanding.toFixed(2)}</span>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* 3. Total Sales Year to Date */}
               <Card>
                 <CardContent className="p-6">
-                  <h3 className="font-semibold mb-4">Recent Documents</h3>
-                  <div className="space-y-3">
-                    {savedEstimatesList.slice(0, 5).map((est) => (
-                      <div key={est.id} className="flex items-center justify-between border-b pb-3 last:border-none">
-                        <div>
-                          <div className="font-medium">{est.jobName || 'Untitled'}</div>
-                          <div className="text-sm text-gray-500">{est.invoiceNumber} • {est.date}</div>
-                        </div>
-                        <Button size="sm" onClick={() => openExistingDocument(est)}>Open</Button>
-                      </div>
-                    ))}
-                  </div>
+                  <h3 className="font-semibold mb-4 flex items-center gap-2">
+                    📈 Total Sales Year to Date
+                  </h3>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-3/4">Period</TableHead>
+                        <TableHead className="text-right">Sales</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      <TableRow>
+                        <TableCell className="font-medium">
+                          {currentYear} (Year to Date)
+                        </TableCell>
+                        <TableCell className="text-right text-4xl font-bold text-[#10b981]">
+                          ${salesYTD.toFixed(2)}
+                        </TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
                 </CardContent>
               </Card>
             </div>
@@ -1449,7 +1563,7 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* Quick Lines Modal - FIXED */}
+      {/* Quick Lines Modal */}
       <Dialog open={isQuickLinesModalOpen} onOpenChange={setIsQuickLinesModalOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
