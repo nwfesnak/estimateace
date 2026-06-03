@@ -1448,6 +1448,58 @@ export default function Home() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Quick Lines Modal - FIXED */}
+      <Dialog open={isQuickLinesModalOpen} onOpenChange={setIsQuickLinesModalOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>📌 Saved Quick Lines</DialogTitle>
+          </DialogHeader>
+          <div className="max-h-96 overflow-auto py-2">
+            {quickLines.length === 0 ? (
+              <div className="text-center py-12 text-gray-500">
+                No quick lines saved yet.<br />
+                Click the 💾 icon next to any line item to save one.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {quickLines.map((quick) => (
+                  <div key={quick.id} className="flex justify-between items-center border rounded-xl p-4 bg-white">
+                    <div className="flex-1">
+                      <div className="font-medium text-lg">{quick.description}</div>
+                      <div className="text-sm text-gray-500 mt-1">
+                        {quick.qty} × ${quick.price.toFixed(2)} = ${(quick.qty * quick.price).toFixed(2)}
+                        {quick.unit && ` • ${quick.unit}`}
+                      </div>
+                    </div>
+                    <div className="flex gap-3">
+                      <Button 
+                        size="sm" 
+                        onClick={() => useQuickLine(quick)}
+                        className="bg-[#10b981]"
+                      >
+                        Use
+                      </Button>
+                      <Button 
+                        size="sm" 
+                        variant="destructive"
+                        onClick={() => deleteQuickLine(quick.id)}
+                      >
+                        Delete
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsQuickLinesModalOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
