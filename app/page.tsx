@@ -156,7 +156,7 @@ export default function Home() {
     if (error) console.error('Save error:', error);
     else {
       setLastSaved(new Date().toLocaleTimeString());
-      refreshSavedList();
+      refreshSavedList();   // ← this line makes the new estimate appear instantly in the Estimates tab
     }
   };
 
