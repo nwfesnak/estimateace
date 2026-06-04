@@ -54,23 +54,43 @@ export default function Home() {
   const [useHourlyLabor, setUseHourlyLabor] = useState(true);
   const laborAmount = useHourlyLabor ? laborHours * laborRate : laborFixedAmount;
 
-  // Tax states
-  const taxRates: { [key: string]: number } = {
-    'AL': 4, 'AK': 0, 'AZ': 5.6, 'AR': 6.5, 'CA': 7.25,
-    'CO': 2.9, 'CT': 6.35, 'DE': 0, 'FL': 6, 'GA': 4,
-    'HI': 4, 'ID': 6, 'IL': 6.25, 'IN': 7, 'IA': 6,
-    'KS': 6.5, 'KY': 6, 'LA': 4.45, 'ME': 5.5, 'MD': 6,
-    'MA': 6.25, 'MI': 6, 'MN': 6.875, 'MS': 7, 'MO': 4.225,
-    'MT': 0, 'NE': 5.5, 'NV': 6.85, 'NH': 0, 'NJ': 6.625,
-    'NM': 5.125, 'NY': 4, 'NC': 4.75, 'ND': 5, 'OH': 5.75,
-    'OK': 4.5, 'OR': 0, 'PA': 6, 'RI': 7, 'SC': 6,
-    'SD': 4.5, 'TN': 7, 'TX': 6.25, 'UT': 4.85, 'VT': 6,
-    'VA': 4.3, 'WA': 6.5, 'WV': 6, 'WI': 5, 'WY': 4,
+  // Tax states (static zip lookup - no TaxJar)
+  const [isTaxExempt, setIsTaxExempt] = useState(false);
+  const [taxLabor, setTaxLabor] = useState(true);
+
+  // ====================== DYNAMIC ZIP CODE TAX LOOKUP ======================
+  const getTaxRateFromZip = (zip: string, fallbackState: string): number => {
+    const zipTaxMap: { [key: string]: number } = {
+      '33101': 7.0, '33139': 7.0, '90210': 9.5, '10001': 8.875,
+      '60601': 10.25, '77001': 8.25, '75201': 8.25, '94102': 8.5,
+      '30303': 8.9, '33131': 7.0,
+    };
+    const cleanZip = zip.trim().replace(/\D/g, '').slice(0, 5);
+    if (zipTaxMap[cleanZip]) return zipTaxMap[cleanZip];
+
+    const stateRates: { [key: string]: number } = {
+      'AL': 4, 'AK': 0, 'AZ': 5.6, 'AR': 6.5, 'CA': 7.25,
+      'CO': 2.9, 'CT': 6.35, 'DE': 0, 'FL': 6, 'GA': 4,
+      'HI': 4, 'ID': 6, 'IL': 6.25, 'IN': 7, 'IA': 6,
+      'KS': 6.5, 'KY': 6, 'LA': 4.45, 'ME': 5.5, 'MD': 6,
+      'MA': 6.25, 'MI': 6, 'MN': 6.875, 'MS': 7, 'MO': 4.225,
+      'MT': 0, 'NE': 5.5, 'NV': 6.85, 'NH': 0, 'NJ': 6.625,
+      'NM': 5.125, 'NY': 4, 'NC': 4.75, 'ND': 5, 'OH': 5.75,
+      'OK': 4.5, 'OR': 0, 'PA': 6, 'RI': 7, 'SC': 6,
+      'SD': 4.5, 'TN': 7, 'TX': 6.25, 'UT': 4.85, 'VT': 6,
+      'VA': 4.3, 'WA': 6.5, 'WV': 6, 'WI': 5, 'WY': 4,
+    };
+    return stateRates[fallbackState.toUpperCase()] || 7;
   };
-  const taxRate = taxRates[state.toUpperCase()] || 7;
-  const subtotal = items.reduce((sum, item) => sum + (item.total || 0), 0) + laborAmount;
-  const taxAmount = subtotal * (taxRate / 100);
-  const grandTotal = subtotal + taxAmount;
+
+  const baseTaxRate = getTaxRateFromZip(zipCode, state);
+
+  // Real tax calculation
+  const taxableSubtotal = items.reduce((sum, item) => sum + (item.total || 0), 0);
+  const taxableLabor = taxLabor ? laborAmount : 0;
+  const taxableTotal = taxableSubtotal + taxableLabor;
+  const taxAmount = isTaxExempt ? 0 : taxableTotal * (baseTaxRate / 100);
+  const grandTotal = taxableSubtotal + laborAmount + taxAmount;
 
   // Profile
   const [profile, setProfile] = useState({ 
@@ -115,7 +135,7 @@ export default function Home() {
   // Reports view selected estimate
   const [selectedReportJob, setSelectedReportJob] = useState<any>(null);
 
-  // NEW: sub-tab inside Reports view (only addition)
+  // NEW: sub-tab inside Reports view
   const [reportsSubTab, setReportsSubTab] = useState<'profit' | 'tax'>('profit');
 
   const showMessage = (message: string) => {
@@ -152,7 +172,10 @@ export default function Home() {
       items, terms, profile, documentType, dueDate, paymentStatus, amountPaid,
       paymentMethod, photoUrls, videoUrls, receiptUrls, receiptDetails,
       laborHours, laborRate, laborFixedAmount, useHourlyLabor, laborAmount,
-      taxRate, taxAmount,
+      taxRate: baseTaxRate,
+      taxAmount,
+      isTaxExempt,
+      taxLabor,
       updated_at: new Date().toISOString()
     };
     const { error } = await supabase.from('estimates').upsert({ id: invoiceNumber, ...data });
@@ -264,6 +287,8 @@ export default function Home() {
     setLaborRate(est.laborRate || 0);
     setLaborFixedAmount(est.laborFixedAmount || 0);
     setUseHourlyLabor(est.useHourlyLabor !== false);
+    setIsTaxExempt(est.isTaxExempt || false);
+    setTaxLabor(est.taxLabor !== false);
   };
 
   const loadLatestProfile = async () => {
@@ -285,6 +310,8 @@ export default function Home() {
     setPhotoUrls([]); setVideoUrls([]); setReceiptUrls([]); setReceiptDetails([]);
     setItems([{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
     setLaborHours(0); setLaborRate(0); setLaborFixedAmount(0); setUseHourlyLabor(true);
+    setIsTaxExempt(false);
+    setTaxLabor(true);
     const today = new Date().toISOString().split('T')[0];
     setDate(today);
     const savedCount = parseInt(localStorage.getItem('estimateCount') || '0') + 1;
@@ -473,7 +500,7 @@ export default function Home() {
   useEffect(() => {
     if (view === 'editor') debouncedSave();
     return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
-  }, [jobName, address, city, state, zipCode, phones, emails, date, invoiceNumber, items, terms, profile, documentType, dueDate, paymentStatus, amountPaid, paymentMethod, view, receiptDetails]);
+  }, [jobName, address, city, state, zipCode, phones, emails, date, invoiceNumber, items, terms, profile, documentType, dueDate, paymentStatus, amountPaid, paymentMethod, view, receiptDetails, isTaxExempt, taxLabor]);
 
   useEffect(() => {
     const saved = localStorage.getItem('quickLines');
@@ -503,9 +530,9 @@ export default function Home() {
     const laborAmountDoc = doc.laborAmount ?? 
       (doc.useHourlyLabor ? (doc.laborHours || 0) * (doc.laborRate || 0) : (doc.laborFixedAmount || 0));
     const subtotal = itemsTotal + laborAmountDoc;
-    const docTaxRate = doc.taxRate ?? (taxRates[doc.state?.toUpperCase() || ''] || 7);
-    const taxAmountDoc = subtotal * (docTaxRate / 100);
-    return subtotal + taxAmountDoc;
+    const docTaxRate = doc.taxRate ?? 7;
+    const docTaxAmount = doc.isTaxExempt ? 0 : (subtotal + (doc.taxLabor !== false ? laborAmountDoc : 0)) * (docTaxRate / 100);
+    return subtotal + laborAmountDoc + docTaxAmount;
   };
 
   const totalOutstanding = outstandingInvoices.reduce((sum, inv) => sum + calculateGrandTotal(inv), 0);
@@ -802,6 +829,21 @@ export default function Home() {
                     ))}
                     <Button variant="outline" size="sm" onClick={addEmail}>+ Add Email</Button>
                   </div>
+
+                  {/* Real Tax Controls */}
+                  <div className="md:col-span-2 flex items-center gap-8 pt-4 border-t">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input type="checkbox" checked={isTaxExempt} onChange={e => setIsTaxExempt(e.target.checked)} />
+                      <span className="font-medium">Tax Exempt</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input type="checkbox" checked={taxLabor} onChange={e => setTaxLabor(e.target.checked)} />
+                      <span className="font-medium">Tax Labor</span>
+                    </label>
+                    <div className="ml-auto text-sm text-gray-500">
+                      Rate: <span className="font-semibold">{baseTaxRate}%</span>
+                    </div>
+                  </div>
                 </CardContent>
               </Card>
 
@@ -871,7 +913,7 @@ export default function Home() {
 
                 <div className="p-6 bg-white border-t">
                   <div className="flex justify-end text-2xl font-semibold mb-2">
-                    Taxes ({state || '—'} {taxRate}%): <span className="text-[#14b8a6] ml-4">${taxAmount.toFixed(2)}</span>
+                    Taxes ({state || '—'} {baseTaxRate}%): <span className="text-[#14b8a6] ml-4">${taxAmount.toFixed(2)}</span>
                   </div>
                   <div className="flex justify-end text-4xl font-bold">
                     Grand Total: <span className="text-[#10b981] ml-4">${grandTotal.toFixed(2)}</span>
@@ -993,7 +1035,7 @@ export default function Home() {
                 {laborAmount > 0 && (
                   <div className="text-right text-2xl font-semibold text-[#14b8a6]">Labor: ${laborAmount.toFixed(2)}</div>
                 )}
-                <div className="text-right text-2xl font-semibold text-[#14b8a6]">Taxes ({state || '—'} {taxRate}%): ${taxAmount.toFixed(2)}</div>
+                <div className="text-right text-2xl font-semibold text-[#14b8a6]">Taxes ({state || '—'} {baseTaxRate}%): ${taxAmount.toFixed(2)}</div>
                 <div className="text-right text-4xl font-bold">Total: ${grandTotal.toFixed(2)}</div>
 
                 {profile.disclosure && (
@@ -1486,7 +1528,7 @@ export default function Home() {
           )}
         </div>
 
-        {/* Bottom Navigation - unchanged */}
+        {/* Bottom Navigation */}
         <div className="bg-white border-t shadow-inner flex items-center justify-around py-2 px-1 text-xs">
           <button onClick={goToDashboard} className={`flex flex-col items-center flex-1 py-1 ${view === 'dashboard' ? 'text-[#10b981]' : 'text-gray-500'}`}>
             <span className="text-3xl mb-0.5">📊</span>
@@ -1708,9 +1750,7 @@ export default function Home() {
             )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsQuickLinesModalOpen(false)}>
-              Close
-            </Button>
+            <Button variant="outline" onClick={() => setIsQuickLinesModalOpen(false)}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
