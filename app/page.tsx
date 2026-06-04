@@ -54,7 +54,7 @@ export default function Home() {
   const [useHourlyLabor, setUseHourlyLabor] = useState(true);
   const laborAmount = useHourlyLabor ? laborHours * laborRate : laborFixedAmount;
 
-  // Tax states
+  // Tax states (static zip lookup - no TaxJar)
   const [isTaxExempt, setIsTaxExempt] = useState(false);
   const [taxLabor, setTaxLabor] = useState(true);
 
@@ -92,21 +92,14 @@ export default function Home() {
   const taxAmount = isTaxExempt ? 0 : taxableTotal * (baseTaxRate / 100);
   const grandTotal = taxableSubtotal + laborAmount + taxAmount;
 
-  // Profile with payment settings
+  // Profile
   const [profile, setProfile] = useState({ 
     name: '', company: '', address: '', phone: '', email: '', slogan: '',
     disclosure: '',
     certificateUrl: '',
     depositPercentage: 10,
     autoSaveEnabled: true,
-    teammates: [] as { email: string; role: 'full' | 'limited' }[],
-    paymentSettings: {
-      stripe: { enabled: true, connected: false },
-      echeck: { enabled: true, connected: false },
-      paypal: { enabled: true, connected: false },
-      venmo: { enabled: true, connected: false },
-      zelle: { enabled: true, connected: false },
-    } as any
+    teammates: [] as { email: string; role: 'full' | 'limited' }[]
   });
 
   const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -144,15 +137,6 @@ export default function Home() {
 
   // NEW: sub-tab inside Reports view
   const [reportsSubTab, setReportsSubTab] = useState<'profit' | 'tax'>('profit');
-
-  // NEW: Profile tab (info / payments)
-  const [profileTab, setProfileTab] = useState<'info' | 'payments'>('info');
-
-  // NEW: Payment modal states
-  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
-  const [paymentType, setPaymentType] = useState<'deposit' | 'balance'>('deposit');
-  const [paymentAmount, setPaymentAmount] = useState(0);
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string | null>(null);
 
   const showMessage = (message: string) => {
     const clean = message.replace(/^[^\s]*\.vercel\.app says:\s*/i, '').trim();
@@ -528,55 +512,7 @@ export default function Home() {
     if (view === 'archivesView') refreshArchivesList();
   }, [view]);
 
-  // ====================== PAYMENT FUNCTIONS ======================
-  const openPaymentModal = (type: 'deposit' | 'balance', amount: number) => {
-    setPaymentType(type);
-    setPaymentAmount(amount);
-    setSelectedPaymentMethod(null);
-    setIsPaymentModalOpen(true);
-  };
-
-  const closePaymentModal = () => {
-    setIsPaymentModalOpen(false);
-    setSelectedPaymentMethod(null);
-  };
-
-  const selectPaymentMethod = (method: string) => {
-    setSelectedPaymentMethod(method);
-  };
-
-  const proceedWithPayment = () => {
-    if (!selectedPaymentMethod) return showMessage('Please select a payment method');
-    closePaymentModal();
-
-    const message = `✅ Payment of $${paymentAmount.toFixed(2)} for ${paymentType} received via ${selectedPaymentMethod.toUpperCase()}!`;
-
-    if (paymentType === 'deposit') {
-      const depositAmt = grandTotal * (profile.depositPercentage || 0) / 100;
-      setAmountPaid(depositAmt);
-    } else {
-      setAmountPaid(grandTotal);
-      setPaymentStatus('paid');
-    }
-    saveToDB();
-    showMessage(message);
-  };
-
-  const togglePaymentMethod = (method: string, enabled: boolean) => {
-    setProfile(prev => ({
-      ...prev,
-      paymentSettings: {
-        ...prev.paymentSettings,
-        [method]: { ...prev.paymentSettings[method], enabled }
-      }
-    }));
-  };
-
-  const linkPaymentAccount = (method: string) => {
-    showMessage(`${method.toUpperCase()} account linking opened. (Add the API route later to make it fully functional)`);
-  };
-
-  // Dashboard calculations (unchanged)
+  // Dashboard calculations
   const estimatesCount = savedEstimatesList.filter(est => 
     est.documentType === 'estimate' || est.invoiceNumber?.startsWith('EST')
   ).length;
@@ -894,6 +830,7 @@ export default function Home() {
                     <Button variant="outline" size="sm" onClick={addEmail}>+ Add Email</Button>
                   </div>
 
+                  {/* Real Tax Controls */}
                   <div className="md:col-span-2 flex items-center gap-8 pt-4 border-t">
                     <label className="flex items-center gap-2 cursor-pointer">
                       <input type="checkbox" checked={isTaxExempt} onChange={e => setIsTaxExempt(e.target.checked)} />
@@ -1144,218 +1081,156 @@ export default function Home() {
               <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to Dashboard</Button>
               <h2 className="text-3xl font-semibold mb-8">Company Profile</h2>
 
-              <div className="flex border-b mb-8">
-                <button 
-                  onClick={() => setProfileTab('info')}
-                  className={`flex-1 py-3 text-center font-medium ${profileTab === 'info' ? 'border-b-2 border-[#10b981] text-[#10b981]' : 'text-gray-500'}`}
-                >
-                  Company Info
-                </button>
-                <button 
-                  onClick={() => setProfileTab('payments')}
-                  className={`flex-1 py-3 text-center font-medium ${profileTab === 'payments' ? 'border-b-2 border-[#10b981] text-[#10b981]' : 'text-gray-500'}`}
-                >
-                  💳 Payments
-                </button>
-              </div>
-
-              {profileTab === 'info' && (
-                <Card className="mb-8">
-                  <CardContent className="p-8 space-y-8">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div>
-                        <label className="block text-sm font-semibold mb-2">Company Name</label>
-                        <Input value={profile.company} onChange={e => setProfile({...profile, company: e.target.value})} />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-semibold mb-2">Slogan</label>
-                        <Input value={profile.slogan} onChange={e => setProfile({...profile, slogan: e.target.value})} />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-semibold mb-2">Phone</label>
-                        <Input value={profile.phone} onChange={e => setProfile({...profile, phone: e.target.value})} />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-semibold mb-2">Email</label>
-                        <Input value={profile.email} onChange={e => setProfile({...profile, email: e.target.value})} />
-                      </div>
-                      <div className="md:col-span-2">
-                        <label className="block text-sm font-semibold mb-2">Address</label>
-                        <Input value={profile.address} onChange={e => setProfile({...profile, address: e.target.value})} />
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-semibold">Quick Save (Auto-save)</p>
-                        <p className="text-sm text-gray-500">Automatically save changes while editing</p>
-                      </div>
-                      <label className="relative inline-flex items-center cursor-pointer">
-                        <input 
-                          type="checkbox" 
-                          checked={profile.autoSaveEnabled} 
-                          onChange={(e) => setProfile(prev => ({ ...prev, autoSaveEnabled: e.target.checked }))}
-                          className="sr-only peer"
-                        />
-                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]"></div>
-                      </label>
-                    </div>
-
+              <Card className="mb-8">
+                <CardContent className="p-8 space-y-8">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
-                      <label className="block text-sm font-semibold mb-2">Disclosure / Notes</label>
-                      <Textarea 
-                        value={profile.disclosure} 
-                        onChange={e => setProfile({...profile, disclosure: e.target.value})} 
-                        rows={4}
-                        placeholder="Enter any disclosure text here..."
-                      />
+                      <label className="block text-sm font-semibold mb-2">Company Name</label>
+                      <Input value={profile.company} onChange={e => setProfile({...profile, company: e.target.value})} />
                     </div>
-
                     <div>
-                      <label className="block text-sm font-semibold mb-2">Default Deposit Percentage (%) of total bill</label>
-                      <Input 
-                        type="number" 
-                        value={profile.depositPercentage || 0} 
-                        onChange={e => setProfile({...profile, depositPercentage: parseFloat(e.target.value) || 0})}
-                        placeholder="10"
-                      />
+                      <label className="block text-sm font-semibold mb-2">Slogan</label>
+                      <Input value={profile.slogan} onChange={e => setProfile({...profile, slogan: e.target.value})} />
                     </div>
-
                     <div>
-                      <label className="block text-sm font-semibold mb-2">Certificate of Insurance</label>
+                      <label className="block text-sm font-semibold mb-2">Phone</label>
+                      <Input value={profile.phone} onChange={e => setProfile({...profile, phone: e.target.value})} />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold mb-2">Email</label>
+                      <Input value={profile.email} onChange={e => setProfile({...profile, email: e.target.value})} />
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="block text-sm font-semibold mb-2">Address</label>
+                      <Input value={profile.address} onChange={e => setProfile({...profile, address: e.target.value})} />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-semibold">Quick Save (Auto-save)</p>
+                      <p className="text-sm text-gray-500">Automatically save changes while editing</p>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
                       <input 
-                        type="file" 
-                        accept=".pdf,image/*" 
-                        onChange={handleCertificateUpload}
-                        className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-[#10b981] file:text-white hover:file:bg-[#0ea16b]"
+                        type="checkbox" 
+                        checked={profile.autoSaveEnabled} 
+                        onChange={(e) => setProfile(prev => ({ ...prev, autoSaveEnabled: e.target.checked }))}
+                        className="sr-only peer"
                       />
+                      <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]"></div>
+                    </label>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold mb-2">Disclosure / Notes</label>
+                    <Textarea 
+                      value={profile.disclosure} 
+                      onChange={e => setProfile({...profile, disclosure: e.target.value})} 
+                      rows={4}
+                      placeholder="Enter any disclosure text here..."
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold mb-2">Default Deposit Percentage (%) of total bill</label>
+                    <Input 
+                      type="number" 
+                      value={profile.depositPercentage || 0} 
+                      onChange={e => setProfile({...profile, depositPercentage: parseFloat(e.target.value) || 0})}
+                      placeholder="10"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold mb-2">Certificate of Insurance</label>
+                    <input 
+                      type="file" 
+                      accept=".pdf,image/*" 
+                      onChange={handleCertificateUpload}
+                      className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-[#10b981] file:text-white hover:file:bg-[#0ea16b]"
+                    />
+                  </div>
+
+                  {profile.certificateUrl && (
+                    <div className="mt-8 border rounded-lg p-6">
+                      <h3 className="font-semibold mb-4">Certificate of Insurance</h3>
+                      <a href={profile.certificateUrl} target="_blank" rel="noopener noreferrer">
+                        <img src={profile.certificateUrl} alt="Certificate of Insurance" className="max-h-96 mx-auto border rounded-lg shadow" />
+                      </a>
+                      <p className="text-xs text-gray-500 mt-2 text-center">Click image to open full size</p>
                     </div>
+                  )}
 
-                    {profile.certificateUrl && (
-                      <div className="mt-8 border rounded-lg p-6">
-                        <h3 className="font-semibold mb-4">Certificate of Insurance</h3>
-                        <a href={profile.certificateUrl} target="_blank" rel="noopener noreferrer">
-                          <img src={profile.certificateUrl} alt="Certificate of Insurance" className="max-h-96 mx-auto border rounded-lg shadow" />
-                        </a>
-                        <p className="text-xs text-gray-500 mt-2 text-center">Click image to open full size</p>
-                      </div>
-                    )}
-
-                    <div className="border-t pt-8">
-                      <h3 className="font-semibold mb-4">Teammates</h3>
-                      <div className="flex gap-2 mb-6">
-                        <Input placeholder="teammate@email.com" id="teammate-email" className="flex-1" />
-                        <Button onClick={() => {
-                          const input = document.getElementById('teammate-email') as HTMLInputElement;
-                          if (!input.value) return;
-                          const newTeammate = { email: input.value.trim(), role: 'limited' as 'full' | 'limited' };
-                          setProfile(prev => ({ ...prev, teammates: [...(prev.teammates || []), newTeammate] }));
-                          input.value = '';
-                        }}>Add</Button>
-                      </div>
-                      <div className="space-y-3">
-                        {profile.teammates && profile.teammates.map((tm, index) => (
-                          <div key={index} className="flex items-center justify-between border p-4 rounded-lg">
-                            <div className="font-medium">{tm.email}</div>
-                            <div className="flex items-center gap-6">
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm">Full</span>
-                                <label className="relative inline-flex items-center cursor-pointer">
-                                  <input type="checkbox" checked={tm.role === 'full'} onChange={() => {
-                                    const updated = [...profile.teammates];
-                                    updated[index].role = updated[index].role === 'full' ? 'limited' : 'full';
-                                    setProfile(prev => ({ ...prev, teammates: updated }));
-                                  }} className="sr-only peer" />
-                                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]"></div>
-                                </label>
-                                <span className="text-sm">Limited</span>
-                              </div>
-                              <Button variant="destructive" size="sm" onClick={() => {
-                                const updated = profile.teammates.filter((_, i) => i !== index);
-                                setProfile(prev => ({ ...prev, teammates: updated }));
-                              }}>Remove</Button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
+                  <div className="border-t pt-8">
+                    <h3 className="font-semibold mb-4">Teammates</h3>
+                    <div className="flex gap-2 mb-6">
+                      <Input placeholder="teammate@email.com" id="teammate-email" className="flex-1" />
+                      <Button onClick={() => {
+                        const input = document.getElementById('teammate-email') as HTMLInputElement;
+                        if (!input.value) return;
+                        const newTeammate = { email: input.value.trim(), role: 'limited' as 'full' | 'limited' };
+                        setProfile(prev => ({ ...prev, teammates: [...(prev.teammates || []), newTeammate] }));
+                        input.value = '';
+                      }}>Add</Button>
                     </div>
-
-                    <div className="border-t pt-8">
-                      <h3 className="font-semibold mb-4">Export Data</h3>
-                      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
-                        <label className="flex items-center gap-2">
-                          <input type="checkbox" checked={exportOptions.estimates} onChange={e => setExportOptions(prev => ({...prev, estimates: e.target.checked}))} />
-                          Estimates
-                        </label>
-                        <label className="flex items-center gap-2">
-                          <input type="checkbox" checked={exportOptions.invoices} onChange={e => setExportOptions(prev => ({...prev, invoices: e.target.checked}))} />
-                          Invoices
-                        </label>
-                        <label className="flex items-center gap-2">
-                          <input type="checkbox" checked={exportOptions.archives} onChange={e => setExportOptions(prev => ({...prev, archives: e.target.checked}))} />
-                          Archives
-                        </label>
-                        <label className="flex items-center gap-2">
-                          <input type="checkbox" checked={exportOptions.photos} onChange={e => setExportOptions(prev => ({...prev, photos: e.target.checked}))} />
-                          Photos
-                        </label>
-                        <label className="flex items-center gap-2">
-                          <input type="checkbox" checked={exportOptions.videos} onChange={e => setExportOptions(prev => ({...prev, videos: e.target.checked}))} />
-                          Videos
-                        </label>
-                      </div>
-                      <Button onClick={exportData} className="w-full bg-[#10b981]">Export Selected Data (CSV)</Button>
-                    </div>
-
-                    <Button onClick={saveProfile} className="w-full bg-[#10b981]">Save Profile</Button>
-                  </CardContent>
-                </Card>
-              )}
-
-              {profileTab === 'payments' && (
-                <Card className="mb-8">
-                  <CardContent className="p-8">
-                    <h3 className="text-xl font-semibold mb-6">💳 Payment Options</h3>
-                    <div className="space-y-6">
-                      {Object.entries(profile.paymentSettings).map(([method, settings]: [string, any]) => (
-                        <div key={method} className="flex items-center justify-between border rounded-2xl p-6">
-                          <div className="flex items-center gap-4">
-                            <span className="text-4xl">
-                              {method === 'stripe' ? '💳' : 
-                               method === 'echeck' ? '🏦' : 
-                               method === 'paypal' ? '💰' : 
-                               method === 'venmo' ? '📱' : '🏦'}
-                            </span>
-                            <div>
-                              <div className="font-semibold capitalize text-lg">{method}</div>
-                              <div className="text-sm text-gray-500">
-                                {settings.connected ? '✓ Connected' : 'Not connected yet'}
-                              </div>
-                            </div>
-                          </div>
+                    <div className="space-y-3">
+                      {profile.teammates && profile.teammates.map((tm, index) => (
+                        <div key={index} className="flex items-center justify-between border p-4 rounded-lg">
+                          <div className="font-medium">{tm.email}</div>
                           <div className="flex items-center gap-6">
-                            <label className="relative inline-flex items-center cursor-pointer">
-                              <input 
-                                type="checkbox" 
-                                checked={settings.enabled} 
-                                onChange={e => togglePaymentMethod(method, e.target.checked)}
-                                className="sr-only peer"
-                              />
-                              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]"></div>
-                            </label>
-                            <Button 
-                              onClick={() => linkPaymentAccount(method)}
-                              variant={settings.connected ? "outline" : "default"}
-                            >
-                              {settings.connected ? 'Manage' : 'Link Account'}
-                            </Button>
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm">Full</span>
+                              <label className="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" checked={tm.role === 'full'} onChange={() => {
+                                  const updated = [...profile.teammates];
+                                  updated[index].role = updated[index].role === 'full' ? 'limited' : 'full';
+                                  setProfile(prev => ({ ...prev, teammates: updated }));
+                                }} className="sr-only peer" />
+                                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]"></div>
+                              </label>
+                              <span className="text-sm">Limited</span>
+                            </div>
+                            <Button variant="destructive" size="sm" onClick={() => {
+                              const updated = profile.teammates.filter((_, i) => i !== index);
+                              setProfile(prev => ({ ...prev, teammates: updated }));
+                            }}>Remove</Button>
                           </div>
                         </div>
                       ))}
                     </div>
-                  </CardContent>
-                </Card>
-              )}
+                  </div>
+
+                  <div className="border-t pt-8">
+                    <h3 className="font-semibold mb-4">Export Data</h3>
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+                      <label className="flex items-center gap-2">
+                        <input type="checkbox" checked={exportOptions.estimates} onChange={e => setExportOptions(prev => ({...prev, estimates: e.target.checked}))} />
+                        Estimates
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <input type="checkbox" checked={exportOptions.invoices} onChange={e => setExportOptions(prev => ({...prev, invoices: e.target.checked}))} />
+                        Invoices
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <input type="checkbox" checked={exportOptions.archives} onChange={e => setExportOptions(prev => ({...prev, archives: e.target.checked}))} />
+                        Archives
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <input type="checkbox" checked={exportOptions.photos} onChange={e => setExportOptions(prev => ({...prev, photos: e.target.checked}))} />
+                        Photos
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <input type="checkbox" checked={exportOptions.videos} onChange={e => setExportOptions(prev => ({...prev, videos: e.target.checked}))} />
+                        Videos
+                      </label>
+                    </div>
+                    <Button onClick={exportData} className="w-full bg-[#10b981]">Export Selected Data (CSV)</Button>
+                  </div>
+
+                  <Button onClick={saveProfile} className="w-full bg-[#10b981]">Save Profile</Button>
+                </CardContent>
+              </Card>
             </div>
           )}
 
@@ -1594,10 +1469,15 @@ export default function Home() {
                 {documentType !== 'invoice' && (
                   <div className="mt-12 text-center">
                     <Button 
-                      onClick={() => openPaymentModal('deposit', grandTotal * (profile.depositPercentage || 0) / 100)}
+                      onClick={() => {
+                        const deposit = grandTotal * (profile.depositPercentage || 0) / 100;
+                        if (confirm(`✅ Estimate Approved!\n\nDeposit due: $${deposit.toFixed(2)} (${profile.depositPercentage || 0}% of total)\n\nWould you like to pay the deposit now?`)) {
+                          alert(`💳 Deposit of $${deposit.toFixed(2)} has been paid!\n\nThank you – the estimate is now fully approved and paid.`);
+                        }
+                      }}
                       className="w-full text-3xl py-8 bg-[#10b981] hover:bg-[#0ea16b] text-white font-semibold rounded-3xl shadow-lg"
                     >
-                      Pay Deposit Now (${(grandTotal * (profile.depositPercentage || 0) / 100).toFixed(2)})
+                      Pay Deposit Now
                     </Button>
                   </div>
                 )}
@@ -1610,9 +1490,16 @@ export default function Home() {
                       Remainder due: <strong>{100 - (profile.depositPercentage || 0)}%</strong> = <span className="font-bold text-2xl"> ${(grandTotal * (100 - (profile.depositPercentage || 0)) / 100).toFixed(2)}</span>
                     </p>
                     <Button 
-                      onClick={() => openPaymentModal('balance', grandTotal * (100 - (profile.depositPercentage || 0)) / 100)}
-                      className="w-full mt-6 py-8 text-2xl font-bold bg-[#f59e0b] hover:bg-orange-600 text-white rounded-3xl"
-                    >
+                      onClick={() => {
+                        const remainder = grandTotal * (100 - (profile.depositPercentage || 0)) / 100;
+                        if (confirm(`Pay the Balance Now $${remainder.toFixed(2)}?\n\nThis will mark the invoice as fully paid.`)) {
+                          alert(`✅ Payment of $${remainder.toFixed(2)} received!\n\nInvoice is now 100% PAID and marked complete.\nThank you!`);
+                          setPaymentStatus('paid');
+                          setAmountPaid(grandTotal);
+                          saveToDB();
+                        }
+                      }}
+                      className="w-full mt-6 py-8 text-2xl font-bold bg-[#f59e0b] hover:bg-orange-600 text-white rounded-3xl">
                       Pay the Balance Now (${(grandTotal * (100 - (profile.depositPercentage || 0)) / 100).toFixed(2)})
                     </Button>
                     <p className="text-center text-xs text-gray-500 mt-3">Clicking this completes the invoice conversion</p>
@@ -1674,7 +1561,6 @@ export default function Home() {
         </div>
       </div>
 
-      {/* All original modals (Load, Send, Labor, Receipt, Quick Lines, Calendar) are unchanged and included below */}
       {/* Load Modal */}
       <Dialog open={isLoadModalOpen} onOpenChange={setIsLoadModalOpen}>
         <DialogContent className="max-w-2xl">
@@ -1788,7 +1674,7 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* Receipt Extraction Modal */}
+      {/* Receipt Extraction Modal - UPDATED with auto date + category dropdown */}
       <Dialog open={isReceiptExtractModalOpen} onOpenChange={setIsReceiptExtractModalOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -1925,62 +1811,6 @@ export default function Home() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsCalendarModalOpen(false)}>Cancel</Button>
             <Button onClick={scheduleAppointment} className="bg-[#10b981]">Schedule Appointment</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* PAYMENT MODAL */}
-      <Dialog open={isPaymentModalOpen} onOpenChange={setIsPaymentModalOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Pay {paymentType === 'deposit' ? 'Deposit' : 'Balance'}</DialogTitle>
-          </DialogHeader>
-          <div className="py-4">
-            <div className="text-center mb-6">
-              <div className="text-5xl font-bold text-[#10b981]">${paymentAmount.toFixed(2)}</div>
-            </div>
-            <div className="space-y-3">
-              {Object.keys(profile.paymentSettings || {}).map((method) => {
-                const settings = profile.paymentSettings[method];
-                if (!settings.enabled) return null;
-                return (
-                  <button
-                    key={method}
-                    onClick={() => selectPaymentMethod(method)}
-                    className={`w-full flex items-center gap-4 p-4 border-2 rounded-2xl hover:bg-gray-50 ${selectedPaymentMethod === method ? 'border-[#10b981] bg-green-50' : 'border-gray-200'}`}
-                  >
-                    <span className="text-3xl">
-                      {method === 'stripe' ? '💳' : 
-                       method === 'echeck' ? '🏦' : 
-                       method === 'paypal' ? '💰' : 
-                       method === 'venmo' ? '📱' : '🏦'}
-                    </span>
-                    <div className="flex-1 text-left">
-                      <div className="font-semibold capitalize">{method}</div>
-                      <div className="text-xs text-gray-500">
-                        {method === 'stripe' ? 'Cards, Apple Pay, Google Pay' : 
-                         method === 'echeck' ? 'Bank account (ACH)' : 
-                         method === 'paypal' ? 'PayPal balance or card' : 
-                         method === 'venmo' ? 'Mobile app payment' : 'Bank-to-bank transfer'}
-                      </div>
-                    </div>
-                    {settings.connected && <span className="text-green-500 text-xs font-medium">✓ Connected</span>}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-          <DialogFooter className="flex gap-3">
-            <Button variant="outline" onClick={closePaymentModal} className="flex-1">
-              Cancel
-            </Button>
-            <Button 
-              onClick={proceedWithPayment} 
-              disabled={!selectedPaymentMethod}
-              className="flex-1 bg-[#10b981]"
-            >
-              Continue to Pay
-            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
