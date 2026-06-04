@@ -204,7 +204,7 @@ export default function Home() {
       setReceiptUrls(prev => [...prev, ...newUrls]);
       if (newUrls.length > 0) {
         setCurrentReceiptUrl(newUrls[0]);
-        setTempReceiptData({ date: '', vendor: '', amount: 0, notes: '' });
+        setTempReceiptData({ date: new Date().toISOString().split('T')[0], vendor: '', amount: 0, notes: '' });
         setIsReceiptExtractModalOpen(true);
       }
     }
@@ -1674,7 +1674,7 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* Receipt Extraction Modal */}
+      {/* Receipt Extraction Modal - UPDATED with auto date + category dropdown */}
       <Dialog open={isReceiptExtractModalOpen} onOpenChange={setIsReceiptExtractModalOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -1686,9 +1686,28 @@ export default function Home() {
               <Input type="date" value={tempReceiptData.date} onChange={e => setTempReceiptData({...tempReceiptData, date: e.target.value})} />
             </div>
             <div>
-              <label className="block text-sm font-semibold mb-1">Vendor / Store</label>
-              <Input value={tempReceiptData.vendor} onChange={e => setTempReceiptData({...tempReceiptData, vendor: e.target.value})} />
+              <label className="block text-sm font-semibold mb-1">Category</label>
+              <select 
+                value={tempReceiptData.vendor} 
+                onChange={e => setTempReceiptData({...tempReceiptData, vendor: e.target.value})}
+                className="w-full p-3 border rounded-xl"
+              >
+                <option value="Material/Supplies">Material/Supplies</option>
+                <option value="Gas">Gas</option>
+                <option value="Meals">Meals</option>
+                <option value="Other">Other (custom)</option>
+              </select>
             </div>
+            {tempReceiptData.vendor === 'Other' && (
+              <div>
+                <label className="block text-sm font-semibold mb-1">Custom Category</label>
+                <Input 
+                  value={tempReceiptData.vendor} 
+                  onChange={e => setTempReceiptData({...tempReceiptData, vendor: e.target.value})} 
+                  placeholder="Enter custom category"
+                />
+              </div>
+            )}
             <div>
               <label className="block text-sm font-semibold mb-1">Total Amount</label>
               <Input type="number" value={tempReceiptData.amount} onChange={e => setTempReceiptData({...tempReceiptData, amount: parseFloat(e.target.value) || 0})} />
