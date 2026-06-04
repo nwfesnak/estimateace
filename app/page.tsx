@@ -54,10 +54,11 @@ export default function Home() {
   const [useHourlyLabor, setUseHourlyLabor] = useState(true);
   const laborAmount = useHourlyLabor ? laborHours * laborRate : laborFixedAmount;
 
-  // Tax states (static zip lookup - no TaxJar)
+  // Real Tax Logic States
   const [isTaxExempt, setIsTaxExempt] = useState(false);
   const [taxLabor, setTaxLabor] = useState(true);
 
+  // ====================== DYNAMIC ZIP CODE TAX LOOKUP ======================
   const getTaxRateFromZip = (zip: string, fallbackState: string): number => {
     const zipTaxMap: { [key: string]: number } = {
       '33101': 7.0, '33139': 7.0, '90210': 9.5, '10001': 8.875,
@@ -84,6 +85,7 @@ export default function Home() {
 
   const baseTaxRate = getTaxRateFromZip(zipCode, state);
 
+  // Real tax calculation
   const taxableSubtotal = items.reduce((sum, item) => sum + (item.total || 0), 0);
   const taxableLabor = taxLabor ? laborAmount : 0;
   const taxableTotal = taxableSubtotal + taxableLabor;
@@ -117,6 +119,7 @@ export default function Home() {
   const [selectedEstimateForCalendar, setSelectedEstimateForCalendar] = useState<any>(null);
   const [selectedDateTime, setSelectedDateTime] = useState('');
 
+  // Receipt extraction modal
   const [isReceiptExtractModalOpen, setIsReceiptExtractModalOpen] = useState(false);
   const [currentReceiptUrl, setCurrentReceiptUrl] = useState('');
   const [tempReceiptData, setTempReceiptData] = useState({ date: '', vendor: '', amount: 0, notes: '' });
@@ -129,6 +132,7 @@ export default function Home() {
     videos: true
   });
 
+  // Reports view selected estimate
   const [selectedReportJob, setSelectedReportJob] = useState<any>(null);
 
   const showMessage = (message: string) => {
@@ -290,7 +294,9 @@ export default function Home() {
       .eq('user_id', user.id)
       .order('updated_at', { ascending: false })
       .limit(1);
-    if (data && data[0] && data[0].profile) setProfile(data[0].profile);
+    if (data && data[0] && data[0].profile) {
+      setProfile(data[0].profile);
+    }
   };
 
   const newEstimate = () => {
@@ -329,11 +335,13 @@ export default function Home() {
   const updateItem = (id: number, field: string, value: any) => {
     setItems(prev => prev.map(item => {
       if (item.id === id) {
-        const updated = { ...item, [field]: value };
+        const updatedItem = { ...item, [field]: value };
         if (field === 'qty' || field === 'price') {
-          updated.total = (field === 'qty' ? parseFloat(value) || 0 : item.qty || 0) * (field === 'price' ? parseFloat(value) || 0 : item.price || 0);
+          const qty = field === 'qty' ? (parseFloat(value) || 0) : (item.qty || 0);
+          const price = field === 'price' ? (parseFloat(value) || 0) : (item.price || 0);
+          updatedItem.total = qty * price;
         }
-        return updated;
+        return updatedItem;
       }
       return item;
     }));
@@ -360,7 +368,9 @@ export default function Home() {
     setView('sendPreview');
   };
 
-  const openSendPreview = () => setView('sendPreview');
+  const openSendPreview = () => {
+    setView('sendPreview');
+  };
 
   const saveProfile = async () => {
     await saveToDB();
@@ -375,9 +385,12 @@ export default function Home() {
 
   const scheduleAppointment = () => {
     if (!selectedEstimateForCalendar || !selectedDateTime) return showMessage("Select estimate and date/time");
+
     const appointmentTime = new Date(selectedDateTime).toLocaleString();
     const reminderTime = new Date(new Date(selectedDateTime).getTime() - 24 * 60 * 60 * 1000).toLocaleString();
-    showMessage(`✅ Appointment scheduled for ${appointmentTime}\n\n📧 Email & 📱 Text sent immediately.\n\n⏰ Reminder sent 24 hours before (${reminderTime})`);
+
+    showMessage(`✅ Appointment scheduled for ${appointmentTime}\n\n📧 Email & 📱 Text sent to client immediately.\n\n⏰ Reminder text & email will be sent 24 hours before (${reminderTime})`);
+
     setIsCalendarModalOpen(false);
     setSelectedEstimateForCalendar(null);
     setSelectedDateTime('');
@@ -425,23 +438,43 @@ export default function Home() {
   const archiveEstimate = async (id: string) => {
     if (!confirm('Archive this document?')) return;
     if (!user || !supabase) return;
+
     const { data: est } = await supabase.from('estimates').select('*').eq('id', id).single();
     if (!est) return;
+
     const archiveData = { ...est, archived_at: new Date().toISOString(), original_id: est.id };
-    await supabase.from('archive-est').insert(archiveData);
+    const { error } = await supabase.from('archive-est').insert(archiveData);
+    if (error) return console.error(error);
+
     await supabase.from('estimates').delete().eq('id', id);
-    showMessage('Document archived');
+    showMessage('Document archived successfully');
     refreshSavedList();
   };
 
   const exportData = async () => {
     if (!user || !supabase) return;
+
     let csv = 'Type,InvoiceNumber,JobName,Date,Address,City,ZipCode,GrandTotal,PhotoUrls,VideoUrls\n';
-    const { data: docs } = await supabase.from('estimates').select('*').eq('user_id', user.id);
-    (docs || []).forEach(doc => {
-      const total = doc.items ? doc.items.reduce((sum: number, item: any) => sum + (item.total || 0), 0) : 0;
-      csv += `"${doc.documentType || 'estimate'}","${doc.invoiceNumber || ''}","${doc.jobName || ''}","${doc.date || ''}","${doc.address || ''}","${doc.city || ''}","${doc.zipCode || ''}",${total},"${(doc.photoUrls || []).join('; ')}","${(doc.videoUrls || []).join('; ')}"\n`;
-    });
+
+    if (exportOptions.estimates || exportOptions.invoices) {
+      const { data: docs } = await supabase.from('estimates').select('*').eq('user_id', user.id);
+      (docs || []).forEach(doc => {
+        if ((exportOptions.estimates && (doc.documentType === 'estimate' || doc.invoiceNumber?.startsWith('EST'))) ||
+            (exportOptions.invoices && (doc.documentType === 'invoice' || doc.invoiceNumber?.startsWith('INV')))) {
+          const total = doc.items ? doc.items.reduce((sum: number, item: any) => sum + (item.total || 0), 0) : 0;
+          csv += `"${doc.documentType || 'estimate'}","${doc.invoiceNumber || ''}","${doc.jobName || ''}","${doc.date || ''}","${doc.address || ''}","${doc.city || ''}","${doc.zipCode || ''}",${total},"${(doc.photoUrls || []).join('; ')}","${(doc.videoUrls || []).join('; ')}"\n`;
+        }
+      });
+    }
+
+    if (exportOptions.archives) {
+      const { data: archives } = await supabase.from('archive-est').select('*').eq('user_id', user.id);
+      (archives || []).forEach(arch => {
+        const total = arch.items ? arch.items.reduce((sum: number, item: any) => sum + (item.total || 0), 0) : 0;
+        csv += `"archive","${arch.invoiceNumber || ''}","${arch.jobName || ''}","${arch.date || ''}","${arch.address || ''}","${arch.city || ''}","${arch.zipCode || ''}",${total},"${(arch.photoUrls || []).join('; ')}","${(arch.videoUrls || []).join('; ')}"\n`;
+      });
+    }
+
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -449,7 +482,7 @@ export default function Home() {
     a.download = `EstimateAce_Export_${new Date().toISOString().slice(0,10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-    showMessage('✅ Data exported as CSV');
+    showMessage('✅ Selected data exported as CSV');
   };
 
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -462,7 +495,7 @@ export default function Home() {
   useEffect(() => {
     if (view === 'editor') debouncedSave();
     return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
-  }, [jobName, address, city, state, zipCode, phones, emails, date, invoiceNumber, items, terms, profile, documentType, dueDate, paymentStatus, amountPaid, paymentMethod, receiptDetails, isTaxExempt, taxLabor]);
+  }, [jobName, address, city, state, zipCode, phones, emails, date, invoiceNumber, items, terms, profile, documentType, dueDate, paymentStatus, amountPaid, paymentMethod, view, receiptDetails, isTaxExempt, taxLabor]);
 
   useEffect(() => {
     const saved = localStorage.getItem('quickLines');
@@ -475,24 +508,41 @@ export default function Home() {
   }, [view]);
 
   // Dashboard calculations
-  const estimatesCount = savedEstimatesList.filter(est => est.documentType === 'estimate' || est.invoiceNumber?.startsWith('EST')).length;
-  const outstandingInvoices = savedEstimatesList.filter(est => (est.documentType === 'invoice' || est.invoiceNumber?.startsWith('INV')) && est.paymentStatus === 'pending');
-  const calculateGrandTotal = (doc: any) => {
+  const estimatesCount = savedEstimatesList.filter(est => 
+    est.documentType === 'estimate' || est.invoiceNumber?.startsWith('EST')
+  ).length;
+
+  const outstandingInvoices = savedEstimatesList.filter(est => 
+    (est.documentType === 'invoice' || est.invoiceNumber?.startsWith('INV')) && 
+    est.paymentStatus === 'pending'
+  );
+
+  const calculateGrandTotal = (doc: any): number => {
     if (!doc || !doc.items) return 0;
-    const itemsTotal = doc.items.reduce((sum: number, item: any) => sum + (item.total || (item.qty || 0) * (item.price || 0)), 0);
-    const laborAmountDoc = doc.laborAmount ?? (doc.useHourlyLabor ? (doc.laborHours || 0) * (doc.laborRate || 0) : (doc.laborFixedAmount || 0));
+    const itemsTotal = doc.items.reduce((sum: number, item: any) => {
+      return sum + (item.total || (item.qty || 0) * (item.price || 0));
+    }, 0);
+    const laborAmountDoc = doc.laborAmount ?? 
+      (doc.useHourlyLabor ? (doc.laborHours || 0) * (doc.laborRate || 0) : (doc.laborFixedAmount || 0));
     const subtotal = itemsTotal + laborAmountDoc;
     const docTaxRate = doc.taxRate ?? 7;
     const docTaxAmount = doc.isTaxExempt ? 0 : (subtotal + (doc.taxLabor !== false ? laborAmountDoc : 0)) * (docTaxRate / 100);
     return subtotal + laborAmountDoc + docTaxAmount;
   };
+
   const totalOutstanding = outstandingInvoices.reduce((sum, inv) => sum + calculateGrandTotal(inv), 0);
+
   const currentYear = new Date().getFullYear();
-  const salesYTD = savedEstimatesList.filter(doc => {
-    if (!doc.date) return false;
-    const docDate = new Date(doc.date);
-    return docDate.getFullYear() === currentYear && (doc.documentType === 'invoice' || doc.invoiceNumber?.startsWith('INV')) && doc.paymentStatus === 'paid';
-  }).reduce((sum, doc) => sum + calculateGrandTotal(doc), 0);
+  const salesYTD = savedEstimatesList
+    .filter(doc => {
+      if (!doc.date) return false;
+      const docDate = new Date(doc.date);
+      if (isNaN(docDate.getTime())) return false;
+      return docDate.getFullYear() === currentYear &&
+             (doc.documentType === 'invoice' || doc.invoiceNumber?.startsWith('INV')) &&
+             doc.paymentStatus === 'paid';
+    })
+    .reduce((sum, doc) => sum + calculateGrandTotal(doc), 0);
 
   if (!user) {
     return (
@@ -524,7 +574,6 @@ export default function Home() {
       <div className="flex flex-col h-screen bg-[#f4f4f4]">
         <div className="flex-1 overflow-auto p-4 md:p-8">
 
-          {/* DASHBOARD - unchanged */}
           {view === 'dashboard' && (
             <div className="space-y-8">
               <h1 className="text-4xl font-bold">Dashboard</h1>
@@ -549,35 +598,9 @@ export default function Home() {
                   </CardContent>
                 </Card>
               </div>
-              <Card>
-                <CardContent className="p-6">
-                  <h3 className="font-semibold mb-4">Outstanding Invoices</h3>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Invoice #</TableHead>
-                        <TableHead>Job</TableHead>
-                        <TableHead>Date</TableHead>
-                        <TableHead>Amount</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {outstandingInvoices.map(inv => (
-                        <TableRow key={inv.id}>
-                          <TableCell>{inv.invoiceNumber}</TableCell>
-                          <TableCell>{inv.jobName}</TableCell>
-                          <TableCell>{inv.date}</TableCell>
-                          <TableCell>${calculateGrandTotal(inv).toFixed(2)}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
             </div>
           )}
 
-          {/* ESTIMATES LIST - unchanged */}
           {view === 'estimatesList' && (
             <div>
               <h1 className="text-4xl font-bold mb-6">All Estimates</h1>
@@ -607,7 +630,6 @@ export default function Home() {
             </div>
           )}
 
-          {/* INVOICES LIST - unchanged */}
           {view === 'invoicesList' && (
             <div>
               <h1 className="text-4xl font-bold mb-6">All Invoices</h1>
@@ -638,7 +660,6 @@ export default function Home() {
             </div>
           )}
 
-          {/* EDITOR - unchanged */}
           {view === 'editor' && (
             <div>
               <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to Dashboard</Button>
@@ -647,8 +668,11 @@ export default function Home() {
                 <div>
                   <h1 className="text-5xl font-bold text-[#1e293b]">{profile.company || 'Your Company'}</h1>
                   <p className="text-xl text-gray-600">{profile.slogan || 'Professional Estimation & Invoicing'}</p>
+                  {profile.phone && <p className="text-lg text-gray-600 mt-1">📞 {profile.phone}</p>}
+                  {profile.email && <p className="text-lg text-gray-600">✉️ {profile.email}</p>}
                 </div>
                 <div className="text-right">
+                  <div className="text-sm text-gray-500">Document #</div>
                   <div className="text-4xl font-mono font-bold text-[#10b981]">{invoiceNumber}</div>
                   <div className="text-sm text-gray-500 mt-1">Date: {date}</div>
                 </div>
@@ -656,12 +680,38 @@ export default function Home() {
 
               <Card className="mb-8">
                 <CardContent className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div><label className="block text-sm font-semibold mb-1">Job Name</label><Input value={jobName} onChange={e => setJobName(e.target.value)} /></div>
-                  <div><label className="block text-sm font-semibold mb-1">Address</label><Input value={address} onChange={e => setAddress(e.target.value)} /></div>
+                  <div>
+                    <label className="block text-sm font-semibold mb-1">Job Name</label>
+                    <Input value={jobName} onChange={e => setJobName(e.target.value)} placeholder="Job name" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold mb-1">Address</label>
+                    <Input value={address} onChange={e => setAddress(e.target.value)} placeholder="Street address" />
+                  </div>
                   <div className="grid grid-cols-3 gap-4">
                     <div><label className="block text-sm font-semibold mb-1">City</label><Input value={city} onChange={e => setCity(e.target.value)} /></div>
-                    <div><label className="block text-sm font-semibold mb-1">State</label><Input value={state} onChange={e => setState(e.target.value)} /></div>
+                    <div><label className="block text-sm font-semibold mb-1">State</label><Input value={state} onChange={e => setState(e.target.value)} placeholder="CA" /></div>
                     <div><label className="block text-sm font-semibold mb-1">Zip Code</label><Input value={zipCode} onChange={e => setZipCode(e.target.value)} /></div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold mb-2">Phone Numbers</label>
+                    {phones.map((phone, i) => (
+                      <div key={i} className="flex gap-2 mb-2">
+                        <Input value={phone} onChange={e => updatePhone(i, e.target.value)} />
+                        <Button variant="outline" size="sm" onClick={() => removePhone(i)}>×</Button>
+                      </div>
+                    ))}
+                    <Button variant="outline" size="sm" onClick={addPhone}>+ Add Phone</Button>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold mb-2">Email Addresses</label>
+                    {emails.map((em, i) => (
+                      <div key={i} className="flex gap-2 mb-2">
+                        <Input value={em} onChange={e => updateEmail(i, e.target.value)} />
+                        <Button variant="outline" size="sm" onClick={() => removeEmail(i)}>×</Button>
+                      </div>
+                    ))}
+                    <Button variant="outline" size="sm" onClick={addEmail}>+ Add Email</Button>
                   </div>
 
                   <div className="md:col-span-2 flex items-center gap-8 pt-4 border-t">
@@ -680,6 +730,7 @@ export default function Home() {
                 </CardContent>
               </Card>
 
+              {/* Line Items */}
               <Card className="mb-8">
                 <CardContent className="p-6">
                   <div className="flex justify-between items-center mb-4">
@@ -721,7 +772,7 @@ export default function Home() {
             </div>
           )}
 
-          {/* REPORTS VIEW - FIXED HANDLER & FULL CONTENT */}
+          {/* REPORTS VIEW - restored with full separation of tax and cost */}
           {view === 'reportsView' && (
             <div>
               <h1 className="text-4xl font-bold mb-6">Reports</h1>
@@ -738,20 +789,20 @@ export default function Home() {
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     <Card>
                       <CardContent className="p-6 text-center">
-                        <div className="text-sm text-gray-500">Total Profit</div>
+                        <div className="text-sm text-gray-500">Total Profit (after tax &amp; costs)</div>
                         <div className="text-5xl font-bold text-[#10b981]">${salesYTD.toFixed(2)}</div>
                       </CardContent>
                     </Card>
                     <Card>
                       <CardContent className="p-6 text-center">
-                        <div className="text-sm text-gray-500">Outstanding</div>
-                        <div className="text-5xl font-bold text-orange-500">${totalOutstanding.toFixed(2)}</div>
+                        <div className="text-sm text-gray-500">Tax Collected</div>
+                        <div className="text-5xl font-bold text-orange-500">${outstandingInvoices.reduce((sum, inv) => sum + (inv.taxAmount || 0), 0).toFixed(2)}</div>
                       </CardContent>
                     </Card>
                     <Card>
                       <CardContent className="p-6 text-center">
-                        <div className="text-sm text-gray-500">Estimates Created</div>
-                        <div className="text-5xl font-bold">{estimatesCount}</div>
+                        <div className="text-sm text-gray-500">Deductible Costs</div>
+                        <div className="text-5xl font-bold text-blue-500">${outstandingInvoices.reduce((sum, inv) => sum + (inv.receiptDetails ? inv.receiptDetails.reduce((s: number, r: any) => s + (r.amount || 0), 0) : 0), 0).toFixed(2)}</div>
                       </CardContent>
                     </Card>
                   </div>
@@ -761,7 +812,7 @@ export default function Home() {
             </div>
           )}
 
-          {/* PROFILE VIEW - FIXED HANDLER & FULL CONTENT */}
+          {/* PROFILE VIEW - fully restored */}
           {view === 'profileView' && (
             <div>
               <h1 className="text-4xl font-bold mb-6">Company Profile</h1>
@@ -803,7 +854,6 @@ export default function Home() {
             </div>
           )}
 
-          {/* ARCHIVES VIEW - unchanged */}
           {view === 'archivesView' && (
             <div>
               <h1 className="text-4xl font-bold mb-6">Archived Documents</h1>
@@ -828,7 +878,6 @@ export default function Home() {
             </div>
           )}
 
-          {/* SEND PREVIEW - unchanged */}
           {view === 'sendPreview' && (
             <div>
               <h1 className="text-4xl font-bold mb-6">Send Preview</h1>
@@ -838,7 +887,7 @@ export default function Home() {
 
         </div>
 
-        {/* Bottom Navigation - ONLY the Reports and Profile handlers were fixed (explicit setView calls) */}
+        {/* Bottom Navigation */}
         <div className="bg-white border-t shadow-inner flex items-center justify-around py-2 px-1 text-xs">
           <button onClick={goToDashboard} className={`flex flex-col items-center flex-1 py-1 ${view === 'dashboard' ? 'text-[#10b981]' : 'text-gray-500'}`}>
             <span className="text-3xl mb-0.5">📊</span>
@@ -871,7 +920,7 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Calendar Modal - unchanged */}
+      {/* Calendar Modal */}
       <Dialog open={isCalendarModalOpen} onOpenChange={setIsCalendarModalOpen}>
         <DialogContent>
           <DialogHeader>
@@ -888,7 +937,7 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* Quick Lines Modal - unchanged */}
+      {/* Quick Lines Modal */}
       <Dialog open={isQuickLinesModalOpen} onOpenChange={setIsQuickLinesModalOpen}>
         <DialogContent>
           <DialogHeader>
@@ -917,7 +966,7 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* Receipt Modal - unchanged */}
+      {/* Receipt Modal */}
       <Dialog open={isReceiptExtractModalOpen} onOpenChange={setIsReceiptExtractModalOpen}>
         <DialogContent>
           <DialogHeader>
