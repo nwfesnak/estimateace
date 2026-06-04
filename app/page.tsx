@@ -573,31 +573,29 @@ export default function Home() {
   };
 
   const linkPaymentAccount = (method: string) => {
-    showMessage(`${method.toUpperCase()} account linking opened. (Add the API route later to make it fully functional)`);
-  };
+  if (method === 'stripe') {
+    const clientId = process.env.NEXT_PUBLIC_STRIPE_CONNECT_CLIENT_ID;
+    if (!clientId) {
+      return showMessage('❌ Stripe Connect Client ID is not set in Vercel yet.');
+    }
 
-  // Dashboard calculations (unchanged)
-  const estimatesCount = savedEstimatesList.filter(est => 
-    est.documentType === 'estimate' || est.invoiceNumber?.startsWith('EST')
-  ).length;
+    const redirectUri = `${process.env.NEXT_PUBLIC_BASE_URL}/api/stripe/callback`;
+    const state = user?.id || '';
 
-  const outstandingInvoices = savedEstimatesList.filter(est => 
-    (est.documentType === 'invoice' || est.invoiceNumber?.startsWith('INV')) && 
-    est.paymentStatus === 'pending'
-  );
+    const url = `https://connect.stripe.com/oauth/authorize?` +
+      `response_type=code&` +
+      `client_id=${clientId}&` +
+      `scope=read_write&` +
+      `state=${state}&` +
+      `redirect_uri=${encodeURIComponent(redirectUri)}`;
 
-  const calculateGrandTotal = (doc: any): number => {
-    if (!doc || !doc.items) return 0;
-    const itemsTotal = doc.items.reduce((sum: number, item: any) => {
-      return sum + (item.total || (item.qty || 0) * (item.price || 0));
-    }, 0);
-    const laborAmountDoc = doc.laborAmount ?? 
-      (doc.useHourlyLabor ? (doc.laborHours || 0) * (doc.laborRate || 0) : (doc.laborFixedAmount || 0));
-    const subtotal = itemsTotal + laborAmountDoc;
-    const docTaxRate = doc.taxRate ?? 7;
-    const docTaxAmount = doc.isTaxExempt ? 0 : (subtotal + (doc.taxLabor !== false ? laborAmountDoc : 0)) * (docTaxRate / 100);
-    return subtotal + laborAmountDoc + docTaxAmount;
-  };
+    window.location.href = url;
+    return;
+  }
+
+  // Other methods (PayPal, Venmo, Zelle, eCheck) stay as placeholder for now
+  showMessage(`${method.toUpperCase()} account linking coming soon.`);
+};
 
   const totalOutstanding = outstandingInvoices.reduce((sum, inv) => sum + calculateGrandTotal(inv), 0);
 
