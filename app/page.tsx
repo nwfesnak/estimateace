@@ -1038,6 +1038,1043 @@ export default function Home() {
                   </Button>
                   <input id="receipts-camera" type="file" accept="image/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'receipt')} className="hidden" />
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+'use client';
+
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { createClient } from '@supabase/supabase-js';
+
+export default function Home() {
+  const supabase = useMemo(() => {
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) return null;
+    return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+  }, []);
+
+  const [user, setUser] = useState<any>(null);
+  const [view, setView] = useState<'dashboard' | 'editor' | 'estimatesList' | 'invoicesList' | 'profileView' | 'archivesView' | 'sendPreview' | 'reportsView'>('dashboard');
+
+  // Login
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [showLogin, setShowLogin] = useState(true);
+
+  // Document states
+  const [documentType, setDocumentType] = useState<'estimate' | 'invoice'>('estimate');
+  const [jobName, setJobName] = useState('');
+  const [address, setAddress] = useState('');
+  const [city, setCity] = useState('');
+  const [state, setState] = useState('');
+  const [zipCode, setZipCode] = useState('');
+  const [phones, setPhones] = useState<string[]>(['']);
+  const [emails, setEmails] = useState<string[]>(['']);
+  const [date, setDate] = useState('');
+  const [invoiceNumber, setInvoiceNumber] = useState('EST-0001');
+  const [items, setItems] = useState<any[]>([{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
+  const [terms, setTerms] = useState('');
+  const [photoUrls, setPhotoUrls] = useState<string[]>([]);
+  const [videoUrls, setVideoUrls] = useState<string[]>([]);
+  const [receiptUrls, setReceiptUrls] = useState<string[]>([]);
+  const [receiptDetails, setReceiptDetails] = useState<any[]>([]);
+
+  const [dueDate, setDueDate] = useState('');
+  const [paymentStatus, setPaymentStatus] = useState<'pending' | 'paid'>('pending');
+  const [amountPaid, setAmountPaid] = useState(0);
+  const [paymentMethod, setPaymentMethod] = useState('');
+
+  // Labor states
+  const [isLaborModalOpen, setIsLaborModalOpen] = useState(false);
+  const [laborHours, setLaborHours] = useState(0);
+  const [laborRate, setLaborRate] = useState(0);
+  const [laborFixedAmount, setLaborFixedAmount] = useState(0);
+  const [useHourlyLabor, setUseHourlyLabor] = useState(true);
+  const laborAmount = useHourlyLabor ? laborHours * laborRate : laborFixedAmount;
+
+  // Tax states
+  const [isTaxExempt, setIsTaxExempt] = useState(false);
+  const [taxLabor, setTaxLabor] = useState(true);
+
+  // ====================== DYNAMIC ZIP CODE TAX LOOKUP ======================
+  const getTaxRateFromZip = (zip: string, fallbackState: string): number => {
+    const zipTaxMap: { [key: string]: number } = {
+      '33101': 7.0, '33139': 7.0, '90210': 9.5, '10001': 8.875,
+      '60601': 10.25, '77001': 8.25, '75201': 8.25, '94102': 8.5,
+      '30303': 8.9, '33131': 7.0,
+    };
+    const cleanZip = zip.trim().replace(/\D/g, '').slice(0, 5);
+    if (zipTaxMap[cleanZip]) return zipTaxMap[cleanZip];
+
+    const stateRates: { [key: string]: number } = {
+      'AL': 4, 'AK': 0, 'AZ': 5.6, 'AR': 6.5, 'CA': 7.25,
+      'CO': 2.9, 'CT': 6.35, 'DE': 0, 'FL': 6, 'GA': 4,
+      'HI': 4, 'ID': 6, 'IL': 6.25, 'IN': 7, 'IA': 6,
+      'KS': 6.5, 'KY': 6, 'LA': 4.45, 'ME': 5.5, 'MD': 6,
+      'MA': 6.25, 'MI': 6, 'MN': 6.875, 'MS': 7, 'MO': 4.225,
+      'MT': 0, 'NE': 5.5, 'NV': 6.85, 'NH': 0, 'NJ': 6.625,
+      'NM': 5.125, 'NY': 4, 'NC': 4.75, 'ND': 5, 'OH': 5.75,
+      'OK': 4.5, 'OR': 0, 'PA': 6, 'RI': 7, 'SC': 6,
+      'SD': 4.5, 'TN': 7, 'TX': 6.25, 'UT': 4.85, 'VT': 6,
+      'VA': 4.3, 'WA': 6.5, 'WV': 6, 'WI': 5, 'WY': 4,
+    };
+    return stateRates[fallbackState.toUpperCase()] || 7;
+  };
+
+  const baseTaxRate = getTaxRateFromZip(zipCode, state);
+
+  // Real tax calculation
+  const taxableSubtotal = items.reduce((sum, item) => sum + (item.total || 0), 0);
+  const taxableLabor = taxLabor ? laborAmount : 0;
+  const taxableTotal = taxableSubtotal + taxableLabor;
+  const taxAmount = isTaxExempt ? 0 : taxableTotal * (baseTaxRate / 100);
+  const grandTotal = taxableSubtotal + laborAmount + taxAmount;
+
+  // Profile with payment settings
+  const [profile, setProfile] = useState({ 
+    name: '', company: '', address: '', phone: '', email: '', slogan: '',
+    disclosure: '',
+    certificateUrl: '',
+    depositPercentage: 10,
+    autoSaveEnabled: true,
+    teammates: [] as { email: string; role: 'full' | 'limited' }[],
+    paymentSettings: {
+      stripe: { enabled: true, connected: false },
+      echeck: { enabled: true, connected: false },
+      paypal: { enabled: true, connected: false },
+      venmo: { enabled: true, connected: false },
+      zelle: { enabled: true, connected: false },
+    } as any
+  });
+
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [savedTemplates, setSavedTemplates] = useState<{ name: string; text: string }[]>([]);
+  const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
+  const [lastSaved, setLastSaved] = useState('Never');
+  const [isLoadModalOpen, setIsLoadModalOpen] = useState(false);
+  const [savedEstimatesList, setSavedEstimatesList] = useState<any[]>([]);
+  const [archivesList, setArchivesList] = useState<any[]>([]);
+  const [isSendModalOpen, setIsSendModalOpen] = useState(false);
+  const [selectedEmailsForSend, setSelectedEmailsForSend] = useState<string[]>([]);
+  const [selectedPhonesForSend, setSelectedPhonesForSend] = useState<string[]>([]);
+
+  const [quickLines, setQuickLines] = useState<any[]>([]);
+  const [isQuickLinesModalOpen, setIsQuickLinesModalOpen] = useState(false);
+  const [isCalendarModalOpen, setIsCalendarModalOpen] = useState(false);
+  const [selectedEstimateForCalendar, setSelectedEstimateForCalendar] = useState<any>(null);
+  const [selectedDateTime, setSelectedDateTime] = useState('');
+
+  // Receipt extraction modal
+  const [isReceiptExtractModalOpen, setIsReceiptExtractModalOpen] = useState(false);
+  const [currentReceiptUrl, setCurrentReceiptUrl] = useState('');
+  const [tempReceiptData, setTempReceiptData] = useState({ date: '', vendor: '', amount: 0, notes: '' });
+
+  const [exportOptions, setExportOptions] = useState({
+    estimates: true,
+    invoices: true,
+    archives: true,
+    photos: true,
+    videos: true
+  });
+
+  // Reports view selected estimate
+  const [selectedReportJob, setSelectedReportJob] = useState<any>(null);
+
+  // NEW: sub-tab inside Reports view
+  const [reportsSubTab, setReportsSubTab] = useState<'profit' | 'tax'>('profit');
+
+  // NEW: Profile tab (info / payments)
+  const [profileTab, setProfileTab] = useState<'info' | 'payments'>('info');
+
+  // NEW: Payment modal states
+  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [paymentType, setPaymentType] = useState<'deposit' | 'balance'>('deposit');
+  const [paymentAmount, setPaymentAmount] = useState(0);
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string | null>(null);
+
+  const showMessage = (message: string) => {
+    const clean = message.replace(/^[^\s]*\.vercel\.app says:\s*/i, '').trim();
+    alert(clean);
+  };
+
+  useEffect(() => {
+    if (!supabase) return;
+    supabase.auth.getSession().then(({ data }) => setUser(data.session?.user ?? null));
+    const { data: listener } = supabase.auth.onAuthStateChange((_, session) => setUser(session?.user ?? null));
+    return () => listener.subscription.unsubscribe();
+  }, [supabase]);
+
+  const login = async () => {
+    if (!supabase) return;
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) showMessage(error.message);
+    else setShowLogin(false);
+  };
+
+  const signup = async () => {
+    if (!supabase) return;
+    const { error } = await supabase.auth.signUp({ email, password });
+    if (error) showMessage(error.message);
+    else showMessage('Account created!');
+  };
+
+  const saveToDB = async () => {
+    if (!user || !supabase) return;
+    const data = {
+      user_id: user.id,
+      jobName, address, city, state, zipCode, phones, emails, date, invoiceNumber,
+      items, terms, profile, documentType, dueDate, paymentStatus, amountPaid,
+      paymentMethod, photoUrls, videoUrls, receiptUrls, receiptDetails,
+      laborHours, laborRate, laborFixedAmount, useHourlyLabor, laborAmount,
+      taxRate: baseTaxRate,
+      taxAmount,
+      isTaxExempt,
+      taxLabor,
+      updated_at: new Date().toISOString()
+    };
+    const { error } = await supabase.from('estimates').upsert({ id: invoiceNumber, ...data });
+    if (error) console.error('Save error:', error);
+    else {
+      setLastSaved(new Date().toLocaleTimeString());
+      refreshSavedList();
+    }
+  };
+
+  const handleMediaUpload = async (files: FileList | null, type: 'photo' | 'video' | 'receipt') => {
+    if (!files || !user || !supabase) return;
+    const newUrls: string[] = [];
+    for (const file of Array.from(files)) {
+      const fileExt = file.name.split('.').pop();
+      const filePath = `${user.id}/${type}/${Date.now()}.${fileExt}`;
+      const { error } = await supabase.storage.from('media').upload(filePath, file, { upsert: true });
+      if (!error) {
+        const { data } = supabase.storage.from('media').getPublicUrl(filePath);
+        newUrls.push(data.publicUrl);
+      }
+    }
+    if (type === 'photo') setPhotoUrls(prev => [...prev, ...newUrls]);
+    else if (type === 'video') setVideoUrls(prev => [...prev, ...newUrls]);
+    else if (type === 'receipt') {
+      setReceiptUrls(prev => [...prev, ...newUrls]);
+      if (newUrls.length > 0) {
+        setCurrentReceiptUrl(newUrls[0]);
+        setTempReceiptData({ date: new Date().toISOString().split('T')[0], vendor: '', amount: 0, notes: '' });
+        setIsReceiptExtractModalOpen(true);
+      }
+    }
+    await saveToDB();
+  };
+
+  const saveReceiptExtraction = () => {
+    if (!currentReceiptUrl) return;
+    const newDetail = {
+      url: currentReceiptUrl,
+      date: tempReceiptData.date,
+      vendor: tempReceiptData.vendor,
+      amount: parseFloat(tempReceiptData.amount.toString()) || 0,
+      notes: tempReceiptData.notes
+    };
+    setReceiptDetails(prev => [...prev, newDetail]);
+    setIsReceiptExtractModalOpen(false);
+    saveToDB();
+    showMessage('✅ Receipt data saved to database');
+  };
+
+  const handleCertificateUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user || !supabase) return;
+    const filePath = `${user.id}/certificate/${Date.now()}-${file.name}`;
+    const { error } = await supabase.storage.from('media').upload(filePath, file, { upsert: true });
+    if (!error) {
+      const { data } = supabase.storage.from('media').getPublicUrl(filePath);
+      setProfile(prev => ({ ...prev, certificateUrl: data.publicUrl }));
+      showMessage('✅ Certificate of Insurance uploaded');
+      await saveToDB();
+    }
+  };
+
+  const removeMedia = (type: 'photo' | 'video' | 'receipt', index: number) => {
+    if (type === 'photo') setPhotoUrls(prev => prev.filter((_, i) => i !== index));
+    else if (type === 'video') setVideoUrls(prev => prev.filter((_, i) => i !== index));
+    else if (type === 'receipt') {
+      setReceiptUrls(prev => prev.filter((_, i) => i !== index));
+      setReceiptDetails(prev => prev.filter((_, i) => i !== index));
+    }
+    saveToDB();
+  };
+
+  const refreshSavedList = async () => {
+    if (!user || !supabase) return;
+    const { data } = await supabase.from('estimates').select('*').eq('user_id', user.id).order('updated_at', { ascending: false });
+    setSavedEstimatesList(data || []);
+  };
+
+  const refreshArchivesList = async () => {
+    if (!user || !supabase) return;
+    const { data } = await supabase.from('archive-est').select('*').eq('user_id', user.id).order('archived_at', { ascending: false });
+    setArchivesList(data || []);
+  };
+
+  const loadSelectedEstimate = (est: any) => {
+    setJobName(est.jobName || '');
+    setAddress(est.address || '');
+    setCity(est.city || '');
+    setState(est.state || '');
+    setZipCode(est.zipCode || '');
+    setPhones(est.phones || ['']);
+    setEmails(est.emails || ['']);
+    setDate(est.date || '');
+    setInvoiceNumber(est.invoiceNumber || 'EST-0001');
+    setItems(est.items || [{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
+    setTerms(est.terms || '');
+    setProfile(est.profile || profile);
+    setDocumentType(est.documentType || 'estimate');
+    setDueDate(est.dueDate || '');
+    setPaymentStatus(est.paymentStatus || 'pending');
+    setAmountPaid(est.amountPaid || 0);
+    setPaymentMethod(est.paymentMethod || '');
+    setPhotoUrls(est.photoUrls || []);
+    setVideoUrls(est.videoUrls || []);
+    setReceiptUrls(est.receiptUrls || []);
+    setReceiptDetails(est.receiptDetails || []);
+    setLaborHours(est.laborHours || 0);
+    setLaborRate(est.laborRate || 0);
+    setLaborFixedAmount(est.laborFixedAmount || 0);
+    setUseHourlyLabor(est.useHourlyLabor !== false);
+    setIsTaxExempt(est.isTaxExempt || false);
+    setTaxLabor(est.taxLabor !== false);
+  };
+
+  const loadLatestProfile = async () => {
+    if (!user || !supabase) return;
+    const { data } = await supabase
+      .from('estimates')
+      .select('profile')
+      .eq('user_id', user.id)
+      .order('updated_at', { ascending: false })
+      .limit(1);
+    if (data && data[0] && data[0].profile) {
+      setProfile(data[0].profile);
+    }
+  };
+
+  const newEstimate = () => {
+    setJobName(''); setAddress(''); setCity(''); setState(''); setZipCode('');
+    setPhones(['']); setEmails(['']); setTerms('');
+    setPhotoUrls([]); setVideoUrls([]); setReceiptUrls([]); setReceiptDetails([]);
+    setItems([{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
+    setLaborHours(0); setLaborRate(0); setLaborFixedAmount(0); setUseHourlyLabor(true);
+    setIsTaxExempt(false);
+    setTaxLabor(true);
+    const today = new Date().toISOString().split('T')[0];
+    setDate(today);
+    const savedCount = parseInt(localStorage.getItem('estimateCount') || '0') + 1;
+    localStorage.setItem('estimateCount', savedCount.toString());
+    const prefix = documentType === 'invoice' ? 'INV' : 'EST';
+    setInvoiceNumber(`${prefix}-${String(savedCount).padStart(4, '0')}`);
+    loadLatestProfile();
+  };
+
+  const openNewDocument = (type: 'estimate' | 'invoice') => {
+    setDocumentType(type);
+    newEstimate();
+    setView('editor');
+  };
+
+  const openExistingDocument = (est: any) => {
+    loadSelectedEstimate(est);
+    setView('editor');
+  };
+
+  const goToDashboard = () => setView('dashboard');
+
+  const openQuickLinesModal = () => setIsQuickLinesModalOpen(true);
+
+  const addRow = () => setItems([...items, { id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
+  const updateItem = (id: number, field: string, value: any) => {
+    setItems(prev => prev.map(item => {
+      if (item.id === id) {
+        const updatedItem = { ...item, [field]: value };
+        if (field === 'qty' || field === 'price') {
+          const qty = field === 'qty' ? (parseFloat(value) || 0) : (item.qty || 0);
+          const price = field === 'price' ? (parseFloat(value) || 0) : (item.price || 0);
+          updatedItem.total = qty * price;
+        }
+        return updatedItem;
+      }
+      return item;
+    }));
+  };
+  const removeRow = (id: number) => setItems(prev => prev.filter(item => item.id !== id));
+
+  const addPhone = () => setPhones([...phones, '']);
+  const removePhone = (i: number) => setPhones(phones.filter((_, idx) => idx !== i));
+  const updatePhone = (i: number, value: string) => { const arr = [...phones]; arr[i] = value; setPhones(arr); };
+  const addEmail = () => setEmails([...emails, '']);
+  const removeEmail = (i: number) => setEmails(emails.filter((_, idx) => idx !== i));
+  const updateEmail = (i: number, value: string) => { const arr = [...emails]; arr[i] = value; setEmails(arr); };
+
+  const saveNamedEstimate = async () => {
+    await saveToDB();
+    showMessage(`✅ Saved as "${jobName || 'Untitled'} - ${invoiceNumber}"`);
+  };
+
+  const printDocument = () => window.print();
+
+  const convertToInvoice = () => {
+    setDocumentType('invoice');
+    if (invoiceNumber.startsWith('EST-')) setInvoiceNumber(invoiceNumber.replace('EST-', 'INV-'));
+    setView('sendPreview');
+  };
+
+  const openSendPreview = () => {
+    setView('sendPreview');
+  };
+
+  const saveProfile = async () => {
+    await saveToDB();
+    await loadLatestProfile();
+    showMessage('✅ Profile saved!');
+  };
+
+  const openCalendarModal = async () => {
+    await refreshSavedList();
+    setIsCalendarModalOpen(true);
+  };
+
+  const scheduleAppointment = () => {
+    if (!selectedEstimateForCalendar || !selectedDateTime) return showMessage("Select estimate and date/time");
+
+    const appointmentTime = new Date(selectedDateTime).toLocaleString();
+    const reminderTime = new Date(new Date(selectedDateTime).getTime() - 24 * 60 * 60 * 1000).toLocaleString();
+
+    showMessage(`✅ Appointment scheduled for ${appointmentTime}\n\n📧 Email & 📱 Text sent to client immediately.\n\n⏰ Reminder text & email will be sent 24 hours before (${reminderTime})`);
+
+    setIsCalendarModalOpen(false);
+    setSelectedEstimateForCalendar(null);
+    setSelectedDateTime('');
+  };
+
+  const saveAsTemplate = () => {
+    if (!terms.trim()) return showMessage("Enter text first");
+    const name = prompt("Template name:");
+    if (name) {
+      const updated = [...savedTemplates, { name: name.trim(), text: terms }];
+      setSavedTemplates(updated);
+      localStorage.setItem('templates', JSON.stringify(updated));
+      showMessage(`Template "${name}" saved!`);
+    }
+  };
+
+  const saveAsQuickLine = (item: any) => {
+    const newQuick = { id: Date.now(), description: item.description, qty: item.qty, unit: item.unit, price: item.price };
+    const updated = [...quickLines, newQuick];
+    setQuickLines(updated);
+    localStorage.setItem('quickLines', JSON.stringify(updated));
+    showMessage('Quick line saved!');
+  };
+
+  const useQuickLine = (quick: any) => {
+    const newItem = { id: Date.now(), description: quick.description, qty: quick.qty, unit: quick.unit, price: quick.price, total: quick.qty * quick.price };
+    setItems(prev => [...prev, newItem]);
+    setIsQuickLinesModalOpen(false);
+  };
+
+  const deleteQuickLine = (id: number) => {
+    const updated = quickLines.filter(q => q.id !== id);
+    setQuickLines(updated);
+    localStorage.setItem('quickLines', JSON.stringify(updated));
+  };
+
+  const deleteSelectedEstimate = async (id: string) => {
+    if (!confirm('Delete permanently?')) return;
+    if (!supabase) return;
+    await supabase.from('estimates').delete().eq('id', id);
+    await refreshSavedList();
+    showMessage('Document deleted');
+  };
+
+  const archiveEstimate = async (id: string) => {
+    if (!confirm('Archive this document?')) return;
+    if (!user || !supabase) return;
+
+    const { data: est } = await supabase.from('estimates').select('*').eq('id', id).single();
+    if (!est) return;
+
+    const archiveData = { ...est, archived_at: new Date().toISOString(), original_id: est.id };
+    const { error } = await supabase.from('archive-est').insert(archiveData);
+    if (error) return console.error(error);
+
+    await supabase.from('estimates').delete().eq('id', id);
+    showMessage('Document archived successfully');
+    refreshSavedList();
+  };
+
+  const exportData = async () => {
+    if (!user || !supabase) return;
+
+    let csv = 'Type,InvoiceNumber,JobName,Date,Address,City,ZipCode,GrandTotal,PhotoUrls,VideoUrls\n';
+
+    if (exportOptions.estimates || exportOptions.invoices) {
+      const { data: docs } = await supabase.from('estimates').select('*').eq('user_id', user.id);
+      (docs || []).forEach(doc => {
+        if ((exportOptions.estimates && (doc.documentType === 'estimate' || doc.invoiceNumber?.startsWith('EST'))) ||
+            (exportOptions.invoices && (doc.documentType === 'invoice' || doc.invoiceNumber?.startsWith('INV')))) {
+          const total = doc.items ? doc.items.reduce((sum: number, item: any) => sum + (item.total || 0), 0) : 0;
+          csv += `"${doc.documentType || 'estimate'}","${doc.invoiceNumber || ''}","${doc.jobName || ''}","${doc.date || ''}","${doc.address || ''}","${doc.city || ''}","${doc.zipCode || ''}",${total},"${(doc.photoUrls || []).join('; ')}","${(doc.videoUrls || []).join('; ')}"\n`;
+        }
+      });
+    }
+
+    if (exportOptions.archives) {
+      const { data: archives } = await supabase.from('archive-est').select('*').eq('user_id', user.id);
+      (archives || []).forEach(arch => {
+        const total = arch.items ? arch.items.reduce((sum: number, item: any) => sum + (item.total || 0), 0) : 0;
+        csv += `"archive","${arch.invoiceNumber || ''}","${arch.jobName || ''}","${arch.date || ''}","${arch.address || ''}","${arch.city || ''}","${arch.zipCode || ''}",${total},"${(arch.photoUrls || []).join('; ')}","${(arch.videoUrls || []).join('; ')}"\n`;
+      });
+    }
+
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `EstimateAce_Export_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showMessage('✅ Selected data exported as CSV');
+  };
+
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const debouncedSave = () => {
+    if (!profile.autoSaveEnabled) return;
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    saveTimeoutRef.current = setTimeout(saveToDB, 800);
+  };
+
+  useEffect(() => {
+    if (view === 'editor') debouncedSave();
+    return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
+  }, [jobName, address, city, state, zipCode, phones, emails, date, invoiceNumber, items, terms, profile, documentType, dueDate, paymentStatus, amountPaid, paymentMethod, view, receiptDetails, isTaxExempt, taxLabor]);
+
+  useEffect(() => {
+    const saved = localStorage.getItem('quickLines');
+    if (saved) setQuickLines(JSON.parse(saved));
+  }, []);
+
+  useEffect(() => {
+    if (view === 'dashboard' || view === 'estimatesList' || view === 'invoicesList') refreshSavedList();
+    if (view === 'archivesView') refreshArchivesList();
+  }, [view]);
+
+  // ====================== PAYMENT FUNCTIONS ======================
+  const openPaymentModal = (type: 'deposit' | 'balance', amount: number) => {
+    setPaymentType(type);
+    setPaymentAmount(amount);
+    setSelectedPaymentMethod(null);
+    setIsPaymentModalOpen(true);
+  };
+
+  const closePaymentModal = () => {
+    setIsPaymentModalOpen(false);
+    setSelectedPaymentMethod(null);
+  };
+
+  const selectPaymentMethod = (method: string) => {
+    setSelectedPaymentMethod(method);
+  };
+
+  const proceedWithPayment = () => {
+    if (!selectedPaymentMethod) return showMessage('Please select a payment method');
+    closePaymentModal();
+
+    const message = `✅ Payment of $${paymentAmount.toFixed(2)} for ${paymentType} received via ${selectedPaymentMethod.toUpperCase()}!`;
+
+    if (paymentType === 'deposit') {
+      const depositAmt = grandTotal * (profile.depositPercentage || 0) / 100;
+      setAmountPaid(depositAmt);
+    } else {
+      setAmountPaid(grandTotal);
+      setPaymentStatus('paid');
+    }
+    saveToDB();
+    showMessage(message);
+  };
+
+  const togglePaymentMethod = (method: string, enabled: boolean) => {
+    setProfile(prev => ({
+      ...prev,
+      paymentSettings: {
+        ...prev.paymentSettings,
+        [method]: { ...prev.paymentSettings[method], enabled }
+      }
+    }));
+  };
+
+const linkPaymentAccount = (method: string) => {
+  if (method === 'stripe') {
+    const clientId = process.env.NEXT_PUBLIC_STRIPE_CONNECT_CLIENT_ID;
+    if (!clientId) {
+      return showMessage('Stripe Connect Client ID is not set in Vercel yet.');
+    }
+
+    const redirectUri = `${process.env.NEXT_PUBLIC_BASE_URL}/api/stripe/callback`;
+    const state = user?.id || 'unknown';
+
+    const url = `https://connect.stripe.com/oauth/authorize?` +
+      `response_type=code&` +
+      `client_id=${clientId}&` +
+      `scope=read_write&` +
+      `state=${state}&` +
+      `redirect_uri=${encodeURIComponent(redirectUri)}`;
+
+    window.location.href = url;
+    return;
+  }
+
+  // For other methods (PayPal, Venmo, etc.) we keep placeholder for now
+  showMessage(`${method.toUpperCase()} linking coming soon.`);
+};
+  const totalOutstanding = outstandingInvoices.reduce((sum, inv) => sum + calculateGrandTotal(inv), 0);
+
+  const currentYear = new Date().getFullYear();
+  const salesYTD = savedEstimatesList
+    .filter(doc => {
+      if (!doc.date) return false;
+      const docDate = new Date(doc.date);
+      if (isNaN(docDate.getTime())) return false;
+      return docDate.getFullYear() === currentYear &&
+             (doc.documentType === 'invoice' || doc.invoiceNumber?.startsWith('INV')) &&
+             doc.paymentStatus === 'paid';
+    })
+    .reduce((sum, doc) => sum + calculateGrandTotal(doc), 0);
+
+  // ====================== TAX REPORTS CALCULATIONS ======================
+  const totalSalesTaxCollected = savedEstimatesList.reduce((sum, doc) => sum + (doc.taxAmount || 0), 0);
+  const totalTaxDeductibleReceipts = savedEstimatesList.reduce((sum, doc) => {
+    return sum + (doc.receiptDetails || []).reduce((s: number, r: any) => s + (r.amount || 0), 0);
+  }, 0);
+  const netTaxableProfit = savedEstimatesList
+    .filter(doc => doc.paymentStatus === 'paid')
+    .reduce((sum, doc) => {
+      const gross = calculateGrandTotal(doc);
+      const receipts = (doc.receiptDetails || []).reduce((s: number, r: any) => s + (r.amount || 0), 0);
+      const labor = doc.laborAmount || 0;
+      return sum + (gross - receipts - labor);
+    }, 0);
+
+  const quarterlyTaxData = [1,2,3,4].map(q => {
+    const start = new Date(currentYear, (q-1)*3, 1);
+    const end = new Date(currentYear, q*3, 0);
+    const filtered = savedEstimatesList.filter(doc => {
+      if (!doc.date) return false;
+      const d = new Date(doc.date);
+      return d >= start && d <= end && doc.paymentStatus === 'paid';
+    });
+    const tax = filtered.reduce((sum, doc) => sum + (doc.taxAmount || 0), 0);
+    const receipts = filtered.reduce((sum, doc) => {
+      return sum + (doc.receiptDetails || []).reduce((s: number, r: any) => s + (r.amount || 0), 0);
+    }, 0);
+    return { quarter: `Q${q}`, taxCollected: tax, expenses: receipts };
+  });
+
+  const exportTaxReport = () => {
+    let csv = 'Quarter,Tax Collected,Tax Deductible Receipts,Net Taxable Profit\n';
+    quarterlyTaxData.forEach(q => {
+      csv += `Q${q.quarter},${q.taxCollected.toFixed(2)},${q.expenses.toFixed(2)},${(q.taxCollected - q.expenses).toFixed(2)}\n`;
+    });
+    csv += `\nTotal Sales Tax Collected,${totalSalesTaxCollected.toFixed(2)}\n`;
+    csv += `Total Tax Deductible Receipts,${totalTaxDeductibleReceipts.toFixed(2)}\n`;
+    csv += `Net Taxable Profit,${netTaxableProfit.toFixed(2)}\n`;
+
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Tax_Report_${currentYear}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showMessage('✅ Tax report exported as CSV');
+  };
+
+  if (!user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#f4f4f4]">
+        <Card className="w-full max-w-md p-8">
+          <h1 className="text-4xl font-bold text-center mb-8 text-[#1e293b]">EstimateAce</h1>
+          <Input placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} className="mb-3" />
+          <Input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} className="mb-6" />
+          <div className="flex gap-3">
+            <Button onClick={login} className="flex-1">Login</Button>
+            <Button onClick={signup} variant="outline" className="flex-1">Sign Up</Button>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <style jsx global>{`
+        @media print {
+          body * { visibility: hidden; }
+          #print-document, #print-document * { visibility: visible; }
+          #print-document { position: absolute; left: 0; top: 0; width: 100%; padding: 40px; }
+          .no-print { display: none !important; }
+        }
+      `}</style>
+
+      <div className="flex flex-col h-screen bg-[#f4f4f4]">
+        <div className="flex-1 overflow-auto p-4 md:p-8">
+          {view === 'dashboard' && (
+            <div>
+              <div className="flex justify-between items-center mb-8">
+                <div>
+                  <h2 className="text-4xl font-semibold text-[#1e293b]">Welcome back!</h2>
+                  <p className="text-gray-600 mt-1">Here’s what’s happening with your business</p>
+                </div>
+              </div>
+
+              <Card className="mb-8">
+                <CardContent className="p-6">
+                  <h3 className="font-semibold mb-4 flex items-center gap-2">
+                    📋 Total Estimates Written (Not Archived)
+                  </h3>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-3/4">Metric</TableHead>
+                        <TableHead className="text-right">Count</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      <TableRow>
+                        <TableCell className="font-medium">Active Estimates</TableCell>
+                        <TableCell className="text-right text-4xl font-bold text-[#10b981]">
+                          {estimatesCount}
+                        </TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+
+              <Card className="mb-8">
+                <CardContent className="p-6">
+                  <h3 className="font-semibold mb-4 flex items-center gap-2">
+                    💰 All Outstanding Invoices
+                  </h3>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Invoice #</TableHead>
+                          <TableHead>Job Name</TableHead>
+                          <TableHead className="text-right">Amount Due</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {outstandingInvoices.length === 0 ? (
+                          <TableRow>
+                            <TableCell colSpan={3} className="text-center py-8 text-gray-500">
+                              No outstanding invoices
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          outstandingInvoices.map((inv) => (
+                            <TableRow key={inv.id}>
+                              <TableCell className="font-medium">{inv.invoiceNumber}</TableCell>
+                              <TableCell>{inv.jobName || 'Untitled'}</TableCell>
+                              <TableCell className="text-right font-semibold">
+                                ${calculateGrandTotal(inv).toFixed(2)}
+                              </TableCell>
+                            </TableRow>
+                          ))
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  {outstandingInvoices.length > 0 && (
+                    <div className="mt-6 flex justify-end items-baseline gap-2 text-xl">
+                      <span className="text-gray-600">Total Outstanding:</span>
+                      <span className="font-bold text-amber-600">${totalOutstanding.toFixed(2)}</span>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardContent className="p-6">
+                  <h3 className="font-semibold mb-4 flex items-center gap-2">
+                    📈 Total Sales Year to Date
+                  </h3>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-3/4">Period</TableHead>
+                        <TableHead className="text-right">Sales</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      <TableRow>
+                        <TableCell className="font-medium">
+                          {currentYear} (Year to Date)
+                        </TableCell>
+                        <TableCell className="text-right text-4xl font-bold text-[#10b981]">
+                          ${salesYTD.toFixed(2)}
+                        </TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {view === 'estimatesList' && (
+            <div>
+              <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to Dashboard</Button>
+              <h2 className="text-3xl font-semibold mb-6">All Estimates</h2>
+              <div className="space-y-4">
+                {savedEstimatesList.filter(est => est.documentType === 'estimate' || est.invoiceNumber?.startsWith('EST')).map((est) => (
+                  <div key={est.id} className="flex justify-between items-center border p-4 rounded-lg bg-white">
+                    <div>
+                      <div className="font-medium">{est.jobName || 'Untitled'}</div>
+                      <div className="text-sm text-gray-500">{est.invoiceNumber} • {est.date}</div>
+                    </div>
+                    <div className="flex gap-3">
+                      <Button size="sm" onClick={() => { loadSelectedEstimate(est); setView('editor'); }}>Open</Button>
+                      <Button size="sm" variant="outline" onClick={() => archiveEstimate(est.id)}>Archive</Button>
+                      <Button size="sm" variant="destructive" onClick={() => deleteSelectedEstimate(est.id)}>Delete</Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {view === 'invoicesList' && (
+            <div>
+              <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to Dashboard</Button>
+              <h2 className="text-3xl font-semibold mb-6">All Invoices</h2>
+              <div className="space-y-4">
+                {savedEstimatesList.filter(est => est.documentType === 'invoice' || est.invoiceNumber?.startsWith('INV')).map((est) => (
+                  <div key={est.id} className="flex justify-between items-center border p-4 rounded-lg bg-white">
+                    <div className="flex-1">
+                      <div className="font-medium">{est.jobName || 'Untitled'}</div>
+                      <div className="text-sm text-gray-500">{est.invoiceNumber} • {est.date}</div>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      {est.paymentStatus === 'paid' && <span className="px-3 py-1 text-xs font-medium bg-green-100 text-green-700 rounded-full">Paid</span>}
+                      <Button size="sm" onClick={() => { loadSelectedEstimate(est); setView('editor'); }}>Open</Button>
+                      <Button size="sm" variant="outline" onClick={() => archiveEstimate(est.id)}>Archive</Button>
+                      <Button size="sm" variant="destructive" onClick={() => deleteSelectedEstimate(est.id)}>Delete</Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {view === 'editor' && (
+            <div>
+              <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to Dashboard</Button>
+
+              <div className="flex justify-between items-start mb-8">
+                <div>
+                  <h1 className="text-5xl font-bold text-[#1e293b]">{profile.company || 'Your Company'}</h1>
+                  <p className="text-xl text-gray-600">{profile.slogan || 'Professional Estimation & Invoicing'}</p>
+                  {profile.phone && <p className="text-lg text-gray-600 mt-1">📞 {profile.phone}</p>}
+                  {profile.email && <p className="text-lg text-gray-600">✉️ {profile.email}</p>}
+                </div>
+                <div className="text-right">
+                  <div className="text-sm text-gray-500">Document #</div>
+                  <div className="text-4xl font-mono font-bold text-[#10b981]">{invoiceNumber}</div>
+                  <div className="text-sm text-gray-500 mt-1">Date: {date}</div>
+                </div>
+              </div>
+
+              <Card className="mb-8">
+                <CardContent className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-sm font-semibold mb-1">Job Name</label>
+                    <Input value={jobName} onChange={e => setJobName(e.target.value)} placeholder="Job name" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold mb-1">Address</label>
+                    <Input value={address} onChange={e => setAddress(e.target.value)} placeholder="Street address" />
+                  </div>
+                  <div className="grid grid-cols-3 gap-4">
+                    <div><label className="block text-sm font-semibold mb-1">City</label><Input value={city} onChange={e => setCity(e.target.value)} /></div>
+                    <div><label className="block text-sm font-semibold mb-1">State</label><Input value={state} onChange={e => setState(e.target.value)} placeholder="CA" /></div>
+                    <div><label className="block text-sm font-semibold mb-1">Zip Code</label><Input value={zipCode} onChange={e => setZipCode(e.target.value)} /></div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold mb-2">Phone Numbers</label>
+                    {phones.map((phone, i) => (
+                      <div key={i} className="flex gap-2 mb-2">
+                        <Input value={phone} onChange={e => updatePhone(i, e.target.value)} />
+                        <Button variant="outline" size="sm" onClick={() => removePhone(i)}>×</Button>
+                      </div>
+                    ))}
+                    <Button variant="outline" size="sm" onClick={addPhone}>+ Add Phone</Button>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold mb-2">Email Addresses</label>
+                    {emails.map((em, i) => (
+                      <div key={i} className="flex gap-2 mb-2">
+                        <Input value={em} onChange={e => updateEmail(i, e.target.value)} />
+                        <Button variant="outline" size="sm" onClick={() => removeEmail(i)}>×</Button>
+                      </div>
+                    ))}
+                    <Button variant="outline" size="sm" onClick={addEmail}>+ Add Email</Button>
+                  </div>
+
+                  <div className="md:col-span-2 flex items-center gap-8 pt-4 border-t">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input type="checkbox" checked={isTaxExempt} onChange={e => setIsTaxExempt(e.target.checked)} />
+                      <span className="font-medium">Tax Exempt</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input type="checkbox" checked={taxLabor} onChange={e => setTaxLabor(e.target.checked)} />
+                      <span className="font-medium">Tax Labor</span>
+                    </label>
+                    <div className="ml-auto text-sm text-gray-500">
+                      Rate: <span className="font-semibold">{baseTaxRate}%</span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <div className="flex flex-wrap gap-3 mb-8">
+                <Button onClick={addRow} variant="outline">+ Add Line Item</Button>
+                <Button onClick={openQuickLinesModal} variant="outline">📌 Quick Lines</Button>
+              </div>
+
+              <Card className="mb-8">
+                <div className="overflow-x-auto">
+                  <Table className="min-w-[800px]">
+                    <TableHeader>
+                      <TableRow className="bg-[#1e293b]">
+                        <TableHead className="text-white w-1/2 min-w-[320px]">Description</TableHead>
+                        <TableHead className="text-white text-right w-20">Qty</TableHead>
+                        <TableHead className="text-white text-right w-20">Unit</TableHead>
+                        <TableHead className="text-white text-right w-24">Price</TableHead>
+                        <TableHead className="text-white text-right w-28">Total</TableHead>
+                        <TableHead className="text-white w-16"></TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {items.map((item) => (
+                        <TableRow key={item.id}>
+                          <TableCell>
+                            <Textarea 
+                              value={item.description} 
+                              onChange={e => updateItem(item.id, 'description', e.target.value)} 
+                              rows={5}
+                              className="resize-y min-h-[120px]"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Input 
+                              type="number" 
+                              value={item.qty} 
+                              onChange={e => updateItem(item.id, 'qty', parseFloat(e.target.value) || 0)} 
+                              className="text-right" 
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Input 
+                              value={item.unit} 
+                              onChange={e => updateItem(item.id, 'unit', e.target.value)} 
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Input 
+                              type="number" 
+                              value={item.price} 
+                              onChange={e => updateItem(item.id, 'price', parseFloat(e.target.value) || 0)} 
+                              className="text-right" 
+                            />
+                          </TableCell>
+                          <TableCell className="text-right font-medium">${(item.total || 0).toFixed(2)}</TableCell>
+                          <TableCell>
+                            <div className="flex gap-1">
+                              <Button size="sm" variant="outline" onClick={() => saveAsQuickLine(item)}>💾</Button>
+                              <Button size="sm" variant="destructive" onClick={() => removeRow(item.id)}>×</Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+
+                <div className="p-6 bg-white border-t">
+                  <div className="flex justify-end text-2xl font-semibold mb-2">
+                    Taxes ({state || '—'} {baseTaxRate}%): <span className="text-[#14b8a6] ml-4">${taxAmount.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-end text-4xl font-bold">
+                    Grand Total: <span className="text-[#10b981] ml-4">${grandTotal.toFixed(2)}</span>
+                  </div>
+                </div>
+              </Card>
+
+              <div className="flex flex-wrap gap-3 mb-8">
+                <Button onClick={saveNamedEstimate} className="bg-[#1e293b]">💾 Save Estimate</Button>
+                <Button onClick={printDocument} className="bg-[#3b82f6]">🖨️ Print/Preview</Button>
+                <Button onClick={openSendPreview} className="bg-[#8b5cf6]">✉️ Send Estimate</Button>
+                <Button onClick={convertToInvoice} className="bg-[#f59e0b]">📄 Convert to Invoice</Button>
+              </div>
+
+              <div className="flex gap-3 mb-8">
+                <Button onClick={() => document.getElementById('photo-camera')?.click()} className="flex-1">📸 Take Photo</Button>
+                <Button onClick={() => document.getElementById('video-camera')?.click()} className="flex-1">🎥 Record Video</Button>
+              </div>
+
+              <input id="photo-camera" type="file" accept="image/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'photo')} className="hidden" />
+              <input id="video-camera" type="file" accept="video/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'video')} className="hidden" />
+
+              <Card className="mb-8">
+                <CardContent className="p-6">
+                  <h3 className="text-xl font-semibold mb-4">📸 Photos ({photoUrls.length})</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    {photoUrls.map((url, i) => (
+                      <div key={i} className="relative group">
+                        <img src={url} alt="" className="w-full h-40 object-cover rounded-lg border" />
+                        <button onClick={() => removeMedia('photo', i)} className="absolute top-2 right-2 bg-red-500 hover:bg-red-600 text-white text-xs px-3 py-1 rounded-full shadow-md opacity-0 group-hover:opacity-100 transition">✕</button>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="mb-8">
+                <CardContent className="p-6">
+                  <h3 className="text-xl font-semibold mb-4">🎥 Videos ({videoUrls.length})</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    {videoUrls.map((url, i) => (
+                      <div key={i} className="relative group">
+                        <video src={url} controls className="w-full h-40 object-cover rounded-lg border" />
+                        <button onClick={() => removeMedia('video', i)} className="absolute top-2 right-2 bg-red-500 hover:bg-red-600 text-white text-xs px-3 py-1 rounded-full shadow-md opacity-0 group-hover:opacity-100 transition">✕</button>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="mb-8">
+                <CardContent className="p-6">
+                  <h3 className="text-xl font-semibold mb-4">📄 Receipts ({receiptUrls.length})</h3>
+                  <Button onClick={() => document.getElementById('receipts-camera')?.click()} className="mb-4">
+                    📄 Scan / Take Photo of Receipt
+                  </Button>
+                  <Button onClick={() => setIsLaborModalOpen(true)} className="mb-4 bg-[#14b8a6]">
+                    💼 Labor
+                  </Button>
+                  <input id="receipts-camera" type="file" accept="image/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'receipt')} className="hidden" />
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     {receiptUrls.map((url, i) => (
                       <div key={i} className="relative group">
                         <img src={url} alt="" className="w-full h-40 object-cover rounded-lg border" />
