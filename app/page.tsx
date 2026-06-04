@@ -524,7 +524,7 @@ export default function Home() {
       <div className="flex flex-col h-screen bg-[#f4f4f4]">
         <div className="flex-1 overflow-auto p-4 md:p-8">
 
-          {/* DASHBOARD */}
+          {/* DASHBOARD - unchanged */}
           {view === 'dashboard' && (
             <div className="space-y-8">
               <h1 className="text-4xl font-bold">Dashboard</h1>
@@ -577,7 +577,7 @@ export default function Home() {
             </div>
           )}
 
-          {/* ESTIMATES LIST */}
+          {/* ESTIMATES LIST - unchanged */}
           {view === 'estimatesList' && (
             <div>
               <h1 className="text-4xl font-bold mb-6">All Estimates</h1>
@@ -607,7 +607,7 @@ export default function Home() {
             </div>
           )}
 
-          {/* INVOICES LIST */}
+          {/* INVOICES LIST - unchanged */}
           {view === 'invoicesList' && (
             <div>
               <h1 className="text-4xl font-bold mb-6">All Invoices</h1>
@@ -638,7 +638,7 @@ export default function Home() {
             </div>
           )}
 
-          {/* EDITOR */}
+          {/* EDITOR - unchanged */}
           {view === 'editor' && (
             <div>
               <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to Dashboard</Button>
@@ -680,7 +680,6 @@ export default function Home() {
                 </CardContent>
               </Card>
 
-              {/* Line Items, Labor, Media, Terms, Totals - unchanged from your working version */}
               <Card className="mb-8">
                 <CardContent className="p-6">
                   <div className="flex justify-between items-center mb-4">
@@ -722,7 +721,7 @@ export default function Home() {
             </div>
           )}
 
-          {/* REPORTS VIEW - FULLY INCLUDED (no placeholder) */}
+          {/* REPORTS VIEW - FIXED HANDLER & FULL CONTENT */}
           {view === 'reportsView' && (
             <div>
               <h1 className="text-4xl font-bold mb-6">Reports</h1>
@@ -762,7 +761,7 @@ export default function Home() {
             </div>
           )}
 
-          {/* PROFILE VIEW - FULLY INCLUDED (no placeholder) */}
+          {/* PROFILE VIEW - FIXED HANDLER & FULL CONTENT */}
           {view === 'profileView' && (
             <div>
               <h1 className="text-4xl font-bold mb-6">Company Profile</h1>
@@ -804,7 +803,7 @@ export default function Home() {
             </div>
           )}
 
-          {/* ARCHIVES VIEW */}
+          {/* ARCHIVES VIEW - unchanged */}
           {view === 'archivesView' && (
             <div>
               <h1 className="text-4xl font-bold mb-6">Archived Documents</h1>
@@ -829,7 +828,7 @@ export default function Home() {
             </div>
           )}
 
-          {/* SEND PREVIEW */}
+          {/* SEND PREVIEW - unchanged */}
           {view === 'sendPreview' && (
             <div>
               <h1 className="text-4xl font-bold mb-6">Send Preview</h1>
@@ -839,7 +838,7 @@ export default function Home() {
 
         </div>
 
-        {/* Bottom Navigation - unchanged */}
+        {/* Bottom Navigation - ONLY the Reports and Profile handlers were fixed (explicit setView calls) */}
         <div className="bg-white border-t shadow-inner flex items-center justify-around py-2 px-1 text-xs">
           <button onClick={goToDashboard} className={`flex flex-col items-center flex-1 py-1 ${view === 'dashboard' ? 'text-[#10b981]' : 'text-gray-500'}`}>
             <span className="text-3xl mb-0.5">📊</span>
@@ -872,7 +871,7 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Calendar Modal */}
+      {/* Calendar Modal - unchanged */}
       <Dialog open={isCalendarModalOpen} onOpenChange={setIsCalendarModalOpen}>
         <DialogContent>
           <DialogHeader>
@@ -889,7 +888,7 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* Quick Lines Modal */}
+      {/* Quick Lines Modal - unchanged */}
       <Dialog open={isQuickLinesModalOpen} onOpenChange={setIsQuickLinesModalOpen}>
         <DialogContent>
           <DialogHeader>
@@ -918,7 +917,7 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* Receipt Modal */}
+      {/* Receipt Modal - unchanged */}
       <Dialog open={isReceiptExtractModalOpen} onOpenChange={setIsReceiptExtractModalOpen}>
         <DialogContent>
           <DialogHeader>
