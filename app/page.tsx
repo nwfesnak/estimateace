@@ -47,7 +47,62 @@ export async function POST(request: Request) {
         paymentType: type,
       },
     });
+    import { NextResponse } from 'next/server';
+import Stripe from 'stripe';
+import { createClient } from '@supabase/supabase-js';
 
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+  apiVersion: '2025-02-24.acacia',
+});
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
+
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const code = url.searchParams.get('code');
+  const state = url.searchParams.get('state');
+
+  if (!code) {
+    return NextResponse.redirect('/profileView?error=no_code');
+  }
+
+  try {
+    // Exchange the code for the account ID
+    const response = await stripe.oauth.token({
+      grant_type: 'authorization_code',
+      code,
+    });
+
+    const stripeAccountId = response.stripe_user_id;
+
+    // Save it to the user's profile
+    const { error } = await supabase
+      .from('estimates')
+      .update({
+        profile: {
+          ... (await supabase.from('estimates').select('profile').eq('user_id', state).single()).data?.profile,
+          paymentSettings: {
+            stripe: {
+              enabled: true,
+              connected: true,
+              accountId: stripeAccountId,
+            },
+          },
+        },
+      })
+      .eq('user_id', state);
+
+    if (error) console.error('Supabase save error:', error);
+
+    return NextResponse.redirect('/profileView?success=stripe_connected');
+  } catch (err: any) {
+    console.error('Stripe callback error:', err);
+    return NextResponse.redirect('/profileView?error=stripe_callback');
+  }
+}
     return NextResponse.json({ url: session.url });
   } catch (error: any) {
     console.error('Stripe error:', error);
