@@ -938,13 +938,24 @@ export default function Home() {
                       {items.map((item) => (
                         <TableRow key={item.id}>
                           <TableCell>
-                            <Textarea 
-                              value={item.description} 
-                              onChange={e => updateItem(item.id, 'description', e.target.value)} 
-                              rows={5}
-                              className="resize-y min-h-[120px]"
-                            />
-                          </TableCell>
+  <Textarea 
+    value={item.description} 
+    onChange={e => updateItem(item.id, 'description', e.target.value)} 
+    rows={5}
+    className="resize-y min-h-[120px]"
+  />
+  <Button
+    size="sm"
+    variant="ghost"
+    className="mt-2 w-full text-xs flex items-center gap-1 justify-center"
+    onClick={() => {
+      const suggestion = prompt("🤖 Grok AI – Describe this line item (e.g. 'Install 5 tempered glass windows with white trim')");
+      if (suggestion) updateItem(item.id, 'description', suggestion);
+    }}
+  >
+    🤖 Grok AI
+  </Button>
+</TableCell>
                           <TableCell>
                             <Input 
                               type="number" 
