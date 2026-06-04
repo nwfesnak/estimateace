@@ -8,7 +8,103 @@ import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { createClient } from '@supabase/supabase-js';
+import { NextResponse } from 'next/server';
+import Stripe from 'stripe';
 
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+  apiVersion: '2025-02-24.acacia', // latest stable
+});
+
+export async function POST(request: Request) {
+  try {
+    const { type, amount, invoiceNumber, userId } = await request.json();
+
+    if (!amount || !invoiceNumber) {
+      return NextResponse.json({ error: 'Missing amount or invoiceNumber' }, { status: 400 });
+    }
+
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card', 'ach'],           // card + eCheck
+      line_items: [
+        {
+          price_data: {
+            currency: 'usd',
+            product_data: {
+              name: type === 'deposit' ? 'Deposit Payment' : 'Balance Payment',
+              description: `Invoice #${invoiceNumber}`,
+            },
+            unit_amount: Math.round(amount * 100), // cents
+          },
+          quantity: 1,
+        },
+      ],
+      mode: 'payment',
+      success_url: `${process.env.NEXT_PUBLIC_BASE_URL}/success?session_id={CHECKOUT_SESSION_ID}&type=${type}&invoice=${invoiceNumber}`,
+      cancel_url: `${process.env.NEXT_PUBLIC_BASE_URL}/sendPreview`,
+      metadata: {
+        invoiceNumber,
+        userId: userId || '',
+        paymentType: type,
+      },
+    });
+
+    return NextResponse.json({ url: session.url });
+  } catch (error: any) {
+    console.error('Stripe error:', error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}
+  import { NextResponse } from 'next/server';
+
+export async function POST(request: Request) {
+  try {
+    const { type, amount, invoiceNumber, userId } = await request.json();
+
+    const accessTokenRes = await fetch('https://api-m.paypal.com/v1/oauth2/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Authorization: `Basic ${Buffer.from(
+          `${process.env.PAYPAL_CLIENT_ID}:${process.env.PAYPAL_CLIENT_SECRET}`
+        ).toString('base64')}`,
+      },
+      body: 'grant_type=client_credentials',
+    });
+
+    const { access_token } = await accessTokenRes.json();
+
+    const orderRes = await fetch('https://api-m.paypal.com/v2/checkout/orders', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${access_token}`,
+      },
+      body: JSON.stringify({
+        intent: 'CAPTURE',
+        purchase_units: [
+          {
+            amount: {
+              currency_code: 'USD',
+              value: amount.toFixed(2),
+            },
+            description: `${type === 'deposit' ? 'Deposit' : 'Balance'} for Invoice #${invoiceNumber}`,
+          },
+        ],
+        application_context: {
+          return_url: `${process.env.NEXT_PUBLIC_BASE_URL}/success?type=${type}&invoice=${invoiceNumber}`,
+          cancel_url: `${process.env.NEXT_PUBLIC_BASE_URL}/sendPreview`,
+        },
+      }),
+    });
+
+    const order = await orderRes.json();
+
+    return NextResponse.json({ url: order.links.find((l: any) => l.rel === 'approve')?.href });
+  } catch (error: any) {
+    console.error('PayPal error:', error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}
 export default function Home() {
   const supabase = useMemo(() => {
     if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) return null;
