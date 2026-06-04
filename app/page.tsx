@@ -123,11 +123,12 @@ export default function Home() {
   const [selectedPhonesForSend, setSelectedPhonesForSend] = useState<string[]>([]);
 
   const [quickLines, setQuickLines] = useState<any[]>([]);
-  const [quickLines, setQuickLines] = useState<any[]>([]);
 
+  // === TRANSLATE STATES (added exactly as requested) ===
   const [translateFrom, setTranslateFrom] = useState<'en' | 'es' | 'fr' | 'de' | 'pt' | 'it'>('en');
   const [translateTo, setTranslateTo] = useState<'en' | 'es' | 'fr' | 'de' | 'pt' | 'it'>('es');
   const [itemTranslations, setItemTranslations] = useState<{ [key: number]: string }>({});
+
   const [isQuickLinesModalOpen, setIsQuickLinesModalOpen] = useState(false);
   const [isCalendarModalOpen, setIsCalendarModalOpen] = useState(false);
   const [selectedEstimateForCalendar, setSelectedEstimateForCalendar] = useState<any>(null);
@@ -361,27 +362,30 @@ export default function Home() {
       return item;
     }));
   };
-const translateDescription = async (text: string, itemId: number) => {
-  if (!text.trim()) return showMessage('Enter text first');
-  
-  try {
-    const res = await fetch('https://libretranslate.com/translate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        q: text,
-        source: translateFrom,
-        target: translateTo,
-        format: 'text'
-      })
-    });
-    const data = await res.json();
-    setItemTranslations(prev => ({ ...prev, [itemId]: data.translatedText }));
-    showMessage('✅ Translation added (internal use only)');
-  } catch {
-    showMessage('⚠️ Translation service temporarily unavailable. Please try again.');
-  }
-};
+
+  // === TRANSLATE FUNCTION (added exactly as requested) ===
+  const translateDescription = async (text: string, itemId: number) => {
+    if (!text.trim()) return showMessage('Enter text first');
+    
+    try {
+      const res = await fetch('https://libretranslate.com/translate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          q: text,
+          source: translateFrom,
+          target: translateTo,
+          format: 'text'
+        })
+      });
+      const data = await res.json();
+      setItemTranslations(prev => ({ ...prev, [itemId]: data.translatedText }));
+      showMessage('✅ Translation added (internal use only)');
+    } catch {
+      showMessage('⚠️ Translation service temporarily unavailable. Please try again.');
+    }
+  };
+
   const removeRow = (id: number) => setItems(prev => prev.filter(item => item.id !== id));
 
   const addPhone = () => setPhones([...phones, '']);
@@ -964,24 +968,89 @@ const translateDescription = async (text: string, itemId: number) => {
                       {items.map((item) => (
                         <TableRow key={item.id}>
                           <TableCell>
-                    <Textarea 
-                       value={item.description} 
-                       onChange={e => updateItem(item.id, 'description', e.target.value)} 
-                       rows={5}
-                       className="resize-y min-h-[120px]"
-                      />
-  <Button
-    size="sm"
-    variant="ghost"
-    className="mt-2 w-full text-xs flex items-center gap-1 justify-center"
-    onClick={() => {
-      const suggestion = prompt("🤖 Grok AI – Describe this line item (e.g. 'Install 5 tempered glass windows with white trim')");
-      if (suggestion) updateItem(item.id, 'description', suggestion);
-    }}
-  >
-    🤖 Grok AI
-  </Button>
-</TableCell>
+                            <Textarea 
+                              value={item.description} 
+                              onChange={e => updateItem(item.id, 'description', e.target.value)} 
+                              rows={5}
+                              className="resize-y min-h-[120px]"
+                            />
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="mt-2 w-full text-xs flex items-center gap-1 justify-center"
+                              onClick={() => {
+                                const suggestion = prompt("🤖 Grok AI – Describe this line item (e.g. 'Install 5 tempered glass windows with white trim')");
+                                if (suggestion) updateItem(item.id, 'description', suggestion);
+                              }}
+                            >
+                              🤖 Grok AI
+                            </Button>
+
+                            {/* TRANSLATE FEATURE - added exactly as requested */}
+                            <div className="mt-4 pt-3 border-t flex flex-wrap items-center gap-2 text-xs">
+                              <select 
+                                value={translateFrom}
+                                onChange={e => setTranslateFrom(e.target.value as any)}
+                                className="border rounded px-2 py-1 bg-white"
+                              >
+                                <option value="en">English</option>
+                                <option value="es">Spanish</option>
+                                <option value="fr">French</option>
+                                <option value="de">German</option>
+                                <option value="pt">Portuguese</option>
+                                <option value="it">Italian</option>
+                              </select>
+                              
+                              <span className="text-gray-400">→</span>
+                              
+                              <select 
+                                value={translateTo}
+                                onChange={e => setTranslateTo(e.target.value as any)}
+                                className="border rounded px-2 py-1 bg-white"
+                              >
+                                <option value="es">Spanish</option>
+                                <option value="en">English</option>
+                                <option value="fr">French</option>
+                                <option value="de">German</option>
+                                <option value="pt">Portuguese</option>
+                                <option value="it">Italian</option>
+                              </select>
+
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="text-xs"
+                                onClick={() => translateDescription(item.description, item.id)}
+                              >
+                                🔄 Translate
+                              </Button>
+                            </div>
+
+                            {/* Translated box (internal only) */}
+                            {itemTranslations[item.id] && (
+                              <div className="mt-3 relative">
+                                <div className="text-[10px] font-medium text-emerald-600 flex items-center gap-1 mb-1">
+                                  🔄 Translation (Internal team use only — not sent to client)
+                                </div>
+                                <Textarea 
+                                  value={itemTranslations[item.id]}
+                                  readOnly
+                                  rows={3}
+                                  className="resize-y bg-gray-50 text-sm"
+                                />
+                                <button
+                                  onClick={() => setItemTranslations(prev => {
+                                    const copy = { ...prev };
+                                    delete copy[item.id];
+                                    return copy;
+                                  })}
+                                  className="absolute top-1 right-2 text-xs text-red-500 hover:text-red-700"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            )}
+                          </TableCell>
                           <TableCell>
                             <Input 
                               type="number" 
