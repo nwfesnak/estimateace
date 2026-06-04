@@ -105,7 +105,7 @@ export default function Home() {
       zelle: { enabled: true, connected: false },
     } as any
   });
-
+  const [lastSaved, setLastSaved] = useState('Never');
   const [profileTab, setProfileTab] = useState<'info' | 'payments'>('info');
 
   // Payment modal states
