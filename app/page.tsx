@@ -149,6 +149,12 @@ export default function Home() {
   const [selectedReportJob, setSelectedReportJob] = useState<any>(null);
   const [reportsSubTab, setReportsSubTab] = useState<'profit' | 'tax'>('profit');
 
+  // NEW STATE FOR MOBILE PHOTO CAMERA
+  const [isPhotoCameraOpen, setIsPhotoCameraOpen] = useState(false);
+
+  // Last saved state (required for existing saveToDB call)
+  const [lastSaved, setLastSaved] = useState('');
+
   const showMessage = (message: string) => {
     const clean = message.replace(/^[^\s]*\.vercel\.app says:\s*/i, '').trim();
     alert(clean);
@@ -258,6 +264,42 @@ export default function Home() {
       setReceiptDetails(prev => prev.filter((_, i) => i !== index));
     }
     saveToDB();
+  };
+
+  // NEW CAMERA FUNCTIONS
+  const openPhotoCamera = () => {
+    setIsPhotoCameraOpen(true);
+  };
+
+  const closePhotoCamera = () => {
+    if (videoRef.current && videoRef.current.srcObject) {
+      (videoRef.current.srcObject as MediaStream).getTracks().forEach(track => track.stop());
+    }
+    setIsPhotoCameraOpen(false);
+  };
+
+  const capturePhoto = () => {
+    if (!videoRef.current || !canvasRef.current) return;
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (video.videoWidth === 0 || video.videoHeight === 0) {
+      showMessage('Camera not ready yet - please wait a moment');
+      return;
+    }
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.drawImage(video, 0, 0);
+      canvas.toBlob((blob) => {
+        if (blob) {
+          const file = new File([blob], `photo-${Date.now()}.jpg`, { type: 'image/jpeg' });
+          const dataTransfer = new DataTransfer();
+          dataTransfer.items.add(file);
+          handleMediaUpload(dataTransfer.files, 'photo');
+        }
+      }, 'image/jpeg', 0.95);
+    }
   };
 
   const refreshSavedList = async () => {
@@ -526,6 +568,11 @@ export default function Home() {
   };
 
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // NEW REFS FOR CAMERA
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
   const debouncedSave = () => {
     if (!profile.autoSaveEnabled) return;
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
@@ -546,6 +593,38 @@ export default function Home() {
     if (view === 'dashboard' || view === 'estimatesList' || view === 'invoicesList') refreshSavedList();
     if (view === 'archivesView') refreshArchivesList();
   }, [view]);
+
+  // NEW CAMERA USEEFFECT
+  useEffect(() => {
+    if (isPhotoCameraOpen && videoRef.current) {
+      navigator.mediaDevices
+        .getUserMedia({ 
+          video: { 
+            facingMode: 'environment',
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          } 
+        })
+        .then((stream) => {
+          if (videoRef.current) {
+            videoRef.current.srcObject = stream;
+            videoRef.current.play().catch(console.error);
+          }
+        })
+        .catch((err) => {
+          console.error('Camera access error:', err);
+          showMessage('Cannot access camera. Please allow camera permission.');
+          setIsPhotoCameraOpen(false);
+        });
+    }
+    return () => {
+      if (videoRef.current && videoRef.current.srcObject) {
+        (videoRef.current.srcObject as MediaStream).getTracks().forEach((track) => {
+          track.stop();
+        });
+      }
+    };
+  }, [isPhotoCameraOpen]);
 
   // Payment functions
   const openPaymentModal = (type: 'deposit' | 'balance', amount: number) => {
@@ -1104,11 +1183,10 @@ export default function Home() {
               </div>
 
               <div className="flex gap-3 mb-8">
-                <Button onClick={() => document.getElementById('photo-camera')?.click()} className="flex-1">📸 Take Photo</Button>
+                <Button onClick={openPhotoCamera} className="flex-1">📸 Take Photo</Button>
                 <Button onClick={() => document.getElementById('video-camera')?.click()} className="flex-1">🎥 Record Video</Button>
               </div>
 
-              <input id="photo-camera" type="file" accept="image/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'photo')} className="hidden" />
               <input id="video-camera" type="file" accept="video/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'video')} className="hidden" />
 
               <Card className="mb-8">
@@ -1116,9 +1194,14 @@ export default function Home() {
                   <h3 className="text-xl font-semibold mb-4">📸 Photos ({photoUrls.length})</h3>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     {photoUrls.map((url, i) => (
-                      <div key={i} className="relative group">
+                      <div key={i} className="relative">
                         <img src={url} alt="" className="w-full h-40 object-cover rounded-lg border" />
-                        <button onClick={() => removeMedia('photo', i)} className="absolute top-2 right-2 bg-red-500 hover:bg-red-600 text-white text-xs px-3 py-1 rounded-full shadow-md opacity-0 group-hover:opacity-100 transition">✕</button>
+                        <button 
+                          onClick={() => removeMedia('photo', i)} 
+                          className="absolute top-2 right-2 bg-red-600 hover:bg-red-700 text-white text-4xl w-10 h-10 flex items-center justify-center rounded-2xl shadow-xl"
+                        >
+                          ×
+                        </button>
                       </div>
                     ))}
                   </div>
@@ -2053,7 +2136,7 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* NEW Payment Modal */}
+      {/* Payment Modal */}
       <Dialog open={isPaymentModalOpen} onOpenChange={setIsPaymentModalOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -2110,6 +2193,39 @@ export default function Home() {
               Continue to Pay
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* PHOTO CAMERA MODAL - stays open on mobile until manually closed */}
+      <Dialog open={isPhotoCameraOpen} onOpenChange={setIsPhotoCameraOpen}>
+        <DialogContent className="max-w-4xl p-0 h-[90vh] flex flex-col">
+          <DialogHeader className="px-6 py-4 border-b">
+            <DialogTitle className="flex items-center justify-between">
+              📸 Live Camera
+              <span className="text-sm text-gray-500">Tap repeatedly for multiple photos</span>
+              <Button variant="outline" size="sm" onClick={closePhotoCamera}>
+                Close
+              </Button>
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 bg-black relative flex items-center justify-center overflow-hidden">
+            <video
+              ref={videoRef}
+              className="w-full h-full object-cover"
+              autoPlay
+              playsInline
+              muted
+            />
+            <canvas ref={canvasRef} className="hidden" />
+          </div>
+          <div className="p-8 bg-black flex items-center justify-center border-t">
+            <Button
+              onClick={capturePhoto}
+              className="h-20 w-20 rounded-full bg-white text-black flex items-center justify-center text-6xl shadow-2xl border-8 border-red-500 active:scale-95 transition-transform"
+            >
+              📸
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </>
