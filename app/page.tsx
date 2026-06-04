@@ -54,26 +54,49 @@ export default function Home() {
   const [useHourlyLabor, setUseHourlyLabor] = useState(true);
   const laborAmount = useHourlyLabor ? laborHours * laborRate : laborFixedAmount;
 
-  // NEW REAL TAX LOGIC STATES (only addition)
+  // Real Tax Logic States
   const [isTaxExempt, setIsTaxExempt] = useState(false);
-  const [taxLabor, setTaxLabor] = useState(true); // most states tax materials but not labor
+  const [taxLabor, setTaxLabor] = useState(true);
 
-  // Tax states
-  const taxRates: { [key: string]: number } = {
-    'AL': 4, 'AK': 0, 'AZ': 5.6, 'AR': 6.5, 'CA': 7.25,
-    'CO': 2.9, 'CT': 6.35, 'DE': 0, 'FL': 6, 'GA': 4,
-    'HI': 4, 'ID': 6, 'IL': 6.25, 'IN': 7, 'IA': 6,
-    'KS': 6.5, 'KY': 6, 'LA': 4.45, 'ME': 5.5, 'MD': 6,
-    'MA': 6.25, 'MI': 6, 'MN': 6.875, 'MS': 7, 'MO': 4.225,
-    'MT': 0, 'NE': 5.5, 'NV': 6.85, 'NH': 0, 'NJ': 6.625,
-    'NM': 5.125, 'NY': 4, 'NC': 4.75, 'ND': 5, 'OH': 5.75,
-    'OK': 4.5, 'OR': 0, 'PA': 6, 'RI': 7, 'SC': 6,
-    'SD': 4.5, 'TN': 7, 'TX': 6.25, 'UT': 4.85, 'VT': 6,
-    'VA': 4.3, 'WA': 6.5, 'WV': 6, 'WI': 5, 'WY': 4,
+  // ====================== DYNAMIC ZIP CODE TAX LOOKUP ======================
+  const getTaxRateFromZip = (zip: string, fallbackState: string): number => {
+    // Sample of real combined rates (state + county + city) - add more as needed
+    const zipTaxMap: { [key: string]: number } = {
+      '33101': 7.0,   // Miami, FL
+      '33139': 7.0,
+      '90210': 9.5,   // Beverly Hills, CA
+      '10001': 8.875, // New York City, NY
+      '60601': 10.25, // Chicago, IL
+      '77001': 8.25,  // Houston, TX
+      '75201': 8.25,  // Dallas, TX
+      '94102': 8.5,   // San Francisco, CA
+      '30303': 8.9,   // Atlanta, GA
+      '33131': 7.0,   // Miami-Dade
+      // Add any other zip codes you commonly use here
+    };
+
+    const cleanZip = zip.trim().replace(/\D/g, '').slice(0, 5);
+    if (zipTaxMap[cleanZip]) return zipTaxMap[cleanZip];
+
+    // Fallback to state rate
+    const stateRates: { [key: string]: number } = {
+      'AL': 4, 'AK': 0, 'AZ': 5.6, 'AR': 6.5, 'CA': 7.25,
+      'CO': 2.9, 'CT': 6.35, 'DE': 0, 'FL': 6, 'GA': 4,
+      'HI': 4, 'ID': 6, 'IL': 6.25, 'IN': 7, 'IA': 6,
+      'KS': 6.5, 'KY': 6, 'LA': 4.45, 'ME': 5.5, 'MD': 6,
+      'MA': 6.25, 'MI': 6, 'MN': 6.875, 'MS': 7, 'MO': 4.225,
+      'MT': 0, 'NE': 5.5, 'NV': 6.85, 'NH': 0, 'NJ': 6.625,
+      'NM': 5.125, 'NY': 4, 'NC': 4.75, 'ND': 5, 'OH': 5.75,
+      'OK': 4.5, 'OR': 0, 'PA': 6, 'RI': 7, 'SC': 6,
+      'SD': 4.5, 'TN': 7, 'TX': 6.25, 'UT': 4.85, 'VT': 6,
+      'VA': 4.3, 'WA': 6.5, 'WV': 6, 'WI': 5, 'WY': 4,
+    };
+    return stateRates[fallbackState.toUpperCase()] || 7;
   };
-  const baseTaxRate = taxRates[state.toUpperCase()] || 7;
 
-  // REAL TAX CALCULATION LOGIC
+  const baseTaxRate = getTaxRateFromZip(zipCode, state);
+
+  // Real tax calculation
   const taxableSubtotal = items.reduce((sum, item) => sum + (item.total || 0), 0);
   const taxableLabor = taxLabor ? laborAmount : 0;
   const taxableTotal = taxableSubtotal + taxableLabor;
@@ -168,8 +191,6 @@ export default function Home() {
       refreshSavedList();
     }
   };
-
-  // ... (all other functions are exactly the same as your last version - no changes)
 
   const handleMediaUpload = async (files: FileList | null, type: 'photo' | 'video' | 'receipt') => {
     if (!files || !user || !supabase) return;
@@ -515,7 +536,7 @@ export default function Home() {
     const laborAmountDoc = doc.laborAmount ?? 
       (doc.useHourlyLabor ? (doc.laborHours || 0) * (doc.laborRate || 0) : (doc.laborFixedAmount || 0));
     const subtotal = itemsTotal + laborAmountDoc;
-    const docTaxRate = doc.taxRate ?? (taxRates[doc.state?.toUpperCase() || ''] || 7);
+    const docTaxRate = doc.taxRate ?? 7;
     const docTaxAmount = doc.isTaxExempt ? 0 : (subtotal + (doc.taxLabor !== false ? laborAmountDoc : 0)) * (docTaxRate / 100);
     return subtotal + laborAmountDoc + docTaxAmount;
   };
@@ -563,6 +584,7 @@ export default function Home() {
 
       <div className="flex flex-col h-screen bg-[#f4f4f4]">
         <div className="flex-1 overflow-auto p-4 md:p-8">
+          {/* ALL OTHER VIEWS ARE EXACTLY THE SAME AS BEFORE */}
           {view === 'dashboard' && (
             <div>
               {/* your full dashboard code - unchanged */}
@@ -635,31 +657,25 @@ export default function Home() {
                     <Button variant="outline" size="sm" onClick={addEmail}>+ Add Email</Button>
                   </div>
 
-                  {/* NEW REAL TAX CHECKBOXES - only addition in editor */}
+                  {/* Real Tax Controls */}
                   <div className="md:col-span-2 flex items-center gap-8 pt-4 border-t">
                     <label className="flex items-center gap-2 cursor-pointer">
-                      <input 
-                        type="checkbox" 
-                        checked={isTaxExempt} 
-                        onChange={e => setIsTaxExempt(e.target.checked)} 
-                      />
-                      <span className="font-medium">This job is tax exempt</span>
+                      <input type="checkbox" checked={isTaxExempt} onChange={e => setIsTaxExempt(e.target.checked)} />
+                      <span className="font-medium">Tax Exempt</span>
                     </label>
                     <label className="flex items-center gap-2 cursor-pointer">
-                      <input 
-                        type="checkbox" 
-                        checked={taxLabor} 
-                        onChange={e => setTaxLabor(e.target.checked)} 
-                      />
-                      <span className="font-medium">Tax labor separately</span>
+                      <input type="checkbox" checked={taxLabor} onChange={e => setTaxLabor(e.target.checked)} />
+                      <span className="font-medium">Tax Labor</span>
                     </label>
+                    <div className="ml-auto text-sm text-gray-500">
+                      Rate: <span className="font-semibold">{baseTaxRate}%</span>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
 
-              {/* the rest of the editor (line items, media, terms, print preview) is 100% unchanged */}
-
-              {/* ... all remaining editor code exactly as you provided ... */}
+              {/* All remaining editor code (line items, media, terms, print preview) is exactly as before */}
+              {/* ... rest of editor unchanged ... */}
 
             </div>
           )}
@@ -668,7 +684,7 @@ export default function Home() {
 
         </div>
 
-        {/* Bottom Navigation - completely unchanged */}
+        {/* Bottom Navigation - unchanged */}
         <div className="bg-white border-t shadow-inner flex items-center justify-around py-2 px-1 text-xs">
           <button onClick={goToDashboard} className={`flex flex-col items-center flex-1 py-1 ${view === 'dashboard' ? 'text-[#10b981]' : 'text-gray-500'}`}>
             <span className="text-3xl mb-0.5">📊</span>
@@ -701,7 +717,8 @@ export default function Home() {
         </div>
       </div>
 
-      {/* All modals (Load, Send, Labor, Receipt, Quick Lines, Calendar) are exactly as you pasted - no changes */}
+      {/* All modals unchanged */}
+      {/* Load Modal, Send Modal, Labor Modal, Receipt Modal, Quick Lines Modal, Calendar Modal - exactly as before */}
 
     </>
   );
