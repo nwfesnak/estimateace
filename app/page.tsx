@@ -2132,7 +2132,7 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* Calendar Modal */}
+            {/* Calendar Modal */}
       <Dialog open={isCalendarModalOpen} onOpenChange={setIsCalendarModalOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -2146,4 +2146,31 @@ export default function Home() {
                 onChange={e => {
                   const selected = savedEstimatesList.find(est => est.id === e.target.value);
                   setSelectedEstimateForCalendar(selected || null);
-              
+                }}
+              >
+                <option value="">— Choose an estimate —</option>
+                {savedEstimatesList.map(est => (
+                  <option key={est.id} value={est.id}>
+                    {est.jobName || 'Untitled'} — {est.invoiceNumber}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold mb-2">Date & Time</label>
+              <Input 
+                type="datetime-local" 
+                value={selectedDateTime} 
+                onChange={e => setSelectedDateTime(e.target.value)} 
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsCalendarModalOpen(false)}>Cancel</Button>
+            <Button onClick={scheduleAppointment} className="bg-[#10b981]">Schedule Appointment</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>    </>
+  );
+}
