@@ -1054,43 +1054,17 @@ export default function Home() {
                               className="resize-y min-h-[120px]"
                             />
                            {/* Existing Grok AI button (unchanged) */}
-{/* CLEAN AI PRICE QUOTE BUTTON */}
 <Button
   size="sm"
   variant="ghost"
-  className="mt-2 w-full text-xs flex items-center gap-1 justify-center bg-amber-100 hover:bg-amber-200"
-  onClick={async () => {
-    const description = item.description?.trim();
-    if (!description) return showMessage('Enter a description first');
-
-    try {
-      const res = await fetch('/api/ai-quote', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ description })
-      });
-
-      const data = await res.json();
-
-      if (!res.ok || data.error) {
-        return showMessage(`❌ ${data.error}`);
-      }
-
-      updateItem(item.id, 'price', data.unitPrice);
-      if (data.unit) updateItem(item.id, 'unit', data.unit);
-      if (data.suggestedQty !== undefined) updateItem(item.id, 'qty', data.suggestedQty);
-
-      showMessage(`✅ AI Price Quote generated from live online data!\n\n${data.breakdown}\nConfidence: ${data.confidence}`);
-    } catch (err: any) {
-      showMessage('⚠️ Could not reach AI quote service.');
-    }
+  className="mt-2 w-full text-xs flex items-center gap-1 justify-center"
+  onClick={() => {
+    const suggestion = prompt("🤖 Grok AI – Describe this line item (e.g. 'Install 5 tempered glass windows with white trim')");
+    if (suggestion) updateItem(item.id, 'description', suggestion);
   }}
 >
-  💰 AI Price Quote (Online Data)
+  🤖 Grok AI
 </Button>
-
-{/* TRANSLATE FEATURE - added exactly as requested */}
-<div className="mt-4 pt-3 border-t flex flex-wrap items-center gap-2 text-xs">
 
 {/* FINAL CLEAN AI PRICE QUOTE BUTTON */}
 <Button
@@ -1126,7 +1100,8 @@ export default function Home() {
   }}
 >
   💰 AI Price Quote (Online Data)
-</Button>>
+</Button>
+
                             {/* TRANSLATE FEATURE - added exactly as requested */}
                             <div className="mt-4 pt-3 border-t flex flex-wrap items-center gap-2 text-xs">
                               <select 
