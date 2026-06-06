@@ -1053,17 +1053,54 @@ export default function Home() {
                               rows={5}
                               className="resize-y min-h-[120px]"
                             />
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="mt-2 w-full text-xs flex items-center gap-1 justify-center"
-                              onClick={() => {
-                                const suggestion = prompt("🤖 Grok AI – Describe this line item (e.g. 'Install 5 tempered glass windows with white trim')");
-                                if (suggestion) updateItem(item.id, 'description', suggestion);
-                              }}
-                            >
-                              🤖 Grok AI
-                            </Button>
+                           {/* Existing Grok AI button (unchanged) */}
+<Button
+  size="sm"
+  variant="ghost"
+  className="mt-2 w-full text-xs flex items-center gap-1 justify-center"
+  onClick={() => {
+    const suggestion = prompt("🤖 Grok AI – Describe this line item (e.g. 'Install 5 tempered glass windows with white trim')");
+    if (suggestion) updateItem(item.id, 'description', suggestion);
+  }}
+>
+  🤖 Grok AI
+</Button>
+
+{/* NEW: AI Price Quote button */}
+<Button
+  size="sm"
+  variant="ghost"
+  className="mt-2 w-full text-xs flex items-center gap-1 justify-center bg-amber-100 hover:bg-amber-200"
+  onClick={async () => {
+    const description = item.description?.trim();
+    if (!description) return showMessage('Enter a description first');
+
+    try {
+      const res = await fetch('/api/ai-quote', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ description })
+      });
+
+      const data = await res.json();
+
+      if (data.error) {
+        return showMessage(`❌ ${data.error}`);
+      }
+
+      // Auto-fill the fields
+      updateItem(item.id, 'price', data.unitPrice);
+      if (data.unit) updateItem(item.id, 'unit', data.unit);
+      if (data.suggestedQty !== undefined) updateItem(item.id, 'qty', data.suggestedQty);
+
+      showMessage(`✅ AI Price Quote generated from live online data!\n\n${data.breakdown}\nConfidence: ${data.confidence}`);
+    } catch (err) {
+      showMessage('⚠️ Could not reach AI quote service.');
+    }
+  }}
+>
+  💰 AI Price Quote (Online Data)
+</Button>
 
                             {/* TRANSLATE FEATURE - added exactly as requested */}
                             <div className="mt-4 pt-3 border-t flex flex-wrap items-center gap-2 text-xs">
@@ -2109,125 +2146,4 @@ export default function Home() {
                 onChange={e => {
                   const selected = savedEstimatesList.find(est => est.id === e.target.value);
                   setSelectedEstimateForCalendar(selected || null);
-                }}
-              >
-                <option value="">— Choose an estimate —</option>
-                {savedEstimatesList.map(est => (
-                  <option key={est.id} value={est.id}>
-                    {est.jobName || 'Untitled'} — {est.invoiceNumber}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold mb-2">Date & Time</label>
-              <Input 
-                type="datetime-local" 
-                value={selectedDateTime} 
-                onChange={e => setSelectedDateTime(e.target.value)} 
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsCalendarModalOpen(false)}>Cancel</Button>
-            <Button onClick={scheduleAppointment} className="bg-[#10b981]">Schedule Appointment</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Payment Modal */}
-      <Dialog open={isPaymentModalOpen} onOpenChange={setIsPaymentModalOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>
-              Pay {paymentType === 'deposit' ? 'Deposit' : 'Balance'}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="py-4">
-            <div className="text-center mb-6">
-              <div className="text-5xl font-bold text-[#10b981]">${paymentAmount.toFixed(2)}</div>
-              <p className="text-sm text-gray-500 mt-1">to complete your {paymentType}</p>
-            </div>
-
-            <div className="space-y-3">
-              {Object.keys(profile.paymentSettings || {}).map((method) => {
-                const settings = (profile.paymentSettings || {})[method];
-                if (!settings.enabled) return null;
-                return (
-                  <button
-                    key={method}
-                    onClick={() => selectPaymentMethod(method)}
-                    className={`w-full flex items-center gap-4 p-4 border-2 rounded-2xl hover:bg-gray-50 transition-all ${selectedPaymentMethod === method ? 'border-[#10b981] bg-green-50' : 'border-gray-200'}`}
-                  >
-                    <span className="text-3xl flex-shrink-0">
-                      {method === 'stripe' ? '💳' : 
-                       method === 'echeck' ? '🏦' :
-                       method === 'paypal' ? '💰' :
-                       method === 'venmo' ? '📱' : '🏦'}
-                    </span>
-                    <div className="flex-1 text-left">
-                      <div className="font-semibold capitalize">{method}</div>
-                      <div className="text-xs text-gray-500">
-                        {method === 'stripe' ? 'Cards, Apple Pay, Google Pay' : 
-                         method === 'echeck' ? 'Bank account (ACH)' : 
-                         method === 'paypal' ? 'PayPal balance or card' : 
-                         method === 'venmo' ? 'Mobile app payment' : 'Bank-to-bank transfer'}
-                      </div>
-                    </div>
-                    {settings.connected && <span className="text-green-500 text-xs font-medium">✓ Connected</span>}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-          <DialogFooter className="flex gap-3">
-            <Button variant="outline" onClick={closePaymentModal} className="flex-1">
-              Cancel
-            </Button>
-            <Button 
-              onClick={proceedWithPayment} 
-              disabled={!selectedPaymentMethod}
-              className="flex-1 bg-[#10b981]"
-            >
-              Continue to Pay
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* PHOTO CAMERA MODAL - stays open on mobile until manually closed */}
-      <Dialog open={isPhotoCameraOpen} onOpenChange={setIsPhotoCameraOpen}>
-        <DialogContent className="max-w-4xl p-0 h-[90vh] flex flex-col">
-          <DialogHeader className="px-6 py-4 border-b">
-            <DialogTitle className="flex items-center justify-between">
-              📸 Live Camera
-              <span className="text-sm text-gray-500">Tap repeatedly for multiple photos</span>
-              <Button variant="outline" size="sm" onClick={closePhotoCamera}>
-                Close
-              </Button>
-            </DialogTitle>
-          </DialogHeader>
-          <div className="flex-1 bg-black relative flex items-center justify-center overflow-hidden">
-            <video
-              ref={videoRef}
-              className="w-full h-full object-cover"
-              autoPlay
-              playsInline
-              muted
-            />
-            <canvas ref={canvasRef} className="hidden" />
-          </div>
-          <div className="p-8 bg-black flex items-center justify-center border-t">
-            <Button
-              onClick={capturePhoto}
-              className="h-20 w-20 rounded-full bg-white text-black flex items-center justify-center text-6xl shadow-2xl border-8 border-red-500 active:scale-95 transition-transform"
-            >
-              📸
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-    </>
-  );
-}
+              
