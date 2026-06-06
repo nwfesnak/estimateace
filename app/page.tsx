@@ -1101,8 +1101,6 @@ export default function Home() {
 >
   💰 AI Price Quote (Online Data)
 </Button>>
-  💰 AI Price Quote (Online Data) — DEBUG
-</Button>
                             {/* TRANSLATE FEATURE - added exactly as requested */}
                             <div className="mt-4 pt-3 border-t flex flex-wrap items-center gap-2 text-xs">
                               <select 
