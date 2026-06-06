@@ -1066,7 +1066,7 @@ export default function Home() {
   🤖 Grok AI
 </Button>
 
-{/* DEBUG AI BUTTON */}
+{/* FINAL CLEAN AI PRICE QUOTE BUTTON */}
 <Button
   size="sm"
   variant="ghost"
@@ -1085,20 +1085,22 @@ export default function Home() {
       const data = await res.json();
 
       if (!res.ok || data.error) {
-        return showMessage(`❌ AI ERROR:\n${data.error || 'Unknown server error'}`);
+        return showMessage(`❌ ${data.error}`);
       }
 
-      // Success
+      // Auto-fill the fields
       updateItem(item.id, 'price', data.unitPrice);
       if (data.unit) updateItem(item.id, 'unit', data.unit);
       if (data.suggestedQty !== undefined) updateItem(item.id, 'qty', data.suggestedQty);
 
-      showMessage(`✅ Success!\n${data.breakdown}\nConfidence: ${data.confidence}`);
+      showMessage(`✅ AI Price Quote generated from live online data!\n\n${data.breakdown}\nConfidence: ${data.confidence}`);
     } catch (err: any) {
-      showMessage(`⚠️ Network error: ${err.message}`);
+      showMessage('⚠️ Could not reach AI quote service.');
     }
   }}
 >
+  💰 AI Price Quote (Online Data)
+</Button>>
   💰 AI Price Quote (Online Data) — DEBUG
 </Button>
                             {/* TRANSLATE FEATURE - added exactly as requested */}
