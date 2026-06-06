@@ -4,15 +4,11 @@ import { NextRequest, NextResponse } from 'next/server';
 export async function POST(request: NextRequest) {
   try {
     const apiKey = process.env.GROK_API_KEY;
-
     if (!apiKey) {
-      return NextResponse.json({ 
-        error: 'Missing GROK_API_KEY environment variable on Vercel' 
-      }, { status: 500 });
+      return NextResponse.json({ error: 'Missing GROK_API_KEY' }, { status: 500 });
     }
 
     const { description } = await request.json();
-
     if (!description?.trim()) {
       return NextResponse.json({ error: 'Description is required' }, { status: 400 });
     }
@@ -24,55 +20,50 @@ export async function POST(request: NextRequest) {
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: 'grok-3',                    // ← This is the correct current model
+        model: 'grok-3',
         messages: [
           {
             role: 'system',
-            content: `You are a professional contractor cost estimator with 2026 real-time market data.
-Research current online prices (Home Depot, Lowe's, etc.) for the line item below.
+            content: `You are a professional contractor cost estimator.
+Research current 2026 online market prices.
 
-Return ONLY valid JSON in this exact format:
+For the line item below, return ONLY valid JSON:
 
 {
+  "suggestedDescription": "Clean, professional, customer-friendly description (make it sound high-quality and clear)",
   "unitPrice": number,
   "unit": string,
   "suggestedQty": number,
   "total": number,
-  "breakdown": "short 1-2 sentence explanation with sources",
+  "breakdown": "Short 1-2 sentence explanation with sources or market reasoning",
   "confidence": "high" | "medium" | "low"
 }`
           },
           { role: 'user', content: description }
         ],
         temperature: 0.3,
-        max_tokens: 800,
+        max_tokens: 900,
       }),
     });
 
-    const rawText = await response.text();
-
     if (!response.ok) {
-      return NextResponse.json({ 
-        error: `xAI API Error ${response.status}: ${rawText}` 
-      }, { status: response.status });
+      const errorText = await response.text();
+      return NextResponse.json({ error: `xAI API Error: ${errorText}` }, { status: response.status });
     }
 
-    const data = JSON.parse(rawText);
+    const data = await response.json();
     const aiText = data.choices?.[0]?.message?.content || '';
 
     const jsonMatch = aiText.match(/\{[\s\S]*\}/);
     const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
 
     if (!parsed || typeof parsed.unitPrice !== 'number') {
-      return NextResponse.json({ error: 'AI did not return valid JSON' }, { status: 500 });
+      return NextResponse.json({ error: 'AI returned invalid format' }, { status: 500 });
     }
 
     return NextResponse.json(parsed);
-
   } catch (error: any) {
-    console.error('Full error:', error);
-    return NextResponse.json({ 
-      error: error.message || 'Unknown server error' 
-    }, { status: 500 });
+    console.error(error);
+    return NextResponse.json({ error: error.message || 'Server error' }, { status: 500 });
   }
 }

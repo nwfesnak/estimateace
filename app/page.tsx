@@ -1066,7 +1066,7 @@ export default function Home() {
   🤖 Grok AI
 </Button>
 
-{/* FINAL CLEAN AI PRICE QUOTE BUTTON */}
+{/* AI PRICE QUOTE BUTTON - UPDATED */}
 <Button
   size="sm"
   variant="ghost"
@@ -1088,12 +1088,15 @@ export default function Home() {
         return showMessage(`❌ ${data.error}`);
       }
 
-      // Auto-fill the fields
+      // Auto-update description + price fields
+      if (data.suggestedDescription) {
+        updateItem(item.id, 'description', data.suggestedDescription);
+      }
       updateItem(item.id, 'price', data.unitPrice);
       if (data.unit) updateItem(item.id, 'unit', data.unit);
       if (data.suggestedQty !== undefined) updateItem(item.id, 'qty', data.suggestedQty);
 
-      showMessage(`✅ AI Price Quote generated from live online data!\n\n${data.breakdown}\nConfidence: ${data.confidence}`);
+      showMessage(`✅ AI Quote Generated!\n\nDescription updated for customer\n\n${data.breakdown}\nConfidence: ${data.confidence}`);
     } catch (err: any) {
       showMessage('⚠️ Could not reach AI quote service.');
     }
