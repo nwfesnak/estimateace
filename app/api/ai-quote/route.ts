@@ -24,29 +24,32 @@ export async function POST(request: NextRequest) {
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: 'grok-beta',           // ← safer model
+        model: 'grok-3',                    // ← This is the correct current model
         messages: [
           {
             role: 'system',
-            content: `You are a professional contractor cost estimator.
-Return ONLY valid JSON:
+            content: `You are a professional contractor cost estimator with 2026 real-time market data.
+Research current online prices (Home Depot, Lowe's, etc.) for the line item below.
+
+Return ONLY valid JSON in this exact format:
+
 {
   "unitPrice": number,
   "unit": string,
   "suggestedQty": number,
   "total": number,
-  "breakdown": "short explanation",
+  "breakdown": "short 1-2 sentence explanation with sources",
   "confidence": "high" | "medium" | "low"
 }`
           },
           { role: 'user', content: description }
         ],
         temperature: 0.3,
-        max_tokens: 600,
+        max_tokens: 800,
       }),
     });
 
-    const rawText = await response.text();   // get raw response for debugging
+    const rawText = await response.text();
 
     if (!response.ok) {
       return NextResponse.json({ 
