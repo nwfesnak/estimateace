@@ -8,12 +8,21 @@ import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { createClient } from '@supabase/supabase-js';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 
 export default function Home() {
   const supabase = useMemo(() => {
     if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) return null;
     return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
   }, []);
+
+  // Helper for Storage URLs - works with Private bucket (recommended for security)
+  // Uses signed URLs (valid for 24 hours) instead of public URLs
+  const getMediaUrl = async (filePath: string): Promise<string> => {
+    if (!supabase) return '';
+    const { data } = await supabase.storage.from('media').createSignedUrl(filePath, 60 * 60 * 24); // 24h expiry
+    return data?.signedUrl || '';
+  };
 
   const [user, setUser] = useState<any>(null);
   const [view, setView] = useState<'dashboard' | 'editor' | 'estimatesList' | 'invoicesList' | 'profileView' | 'archivesView' | 'sendPreview' | 'reportsView'>('dashboard');
@@ -22,6 +31,290 @@ export default function Home() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showLogin, setShowLogin] = useState(true);
+
+  // Crew / Sub login
+  const [crewLoginEmail, setCrewLoginEmail] = useState('');
+  const [crewLoginPassword, setCrewLoginPassword] = useState('');
+  const [currentCrew, setCurrentCrew] = useState<any>(null);
+
+  // Forgot password states
+  const [showMainForgot, setShowMainForgot] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [showCrewForgot, setShowCrewForgot] = useState(false);
+  const [crewForgotEmail, setCrewForgotEmail] = useState('');
+
+  // 2FA states
+  const [requires2FA, setRequires2FA] = useState(false);
+  const [twoFactorPhone, setTwoFactorPhone] = useState('');
+  const [twoFactorCode, setTwoFactorCode] = useState('');
+  const [expected2FACode, setExpected2FACode] = useState('');
+
+  // Simple i18n translations (expand as needed) - full keys for entire app
+  const translations: any = {
+    en: {
+      welcome: "Welcome back!",
+      dashboard: "Dashboard",
+      estimates: "Estimates",
+      invoices: "Invoices",
+      newEstimate: "New Estimate",
+      newInvoice: "New Invoice",
+      reports: "Reports",
+      calendar: "Calendar",
+      profile: "Profile",
+      companyProfile: "Company Profile",
+      termsConditions: "Terms & Conditions",
+      saveProfile: "Save Profile",
+      totalOutstanding: "Total Outstanding",
+      yearToDateSales: "Year to Date Sales",
+      crew: "Crew / Sub-contractors",
+      companyName: "Company Name",
+      slogan: "Slogan",
+      phone: "Phone",
+      email: "Email",
+      address: "Address",
+      city: "City",
+      state: "State",
+      zipCode: "Zip Code",
+      logo: "Company Logo / Photo",
+      backToLogin: "Back to Login",
+      logOut: "Log Out",
+      jobNameLabel: "Client",
+      cityLabel: "City",
+      stateLabel: "State",
+      zipLabel: "Zip Code",
+      phonesLabel: "Phone Numbers",
+      emailsLabel: "Email Addresses",
+      taxExempt: "Tax Exempt",
+      taxLabor: "Tax Labor",
+      addLineItem: "+ Add Line Item",
+      quickLines: "Quick Lines",
+      saveEstimate: "Save Estimate",
+      printPreview: "Print/Preview",
+      sendEstimate: "Send Estimate",
+      convertToInvoice: "Convert to Invoice",
+      takePhoto: "Take Photo",
+      recordVideo: "Record Video",
+      scanReceipt: "Scan Receipt",
+      labor: "Labor",
+      photos: "Photos",
+      videos: "Videos",
+      receipts: "Receipts",
+      termsConditionsEditor: "Terms & Conditions",
+      saveAsTemplate: "Save as Template",
+      loadTemplate: "Load Template...",
+      laborButton: "Labor",
+      photosSection: "Photos",
+      videosSection: "Videos",
+      receiptsSection: "Receipts",
+      loginMain: "Log In (Main Account)",
+      signUp: "Sign Up",
+      logInAsCrew: "Log In as Crew / Sub-contractor",
+      crewLoginNote: "Use the email provided by the main account holder. No password needed.",
+      twoStepVerification: "Two-Step Verification",
+      verifyCode: "Verify Code",
+      resendCode: "Resend Code",
+      open: "Open",
+      archive: "Archive",
+      delete: "Delete",
+      activeEstimates: "Active Estimates",
+      metric: "Metric",
+      count: "Count",
+      noOutstanding: "No outstanding invoices",
+      jobName: "Client",
+      amountDue: "Amount Due",
+      totalOutstandingLabel: "Total Outstanding",
+      paid: "Paid",
+      outstandingRestricted: "Outstanding amounts restricted",
+      backToEditor: "Back to Editor",
+      archivedDocuments: "Archived Documents",
+      load: "Load",
+      savedDocuments: "Saved Documents",
+      languageLabel: "Language / Idioma / Langue",
+      paymentMethods: "Payment Methods",
+      connected: "Connected",
+      notConnected: "Not connected",
+      manage: "Manage",
+      linkAccount: "Link Account",
+      chargeCCFee: "Charge customers a credit card processing fee",
+      exportData: "Export Selected Data (CSV)",
+    },
+    es: {
+      welcome: "¡Bienvenido de nuevo!",
+      dashboard: "Panel",
+      estimates: "Presupuestos",
+      invoices: "Facturas",
+      newEstimate: "Nuevo Presupuesto",
+      newInvoice: "Nueva Factura",
+      reports: "Informes",
+      calendar: "Calendario",
+      profile: "Perfil",
+      companyProfile: "Perfil de la Empresa",
+      termsConditions: "Términos y Condiciones",
+      saveProfile: "Guardar Perfil",
+      totalOutstanding: "Total Pendiente",
+      yearToDateSales: "Ventas del Año hasta la Fecha",
+      crew: "Equipo / Subcontratistas",
+      companyName: "Nombre de la Empresa",
+      slogan: "Lema",
+      phone: "Teléfono",
+      email: "Correo",
+      address: "Dirección",
+      city: "Ciudad",
+      state: "Estado",
+      zipCode: "Código Postal",
+      logo: "Logo de la Empresa",
+      backToLogin: "Volver al Inicio de Sesión",
+      logOut: "Cerrar Sesión",
+      jobNameLabel: "Cliente",
+      cityLabel: "Ciudad",
+      stateLabel: "Estado",
+      zipLabel: "Código Postal",
+      phonesLabel: "Números de Teléfono",
+      emailsLabel: "Direcciones de Correo",
+      taxExempt: "Exento de Impuestos",
+      taxLabor: "Impuesto sobre Mano de Obra",
+      addLineItem: "+ Añadir Partida",
+      quickLines: "Líneas Rápidas",
+      saveEstimate: "Guardar Presupuesto",
+      printPreview: "Imprimir/Vista Previa",
+      sendEstimate: "Enviar Presupuesto",
+      convertToInvoice: "Convertir a Factura",
+      takePhoto: "Tomar Foto",
+      recordVideo: "Grabar Video",
+      scanReceipt: "Escanear Recibo",
+      labor: "Mano de Obra",
+      photos: "Fotos",
+      videos: "Videos",
+      receipts: "Recibos",
+      termsConditionsEditor: "Términos y Condiciones",
+      saveAsTemplate: "Guardar como Plantilla",
+      loadTemplate: "Cargar plantilla...",
+      laborButton: "Mano de Obra",
+      photosSection: "Fotos",
+      videosSection: "Videos",
+      receiptsSection: "Recibos",
+      loginMain: "Iniciar Sesión (Cuenta Principal)",
+      signUp: "Registrarse",
+      logInAsCrew: "Iniciar Sesión como Equipo / Subcontratista",
+      crewLoginNote: "Usa el email proporcionado por la cuenta principal. No se necesita contraseña.",
+      twoStepVerification: "Verificación en Dos Pasos",
+      verifyCode: "Verificar Código",
+      resendCode: "Reenviar Código",
+      open: "Abrir",
+      archive: "Archivar",
+      delete: "Eliminar",
+      activeEstimates: "Presupuestos Activos",
+      metric: "Métrica",
+      count: "Cantidad",
+      noOutstanding: "Sin facturas pendientes",
+      jobName: "Cliente",
+      amountDue: "Monto Adeudado",
+      totalOutstandingLabel: "Total Pendiente",
+      paid: "Pagado",
+      outstandingRestricted: "Montos pendientes restringidos",
+      backToEditor: "Volver al Editor",
+      archivedDocuments: "Documentos Archivados",
+      load: "Cargar",
+      savedDocuments: "Documentos Guardados",
+      languageLabel: "Idioma / Idioma / Langue",
+      paymentMethods: "Métodos de Pago",
+      connected: "Conectado",
+      notConnected: "No conectado",
+      manage: "Administrar",
+      linkAccount: "Vincular Cuenta",
+      chargeCCFee: "Cobrar a los clientes una tarifa de procesamiento de tarjetas",
+      exportData: "Exportar Datos Seleccionados (CSV)",
+    },
+    fr: {
+      welcome: "Bienvenue !",
+      dashboard: "Tableau de bord",
+      estimates: "Devis",
+      invoices: "Factures",
+      newEstimate: "Nouveau Devis",
+      newInvoice: "Nouvelle Facture",
+      reports: "Rapports",
+      calendar: "Calendrier",
+      profile: "Profil",
+      companyProfile: "Profil de l'Entreprise",
+      termsConditions: "Conditions Générales",
+      saveProfile: "Enregistrer le Profil",
+      totalOutstanding: "Total en Cours",
+      yearToDateSales: "Ventes de l'Année en Cours",
+      crew: "Équipe / Sous-traitants",
+      companyName: "Nom de l'Entreprise",
+      slogan: "Slogan",
+      phone: "Téléphone",
+      email: "Email",
+      address: "Adresse",
+      city: "Ville",
+      state: "État",
+      zipCode: "Code Postal",
+      logo: "Logo de l'Entreprise",
+      backToLogin: "Retour à la Connexion",
+      logOut: "Déconnexion",
+      jobNameLabel: "Client",
+      cityLabel: "Ville",
+      stateLabel: "État",
+      zipLabel: "Code Postal",
+      phonesLabel: "Numéros de Téléphone",
+      emailsLabel: "Adresses Email",
+      taxExempt: "Exonéré d'Impôts",
+      taxLabor: "Taxe sur la Main d'Œuvre",
+      addLineItem: "+ Ajouter une Ligne",
+      quickLines: "Lignes Rapides",
+      saveEstimate: "Enregistrer le Devis",
+      printPreview: "Imprimer/Aperçu",
+      sendEstimate: "Envoyer le Devis",
+      convertToInvoice: "Convertir en Facture",
+      takePhoto: "Prendre Photo",
+      recordVideo: "Enregistrer Vidéo",
+      scanReceipt: "Scanner Reçu",
+      labor: "Main d'Œuvre",
+      photos: "Photos",
+      videos: "Vidéos",
+      receipts: "Reçus",
+      termsConditionsEditor: "Conditions Générales",
+      saveAsTemplate: "Enregistrer comme Modèle",
+      loadTemplate: "Charger modèle...",
+      laborButton: "Main d'Œuvre",
+      photosSection: "Photos",
+      videosSection: "Vidéos",
+      receiptsSection: "Reçus",
+      loginMain: "Connexion (Compte Principal)",
+      signUp: "S'inscrire",
+      logInAsCrew: "Se connecter en tant qu'Équipe / Sous-traitant",
+      crewLoginNote: "Utilisez l'email fourni par le titulaire du compte principal. Pas de mot de passe requis.",
+      twoStepVerification: "Vérification en Deux Étapes",
+      verifyCode: "Vérifier le Code",
+      resendCode: "Renvoyer le Code",
+      open: "Ouvrir",
+      archive: "Archiver",
+      delete: "Supprimer",
+      activeEstimates: "Devis Actifs",
+      metric: "Métrique",
+      count: "Nombre",
+      noOutstanding: "Aucune facture en cours",
+      jobName: "Client",
+      amountDue: "Montant Dû",
+      totalOutstandingLabel: "Total en Cours",
+      paid: "Payé",
+      outstandingRestricted: "Montants en cours restreints",
+      backToEditor: "Retour à l'Éditeur",
+      archivedDocuments: "Documents Archivés",
+      load: "Charger",
+      savedDocuments: "Documents Enregistrés",
+      languageLabel: "Langue / Idioma / Language",
+      paymentMethods: "Méthodes de Paiement",
+      connected: "Connecté",
+      notConnected: "Non connecté",
+      manage: "Gérer",
+      linkAccount: "Lier le Compte",
+      chargeCCFee: "Facturer aux clients des frais de traitement par carte",
+      exportData: "Exporter les Données Sélectionnées (CSV)",
+    }
+  };
+
+
 
   // Document states
   const [documentType, setDocumentType] = useState<'estimate' | 'invoice'>('estimate');
@@ -32,14 +325,44 @@ export default function Home() {
   const [zipCode, setZipCode] = useState('');
   const [phones, setPhones] = useState<string[]>(['']);
   const [emails, setEmails] = useState<string[]>(['']);
+
   const [date, setDate] = useState('');
   const [invoiceNumber, setInvoiceNumber] = useState('EST-0001');
   const [items, setItems] = useState<any[]>([{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
   const [terms, setTerms] = useState('');
-  const [photoUrls, setPhotoUrls] = useState<string[]>([]);
+  const [photoUrls, setPhotoUrls] = useState<string[]>([]);   // stores permanent paths (or legacy signed urls)
   const [videoUrls, setVideoUrls] = useState<string[]>([]);
   const [receiptUrls, setReceiptUrls] = useState<string[]>([]);
+
+  // Resolved display URLs (fresh signed URLs)
+  const [photoDisplayUrls, setPhotoDisplayUrls] = useState<string[]>([]);
+  const [videoDisplayUrls, setVideoDisplayUrls] = useState<string[]>([]);
+  const [receiptDisplayUrls, setReceiptDisplayUrls] = useState<string[]>([]);
   const [receiptDetails, setReceiptDetails] = useState<any[]>([]);
+
+  // For Grok AI description improvement loading state (per item)
+  const [improvingDescriptionId, setImprovingDescriptionId] = useState<number | null>(null);
+
+  // For AI Price Quote loading state (per item)
+  const [aiQuoteLoadingId, setAiQuoteLoadingId] = useState<number | null>(null);
+
+  // Resolve paths to fresh signed URLs for display (handles both paths and legacy signed URLs)
+  useEffect(() => {
+    const resolveUrls = async (paths: string[]) => {
+      const resolved = await Promise.all(
+        paths.map(async (p) => {
+          if (!p) return '';
+          if (p.startsWith('http')) return p; // legacy signed URL, use as-is (may be expired)
+          return await getMediaUrl(p);
+        })
+      );
+      return resolved.filter(Boolean);
+    };
+
+    resolveUrls(photoUrls).then(setPhotoDisplayUrls);
+    resolveUrls(videoUrls).then(setVideoDisplayUrls);
+    resolveUrls(receiptUrls).then(setReceiptDisplayUrls);
+  }, [photoUrls, videoUrls, receiptUrls]);
 
   const [dueDate, setDueDate] = useState('');
   const [paymentStatus, setPaymentStatus] = useState<'pending' | 'paid'>('pending');
@@ -92,11 +415,19 @@ export default function Home() {
   // Profile (with payment settings)
   const [profile, setProfile] = useState({ 
     name: '', company: '', address: '', phone: '', email: '', slogan: '',
+    city: '', state: '', zipCode: '',
     disclosure: '',
     certificateUrl: '',
+    logoUrl: '',
+    logoSize: 'medium',
+    language: 'en',
     depositPercentage: 10,
     autoSaveEnabled: true,
-    teammates: [] as { email: string; role: 'full' | 'limited' }[],
+    showPriceBreakdownByLine: false,
+    teammates: [] as { email: string; role: 'full' | 'limited'; canSeePricing: boolean; canSeeEstimatesAndFinancials: boolean }[], // NOTE: No password stored for security (was demo-only plaintext)
+    crewSubscriptionActive: false,
+    chargeCCFee: false,
+    ccFeePercentage: 3,
     paymentSettings: {
       stripe: { enabled: true, connected: false },
       echeck: { enabled: true, connected: false },
@@ -106,13 +437,84 @@ export default function Home() {
     } as any
   });
 
+  // Language / i18n (must be after profile is declared)
+  // Prefer localStorage (user's explicit choice) so language never reverts on load/new/open
+  const currentLang = (() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('appLanguage');
+      if (saved && ['en', 'es', 'fr'].includes(saved)) return saved;
+    }
+    return ((profile as any).language || 'en');
+  })();
+  const t = (key: string): string => {
+    return (translations as any)[currentLang]?.[key] || (translations as any)['en']?.[key] || key;
+  };
+
   const [profileTab, setProfileTab] = useState<'info' | 'payments'>('info');
+
+  // Credit card processing fee derived values (must be after profile state)
+  const ccFeePercent = profile.chargeCCFee ? (profile.ccFeePercentage || 3) : 0;
+  const ccFeeAmount = grandTotal * (ccFeePercent / 100);
+  const totalWithCCFee = grandTotal + ccFeeAmount;
+
+  // Crew visibility restrictions (set when logged in as crew)
+  const canSeePricing = !currentCrew || currentCrew.canSeePricing !== false;
+  const canSeeFinancials = !currentCrew || currentCrew.canSeeEstimatesAndFinancials !== false;
+
+  const getLogoClass = (size: string = profile.logoSize || 'medium') => {
+    const sizes: { [key: string]: string } = {
+      small: 'w-8 h-8',
+      medium: 'w-12 h-12',
+      large: 'w-16 h-16',
+    };
+    return sizes[size] || sizes.medium;
+  };
+
+  // Determine native language based on company zip/state (simple US-centric heuristic)
+  const getNativeLanguage = (zip: string, st: string): string => {
+    const s = (st || '').toUpperCase().trim();
+    const spanishStates = ['CA', 'TX', 'FL', 'NM', 'AZ', 'NV', 'CO', 'NY'];
+    if (spanishStates.includes(s)) return 'es';
+    // Add more mappings if needed, default English
+    return 'en';
+  };
+
+  // Always prefer language from localStorage (user choice) over any per-document snapshot
+  const getPreferredLanguage = (): string => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('appLanguage');
+      if (saved && ['en', 'es', 'fr'].includes(saved)) return saved;
+    }
+    return ((profile as any).language || 'en');
+  };
+
+  // Snapshot only safe, non-sensitive fields to avoid duplicating teammates/passwords etc. in every document
+  const getSafeProfileSnapshot = (full: any) => ({
+    company: full.company || '',
+    slogan: full.slogan || '',
+    logoUrl: full.logoUrl || '',
+    logoSize: full.logoSize || 'medium',
+    disclosure: full.disclosure || '', // terms
+    city: full.city || '',
+    state: full.state || '',
+    zipCode: full.zipCode || '',
+    showPriceBreakdownByLine: !!full.showPriceBreakdownByLine,
+    // deliberately omit: teammates, paymentSettings, ccFee*, crewSubscriptionActive, etc.
+  });
 
   // Payment modal states
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [paymentType, setPaymentType] = useState<'deposit' | 'balance'>('deposit');
   const [paymentAmount, setPaymentAmount] = useState(0);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string | null>(null);
+
+  // Crew / Sub-contractors payment states
+  const [isCrewPayModalOpen, setIsCrewPayModalOpen] = useState(false);
+  const [pendingCrewEmail, setPendingCrewEmail] = useState('');
+  // This price is set by the owner of Estimate Ace (you). 
+  // End users / account holders of sold instances cannot change it.
+  const CREW_MONTHLY_FEE = 20;
+  const [selectedCrewPaymentMethod, setSelectedCrewPaymentMethod] = useState<string | null>(null);
 
   // Other states
   const [isLoadModalOpen, setIsLoadModalOpen] = useState(false);
@@ -122,7 +524,130 @@ export default function Home() {
   const [selectedEmailsForSend, setSelectedEmailsForSend] = useState<string[]>([]);
   const [selectedPhonesForSend, setSelectedPhonesForSend] = useState<string[]>([]);
 
+  // Multi-select for lists
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+
+  // Address auto-suggest states (Google Places primary + previous addresses fallback)
+  const [showAddressSuggestions, setShowAddressSuggestions] = useState(false);
+  const [addressSuggestions, setAddressSuggestions] = useState<any[]>([]);
+  const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
+
   const [quickLines, setQuickLines] = useState<any[]>([]);
+  const [savedTemplates, setSavedTemplates] = useState<any[]>([]);
+
+  // Previous addresses from saved docs (fallback for auto-suggest)
+  const previousAddresses = useMemo(() => {
+    const addrs: any[] = [];
+    const seen = new Set<string>();
+    const all = [...(savedEstimatesList || []), ...(archivesList || [])];
+    all.forEach((doc: any) => {
+      if (!doc.address || !doc.address.trim()) return;
+      if (doc.id === invoiceNumber) return;
+      const key = doc.address.trim().toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      addrs.push({
+        address: doc.address.trim(),
+        city: doc.city || '',
+        state: doc.state || '',
+        zipCode: doc.zipCode || '',
+        display: [doc.address, doc.city, doc.state, doc.zipCode].filter(Boolean).join(', '),
+      });
+    });
+    return addrs.slice(0, 20);
+  }, [savedEstimatesList, archivesList, invoiceNumber]);
+
+  // Debounced address auto-suggest (Google Places primary + previous jobs fallback)
+  useEffect(() => {
+    const q = address.trim();
+    if (!q) {
+      // show profile + recent previous even when empty or very short
+      let base = [];
+      if (profile.address && profile.address.trim()) {
+        base.push({
+          address: profile.address.trim(),
+          city: profile.city || '',
+          state: profile.state || '',
+          zipCode: profile.zipCode || '',
+          display: [profile.address, profile.city, profile.state, profile.zipCode].filter(Boolean).join(', '),
+        });
+      }
+      const recent = previousAddresses.slice(0, 7);
+      setAddressSuggestions([...base, ...recent].slice(0, 8));
+      return;
+    }
+    if (q.length < 2) {
+      // for 1 char, still show matching previous/profile
+      const qLower = q.toLowerCase();
+      let base = [];
+      if (profile.address && profile.address.trim()) {
+        base.push({
+          address: profile.address.trim(),
+          city: profile.city || '',
+          state: profile.state || '',
+          zipCode: profile.zipCode || '',
+          display: [profile.address, profile.city, profile.state, profile.zipCode].filter(Boolean).join(', '),
+        });
+      }
+      const matching = previousAddresses.filter((a: any) =>
+        a.address.toLowerCase().includes(qLower) ||
+        (a.city && a.city.toLowerCase().includes(qLower))
+      );
+      setAddressSuggestions([...base, ...matching].slice(0, 8));
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setIsLoadingSuggestions(true);
+      try {
+        const res = await fetch(`/api/address-autocomplete?q=${encodeURIComponent(q)}`);
+        let live: any[] = [];
+        if (res.ok) live = await res.json();
+
+        const qLower = q.toLowerCase();
+        const internal = previousAddresses.filter((a: any) =>
+          a.address.toLowerCase().includes(qLower) ||
+          (a.city && a.city.toLowerCase().includes(qLower)) ||
+          (a.state && a.state.toLowerCase().includes(qLower)) ||
+          (a.zipCode && a.zipCode.toLowerCase().includes(qLower))
+        );
+
+        let combined = live.length > 0 ? [...live] : [];
+        internal.forEach((int: any) => {
+          if (!combined.some((c: any) => (c.address || '').toLowerCase() === int.address.toLowerCase())) {
+            combined.push(int);
+          }
+        });
+
+        // Always offer company profile if it matches or as top pick
+        if (profile.address && profile.address.trim()) {
+          const prof = {
+            address: profile.address.trim(),
+            city: profile.city || '',
+            state: profile.state || '',
+            zipCode: profile.zipCode || '',
+            display: [profile.address, profile.city, profile.state, profile.zipCode].filter(Boolean).join(', '),
+          };
+          const has = combined.some((c: any) => (c.address || '').toLowerCase() === prof.address.toLowerCase());
+          if (!has) combined.unshift(prof);
+        }
+
+        setAddressSuggestions(combined.slice(0, 8));
+      } catch (e) {
+        // fallback to internal only
+        const qLower = q.toLowerCase();
+        const internal = previousAddresses.filter((a: any) =>
+          a.address.toLowerCase().includes(qLower) ||
+          (a.city && a.city.toLowerCase().includes(qLower))
+        );
+        setAddressSuggestions(internal.slice(0, 8));
+      } finally {
+        setIsLoadingSuggestions(false);
+      }
+    }, 280);
+
+    return () => clearTimeout(timer);
+  }, [address, previousAddresses, profile]);
 
   // === TRANSLATE STATES (added exactly as requested) ===
   const [translateFrom, setTranslateFrom] = useState<'en' | 'es' | 'fr' | 'de' | 'pt' | 'it'>('en');
@@ -154,11 +679,28 @@ export default function Home() {
 
   // Last saved state (required for existing saveToDB call)
   const [lastSaved, setLastSaved] = useState('');
+  const [toasts, setToasts] = useState<any[]>([]);
 
   const showMessage = (message: string) => {
     const clean = message.replace(/^[^\s]*\.vercel\.app says:\s*/i, '').trim();
-    alert(clean);
+    const id = Date.now();
+    setToasts(prev => [...prev, { id, message: clean }]);
+    // Auto dismiss after 4s
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, 4000);
   };
+
+  // Simple toast renderer - placed in the main return below
+  const ToastContainer = () => (
+    <div className="fixed bottom-20 right-4 z-[100] space-y-2">
+      {toasts.map(toast => (
+        <div key={toast.id} className="bg-[#1e293b] text-white px-4 py-2 rounded-lg shadow-lg text-sm max-w-xs">
+          {toast.message}
+        </div>
+      ))}
+    </div>
+  );
 
   useEffect(() => {
     if (!supabase) return;
@@ -167,11 +709,58 @@ export default function Home() {
     return () => listener.subscription.unsubscribe();
   }, [supabase]);
 
+  // Load language preference from localStorage
+  useEffect(() => {
+    const savedLang = localStorage.getItem('appLanguage');
+    if (savedLang && ['en', 'es', 'fr'].includes(savedLang)) {
+      setProfile(prev => {
+        if (prev.language !== savedLang) {
+          return { ...prev, language: savedLang };
+        }
+        return prev;
+      });
+    }
+  }, []);
+
+  // Populate saved lists (for dashboard, lists, reports, etc.) as soon as we have a user
+  useEffect(() => {
+    if (user?.id && supabase) {
+      refreshSavedList();
+      refreshArchivesList();
+    }
+  }, [user?.id]);
+
   const login = async () => {
     if (!supabase) return;
     const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) showMessage(error.message);
-    else setShowLogin(false);
+    if (error) {
+      showMessage(error.message);
+      return;
+    }
+
+    // Get the authenticated user
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    if (authUser) {
+      setUser(authUser);
+
+      // Load profile to check for phone number for 2FA
+      setTimeout(async () => {
+        await loadLatestProfile();
+        const phone = profile.phone || (phones && phones[0]);
+        if (phone) {
+          const code = Math.floor(100000 + Math.random() * 900000).toString();
+          // 2FA disabled for production - was fully simulated (random code shown in browser).
+          // In real app: Integrate Supabase Phone Auth, TOTP, or a proper SMS provider.
+          showMessage(`Login successful. (2FA is demo-only and bypassed)`);
+          setShowLogin(false); // bypass fake 2FA
+          // setRequires2FA(true); // commented to disable fake 2FA
+          // setExpected2FACode(code);
+          // setTwoFactorPhone(phone);
+        } else {
+          setShowLogin(false);
+        }
+      }, 600);
+    }
   };
 
   const signup = async () => {
@@ -181,12 +770,183 @@ export default function Home() {
     else showMessage('Account created!');
   };
 
+  const handleCrewLogin = async () => {
+    if (!supabase) return showMessage('Supabase not configured');
+    const email = crewLoginEmail.trim();
+    if (!email) return showMessage('Enter crew email');
+
+    // DEMO: Match by email only. Passwords are no longer stored or required (security fix).
+    // In production: Replace with real Supabase Auth user accounts for crew members + proper RLS.
+    const { data: docs, error } = await supabase
+      .from('estimates')
+      .select('id, user_id, profile')
+      .limit(100);
+
+    if (error || !docs) return showMessage('Error looking up crew account');
+
+    let ownerUserId: string | null = null;
+    let matchedCrew: any = null;
+
+    for (const doc of docs) {
+      const crewList = doc.profile?.teammates || [];
+      const found = crewList.find((c: any) => c.email === email);
+      if (found) {
+        ownerUserId = doc.user_id;
+        matchedCrew = found;
+        break;
+      }
+    }
+
+    if (!ownerUserId || !matchedCrew) {
+      return showMessage('Invalid crew email. Ask the account owner to add you.');
+    }
+
+    // Set as "logged in" using the owner's id for data access
+    setUser({ id: ownerUserId, email: email } as any);
+    setCurrentCrew(matchedCrew);
+
+    // Load the profile from the first matching doc (or latest)
+    const ownerDoc = docs.find((d: any) => d.user_id === ownerUserId);
+    if (ownerDoc?.profile) {
+      const preferredLang = getPreferredLanguage();
+      setProfile({
+        ...profile,
+        ...ownerDoc.profile,
+        crewSubscriptionActive: ownerDoc.profile.crewSubscriptionActive ?? false,
+        chargeCCFee: ownerDoc.profile.chargeCCFee ?? false,
+        ccFeePercentage: ownerDoc.profile.ccFeePercentage ?? 3,
+        autoSaveEnabled: ownerDoc.profile.autoSaveEnabled ?? true,
+        showPriceBreakdownByLine: ownerDoc.profile.showPriceBreakdownByLine ?? false,
+        language: preferredLang,
+        teammates: (ownerDoc.profile.teammates || []).map((t: any) => ({
+          ...t,
+          canSeePricing: t.canSeePricing ?? false,
+          canSeeEstimatesAndFinancials: t.canSeeEstimatesAndFinancials ?? false,
+        })),
+      });
+    }
+
+    // Refresh lists using the owner id (the setUser will help trigger effects)
+    setTimeout(() => {
+      refreshSavedList();
+    }, 200);
+
+    showMessage(`✅ Logged in as crew/sub-contractor: ${email}`);
+    setCrewLoginEmail('');
+    setCrewLoginPassword('');
+
+    // Trigger 2FA using the company's phone (if available)
+    setTimeout(() => {
+      // 2FA disabled - demo only. Bypassed for production readiness.
+      showMessage(`Logged in as crew. (2FA demo bypassed)`);
+      // Fake 2FA code generation removed
+    }, 400);
+  };
+
+  const verify2FA = () => {
+    if (twoFactorCode === expected2FACode) {
+      setRequires2FA(false);
+      setTwoFactorCode('');
+      setShowLogin(false);
+    } else {
+      showMessage('Incorrect code. Please try again.');
+    }
+  };
+
+  const resend2FACode = () => {
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    setExpected2FACode(code);
+    showMessage(`[DEMO] New code sent to ${twoFactorPhone}: ${code}`);
+  };
+
+  const logout = async () => {
+    if (supabase) {
+      await supabase.auth.signOut();
+    }
+    setUser(null);
+    setCurrentCrew(null);
+    setRequires2FA(false);
+    setShowLogin(true);
+    setTwoFactorCode('');
+    showMessage('You have been logged out.');
+  };
+
+  // Main account forgot password (uses Supabase built-in)
+  const requestMainPasswordReset = async () => {
+    if (!supabase || !forgotEmail.trim()) {
+      showMessage('Please enter your email');
+      return;
+    }
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail.trim(), {
+        redirectTo: typeof window !== 'undefined' ? window.location.origin : undefined,
+      });
+      if (error) {
+        showMessage(error.message);
+      } else {
+        showMessage('If an account exists with that email, a password reset link has been sent.');
+        setForgotEmail('');
+        setShowMainForgot(false);
+      }
+    } catch (e: any) {
+      showMessage('Failed to send reset link. Please try again.');
+    }
+  };
+
+  // Crew / Sub-contractor forgot password (simulated - finds the owner document and resets the password in it)
+  const requestCrewPasswordReset = async () => {
+    if (!supabase || !crewForgotEmail.trim()) {
+      showMessage('Please enter the crew email');
+      return;
+    }
+    const email = crewForgotEmail.trim();
+
+    try {
+      const { data: docs, error } = await supabase
+        .from('estimates')
+        .select('id, user_id, profile')
+        .limit(100);
+
+      if (error || !docs) {
+        showMessage('Could not look up crew account');
+        return;
+      }
+
+      let foundDoc: any = null;
+      let crewIndex = -1;
+
+      for (const doc of docs) {
+        const crewList = doc.profile?.teammates || [];
+        const idx = crewList.findIndex((c: any) => c.email === email);
+        if (idx !== -1) {
+          foundDoc = doc;
+          crewIndex = idx;
+          break;
+        }
+      }
+
+      if (!foundDoc || crewIndex === -1) {
+        showMessage('No crew account found with that email');
+        return;
+      }
+
+      // Crew password reset disabled for security.
+      // In production: Invite crew as real Supabase users (they set their own password via magic link/email).
+      showMessage(`Demo note: Password reset disabled. For production use real Supabase user accounts for crew (no stored passwords).`);
+      setCrewForgotEmail('');
+      setShowCrewForgot(false);
+    } catch (e: any) {
+      showMessage('Failed to reset crew password. Please try again.');
+    }
+  };
+
   const saveToDB = async () => {
     if (!user || !supabase) return;
     const data = {
       user_id: user.id,
       jobName, address, city, state, zipCode, phones, emails, date, invoiceNumber,
-      items, terms, profile, documentType, dueDate, paymentStatus, amountPaid,
+      items, terms, profile: getSafeProfileSnapshot(profile), // safe snapshot only
+      documentType, dueDate, paymentStatus, amountPaid,
       paymentMethod, photoUrls, videoUrls, receiptUrls, receiptDetails,
       laborHours, laborRate, laborFixedAmount, useHourlyLabor, laborAmount,
       taxRate: baseTaxRate,
@@ -196,8 +956,10 @@ export default function Home() {
       updated_at: new Date().toISOString()
     };
     const { error } = await supabase.from('estimates').upsert({ id: invoiceNumber, ...data });
-    if (error) console.error('Save error:', error);
-    else {
+    if (error) {
+      console.error('Save error:', error);
+      showMessage('Failed to save document. Please try again.');
+    } else {
       setLastSaved(new Date().toLocaleTimeString());
       refreshSavedList();
     }
@@ -211,8 +973,8 @@ export default function Home() {
       const filePath = `${user.id}/${type}/${Date.now()}.${fileExt}`;
       const { error } = await supabase.storage.from('media').upload(filePath, file, { upsert: true });
       if (!error) {
-        const { data } = supabase.storage.from('media').getPublicUrl(filePath);
-        newUrls.push(data.publicUrl);
+        // Store the permanent storage path (not the temporary signed URL)
+        newUrls.push(filePath);
       }
     }
     if (type === 'photo') setPhotoUrls(prev => [...prev, ...newUrls]);
@@ -220,10 +982,12 @@ export default function Home() {
     else if (type === 'receipt') {
       setReceiptUrls(prev => [...prev, ...newUrls]);
       if (newUrls.length > 0) {
-        setCurrentReceiptUrl(newUrls[0]);
-        setTempReceiptData({ date: new Date().toISOString().split('T')[0], vendor: '', amount: 0, notes: '' });
-        setIsReceiptExtractModalOpen(true);
+        // For receipt extract, we still need a display URL right away
+        const firstUrl = await getMediaUrl(newUrls[0]);
+        if (firstUrl) setCurrentReceiptUrl(firstUrl);
       }
+      setTempReceiptData({ date: new Date().toISOString().split('T')[0], vendor: '', amount: 0, notes: '' });
+      setIsReceiptExtractModalOpen(true);
     }
     await saveToDB();
   };
@@ -249,10 +1013,28 @@ export default function Home() {
     const filePath = `${user.id}/certificate/${Date.now()}-${file.name}`;
     const { error } = await supabase.storage.from('media').upload(filePath, file, { upsert: true });
     if (!error) {
-      const { data } = supabase.storage.from('media').getPublicUrl(filePath);
-      setProfile(prev => ({ ...prev, certificateUrl: data.publicUrl }));
-      showMessage('✅ Certificate of Insurance uploaded');
-      await saveToDB();
+      const url = await getMediaUrl(filePath);
+      if (url) {
+        setProfile(prev => ({ ...prev, certificateUrl: url }));
+        const isPdf = file.name.toLowerCase().endsWith('.pdf');
+        showMessage(isPdf ? '✅ PDF Certificate of Insurance uploaded' : '✅ Certificate of Insurance uploaded');
+        await saveToDB();
+      }
+    }
+  };
+
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user || !supabase) return;
+    const filePath = `${user.id}/logo/${Date.now()}-${file.name}`;
+    const { error } = await supabase.storage.from('media').upload(filePath, file, { upsert: true });
+    if (!error) {
+      const url = await getMediaUrl(filePath);
+      if (url) {
+        setProfile(prev => ({ ...prev, logoUrl: url }));
+        showMessage('✅ Company logo uploaded');
+        await saveToDB();
+      }
     }
   };
 
@@ -268,12 +1050,34 @@ export default function Home() {
 
   // NEW CAMERA FUNCTIONS
   const openPhotoCamera = () => {
-    setIsPhotoCameraOpen(true);
+    // Start camera access immediately inside the user click handler.
+    // This is required for reliable camera permission prompts (especially iOS Safari).
+    navigator.mediaDevices
+      .getUserMedia({
+        video: {
+          facingMode: 'environment',
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        }
+      })
+      .then((stream) => {
+        pendingCameraStreamRef.current = stream;
+        setIsPhotoCameraOpen(true);
+      })
+      .catch((err) => {
+        console.error('Camera access error (direct):', err);
+        showMessage('Cannot access camera. Please allow camera permission in your browser settings.');
+      });
   };
 
   const closePhotoCamera = () => {
     if (videoRef.current && videoRef.current.srcObject) {
       (videoRef.current.srcObject as MediaStream).getTracks().forEach(track => track.stop());
+      videoRef.current.srcObject = null;
+    }
+    if (pendingCameraStreamRef.current) {
+      pendingCameraStreamRef.current.getTracks().forEach(track => track.stop());
+      pendingCameraStreamRef.current = null;
     }
     setIsPhotoCameraOpen(false);
   };
@@ -297,6 +1101,9 @@ export default function Home() {
           const dataTransfer = new DataTransfer();
           dataTransfer.items.add(file);
           handleMediaUpload(dataTransfer.files, 'photo');
+          // Keep camera open for multiple photos - do not close here
+          setIsPhotoCameraOpen(true);
+          showMessage('Photo captured! Tap the button again for more (camera stays open until you Close).');
         }
       }, 'image/jpeg', 0.95);
     }
@@ -314,7 +1121,7 @@ export default function Home() {
     setArchivesList(data || []);
   };
 
-  const loadSelectedEstimate = (est: any) => {
+  const loadSelectedEstimate = async (est: any) => {
     setJobName(est.jobName || '');
     setAddress(est.address || '');
     setCity(est.city || '');
@@ -326,7 +1133,41 @@ export default function Home() {
     setInvoiceNumber(est.invoiceNumber || 'EST-0001');
     setItems(est.items || [{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
     setTerms(est.terms || '');
-    setProfile(est.profile || profile);
+    const loadedProfile = est.profile || {};
+    // IMPORTANT: always force preferred user language. Never use stale language from document snapshot (est.profile).
+    const preferredLang = getPreferredLanguage();
+    setProfile({
+      ...profile,
+      ...loadedProfile,
+      crewSubscriptionActive: loadedProfile.crewSubscriptionActive ?? false,
+      chargeCCFee: loadedProfile.chargeCCFee ?? false,
+      ccFeePercentage: loadedProfile.ccFeePercentage ?? 3,
+      autoSaveEnabled: loadedProfile.autoSaveEnabled ?? true,
+      showPriceBreakdownByLine: loadedProfile.showPriceBreakdownByLine ?? false,
+      logoUrl: loadedProfile.logoUrl ?? '',
+      logoSize: loadedProfile.logoSize ?? 'medium',
+      language: preferredLang,
+      city: loadedProfile.city ?? '',
+      state: loadedProfile.state ?? '',
+      zipCode: loadedProfile.zipCode ?? '',
+      teammates: (loadedProfile.teammates || []).map((t: any) => ({
+        ...t,
+        canSeePricing: t.canSeePricing ?? false,
+        canSeeEstimatesAndFinancials: t.canSeeEstimatesAndFinancials ?? false,
+      })),
+    });
+    // Ensure latest company profile info (name, logo, etc.) is used even on old documents
+    const latestProf = await loadLatestProfile();
+    // Re-force the chosen language (in case loadLatest pulled something); localStorage wins
+    const finalLang = getPreferredLanguage();
+    setProfile(prev => ({ ...prev, language: finalLang }));
+    // If this document has no terms, populate from company's Terms & Conditions
+    if (!est.terms?.trim()) {
+      const companyTerms = (latestProf && latestProf.disclosure) || profile.disclosure;
+      if (companyTerms) {
+        setTerms(companyTerms);
+      }
+    }
     setDocumentType(est.documentType || 'estimate');
     setDueDate(est.dueDate || '');
     setPaymentStatus(est.paymentStatus || 'pending');
@@ -345,7 +1186,7 @@ export default function Home() {
   };
 
   const loadLatestProfile = async () => {
-    if (!user || !supabase) return;
+    if (!user || !supabase) return null;
     const { data } = await supabase
       .from('estimates')
       .select('profile')
@@ -353,11 +1194,34 @@ export default function Home() {
       .order('updated_at', { ascending: false })
       .limit(1);
     if (data && data[0] && data[0].profile) {
-      setProfile(data[0].profile);
+      const loaded = data[0].profile;
+      const preferredLang = getPreferredLanguage();
+      setProfile(prev => ({
+        ...prev,
+        ...loaded,
+        crewSubscriptionActive: loaded.crewSubscriptionActive ?? prev.crewSubscriptionActive ?? false,
+        chargeCCFee: loaded.chargeCCFee ?? prev.chargeCCFee ?? false,
+        ccFeePercentage: loaded.ccFeePercentage ?? prev.ccFeePercentage ?? 3,
+        autoSaveEnabled: loaded.autoSaveEnabled ?? true,
+        showPriceBreakdownByLine: loaded.showPriceBreakdownByLine ?? false,
+        logoUrl: loaded.logoUrl ?? '',
+        logoSize: loaded.logoSize ?? 'medium',
+        language: preferredLang,
+        city: loaded.city ?? '',
+        state: loaded.state ?? '',
+        zipCode: loaded.zipCode ?? '',
+        teammates: (loaded.teammates || []).map((t: any) => ({
+          ...t,
+          canSeePricing: t.canSeePricing ?? false,
+          canSeeEstimatesAndFinancials: t.canSeeEstimatesAndFinancials ?? false,
+        })),
+      }));
+      return loaded;
     }
+    return null;
   };
 
-  const newEstimate = () => {
+  const newEstimate = async () => {
     setJobName(''); setAddress(''); setCity(''); setState(''); setZipCode('');
     setPhones(['']); setEmails(['']); setTerms('');
     setPhotoUrls([]); setVideoUrls([]); setReceiptUrls([]); setReceiptDetails([]);
@@ -371,17 +1235,29 @@ export default function Home() {
     localStorage.setItem('estimateCount', savedCount.toString());
     const prefix = documentType === 'invoice' ? 'INV' : 'EST';
     setInvoiceNumber(`${prefix}-${String(savedCount).padStart(4, '0')}`);
-    loadLatestProfile();
+    const loadedProfile = await loadLatestProfile();
+    // Force the chosen language (from localStorage preference) so new estimates never revert
+    const newLang = getPreferredLanguage();
+    setProfile(prev => ({ ...prev, language: newLang }));
+    // For new documents, populate Terms & Conditions from company profile
+    const companyTerms = loadedProfile?.disclosure || profile.disclosure;
+    if (companyTerms) {
+      setTerms(companyTerms);
+    }
   };
 
-  const openNewDocument = (type: 'estimate' | 'invoice') => {
+  const openNewDocument = async (type: 'estimate' | 'invoice') => {
     setDocumentType(type);
-    newEstimate();
+    await newEstimate();
+    if (user?.id) {
+      await refreshSavedList();
+      refreshArchivesList();
+    }
     setView('editor');
   };
 
-  const openExistingDocument = (est: any) => {
-    loadSelectedEstimate(est);
+  const openExistingDocument = async (est: any) => {
+    await loadSelectedEstimate(est);
     setView('editor');
   };
 
@@ -389,7 +1265,7 @@ export default function Home() {
 
   const openQuickLinesModal = () => setIsQuickLinesModalOpen(true);
 
-  const addRow = () => setItems([...items, { id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
+  const addRow = () => setItems(prev => [{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }, ...prev]);
   const updateItem = (id: number, field: string, value: any) => {
     setItems(prev => prev.map(item => {
       if (item.id === id) {
@@ -410,21 +1286,25 @@ export default function Home() {
     if (!text.trim()) return showMessage('Enter text first');
     
     try {
-      const res = await fetch('https://libretranslate.com/translate', {
+      // Use our authenticated proxy (enforces login + rate limit)
+      const headers: any = { 'Content-Type': 'application/json' };
+      if (supabase) {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) headers['Authorization'] = `Bearer ${session.access_token}`;
+      }
+
+      const res = await fetch('/api/translate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          q: text,
-          source: translateFrom,
-          target: translateTo,
-          format: 'text'
-        })
+        headers,
+        body: JSON.stringify({ text, from: translateFrom, to: translateTo })
       });
       const data = await res.json();
+      if (data.error) throw new Error(data.error);
       setItemTranslations(prev => ({ ...prev, [itemId]: data.translatedText }));
       showMessage('✅ Translation added (internal use only)');
-    } catch {
-      showMessage('⚠️ Translation service temporarily unavailable. Please try again.');
+    } catch (err: any) {
+      const msg = err?.message || 'Translation service temporarily unavailable.';
+      showMessage(`⚠️ ${msg}. Using Grok for translation (GROK_API_KEY required).`);
     }
   };
 
@@ -444,10 +1324,216 @@ export default function Home() {
 
   const printDocument = () => window.print();
 
+  const saveAsPDF = async () => {
+    const element = document.getElementById('preview-document');
+    if (!element) {
+      showMessage('Preview content not found for PDF generation.');
+      return;
+    }
+
+    try {
+      const html2pdf = (await import('html2pdf.js')).default;
+
+      const opt = {
+        margin: 0.5,
+        filename: `${documentType === 'invoice' ? 'Invoice' : 'Estimate'}-${invoiceNumber}.pdf`,
+        image: { type: 'jpeg' as const, quality: 0.98 },
+        html2canvas: { 
+          scale: 2, 
+          useCORS: true,
+          letterRendering: true,
+          backgroundColor: '#ffffff',
+          onclone: (clonedDoc: Document) => {
+            // Fix for "lab" / oklch color parsing error in html2canvas
+            // Inject overriding styles into the cloned document
+            const style = clonedDoc.createElement('style');
+            style.innerHTML = `
+              *, *::before, *::after {
+                color: #111827 !important;
+                background-color: #ffffff !important;
+                border-color: #d1d5db !important;
+                box-shadow: none !important;
+              }
+            `;
+            clonedDoc.head.appendChild(style);
+          }
+        },
+        jsPDF: { 
+          unit: 'in', 
+          format: 'letter', 
+          orientation: 'portrait' as const 
+        }
+      };
+
+      await html2pdf().set(opt).from(element).save();
+      showMessage('✅ PDF saved successfully!');
+    } catch (err) {
+      console.error('PDF generation error:', err);
+      showMessage('❌ Failed to generate PDF. Please try again.');
+    }
+  };
+
   const convertToInvoice = () => {
     setDocumentType('invoice');
     if (invoiceNumber.startsWith('EST-')) setInvoiceNumber(invoiceNumber.replace('EST-', 'INV-'));
     setView('sendPreview');
+  };
+
+  // Build a clean archive payload using only columns that exist in the "archive-est" table.
+  // Sanitize values (undefined -> null, ensure correct array/boolean/number shapes) to avoid
+  // obscure server-side insert/upsert errors that sometimes surface as empty {} in the client.
+  const prepareArchiveData = (estRow: any) => {
+    if (!estRow) return null;
+
+    const toArray = (v: any): any[] => Array.isArray(v) ? v : (v == null ? [] : [v]);
+    const toNum = (v: any): number | null => {
+      if (v == null || v === '') return null;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+    const toBool = (v: any, defaultVal = false): boolean => {
+      if (v === true || v === 1 || v === 'true') return true;
+      if (v === false || v === 0 || v === 'false') return false;
+      return defaultVal;
+    };
+
+    return {
+      id: estRow.id,
+      user_id: estRow.user_id,
+      documentType: estRow.documentType || 'invoice',
+      jobName: estRow.jobName ?? null,
+      address: estRow.address ?? null,
+      city: estRow.city ?? null,
+      state: estRow.state ?? null,
+      zipCode: estRow.zipCode ?? null,
+      phones: toArray(estRow.phones),
+      emails: toArray(estRow.emails),
+      date: estRow.date ?? null,
+      invoiceNumber: estRow.invoiceNumber,
+      items: Array.isArray(estRow.items) ? estRow.items : [],
+      terms: estRow.terms ?? null,
+      laborHours: toNum(estRow.laborHours),
+      laborRate: toNum(estRow.laborRate),
+      laborFixedAmount: toNum(estRow.laborFixedAmount),
+      useHourlyLabor: toBool(estRow.useHourlyLabor, true),
+      laborAmount: toNum(estRow.laborAmount),
+      taxRate: toNum(estRow.taxRate),
+      taxAmount: toNum(estRow.taxAmount),
+      isTaxExempt: toBool(estRow.isTaxExempt, false),
+      taxLabor: toBool(estRow.taxLabor, true),
+      photoUrls: toArray(estRow.photoUrls),
+      videoUrls: toArray(estRow.videoUrls),
+      receiptUrls: toArray(estRow.receiptUrls),
+      receiptDetails: Array.isArray(estRow.receiptDetails) ? estRow.receiptDetails : [],
+      dueDate: estRow.dueDate ?? null,
+      paymentStatus: estRow.paymentStatus ?? 'pending',
+      amountPaid: toNum(estRow.amountPaid),
+      paymentMethod: estRow.paymentMethod ?? null,
+      profile: (estRow.profile && typeof estRow.profile === 'object') ? estRow.profile : {},
+      updated_at: estRow.updated_at ?? new Date().toISOString(),
+      archived_at: new Date().toISOString(),
+    };
+  };
+
+  const markAsPaidCash = async () => {
+    if (!confirm('Mark this invoice as Paid (Cash) and close it out to the archives?')) return;
+    if (!user || !supabase) return;
+
+    const id = invoiceNumber;
+
+    try {
+      // Explicitly save the paid/cash status (avoids stale state from setPayment* + immediate await saveToDB)
+      const paidData = {
+        user_id: user.id,
+        jobName, address, city, state, zipCode, phones, emails, date, invoiceNumber: id,
+        items, terms, profile: getSafeProfileSnapshot(profile),
+        documentType, dueDate,
+        paymentStatus: 'paid',
+        amountPaid: grandTotal,
+        paymentMethod: 'Cash',
+        photoUrls, videoUrls, receiptUrls, receiptDetails,
+        laborHours, laborRate, laborFixedAmount, useHourlyLabor, laborAmount,
+        taxRate: baseTaxRate,
+        taxAmount,
+        isTaxExempt,
+        taxLabor,
+        updated_at: new Date().toISOString()
+      };
+      const { error: saveErr } = await supabase.from('estimates').upsert({ id, ...paidData });
+      if (saveErr) {
+        console.error('Failed to save paid status:', saveErr);
+        showMessage('❌ Failed to mark as paid.');
+        return;
+      }
+
+      // Re-fetch the freshly updated row (defensively scoped to this user)
+      const { data: est, error: fetchErr } = await supabase
+        .from('estimates')
+        .select('*')
+        .eq('id', id)
+        .eq('user_id', user.id)
+        .single();
+      if (fetchErr || !est) {
+        console.error('Fetch for archive failed:', fetchErr);
+        showMessage('✅ Invoice marked as Paid (Cash), but could not load for archiving.');
+        setView('invoicesList');
+        await refreshSavedList();
+        return;
+      }
+
+      // Archive using clean column list.
+      // To avoid any upsert/onConflict quirks + duplicate key issues, first remove any prior
+      // archive copy of this id, then INSERT. This mirrors the original "close out" move intent.
+      const archiveData = prepareArchiveData(est);
+      if (!archiveData) {
+        showMessage('✅ Invoice marked as Paid (Cash), but archiving failed (no data).');
+        return;
+      }
+
+      // Pre-clear (best-effort) so we never hit PK violation on the subsequent insert.
+      await supabase.from('archive-est').delete().eq('id', id).eq('user_id', user.id);
+
+      const result = await supabase.from('archive-est').insert(archiveData);
+      const { data: inserted, error, status, statusText } = result;
+
+      if (error) {
+        // Log EVERYTHING we can get — the previous {} was unhelpful.
+        console.error('Archive insert error (FULL RESULT):', {
+          error,
+          status,
+          statusText,
+          inserted,
+          archiveDataKeys: Object.keys(archiveData),
+          hasUserId: !!archiveData.user_id,
+          id: archiveData.id,
+        });
+        // Try to surface something useful even when the error object itself looks empty.
+        const errDetail =
+          (error as any)?.message ||
+          (error as any)?.error ||
+          (error as any)?.hint ||
+          (error as any)?.code ||
+          JSON.stringify(error) ||
+          statusText ||
+          'unknown error (see console for status)';
+        console.error('Archive insert raw error object:', error);
+        showMessage(`✅ Invoice marked as Paid (Cash), but archiving failed: ${errDetail} (status ${status ?? '??'})`);
+        await refreshSavedList();
+        return;
+      }
+
+      await supabase.from('estimates').delete().eq('id', id);
+
+      showMessage('✅ Invoice marked as Paid (Cash) and closed to archives');
+      setView('invoicesList');
+      await refreshSavedList();
+      await refreshArchivesList();
+    } catch (e: any) {
+      console.error('Unexpected error in markAsPaidCash:', e);
+      const msg = e?.message || 'unexpected error';
+      showMessage(`✅ Invoice marked as Paid (Cash), but archiving failed: ${msg}`);
+      await refreshSavedList();
+    }
   };
 
   const openSendPreview = () => {
@@ -462,11 +1548,23 @@ export default function Home() {
 
   const openCalendarModal = async () => {
     await refreshSavedList();
+    // Clear any previously selected non-estimate (e.g. old state from before filter)
+    if (selectedEstimateForCalendar) {
+      const isEstimate = selectedEstimateForCalendar.documentType === 'estimate' ||
+                         selectedEstimateForCalendar.invoiceNumber?.startsWith('EST');
+      if (!isEstimate) {
+        setSelectedEstimateForCalendar(null);
+      }
+    }
     setIsCalendarModalOpen(true);
   };
 
   const scheduleAppointment = () => {
-    if (!selectedEstimateForCalendar || !selectedDateTime) return showMessage("Select estimate and date/time");
+    const isStillEstimate = selectedEstimateForCalendar && 
+      (selectedEstimateForCalendar.documentType === 'estimate' || selectedEstimateForCalendar.invoiceNumber?.startsWith('EST'));
+    if (!selectedEstimateForCalendar || !isStillEstimate || !selectedDateTime) {
+      return showMessage("Select estimate and date/time");
+    }
 
     const appointmentTime = new Date(selectedDateTime).toLocaleString();
     const reminderTime = new Date(new Date(selectedDateTime).getTime() - 24 * 60 * 60 * 1000).toLocaleString();
@@ -497,7 +1595,7 @@ export default function Home() {
     showMessage('Quick line saved!');
   };
 
-  const useQuickLine = (quick: any) => {
+  const applyQuickLine = (quick: any) => {
     const newItem = { id: Date.now(), description: quick.description, qty: quick.qty, unit: quick.unit, price: quick.price, total: quick.qty * quick.price };
     setItems(prev => [...prev, newItem]);
     setIsQuickLinesModalOpen(false);
@@ -513,6 +1611,7 @@ export default function Home() {
     if (!confirm('Delete permanently?')) return;
     if (!supabase) return;
     await supabase.from('estimates').delete().eq('id', id);
+    setSelectedIds(prev => prev.filter(sid => sid !== id));
     await refreshSavedList();
     showMessage('Document deleted');
   };
@@ -521,22 +1620,93 @@ export default function Home() {
     if (!confirm('Archive this document?')) return;
     if (!user || !supabase) return;
 
-    const { data: est } = await supabase.from('estimates').select('*').eq('id', id).single();
-    if (!est) return;
+    try {
+      const { data: est, error: fetchErr } = await supabase.from('estimates').select('*').eq('id', id).single();
+      if (fetchErr || !est) {
+        console.error('Archive fetch error:', fetchErr);
+        return;
+      }
 
-    const archiveData = { ...est, archived_at: new Date().toISOString(), original_id: est.id };
-    const { error } = await supabase.from('archive-est').insert(archiveData);
-    if (error) return console.error(error);
+      const archiveData = prepareArchiveData(est);
+      if (!archiveData) return;
 
-    await supabase.from('estimates').delete().eq('id', id);
-    showMessage('Document archived successfully');
+      // Pre-clear then insert (consistent with markAsPaidCash; avoids onConflict/upsert quirks)
+      await supabase.from('archive-est').delete().eq('id', id).eq('user_id', user?.id || '');
+      const result = await supabase.from('archive-est').insert(archiveData);
+      const { error, status, statusText } = result;
+      if (error) {
+        console.error('Archive insert error (FULL):', { error, status, statusText });
+        return;
+      }
+
+      await supabase.from('estimates').delete().eq('id', id);
+      setSelectedIds(prev => prev.filter(sid => sid !== id));
+      showMessage('Document archived successfully');
+      refreshSavedList();
+    } catch (e: any) {
+      console.error('Unexpected error archiving', id, e);
+    }
+  };
+
+  // Bulk actions for multi-select
+  const bulkOpen = async () => {
+    if (selectedIds.length === 0) return;
+    // Open the first selected (can't open multiple at once in editor)
+    const firstId = selectedIds[0];
+    const est = savedEstimatesList.find(e => e.id === firstId);
+    if (est) {
+      await loadSelectedEstimate(est);
+      setView('editor');
+      setSelectedIds([]);
+    }
+  };
+
+  const bulkArchive = async () => {
+    if (selectedIds.length === 0) return;
+    if (!confirm(`Archive ${selectedIds.length} documents?`)) return;
+    if (!user || !supabase) return;
+
+    for (const id of selectedIds) {
+      const { data: est, error: fetchErr } = await supabase.from('estimates').select('*').eq('id', id).single();
+      if (fetchErr || !est) {
+        console.error('Bulk archive fetch error for', id, fetchErr);
+        continue;
+      }
+      const archiveData = prepareArchiveData(est);
+      if (archiveData) {
+        // Pre-clear then insert (consistent behavior)
+        await supabase.from('archive-est').delete().eq('id', id).eq('user_id', user?.id || '');
+        const result = await supabase.from('archive-est').insert(archiveData);
+        const { error, status, statusText } = result;
+        if (error) {
+          console.error('Bulk archive insert error for', id, { error, status, statusText });
+        } else {
+          await supabase.from('estimates').delete().eq('id', id);
+        }
+      }
+    }
+    showMessage(`${selectedIds.length} documents archived`);
+    setSelectedIds([]);
+    refreshSavedList();
+  };
+
+  const bulkDelete = async () => {
+    if (selectedIds.length === 0) return;
+    if (!confirm(`Delete ${selectedIds.length} documents permanently?`)) return;
+    if (!supabase) return;
+
+    for (const id of selectedIds) {
+      await supabase.from('estimates').delete().eq('id', id);
+    }
+    showMessage(`${selectedIds.length} documents deleted`);
+    setSelectedIds([]);
     refreshSavedList();
   };
 
   const exportData = async () => {
     if (!user || !supabase) return;
 
-    let csv = 'Type,InvoiceNumber,JobName,Date,Address,City,ZipCode,GrandTotal,PhotoUrls,VideoUrls\n';
+    let csv = 'Type,InvoiceNumber,Client,Date,Address,City,ZipCode,GrandTotal,PhotoUrls,VideoUrls\n';
 
     if (exportOptions.estimates || exportOptions.invoices) {
       const { data: docs } = await supabase.from('estimates').select('*').eq('user_id', user.id);
@@ -572,6 +1742,8 @@ export default function Home() {
   // NEW REFS FOR CAMERA
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // Hold the stream started directly from user click (better permission prompt on iOS)
+  const pendingCameraStreamRef = useRef<MediaStream | null>(null);
 
   const debouncedSave = () => {
     if (!profile.autoSaveEnabled) return;
@@ -587,41 +1759,91 @@ export default function Home() {
   useEffect(() => {
     const saved = localStorage.getItem('quickLines');
     if (saved) setQuickLines(JSON.parse(saved));
+    const savedT = localStorage.getItem('templates');
+    if (savedT) setSavedTemplates(JSON.parse(savedT));
   }, []);
 
   useEffect(() => {
-    if (view === 'dashboard' || view === 'estimatesList' || view === 'invoicesList') refreshSavedList();
-    if (view === 'archivesView') refreshArchivesList();
+    if (view === 'dashboard' || view === 'estimatesList' || view === 'invoicesList' || view === 'editor') refreshSavedList();
+    if (view === 'archivesView' || view === 'editor') refreshArchivesList();
   }, [view]);
 
-  // NEW CAMERA USEEFFECT
+  // Ensure the chosen language from localStorage (user choice) is always applied
   useEffect(() => {
-    if (isPhotoCameraOpen && videoRef.current) {
-      navigator.mediaDevices
-        .getUserMedia({ 
-          video: { 
-            facingMode: 'environment',
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
-          } 
-        })
-        .then((stream) => {
-          if (videoRef.current) {
-            videoRef.current.srcObject = stream;
-            videoRef.current.play().catch(console.error);
-          }
-        })
-        .catch((err) => {
-          console.error('Camera access error:', err);
-          showMessage('Cannot access camera. Please allow camera permission.');
-          setIsPhotoCameraOpen(false);
-        });
+    const preferred = getPreferredLanguage();
+    if (profile && profile.language !== preferred) {
+      setProfile(prev => ({ ...prev, language: preferred }));
     }
+    // Also ensure we have fresh non-lang company data
+    if (view === 'editor' || view === 'profileView') {
+      loadLatestProfile();
+    }
+  }, [view]);
+
+  // NEW CAMERA USEEFFECT - attach stream that was requested in user gesture + wait for ref
+  useEffect(() => {
+    let attachedStream: MediaStream | null = null;
+
+    const attachStream = (stream: MediaStream) => {
+      attachedStream = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play().catch((e) => console.warn('play() failed:', e));
+      }
+    };
+
+    if (isPhotoCameraOpen) {
+      // If we already started the stream in the click handler, attach it as soon as video element exists
+      if (pendingCameraStreamRef.current) {
+        const stream = pendingCameraStreamRef.current;
+        pendingCameraStreamRef.current = null;
+
+        const tryAttach = () => {
+          if (videoRef.current) {
+            attachStream(stream);
+          } else {
+            setTimeout(tryAttach, 60);
+          }
+        };
+        tryAttach();
+      } else {
+        // Fallback: try to start camera here (may be less reliable for permission on some browsers)
+        const startFallback = () => {
+          if (!isPhotoCameraOpen) return;
+          if (!videoRef.current) {
+            setTimeout(startFallback, 80);
+            return;
+          }
+          navigator.mediaDevices
+            .getUserMedia({
+              video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+            })
+            .then((mediaStream) => {
+              attachStream(mediaStream);
+            })
+            .catch((err) => {
+              console.error('Camera fallback error:', err);
+              showMessage('Cannot access camera. Please allow camera permission.');
+              setIsPhotoCameraOpen(false);
+            });
+        };
+        startFallback();
+      }
+    }
+
     return () => {
+      if (attachedStream) {
+        attachedStream.getTracks().forEach(track => track.stop());
+      }
+      if (pendingCameraStreamRef.current) {
+        pendingCameraStreamRef.current.getTracks().forEach(track => track.stop());
+        pendingCameraStreamRef.current = null;
+      }
       if (videoRef.current && videoRef.current.srcObject) {
         (videoRef.current.srcObject as MediaStream).getTracks().forEach((track) => {
           track.stop();
         });
+        videoRef.current.srcObject = null;
       }
     };
   }, [isPhotoCameraOpen]);
@@ -647,13 +1869,12 @@ export default function Home() {
     if (!selectedPaymentMethod) return showMessage('Please select a payment method');
     closePaymentModal();
 
-    const message = `✅ Payment of $${paymentAmount.toFixed(2)} for ${paymentType} received via ${selectedPaymentMethod.toUpperCase()}!`;
+    const message = `✅ [DEMO] Payment of $${paymentAmount.toFixed(2)} for ${paymentType} received via ${selectedPaymentMethod.toUpperCase()}! (No real charge)`;
 
     if (paymentType === 'deposit') {
-      const depositAmt = grandTotal * (profile.depositPercentage || 0) / 100;
-      setAmountPaid(depositAmt);
+      setAmountPaid(paymentAmount);
     } else {
-      setAmountPaid(grandTotal);
+      setAmountPaid(paymentAmount);
       setPaymentStatus('paid');
     }
     saveToDB();
@@ -671,14 +1892,15 @@ export default function Home() {
   };
 
   const linkPaymentAccount = (method: string) => {
-    const urls: { [key: string]: string } = {
-      stripe: 'https://connect.stripe.com/oauth/authorize?response_type=code&client_id=YOUR_STRIPE_CONNECT_CLIENT_ID&scope=read_write',
-      echeck: 'https://connect.stripe.com/oauth/authorize?response_type=code&client_id=YOUR_STRIPE_CONNECT_CLIENT_ID&scope=read_write',
-      paypal: 'https://www.paypal.com/signin/authorize?client_id=YOUR_PAYPAL_CLIENT_ID&scope=openid%20profile%20email%20address',
-      venmo: 'https://venmo.com/account/connect',
+    // Demo / stub implementation. Replace with real OAuth in production.
+    const demoUrls: { [key: string]: string } = {
+      stripe: 'https://dashboard.stripe.com/connect',
+      echeck: 'https://dashboard.stripe.com/connect',
+      paypal: 'https://www.paypal.com/businessmanage/credentials',
+      venmo: 'https://venmo.com/account',
       zelle: 'https://www.zellepay.com/'
     };
-    window.open(urls[method] || `https://${method}.com`, '_blank');
+    window.open(demoUrls[method] || `https://${method}.com`, '_blank');
 
     setTimeout(() => {
       setProfile(prev => ({
@@ -688,8 +1910,8 @@ export default function Home() {
           [method]: { ...prev.paymentSettings[method], connected: true }
         }
       }));
-      showMessage(`${method.toUpperCase()} account linked successfully!`);
-    }, 1500);
+      showMessage(`[DEMO] ${method.toUpperCase()} account marked as connected.`);
+    }, 800);
   };
 
   // Dashboard calculations
@@ -718,7 +1940,8 @@ export default function Home() {
   const totalOutstanding = outstandingInvoices.reduce((sum, inv) => sum + calculateGrandTotal(inv), 0);
 
   const currentYear = new Date().getFullYear();
-  const salesYTD = savedEstimatesList
+  const allDocs = [...(savedEstimatesList || []), ...(archivesList || [])];
+  const salesYTD = allDocs
     .filter(doc => {
       if (!doc.date) return false;
       const docDate = new Date(doc.date);
@@ -729,12 +1952,37 @@ export default function Home() {
     })
     .reduce((sum, doc) => sum + calculateGrandTotal(doc), 0);
 
-  const totalSalesTaxCollected = savedEstimatesList.reduce((sum, doc) => sum + (doc.taxAmount || 0), 0);
-  const totalTaxDeductibleReceipts = savedEstimatesList.reduce((sum, doc) => {
-    return sum + (doc.receiptDetails || []).reduce((s: number, r: any) => s + (r.amount || 0), 0);
-  }, 0);
-  const netTaxableProfit = savedEstimatesList
-    .filter(doc => doc.paymentStatus === 'paid')
+  const totalSalesTaxCollected = allDocs
+    .filter(doc => {
+      if (!doc.date) return false;
+      const docDate = new Date(doc.date);
+      if (isNaN(docDate.getTime())) return false;
+      return docDate.getFullYear() === currentYear &&
+             (doc.documentType === 'invoice' || doc.invoiceNumber?.startsWith('INV')) &&
+             doc.paymentStatus === 'paid';
+    })
+    .reduce((sum, doc) => sum + (doc.taxAmount || 0), 0);
+  const totalTaxDeductibleReceipts = allDocs
+    .filter(doc => {
+      if (!doc.date) return false;
+      const docDate = new Date(doc.date);
+      if (isNaN(docDate.getTime())) return false;
+      return docDate.getFullYear() === currentYear &&
+             (doc.documentType === 'invoice' || doc.invoiceNumber?.startsWith('INV')) &&
+             doc.paymentStatus === 'paid';
+    })
+    .reduce((sum, doc) => {
+      return sum + (doc.receiptDetails || []).reduce((s: number, r: any) => s + (r.amount || 0), 0);
+    }, 0);
+  const netTaxableProfit = allDocs
+    .filter(doc => {
+      if (!doc.date) return false;
+      const docDate = new Date(doc.date);
+      if (isNaN(docDate.getTime())) return false;
+      return docDate.getFullYear() === currentYear &&
+             (doc.documentType === 'invoice' || doc.invoiceNumber?.startsWith('INV')) &&
+             doc.paymentStatus === 'paid';
+    })
     .reduce((sum, doc) => {
       const gross = calculateGrandTotal(doc);
       const receipts = (doc.receiptDetails || []).reduce((s: number, r: any) => s + (r.amount || 0), 0);
@@ -745,10 +1993,13 @@ export default function Home() {
   const quarterlyTaxData = [1,2,3,4].map(q => {
     const start = new Date(currentYear, (q-1)*3, 1);
     const end = new Date(currentYear, q*3, 0);
-    const filtered = savedEstimatesList.filter(doc => {
+    const filtered = allDocs.filter(doc => {
       if (!doc.date) return false;
       const d = new Date(doc.date);
-      return d >= start && d <= end && doc.paymentStatus === 'paid';
+      if (isNaN(d.getTime())) return false;
+      return d >= start && d <= end &&
+             (doc.documentType === 'invoice' || doc.invoiceNumber?.startsWith('INV')) &&
+             doc.paymentStatus === 'paid';
     });
     const tax = filtered.reduce((sum, doc) => sum + (doc.taxAmount || 0), 0);
     const receipts = filtered.reduce((sum, doc) => {
@@ -780,13 +2031,132 @@ export default function Home() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#f4f4f4]">
         <Card className="w-full max-w-md p-8">
-          <h1 className="text-4xl font-bold text-center mb-8 text-[#1e293b]">EstimateAce</h1>
-          <Input placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} className="mb-3" />
-          <Input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} className="mb-6" />
-          <div className="flex gap-3">
-            <Button onClick={login} className="flex-1">Login</Button>
-            <Button onClick={signup} variant="outline" className="flex-1">Sign Up</Button>
+          <div>
+            <h1 className="text-4xl font-bold text-center text-[#1e293b]">EstimateAce</h1>
+            <div className="text-center text-xs text-orange-600 font-semibold tracking-wider mt-1">BETA TEST BUILD</div>
           </div>
+
+          {!showMainForgot ? (
+            <>
+              <Input placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} className="mb-3" />
+              <Input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} className="mb-4" />
+              <div className="flex gap-3 mb-2">
+                <Button onClick={login} className="flex-1">{t('loginMain')}</Button>
+                <Button onClick={signup} variant="outline" className="flex-1">{t('signUp')}</Button>
+              </div>
+              <button 
+                onClick={() => setShowMainForgot(true)} 
+                className="text-sm text-blue-600 hover:underline w-full text-left"
+              >
+                Forgot your password?
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="text-sm text-gray-600 mb-3">Enter your email to receive a password reset link.</p>
+              <Input 
+                placeholder="Your email" 
+                value={forgotEmail} 
+                onChange={e => setForgotEmail(e.target.value)} 
+                className="mb-4" 
+              />
+              <Button onClick={requestMainPasswordReset} className="w-full mb-2">Send reset link</Button>
+              <button 
+                onClick={() => { setShowMainForgot(false); setForgotEmail(''); }} 
+                className="text-sm text-gray-600 hover:underline w-full"
+              >
+                Back to login
+              </button>
+            </>
+          )}
+
+          {/* Crew / Sub-contractor separate login */}
+          <div className="mt-6 pt-4 border-t">
+            <p className="text-sm font-medium text-center mb-3 text-gray-600">Crew / Sub-contractor Login</p>
+
+            {!showCrewForgot ? (
+              <>
+                <Input 
+                  placeholder="Your email (username)" 
+                  value={crewLoginEmail} 
+                  onChange={e => setCrewLoginEmail(e.target.value)} 
+                  className="mb-2" 
+                />
+                {/* Password input removed. Crew login now matches by email only (demo).
+                    Production: Use real Supabase Auth for crew members (no plaintext passwords). */}
+                <Button 
+                  onClick={handleCrewLogin} 
+                  variant="outline" 
+                  className="w-full mb-2"
+                >
+                  {t('logInAsCrew')}
+                </Button>
+                <button 
+                  onClick={() => setShowCrewForgot(true)} 
+                  className="text-sm text-blue-600 hover:underline w-full text-left"
+                >
+                  Forgot password?
+                </button>
+                <p className="text-[10px] text-gray-500 mt-2 text-center">
+                  {t('crewLoginNote')}
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-xs text-gray-600 mb-3">Password reset is not needed. Crew accounts log in with email only.</p>
+                <button 
+                  onClick={() => { setShowCrewForgot(false); setCrewForgotEmail(''); }} 
+                  className="text-sm text-gray-600 hover:underline w-full"
+                >
+                  Back to crew login
+                </button>
+              </>
+            )}
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  // Two-Factor Authentication screen - DISABLED for production (was 100% simulated/fake)
+  // Real 2FA should use Supabase Auth Phone, authenticator apps, or SMS provider.
+  if (false && requires2FA) {  // permanently disabled
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#f4f4f4]">
+        <Card className="w-full max-w-md p-8">
+          <h2 className="text-2xl font-bold text-center mb-2">{t('twoStepVerification')}</h2>
+          <p className="text-center text-gray-600 mb-4">
+            Enter the 6-digit code sent to <strong>{twoFactorPhone}</strong>
+          </p>
+          <Input 
+            placeholder="000000" 
+            value={twoFactorCode} 
+            onChange={e => setTwoFactorCode(e.target.value.replace(/\D/g, '').slice(0,6))} 
+            className="mb-6 text-center text-3xl tracking-[12px] font-mono" 
+          />
+          <Button onClick={verify2FA} className="w-full mb-3" disabled={twoFactorCode.length !== 6}>
+            {t('verifyCode')}
+          </Button>
+          <Button onClick={resend2FACode} variant="outline" className="w-full mb-4">
+            {t('resendCode')}
+          </Button>
+          <Button 
+            variant="ghost" 
+            className="w-full text-sm" 
+            onClick={() => {
+              if (supabase) supabase.auth.signOut();
+              setUser(null);
+              setCurrentCrew(null);
+              setRequires2FA(false);
+              setTwoFactorCode('');
+              setShowLogin(true);
+            }}
+          >
+            {t('backToLogin')}
+          </Button>
+          <p className="text-[10px] text-center text-gray-500 mt-4">
+            [DEMO] The code is shown in the success message above.
+          </p>
         </Card>
       </div>
     );
@@ -803,32 +2173,52 @@ export default function Home() {
         }
       `}</style>
 
-      <div className="flex flex-col h-screen bg-[#f4f4f4]">
+      <ErrorBoundary>
+        <div className="flex flex-col h-screen bg-[#f4f4f4]">
+        {currentCrew && (
+          <div className="bg-blue-100 text-blue-800 text-xs p-2 text-center">
+            Logged in as crew/sub-contractor: {currentCrew.email} (limited access)
+          </div>
+        )}
+        {/* Production warning banner - remove or make conditional for real deploys */}
+        <div className="bg-yellow-100 text-yellow-800 text-[10px] text-center py-0.5 no-print">
+          DEMO MODE — Payments and extra accounts are simulated. Use to test charging for additional users.
+        </div>
         <div className="flex-1 overflow-auto p-4 md:p-8">
           {view === 'dashboard' && (
             <div>
               <div className="flex justify-between items-center mb-8">
-                <div>
-                  <h2 className="text-4xl font-semibold text-[#1e293b]">Welcome back!</h2>
-                  <p className="text-gray-600 mt-1">Here’s what’s happening with your business</p>
+                <div className="flex items-center gap-4">
+                  {profile.logoUrl && (
+                    <img 
+                      src={profile.logoUrl} 
+                      alt="Company Logo" 
+                      className="w-20 h-20 object-contain border rounded flex-shrink-0" 
+                    />
+                  )}
+                  <div>
+                    <h2 className="text-4xl font-semibold text-[#1e293b]">{profile.company || t('welcome')}</h2>
+                    <p className="text-gray-600 mt-1">{profile.slogan || t('dashboard')}</p>
+                  </div>
                 </div>
+                <Button onClick={logout} variant="outline" size="sm">{t('logOut')}</Button>
               </div>
 
               <Card className="mb-8">
                 <CardContent className="p-6">
                   <h3 className="font-semibold mb-4 flex items-center gap-2">
-                    📋 Total Estimates Written (Not Archived)
+                    📋 {t('estimates')} (Not Archived)
                   </h3>
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="w-3/4">Metric</TableHead>
-                        <TableHead className="text-right">Count</TableHead>
+                        <TableHead className="w-3/4">{t('metric')}</TableHead>
+                        <TableHead className="text-right">{t('count')}</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       <TableRow>
-                        <TableCell className="font-medium">Active Estimates</TableCell>
+                        <TableCell className="font-medium">{t('activeEstimates')}</TableCell>
                         <TableCell className="text-right text-4xl font-bold text-[#10b981]">
                           {estimatesCount}
                         </TableCell>
@@ -841,22 +2231,22 @@ export default function Home() {
               <Card className="mb-8">
                 <CardContent className="p-6">
                   <h3 className="font-semibold mb-4 flex items-center gap-2">
-                    💰 All Outstanding Invoices
+                    💰 {t('invoices')}
                   </h3>
                   <div className="overflow-x-auto">
                     <Table>
                       <TableHeader>
                         <TableRow>
                           <TableHead>Invoice #</TableHead>
-                          <TableHead>Job Name</TableHead>
-                          <TableHead className="text-right">Amount Due</TableHead>
+                          <TableHead>{t('jobName')}</TableHead>
+                          <TableHead className="text-right">{t('amountDue')}</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {outstandingInvoices.length === 0 ? (
                           <TableRow>
                             <TableCell colSpan={3} className="text-center py-8 text-gray-500">
-                              No outstanding invoices
+                              {t('noOutstanding')}
                             </TableCell>
                           </TableRow>
                         ) : (
@@ -873,58 +2263,120 @@ export default function Home() {
                       </TableBody>
                     </Table>
                   </div>
-                  {outstandingInvoices.length > 0 && (
+                  {outstandingInvoices.length > 0 && canSeeFinancials && (
                     <div className="mt-6 flex justify-end items-baseline gap-2 text-xl">
-                      <span className="text-gray-600">Total Outstanding:</span>
+                      <span className="text-gray-600">{t('totalOutstandingLabel')}:</span>
                       <span className="font-bold text-amber-600">${totalOutstanding.toFixed(2)}</span>
                     </div>
+                  )}
+                  {outstandingInvoices.length > 0 && !canSeeFinancials && (
+                    <div className="mt-6 text-sm text-gray-500">{t('outstandingRestricted')}</div>
                   )}
                 </CardContent>
               </Card>
 
-              <Card>
-                <CardContent className="p-6">
-                  <h3 className="font-semibold mb-4 flex items-center gap-2">
-                    📈 Total Sales Year to Date
-                  </h3>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-3/4">Period</TableHead>
-                        <TableHead className="text-right">Sales</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      <TableRow>
-                        <TableCell className="font-medium">
-                          {currentYear} (Year to Date)
-                        </TableCell>
-                        <TableCell className="text-right text-4xl font-bold text-[#10b981]">
-                          ${salesYTD.toFixed(2)}
-                        </TableCell>
-                      </TableRow>
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
+              {canSeeFinancials && (
+                <Card>
+                  <CardContent className="p-6">
+                    <h3 className="font-semibold mb-4 flex items-center gap-2">
+                      📈 {t('yearToDateSales')}
+                    </h3>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-3/4">Period</TableHead>
+                          <TableHead className="text-right">Sales</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        <TableRow>
+                          <TableCell className="font-medium">
+                            {currentYear} (Year to Date)
+                          </TableCell>
+                          <TableCell className="text-right text-4xl font-bold text-[#10b981]">
+                            ${salesYTD.toFixed(2)}
+                          </TableCell>
+                        </TableRow>
+                      </TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
+              )}
+              {!canSeeFinancials && (
+                <Card>
+                  <CardContent className="p-6">
+                    <h3 className="font-semibold mb-4 flex items-center gap-2">
+                      📈 Sales Information
+                    </h3>
+                    <p className="text-sm text-gray-500">Financial details are restricted for your access level.</p>
+                  </CardContent>
+                </Card>
+              )}
             </div>
           )}
 
           {view === 'estimatesList' && (
             <div>
-              <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to Dashboard</Button>
-              <h2 className="text-3xl font-semibold mb-6">All Estimates</h2>
+              <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to {t('dashboard')}</Button>
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-3xl font-semibold">All {t('estimates')}</h2>
+                {savedEstimatesList.filter(est => est.documentType === 'estimate' || est.invoiceNumber?.startsWith('EST')).length > 0 && (
+                  <Button 
+                    size="sm" 
+                    variant="outline" 
+                    onClick={() => {
+                      const estIds = savedEstimatesList
+                        .filter(est => est.documentType === 'estimate' || est.invoiceNumber?.startsWith('EST'))
+                        .map(est => est.id);
+                      setSelectedIds(selectedIds.length === estIds.length ? [] : estIds);
+                    }}
+                  >
+                    {selectedIds.length > 0 ? 'Deselect All' : 'Select All'}
+                  </Button>
+                )}
+              </div>
+
+              {selectedIds.length > 0 && (
+                <div className="mb-4 flex flex-wrap gap-2 p-3 bg-gray-50 rounded-lg">
+                  <Button size="sm" onClick={bulkOpen} disabled={selectedIds.length !== 1}>
+                    Open Selected ({selectedIds.length})
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={bulkArchive}>
+                    Archive Selected ({selectedIds.length})
+                  </Button>
+                  <Button size="sm" variant="destructive" onClick={bulkDelete}>
+                    Delete Selected ({selectedIds.length})
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setSelectedIds([])}>
+                    Clear Selection
+                  </Button>
+                </div>
+              )}
+
               <div className="space-y-4">
                 {savedEstimatesList.filter(est => est.documentType === 'estimate' || est.invoiceNumber?.startsWith('EST')).map((est) => (
                   <div key={est.id} className="flex justify-between items-center border p-4 rounded-lg bg-white">
-                    <div>
-                      <div className="font-medium">{est.jobName || 'Untitled'}</div>
-                      <div className="text-sm text-gray-500">{est.invoiceNumber} • {est.date}</div>
+                    <div className="flex items-center gap-3">
+                      <input 
+                        type="checkbox" 
+                        checked={selectedIds.includes(est.id)}
+                        onChange={() => {
+                          setSelectedIds(prev => 
+                            prev.includes(est.id) 
+                              ? prev.filter(id => id !== est.id) 
+                              : [...prev, est.id]
+                          );
+                        }}
+                      />
+                      <div>
+                        <div className="font-medium">{est.jobName || 'Untitled'}</div>
+                        <div className="text-sm text-gray-500">{est.invoiceNumber} • {est.date}</div>
+                      </div>
                     </div>
                     <div className="flex gap-3">
-                      <Button size="sm" onClick={() => { loadSelectedEstimate(est); setView('editor'); }}>Open</Button>
-                      <Button size="sm" variant="outline" onClick={() => archiveEstimate(est.id)}>Archive</Button>
-                      <Button size="sm" variant="destructive" onClick={() => deleteSelectedEstimate(est.id)}>Delete</Button>
+                      <Button size="sm" onClick={async () => { await loadSelectedEstimate(est); setView('editor'); setSelectedIds([]); }}>{t('open')}</Button>
+                      <Button size="sm" variant="outline" onClick={() => archiveEstimate(est.id)}>{t('archive')}</Button>
+                      <Button size="sm" variant="destructive" onClick={() => deleteSelectedEstimate(est.id)}>{t('delete')}</Button>
                     </div>
                   </div>
                 ))}
@@ -934,20 +2386,67 @@ export default function Home() {
 
           {view === 'invoicesList' && (
             <div>
-              <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to Dashboard</Button>
-              <h2 className="text-3xl font-semibold mb-6">All Invoices</h2>
+              <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to {t('dashboard')}</Button>
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-3xl font-semibold">All {t('invoices')}</h2>
+                {savedEstimatesList.filter(est => est.documentType === 'invoice' || est.invoiceNumber?.startsWith('INV')).length > 0 && (
+                  <Button 
+                    size="sm" 
+                    variant="outline" 
+                    onClick={() => {
+                      const invIds = savedEstimatesList
+                        .filter(est => est.documentType === 'invoice' || est.invoiceNumber?.startsWith('INV'))
+                        .map(est => est.id);
+                      setSelectedIds(selectedIds.length === invIds.length ? [] : invIds);
+                    }}
+                  >
+                    {selectedIds.length > 0 ? 'Deselect All' : 'Select All'}
+                  </Button>
+                )}
+              </div>
+
+              {selectedIds.length > 0 && (
+                <div className="mb-4 flex flex-wrap gap-2 p-3 bg-gray-50 rounded-lg">
+                  <Button size="sm" onClick={bulkOpen} disabled={selectedIds.length !== 1}>
+                    Open Selected ({selectedIds.length})
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={bulkArchive}>
+                    Archive Selected ({selectedIds.length})
+                  </Button>
+                  <Button size="sm" variant="destructive" onClick={bulkDelete}>
+                    Delete Selected ({selectedIds.length})
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setSelectedIds([])}>
+                    Clear Selection
+                  </Button>
+                </div>
+              )}
+
               <div className="space-y-4">
                 {savedEstimatesList.filter(est => est.documentType === 'invoice' || est.invoiceNumber?.startsWith('INV')).map((est) => (
                   <div key={est.id} className="flex justify-between items-center border p-4 rounded-lg bg-white">
-                    <div className="flex-1">
-                      <div className="font-medium">{est.jobName || 'Untitled'}</div>
-                      <div className="text-sm text-gray-500">{est.invoiceNumber} • {est.date}</div>
+                    <div className="flex items-center gap-3 flex-1">
+                      <input 
+                        type="checkbox" 
+                        checked={selectedIds.includes(est.id)}
+                        onChange={() => {
+                          setSelectedIds(prev => 
+                            prev.includes(est.id) 
+                              ? prev.filter(id => id !== est.id) 
+                              : [...prev, est.id]
+                          );
+                        }}
+                      />
+                      <div>
+                        <div className="font-medium">{est.jobName || 'Untitled'}</div>
+                        <div className="text-sm text-gray-500">{est.invoiceNumber} • {est.date}</div>
+                      </div>
                     </div>
                     <div className="flex items-center gap-4">
-                      {est.paymentStatus === 'paid' && <span className="px-3 py-1 text-xs font-medium bg-green-100 text-green-700 rounded-full">Paid</span>}
-                      <Button size="sm" onClick={() => { loadSelectedEstimate(est); setView('editor'); }}>Open</Button>
-                      <Button size="sm" variant="outline" onClick={() => archiveEstimate(est.id)}>Archive</Button>
-                      <Button size="sm" variant="destructive" onClick={() => deleteSelectedEstimate(est.id)}>Delete</Button>
+                      {est.paymentStatus === 'paid' && <span className="px-3 py-1 text-xs font-medium bg-green-100 text-green-700 rounded-full">{t('paid')}</span>}
+                      <Button size="sm" onClick={async () => { await loadSelectedEstimate(est); setView('editor'); setSelectedIds([]); }}>{t('open')}</Button>
+                      <Button size="sm" variant="outline" onClick={() => archiveEstimate(est.id)}>{t('archive')}</Button>
+                      <Button size="sm" variant="destructive" onClick={() => deleteSelectedEstimate(est.id)}>{t('delete')}</Button>
                     </div>
                   </div>
                 ))}
@@ -957,14 +2456,31 @@ export default function Home() {
 
           {view === 'editor' && (
             <div>
-              <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to Dashboard</Button>
+              <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to {t('dashboard')}</Button>
 
               <div className="flex justify-between items-start mb-8">
-                <div>
-                  <h1 className="text-5xl font-bold text-[#1e293b]">{profile.company || 'Your Company'}</h1>
-                  <p className="text-xl text-gray-600">{profile.slogan || 'Professional Estimation & Invoicing'}</p>
-                  {profile.phone && <p className="text-lg text-gray-600 mt-1">📞 {profile.phone}</p>}
-                  {profile.email && <p className="text-lg text-gray-600">✉️ {profile.email}</p>}
+                <div className="flex items-start gap-4">
+                  {profile.logoUrl && (
+                    <img 
+                      src={profile.logoUrl} 
+                      alt="Company Logo" 
+                      className={`${getLogoClass(profile.logoSize)} object-contain border rounded flex-shrink-0`} 
+                    />
+                  )}
+                  <div>
+                    <h1 className="text-5xl font-bold text-[#1e293b]">{profile.company || t('companyProfile')}</h1>
+                    <p className="text-xl text-gray-600">{profile.slogan || 'Professional Estimation & Invoicing'}</p>
+                    {profile.phone && <p className="text-lg text-gray-600 mt-1">📞 {profile.phone}</p>}
+                    {profile.email && <p className="text-lg text-gray-600">✉️ {profile.email}</p>}
+                    {(profile.address || profile.city || profile.state || profile.zipCode) && (
+                      <p className="text-lg text-gray-600">
+                        {profile.address}
+                        {profile.city && `, ${profile.city}`}
+                        {profile.state && `, ${profile.state}`}
+                        {profile.zipCode && ` ${profile.zipCode}`}
+                      </p>
+                    )}
+                  </div>
                 </div>
                 <div className="text-right">
                   <div className="text-sm text-gray-500">Document #</div>
@@ -976,20 +2492,86 @@ export default function Home() {
               <Card className="mb-8">
                 <CardContent className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
-                    <label className="block text-sm font-semibold mb-1">Job Name</label>
-                    <Input value={jobName} onChange={e => setJobName(e.target.value)} placeholder="Job name" />
+                    <label className="block text-sm font-semibold mb-1">{t('jobNameLabel')}</label>
+                    <Input value={jobName} onChange={e => setJobName(e.target.value)} placeholder="Client" />
                   </div>
-                  <div>
-                    <label className="block text-sm font-semibold mb-1">Address</label>
-                    <Input value={address} onChange={e => setAddress(e.target.value)} placeholder="Street address" />
+                  <div className="relative">
+                    <label className="block text-sm font-semibold mb-1">{t('address')}</label>
+                    <Input 
+                      value={address} 
+                      onChange={e => {
+                        setAddress(e.target.value);
+                        setShowAddressSuggestions(true);
+                      }} 
+                      onFocus={() => {
+                        setShowAddressSuggestions(true);
+                        if (user?.id) {
+                          refreshSavedList();
+                          refreshArchivesList();
+                        }
+                      }}
+                      onBlur={() => setTimeout(() => setShowAddressSuggestions(false), 200)}
+                      placeholder="Start typing for address suggestions..." 
+                    />
+                    {showAddressSuggestions && (
+                      <div className="absolute z-[60] mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg max-h-52 overflow-auto text-sm">
+                        {isLoadingSuggestions && (
+                          <div className="px-3 py-2 text-xs text-gray-500">Searching addresses...</div>
+                        )}
+                        {!isLoadingSuggestions && addressSuggestions.length === 0 && address.trim().length >= 2 && (
+                          <div className="px-3 py-2 text-xs text-gray-500">No suggestions. Try a longer address or city name.</div>
+                        )}
+                        {addressSuggestions.map((sugg, idx) => (
+                          <div 
+                            key={idx}
+                            className="px-3 py-1.5 hover:bg-gray-100 cursor-pointer"
+                            onMouseDown={async (e) => {
+                              e.preventDefault();
+                              setShowAddressSuggestions(false);
+
+                              if (sugg.place_id) {
+                                // Fetch structured details from Google for accurate city/state/zip
+                                try {
+                                  const res = await fetch(`/api/address-autocomplete?place_id=${sugg.place_id}`);
+                                  if (res.ok) {
+                                    const details = await res.json();
+                                    setAddress(details.address || sugg.address || sugg.display || '');
+                                    if (details.city) setCity(details.city);
+                                    if (details.state) setState(details.state);
+                                    if (details.zipCode) setZipCode(details.zipCode);
+                                    return;
+                                  }
+                                } catch (err) {
+                                  console.error('Failed to fetch place details:', err);
+                                }
+                                // Fallback
+                                setAddress(sugg.address || sugg.display || '');
+                              } else {
+                                setAddress(sugg.address || '');
+                                if (sugg.city) setCity(sugg.city);
+                                if (sugg.state) setState(sugg.state);
+                                if (sugg.zipCode) setZipCode(sugg.zipCode);
+                              }
+                            }}
+                          >
+                            <div className="font-medium">{sugg.address || sugg.display}</div>
+                            {(sugg.city || sugg.state || sugg.zipCode) && (
+                              <div className="text-[10px] text-gray-500">
+                                {[sugg.city, sugg.state, sugg.zipCode].filter(Boolean).join(', ')}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <div className="grid grid-cols-3 gap-4">
-                    <div><label className="block text-sm font-semibold mb-1">City</label><Input value={city} onChange={e => setCity(e.target.value)} /></div>
-                    <div><label className="block text-sm font-semibold mb-1">State</label><Input value={state} onChange={e => setState(e.target.value)} placeholder="CA" /></div>
-                    <div><label className="block text-sm font-semibold mb-1">Zip Code</label><Input value={zipCode} onChange={e => setZipCode(e.target.value)} /></div>
+                    <div><label className="block text-sm font-semibold mb-1">{t('cityLabel')}</label><Input value={city} onChange={e => setCity(e.target.value)} /></div>
+                    <div><label className="block text-sm font-semibold mb-1">{t('stateLabel')}</label><Input value={state} onChange={e => setState(e.target.value)} placeholder="CA" /></div>
+                    <div><label className="block text-sm font-semibold mb-1">{t('zipLabel')}</label><Input value={zipCode} onChange={e => setZipCode(e.target.value)} /></div>
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold mb-2">Phone Numbers</label>
+                    <label className="block text-sm font-semibold mb-2">{t('phonesLabel')}</label>
                     {phones.map((phone, i) => (
                       <div key={i} className="flex gap-2 mb-2">
                         <Input value={phone} onChange={e => updatePhone(i, e.target.value)} />
@@ -999,7 +2581,7 @@ export default function Home() {
                     <Button variant="outline" size="sm" onClick={addPhone}>+ Add Phone</Button>
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold mb-2">Email Addresses</label>
+                    <label className="block text-sm font-semibold mb-2">{t('emailsLabel')}</label>
                     {emails.map((em, i) => (
                       <div key={i} className="flex gap-2 mb-2">
                         <Input value={em} onChange={e => updateEmail(i, e.target.value)} />
@@ -1012,11 +2594,11 @@ export default function Home() {
                   <div className="md:col-span-2 flex items-center gap-8 pt-4 border-t">
                     <label className="flex items-center gap-2 cursor-pointer">
                       <input type="checkbox" checked={isTaxExempt} onChange={e => setIsTaxExempt(e.target.checked)} />
-                      <span className="font-medium">Tax Exempt</span>
+                      <span className="font-medium">{t('taxExempt')}</span>
                     </label>
                     <label className="flex items-center gap-2 cursor-pointer">
                       <input type="checkbox" checked={taxLabor} onChange={e => setTaxLabor(e.target.checked)} />
-                      <span className="font-medium">Tax Labor</span>
+                      <span className="font-medium">{t('taxLabor')}</span>
                     </label>
                     <div className="ml-auto text-sm text-gray-500">
                       Rate: <span className="font-semibold">{baseTaxRate}%</span>
@@ -1026,8 +2608,8 @@ export default function Home() {
               </Card>
 
               <div className="flex flex-wrap gap-3 mb-8">
-                <Button onClick={addRow} variant="outline">+ Add Line Item</Button>
-                <Button onClick={openQuickLinesModal} variant="outline">📌 Quick Lines</Button>
+                <Button onClick={addRow} variant="outline">{t('addLineItem')}</Button>
+                <Button onClick={openQuickLinesModal} variant="outline">{t('quickLines')}</Button>
               </div>
 
               <Card className="mb-8">
@@ -1044,9 +2626,10 @@ export default function Home() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {items.map((item) => (
+                      {items.map((item, idx) => (
                         <TableRow key={item.id}>
                           <TableCell>
+                            <div className="text-xs text-gray-500 mb-1">Line {idx + 1}</div>
                             <Textarea 
                               value={item.description} 
                               onChange={e => updateItem(item.id, 'description', e.target.value)} 
@@ -1058,12 +2641,58 @@ export default function Home() {
   size="sm"
   variant="ghost"
   className="mt-2 w-full text-xs flex items-center gap-1 justify-center"
-  onClick={() => {
-    const suggestion = prompt("🤖 Grok AI – Describe this line item (e.g. 'Install 5 tempered glass windows with white trim')");
-    if (suggestion) updateItem(item.id, 'description', suggestion);
+  onClick={async () => {
+    const currentDesc = item.description?.trim();
+    if (!currentDesc) return showMessage('Enter a description first');
+
+    setImprovingDescriptionId(item.id);
+
+    try {
+      // Include Supabase access token for auth
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (supabase) {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          headers['Authorization'] = `Bearer ${session.access_token}`;
+        }
+      }
+
+      const res = await fetch('/api/grok', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ description: currentDesc })
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || data.error) {
+        const errMsg = data.error || data.suggestion || 'Grok AI error';
+        if (errMsg.includes('Rate limit')) {
+          showMessage(`⏳ ${errMsg}`);
+        } else if (errMsg.includes('Unauthorized') || errMsg.includes('missing')) {
+          showMessage('🔒 Please log in with a main account to use AI features.');
+        } else if (errMsg.includes('API key') || errMsg.includes('Incorrect')) {
+          showMessage('🔑 AI service key issue. Check Vercel env vars and redeploy.');
+        } else {
+          showMessage(`❌ ${errMsg}`);
+        }
+        return;
+      }
+
+      if (data.suggestion) {
+        updateItem(item.id, 'description', data.suggestion);
+        showMessage('✅ Description improved by Grok AI');
+      }
+    } catch (err) {
+      console.error('Grok AI call failed:', err);
+      showMessage('⚠️ Network error. Could not reach Grok AI. Check your connection or console.');
+    } finally {
+      setImprovingDescriptionId(null);
+    }
   }}
+  disabled={improvingDescriptionId === item.id}
 >
-  🤖 Grok AI
+  {improvingDescriptionId === item.id ? '⏳ Improving...' : '🤖 Grok AI'}
 </Button>
 
 {/* AI PRICE QUOTE BUTTON - UPDATED */}
@@ -1075,17 +2704,40 @@ export default function Home() {
     const description = item.description?.trim();
     if (!description) return showMessage('Enter a description first');
 
+    setAiQuoteLoadingId(item.id);
+
     try {
+      // Include Supabase access token so the API route can verify the user
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (supabase) {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          headers['Authorization'] = `Bearer ${session.access_token}`;
+        }
+      }
+
       const res = await fetch('/api/ai-quote', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ description })
       });
 
       const data = await res.json();
 
       if (!res.ok || data.error) {
-        return showMessage(`❌ ${data.error}`);
+        const errMsg = data.error || 'AI quote error';
+        if (errMsg.includes('Rate limit')) {
+          showMessage(`⏳ ${errMsg}`);
+        } else if (errMsg.includes('Unauthorized') || errMsg.includes('missing')) {
+          showMessage('🔒 Please log in with a main account to use AI features.');
+        } else if (errMsg.includes('API key') || errMsg.includes('Incorrect') || errMsg.includes('GROK_API_KEY')) {
+          showMessage('🔑 AI service key issue. Check Vercel env vars and redeploy.');
+        } else if (errMsg.includes('invalid format')) {
+          showMessage('⚠️ AI returned invalid data. Try a different description.');
+        } else {
+          showMessage(`❌ ${errMsg}`);
+        }
+        return;
       }
 
       // Auto-update description + price fields
@@ -1096,14 +2748,40 @@ export default function Home() {
       if (data.unit) updateItem(item.id, 'unit', data.unit);
       if (data.suggestedQty !== undefined) updateItem(item.id, 'qty', data.suggestedQty);
 
-      showMessage(`✅ AI Quote Generated!\n\nDescription updated for customer\n\n${data.breakdown}\nConfidence: ${data.confidence}`);
+      // Store AI breakdowns for optional display
+      if (data.materialBreakdown) updateItem(item.id, 'materialBreakdown', data.materialBreakdown);
+      if (data.laborBreakdown) updateItem(item.id, 'laborBreakdown', data.laborBreakdown);
+
+      let msg = `✅ AI Quote Generated!\n\nDescription updated for customer\n\n${data.breakdown}\nConfidence: ${data.confidence}`;
+      if (data.materialBreakdown || data.laborBreakdown) {
+        msg += `\n\nBreakdown:`;
+        if (data.materialBreakdown) msg += `\n- Materials: ${data.materialBreakdown.qty} ${data.materialBreakdown.unit} @ $${data.materialBreakdown.unitPrice} = $${data.materialBreakdown.total}`;
+        if (data.laborBreakdown) msg += `\n- Labor: ${data.laborBreakdown.hours} hrs @ $${data.laborBreakdown.rate}/hr = $${data.laborBreakdown.total}`;
+      }
+      showMessage(msg);
     } catch (err: any) {
-      showMessage('⚠️ Could not reach AI quote service.');
+      console.error('AI Quote call failed:', err);
+      showMessage('⚠️ Network error. Could not reach AI quote service. Check your connection or console.');
+    } finally {
+      setAiQuoteLoadingId(null);
     }
   }}
+  disabled={aiQuoteLoadingId === item.id}
 >
-  💰 AI Price Quote (Online Data)
+  {aiQuoteLoadingId === item.id ? '⏳ Getting quote...' : '💰 AI Price Quote (Online Data)'}
 </Button>
+
+                            {(item.materialBreakdown || item.laborBreakdown) && (
+                              <div className="mt-2 p-2 bg-gray-50 border rounded text-[10px] text-gray-700">
+                                <div className="font-semibold mb-1">Line {idx + 1} Breakdown:</div>
+                                {item.materialBreakdown && (
+                                  <div>Materials: {item.materialBreakdown.description || ''} — {item.materialBreakdown.qty} {item.materialBreakdown.unit} × ${Number(item.materialBreakdown.unitPrice || 0).toFixed(2)} = ${Number(item.materialBreakdown.total || 0).toFixed(2)}</div>
+                                )}
+                                {item.laborBreakdown && (
+                                  <div>Labor: {item.laborBreakdown.description || ''} — {item.laborBreakdown.hours} hrs × ${Number(item.laborBreakdown.rate || 0).toFixed(2)}/hr = ${Number(item.laborBreakdown.total || 0).toFixed(2)}</div>
+                                )}
+                              </div>
+                            )}
 
                             {/* TRANSLATE FEATURE - added exactly as requested */}
                             <div className="mt-4 pt-3 border-t flex flex-wrap items-center gap-2 text-xs">
@@ -1185,14 +2863,20 @@ export default function Home() {
                             />
                           </TableCell>
                           <TableCell>
-                            <Input 
-                              type="number" 
-                              value={item.price} 
-                              onChange={e => updateItem(item.id, 'price', parseFloat(e.target.value) || 0)} 
-                              className="text-right" 
-                            />
+                            {canSeePricing ? (
+                              <Input 
+                                type="number" 
+                                value={item.price} 
+                                onChange={e => updateItem(item.id, 'price', parseFloat(e.target.value) || 0)} 
+                                className="text-right [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [appearance:textfield]" 
+                              />
+                            ) : (
+                              <div className="text-right text-gray-400">—</div>
+                            )}
                           </TableCell>
-                          <TableCell className="text-right font-medium">${(item.total || 0).toFixed(2)}</TableCell>
+                          <TableCell className="text-right font-medium">
+                            {canSeePricing ? `$${(item.total || 0).toFixed(2)}` : '—'}
+                          </TableCell>
                           <TableCell>
                             <div className="flex gap-1">
                               <Button size="sm" variant="outline" onClick={() => saveAsQuickLine(item)}>💾</Button>
@@ -1206,34 +2890,53 @@ export default function Home() {
                 </div>
 
                 <div className="p-6 bg-white border-t">
-                  <div className="flex justify-end text-2xl font-semibold mb-2">
-                    Taxes ({state || '—'} {baseTaxRate}%): <span className="text-[#14b8a6] ml-4">${taxAmount.toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-end text-4xl font-bold">
-                    Grand Total: <span className="text-[#10b981] ml-4">${grandTotal.toFixed(2)}</span>
-                  </div>
+                  {canSeeFinancials ? (
+                    <>
+                      <div className="flex justify-end text-2xl font-semibold mb-2">
+                        Taxes ({state || '—'} {baseTaxRate}%): <span className="text-[#14b8a6] ml-4">${taxAmount.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-end text-4xl font-bold">
+                        Grand Total: <span className="text-[#10b981] ml-4">${grandTotal.toFixed(2)}</span>
+                      </div>
+
+                      {profile.chargeCCFee && (
+                        <div className="flex justify-end text-sm mt-2 text-gray-600">
+                          + Credit card processing fee ({ccFeePercent}%): <span className="font-medium ml-1">${ccFeeAmount.toFixed(2)}</span>
+                          <span className="ml-3 text-[#f59e0b] font-semibold">Card total: ${totalWithCCFee.toFixed(2)}</span>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="flex justify-end text-lg text-gray-500">
+                      Financial details hidden for this crew member
+                    </div>
+                  )}
                 </div>
               </Card>
 
-              <div className="flex flex-wrap gap-3 mb-8">
-                <Button onClick={saveNamedEstimate} className="bg-[#1e293b]">💾 Save Estimate</Button>
-                <Button onClick={printDocument} className="bg-[#3b82f6]">🖨️ Print/Preview</Button>
-                <Button onClick={openSendPreview} className="bg-[#8b5cf6]">✉️ Send Estimate</Button>
-                <Button onClick={convertToInvoice} className="bg-[#f59e0b]">📄 Convert to Invoice</Button>
-              </div>
+              {documentType === 'invoice' ? (
+                <div className="flex flex-wrap gap-3 mb-8">
+                  <Button onClick={printDocument} className="bg-[#3b82f6]">{t('printPreview')}</Button>
+                  <Button onClick={markAsPaidCash} className="bg-green-600">Paid Cash</Button>
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-3 mb-8">
+                  <Button onClick={saveNamedEstimate} className="bg-[#1e293b]">{t('saveEstimate')}</Button>
+                  <Button onClick={printDocument} className="bg-[#3b82f6]">{t('printPreview')}</Button>
+                  <Button onClick={openSendPreview} className="bg-[#8b5cf6]">{t('sendEstimate')}</Button>
+                  <Button onClick={convertToInvoice} className="bg-[#f59e0b]">{t('convertToInvoice')}</Button>
+                </div>
+              )}
 
-              <div className="flex gap-3 mb-8">
-                <Button onClick={openPhotoCamera} className="flex-1">📸 Take Photo</Button>
-                <Button onClick={() => document.getElementById('video-camera')?.click()} className="flex-1">🎥 Record Video</Button>
-              </div>
+              {/* Top quick access buttons kept for convenience. Icons inside each section below for "under photos/videos". */}
 
               <input id="video-camera" type="file" accept="video/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'video')} className="hidden" />
 
               <Card className="mb-8">
                 <CardContent className="p-6">
-                  <h3 className="text-xl font-semibold mb-4">📸 Photos ({photoUrls.length})</h3>
+                  <h3 className="text-xl font-semibold mb-4">{t('photosSection')} ({photoUrls.length})</h3>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    {photoUrls.map((url, i) => (
+                    {photoDisplayUrls.map((url, i) => (
                       <div key={i} className="relative">
                         <img src={url} alt="" className="w-full h-40 object-cover rounded-lg border" />
                         <button 
@@ -1244,36 +2947,52 @@ export default function Home() {
                         </button>
                       </div>
                     ))}
+                    {/* Add photo icon/button inside the photos section */}
+                    <div 
+                      onClick={openPhotoCamera}
+                      className="flex flex-col items-center justify-center h-40 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition"
+                    >
+                      <div className="text-4xl mb-1">📷</div>
+                      <div className="text-xs text-gray-500">Take Photo</div>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
 
               <Card className="mb-8">
                 <CardContent className="p-6">
-                  <h3 className="text-xl font-semibold mb-4">🎥 Videos ({videoUrls.length})</h3>
+                  <h3 className="text-xl font-semibold mb-4">{t('videosSection')} ({videoUrls.length})</h3>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    {videoUrls.map((url, i) => (
+                    {videoDisplayUrls.map((url, i) => (
                       <div key={i} className="relative group">
                         <video src={url} controls className="w-full h-40 object-cover rounded-lg border" />
                         <button onClick={() => removeMedia('video', i)} className="absolute top-2 right-2 bg-red-500 hover:bg-red-600 text-white text-xs px-3 py-1 rounded-full shadow-md opacity-0 group-hover:opacity-100 transition">✕</button>
                       </div>
                     ))}
+                    {/* Add video icon/button inside the videos section */}
+                    <div 
+                      onClick={() => document.getElementById('video-camera')?.click()}
+                      className="flex flex-col items-center justify-center h-40 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition"
+                    >
+                      <div className="text-4xl mb-1">🎥</div>
+                      <div className="text-xs text-gray-500">Record Video</div>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
 
               <Card className="mb-8">
                 <CardContent className="p-6">
-                  <h3 className="text-xl font-semibold mb-4">📄 Receipts ({receiptUrls.length})</h3>
+                  <h3 className="text-xl font-semibold mb-4">{t('receiptsSection')} ({receiptUrls.length})</h3>
                   <Button onClick={() => document.getElementById('receipts-camera')?.click()} className="mb-4">
-                    📄 Scan / Take Photo of Receipt
+                    {t('scanReceipt')}
                   </Button>
                   <Button onClick={() => setIsLaborModalOpen(true)} className="mb-4 bg-[#14b8a6]">
-                    💼 Labor
+                    {t('laborButton')}
                   </Button>
                   <input id="receipts-camera" type="file" accept="image/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'receipt')} className="hidden" />
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    {receiptUrls.map((url, i) => (
+                    {receiptDisplayUrls.map((url, i) => (
                       <div key={i} className="relative group">
                         <img src={url} alt="" className="w-full h-40 object-cover rounded-lg border" />
                         <button onClick={() => removeMedia('receipt', i)} className="absolute top-2 right-2 bg-red-500 hover:bg-red-600 text-white text-xs px-3 py-1 rounded-full shadow-md opacity-0 group-hover:opacity-100 transition">✕</button>
@@ -1285,23 +3004,56 @@ export default function Home() {
 
               <Card className="mb-8">
                 <CardContent className="p-6">
-                  <h3 className="text-xl font-semibold mb-3">Terms & Conditions</h3>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-xl font-semibold">{t('termsConditionsEditor')}</h3>
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="outline" onClick={saveAsTemplate}>💾 Save as Template</Button>
+                      {savedTemplates.length > 0 && (
+                        <select 
+                          className="text-sm border rounded px-2 py-1"
+                          onChange={(e) => {
+                            const t = savedTemplates.find((tm: any) => tm.name === e.target.value);
+                            if (t) setTerms(t.text);
+                          }}
+                          defaultValue=""
+                        >
+                          <option value="">Load template...</option>
+                          {savedTemplates.map((t: any, i: number) => (
+                            <option key={i} value={t.name}>{t.name}</option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+                  </div>
                   <Textarea value={terms} onChange={e => setTerms(e.target.value)} rows={6} />
                 </CardContent>
               </Card>
 
               <div id="print-document" className="max-w-4xl mx-auto bg-white p-10 shadow-2xl hidden print:block">
-                <h1 className="text-4xl font-bold text-center mb-8">{profile.company || 'Your Company'}</h1>
-                {(profile.phone || profile.email) && (
+                <div className="flex items-center gap-4 mb-2">
+                  {profile.logoUrl && (
+                    <img src={profile.logoUrl} alt="Logo" className={`${getLogoClass(profile.logoSize)} object-contain`} />
+                  )}
+                  <h1 className="text-4xl font-bold">{profile.company || 'Your Company'}</h1>
+                </div>
+                {(profile.phone || profile.email || profile.address || profile.city || profile.state || profile.zipCode) && (
                   <p className="text-center text-xl text-gray-600 mb-8">
                     {profile.phone && `📞 ${profile.phone}`}{profile.phone && profile.email && ' | '}{profile.email && `✉️ ${profile.email}`}
+                    {(profile.address || profile.city || profile.state || profile.zipCode) && (
+                      <span className="block text-sm mt-1">
+                        {profile.address}
+                        {profile.city && `, ${profile.city}`}
+                        {profile.state && `, ${profile.state}`}
+                        {profile.zipCode && ` ${profile.zipCode}`}
+                      </span>
+                    )}
                   </p>
                 )}
                 <div className="flex justify-between mb-8">
                   <div>
                     <strong>{documentType.toUpperCase()} # {invoiceNumber}</strong><br />
                     Date: {date}<br />
-                    Job: {jobName}
+                    Client: {jobName}
                   </div>
                   <div className="text-right">
                     <strong>Bill To:</strong><br />
@@ -1321,10 +3073,22 @@ export default function Home() {
                   <tbody>
                     {items.map((item, i) => (
                       <tr key={i} className="border-b">
-                        <td className="py-3">{item.description}</td>
+                        <td className="py-3">
+                          <span className="text-xs text-gray-500">Line {i + 1}: </span>{item.description}
+                          {profile.showPriceBreakdownByLine && (item.materialBreakdown || item.laborBreakdown) && (
+                            <div className="mt-1 text-[10px] text-gray-600 leading-tight pl-2">
+                              {item.materialBreakdown && (
+                                <div>Materials: {item.materialBreakdown.description || '—'} — {item.materialBreakdown.qty} {item.materialBreakdown.unit} × ${Number(item.materialBreakdown.unitPrice || 0).toFixed(2)} = ${Number(item.materialBreakdown.total || 0).toFixed(2)}</div>
+                              )}
+                              {item.laborBreakdown && (
+                                <div>Labor: {item.laborBreakdown.description || '—'} — {item.laborBreakdown.hours} hrs × ${Number(item.laborBreakdown.rate || 0).toFixed(2)}/hr = ${Number(item.laborBreakdown.total || 0).toFixed(2)}</div>
+                              )}
+                            </div>
+                          )}
+                        </td>
                         <td className="py-3 text-right">{item.qty}</td>
-                        <td className="py-3 text-right">${item.price.toFixed(2)}</td>
-                        <td className="py-3 text-right">${item.total.toFixed(2)}</td>
+                        <td className="py-3 text-right">{canSeePricing ? `$${item.price.toFixed(2)}` : '—'}</td>
+                        <td className="py-3 text-right">{canSeePricing ? `$${item.total.toFixed(2)}` : '—'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1333,15 +3097,62 @@ export default function Home() {
                 {laborAmount > 0 && (
                   <div className="text-right text-2xl font-semibold text-[#14b8a6]">Labor: ${laborAmount.toFixed(2)}</div>
                 )}
-                <div className="text-right text-2xl font-semibold text-[#14b8a6]">Taxes ({state || '—'} {baseTaxRate}%): ${taxAmount.toFixed(2)}</div>
-                <div className="text-right text-4xl font-bold">Total: ${grandTotal.toFixed(2)}</div>
+                {canSeeFinancials ? (
+                  <>
+                    <div className="text-right text-2xl font-semibold text-[#14b8a6]">Taxes ({state || '—'} {baseTaxRate}%): ${taxAmount.toFixed(2)}</div>
+                    <div className="text-right text-4xl font-bold">Total: ${grandTotal.toFixed(2)}</div>
+                  </>
+                ) : (
+                  <div className="text-right text-lg text-gray-500">Financial details restricted</div>
+                )}
 
-                {profile.disclosure && (
+                {profile.chargeCCFee && ccFeePercent > 0 && (
+                  <div className="text-right mt-1 text-sm text-gray-600">
+                    Credit card processing fee ({ccFeePercent}%): ${ccFeeAmount.toFixed(2)}<br />
+                    <span className="font-semibold">If paid by card: ${totalWithCCFee.toFixed(2)}</span>
+                  </div>
+                )}
+
+                {terms && (
                   <div className="mt-12">
-                    <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Disclosure / Notes</h3>
+                    <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Terms & Conditions</h3>
                     <div className="text-gray-700 leading-relaxed whitespace-pre-wrap border rounded-xl p-6 bg-gray-50">
-                      {profile.disclosure}
+                      {terms}
                     </div>
+                  </div>
+                )}
+
+                {profile.certificateUrl && (
+                  <div className="mt-12">
+                    <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Certificate of Insurance</h3>
+                    
+                    {profile.certificateUrl.toLowerCase().endsWith('.pdf') ? (
+                      <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+                        <div className="text-3xl mb-2">📄</div>
+                        <p className="font-medium">PDF Certificate of Insurance</p>
+                        <a 
+                          href={profile.certificateUrl} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="inline-block mt-3 text-sm px-4 py-2 bg-[#10b981] hover:bg-[#0ea16b] text-white rounded"
+                        >
+                          Open PDF in new tab
+                        </a>
+                      </div>
+                    ) : (
+                      <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+                        <div className="text-3xl mb-2">🖼️</div>
+                        <p className="font-medium mb-2">Certificate of Insurance</p>
+                        <a 
+                          href={profile.certificateUrl} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="inline-block mt-1 text-sm px-4 py-2 bg-[#10b981] hover:bg-[#0ea16b] text-white rounded"
+                        >
+                          Click here for Certificate of Insurance
+                        </a>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1351,23 +3162,21 @@ export default function Home() {
                     Deposit due: <span className="font-semibold">${(grandTotal * (profile.depositPercentage || 0) / 100).toFixed(2)}</span> 
                     <span className="text-sm text-gray-500 ml-2">({profile.depositPercentage || 0}% of total)</span>
                   </div>
+                  {profile.chargeCCFee && (
+                    <div className="mt-2 text-sm text-gray-600">
+                      Credit card payments include an additional {ccFeePercent}% processing fee
+                    </div>
+                  )}
                 </div>
 
                 {photoUrls.length > 0 && (
                   <div className="mt-12">
                     <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Attached Photos</h3>
                     <div className="grid grid-cols-2 gap-6">
-                      {photoUrls.map((url, i) => (
+                      {photoDisplayUrls.map((url, i) => (
                         <img key={i} src={url} alt={`Photo ${i + 1}`} className="w-full border rounded-xl shadow-sm max-h-64 object-contain" />
                       ))}
                     </div>
-                  </div>
-                )}
-
-                {profile.certificateUrl && (
-                  <div className="mt-12">
-                    <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Certificate of Insurance</h3>
-                    <img src={profile.certificateUrl} alt="Certificate of Insurance" className="max-h-96 mx-auto border rounded-lg shadow" />
                   </div>
                 )}
               </div>
@@ -1376,8 +3185,8 @@ export default function Home() {
 
           {view === 'profileView' && (
             <div>
-              <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to Dashboard</Button>
-              <h2 className="text-3xl font-semibold mb-8">Company Profile</h2>
+              <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to {t('dashboard')}</Button>
+              <h2 className="text-3xl font-semibold mb-8">{t('companyProfile')}</h2>
 
               <div className="flex border-b mb-8">
                 <button 
@@ -1399,26 +3208,200 @@ export default function Home() {
                   <CardContent className="p-8 space-y-8">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div>
-                        <label className="block text-sm font-semibold mb-2">Company Name</label>
+                        <label className="block text-sm font-semibold mb-2">{t('companyName')}</label>
                         <Input value={profile.company} onChange={e => setProfile({...profile, company: e.target.value})} />
                       </div>
                       <div>
-                        <label className="block text-sm font-semibold mb-2">Slogan</label>
+                        <label className="block text-sm font-semibold mb-2">{t('slogan')}</label>
                         <Input value={profile.slogan} onChange={e => setProfile({...profile, slogan: e.target.value})} />
                       </div>
                       <div>
-                        <label className="block text-sm font-semibold mb-2">Phone</label>
+                        <label className="block text-sm font-semibold mb-2">{t('phone')}</label>
                         <Input value={profile.phone} onChange={e => setProfile({...profile, phone: e.target.value})} />
                       </div>
                       <div>
-                        <label className="block text-sm font-semibold mb-2">Email</label>
+                        <label className="block text-sm font-semibold mb-2">{t('email')}</label>
                         <Input value={profile.email} onChange={e => setProfile({...profile, email: e.target.value})} />
                       </div>
                       <div className="md:col-span-2">
-                        <label className="block text-sm font-semibold mb-2">Address</label>
-                        <Input value={profile.address} onChange={e => setProfile({...profile, address: e.target.value})} />
+                        <label className="block text-sm font-semibold mb-2">{t('address')}</label>
+                        <Input value={profile.address} onChange={e => setProfile({...profile, address: e.target.value})} placeholder="Street address" />
+                      </div>
+                      <div className="grid grid-cols-3 gap-4 md:col-span-2">
+                        <div>
+                          <label className="block text-sm font-semibold mb-2">{t('city')}</label>
+                          <Input value={profile.city} onChange={e => setProfile({...profile, city: e.target.value})} />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-semibold mb-2">{t('state')}</label>
+                          <Input value={profile.state} onChange={e => setProfile({...profile, state: e.target.value})} placeholder="CA" />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-semibold mb-2">{t('zipCode')}</label>
+                          <Input value={profile.zipCode} onChange={e => setProfile({...profile, zipCode: e.target.value})} />
+                        </div>
                       </div>
                     </div>
+
+                    <div className="pt-2">
+                      <Button 
+                        size="sm" 
+                        variant="outline" 
+                        onClick={saveProfile}
+                      >
+                        Save Company Info
+                      </Button>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold mb-2">{t('languageLabel') || 'Language / Idioma / Langue'}</label>
+                      <div className="flex gap-3">
+                        {[
+                          { code: 'en', label: 'English' },
+                          { code: 'es', label: 'Español' },
+                          { code: 'fr', label: 'Français' },
+                        ].map((lang) => (
+                          <button
+                            key={lang.code}
+                            onClick={() => {
+                              setProfile(prev => ({ ...prev, language: lang.code }));
+                              localStorage.setItem('appLanguage', lang.code);
+                              saveToDB();
+                            }}
+                            className={`px-4 py-2 text-sm rounded-lg border ${
+                              profile.language === lang.code 
+                                ? 'bg-[#10b981] text-white border-[#10b981]' 
+                                : 'bg-white hover:bg-gray-50 border-gray-300'
+                            }`}
+                          >
+                            {lang.label}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">Changes the interface language (demo - more languages can be added)</p>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold mb-2">{t('termsConditions')}</label>
+                      <Textarea 
+                        value={profile.disclosure} 
+                        onChange={e => setProfile({...profile, disclosure: e.target.value})} 
+                        rows={4}
+                        placeholder="Enter your standard terms and conditions here..."
+                      />
+                      <Button 
+                        size="sm" 
+                        variant="outline" 
+                        className="mt-2" 
+                        onClick={saveProfile}
+                      >
+                        {t('saveProfile')}
+                      </Button>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold mb-2">Default Deposit Percentage (%) of total bill</label>
+                      <Input 
+                        type="number" 
+                        value={profile.depositPercentage || 0} 
+                        onChange={e => setProfile({...profile, depositPercentage: parseFloat(e.target.value) || 0})}
+                        placeholder="10"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold mb-2">{t('logo')}</label>
+                      <input 
+                        type="file" 
+                        accept="image/*" 
+                        onChange={handleLogoUpload}
+                        className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-[#10b981] file:text-white hover:file:bg-[#0ea16b]"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">This will appear to the left of the company name in estimates and invoices.</p>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold mb-2">Logo Size</label>
+                      <div className="flex gap-4">
+                        {['small', 'medium', 'large'].map(size => (
+                          <label key={size} className="flex items-center gap-1 cursor-pointer text-sm">
+                            <input 
+                              type="radio" 
+                              name="logoSize" 
+                              value={size} 
+                              checked={profile.logoSize === size}
+                              onChange={(e) => {
+                                setProfile(prev => ({ ...prev, logoSize: e.target.value }));
+                                saveToDB();
+                              }}
+                              className="accent-[#10b981]"
+                            />
+                            <span className="capitalize">{size}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+
+                    {profile.logoUrl && (
+                      <div className="mt-2 flex items-center gap-3">
+                        <img src={profile.logoUrl} alt="Company Logo" className={`${getLogoClass(profile.logoSize)} object-contain border rounded`} />
+                        <button 
+                          onClick={() => {
+                            setProfile(prev => ({ ...prev, logoUrl: '' }));
+                            saveToDB();
+                          }}
+                          className="text-xs text-red-600 hover:text-red-800"
+                        >
+                          Remove logo
+                        </button>
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="block text-sm font-semibold mb-2">Certificate of Insurance</label>
+                      <input 
+                        type="file" 
+                        accept="application/pdf,image/jpeg,image/png,image/jpg" 
+                        onChange={handleCertificateUpload}
+                        className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-[#10b981] file:text-white hover:file:bg-[#0ea16b]"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">Accepted: PDF, JPG, PNG (most common formats for COI)</p>
+                    </div>
+
+                    {profile.certificateUrl && (
+                      <div className="mt-8 border rounded-lg p-6">
+                        <h3 className="font-semibold mb-4">Certificate of Insurance</h3>
+                        
+                        {profile.certificateUrl.toLowerCase().endsWith('.pdf') ? (
+                          <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center bg-gray-50">
+                            <div className="text-4xl mb-2">📄</div>
+                            <p className="font-medium mb-1">PDF Document</p>
+                            <p className="text-xs text-gray-500 mb-3">Certificate of Insurance</p>
+                            <a 
+                              href={profile.certificateUrl} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="inline-block px-5 py-2 bg-[#10b981] hover:bg-[#0ea16b] text-white text-sm font-semibold rounded-lg"
+                            >
+                              View / Download PDF
+                            </a>
+                          </div>
+                        ) : (
+                          <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center bg-gray-50">
+                            <div className="text-4xl mb-2">🖼️</div>
+                            <p className="font-medium mb-1">Certificate of Insurance</p>
+                            <a 
+                              href={profile.certificateUrl} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="inline-block px-5 py-2 bg-[#10b981] hover:bg-[#0ea16b] text-white text-sm font-semibold rounded-lg"
+                            >
+                              Click here for Certificate of Insurance
+                            </a>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     <div className="flex items-center justify-between">
                       <div>
@@ -1436,82 +3419,150 @@ export default function Home() {
                       </label>
                     </div>
 
-                    <div>
-                      <label className="block text-sm font-semibold mb-2">Disclosure / Notes</label>
-                      <Textarea 
-                        value={profile.disclosure} 
-                        onChange={e => setProfile({...profile, disclosure: e.target.value})} 
-                        rows={4}
-                        placeholder="Enter any disclosure text here..."
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-semibold mb-2">Default Deposit Percentage (%) of total bill</label>
-                      <Input 
-                        type="number" 
-                        value={profile.depositPercentage || 0} 
-                        onChange={e => setProfile({...profile, depositPercentage: parseFloat(e.target.value) || 0})}
-                        placeholder="10"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-semibold mb-2">Certificate of Insurance</label>
-                      <input 
-                        type="file" 
-                        accept=".pdf,image/*" 
-                        onChange={handleCertificateUpload}
-                        className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-[#10b981] file:text-white hover:file:bg-[#0ea16b]"
-                      />
-                    </div>
-
-                    {profile.certificateUrl && (
-                      <div className="mt-8 border rounded-lg p-6">
-                        <h3 className="font-semibold mb-4">Certificate of Insurance</h3>
-                        <a href={profile.certificateUrl} target="_blank" rel="noopener noreferrer">
-                          <img src={profile.certificateUrl} alt="Certificate of Insurance" className="max-h-96 mx-auto border rounded-lg shadow" />
-                        </a>
-                        <p className="text-xs text-gray-500 mt-2 text-center">Click image to open full size</p>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-semibold">Show Price Breakdown by Line</p>
+                        <p className="text-sm text-gray-500">Include material &amp; labor breakdown under each line in the estimate/invoice sent to client</p>
                       </div>
-                    )}
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input 
+                          type="checkbox" 
+                          checked={!!profile.showPriceBreakdownByLine} 
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            setProfile(prev => ({ ...prev, showPriceBreakdownByLine: checked }));
+                            saveToDB();
+                          }}
+                          className="sr-only peer"
+                        />
+                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]"></div>
+                      </label>
+                    </div>
 
                     <div className="border-t pt-8">
-                      <h3 className="font-semibold mb-4">Teammates</h3>
-                      <div className="flex gap-2 mb-6">
-                        <Input placeholder="teammate@email.com" id="teammate-email" className="flex-1" />
+                      <h3 className="font-semibold mb-4">{t('crew')}</h3>
+                      <p className="text-xs text-gray-500 -mt-2 mb-3">$20/month per additional account (set by Estimate Ace — charged when you add team/sub accounts).</p>
+                      <div className="flex flex-col gap-2 mb-6">
+                        <Input placeholder="crew@email.com" id="crew-email" className="flex-1" />
                         <Button onClick={() => {
-                          const input = document.getElementById('teammate-email') as HTMLInputElement;
-                          if (!input.value) return;
-                          const newTeammate = { email: input.value.trim(), role: 'limited' as 'full' | 'limited' };
-                          setProfile(prev => ({ ...prev, teammates: [...(prev.teammates || []), newTeammate] }));
-                          input.value = '';
-                        }}>Add</Button>
+                          const emailInput = document.getElementById('crew-email') as HTMLInputElement;
+                          const email = emailInput.value.trim();
+                          if (!email) return showMessage('Enter email for the additional account');
+
+                          if (profile.crewSubscriptionActive) {
+                            // Already subscribed, just add the account
+                            const newCrew = { 
+                              email, 
+                              role: 'limited' as 'full' | 'limited', 
+                              canSeePricing: false, 
+                              canSeeEstimatesAndFinancials: false 
+                            };
+                            setProfile(prev => ({
+                              ...prev,
+                              teammates: [...(prev.teammates || []), newCrew]
+                            }));
+                            emailInput.value = '';
+                            showMessage('✅ Additional account added! They can log in using just their email.');
+                            setTimeout(() => saveToDB(), 100);
+                          } else {
+                            // Need to activate the monthly charge for extra accounts
+                            setPendingCrewEmail(email);
+                            setSelectedCrewPaymentMethod(null);
+                            setIsCrewPayModalOpen(true);
+                            emailInput.value = '';
+                          }
+                        }}>Add Account (charges $20/mo)</Button>
                       </div>
                       <div className="space-y-3">
-                        {profile.teammates && profile.teammates.map((tm, index) => (
+                        {profile.teammates && profile.teammates.map((crew, index) => (
                           <div key={index} className="flex items-center justify-between border p-4 rounded-lg">
-                            <div className="font-medium">{tm.email}</div>
+                            <div className="font-medium">{crew.email}</div>
                             <div className="flex items-center gap-6">
                               <div className="flex items-center gap-2">
                                 <span className="text-sm">Full</span>
                                 <label className="relative inline-flex items-center cursor-pointer">
-                                  <input type="checkbox" checked={tm.role === 'full'} onChange={() => {
+                                  <input type="checkbox" checked={crew.role === 'full'} onChange={() => {
                                     const updated = [...profile.teammates];
                                     updated[index].role = updated[index].role === 'full' ? 'limited' : 'full';
                                     setProfile(prev => ({ ...prev, teammates: updated }));
+                                    saveToDB();
                                   }} className="sr-only peer" />
                                   <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]"></div>
                                 </label>
                                 <span className="text-sm">Limited</span>
                               </div>
+
+                              {/* Visibility permissions for this crew member (controlled by main account holder) */}
+                              <div className="flex items-center gap-4 text-xs">
+                                <label className="flex items-center gap-1 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={crew.canSeePricing ?? false}
+                                    onChange={() => {
+                                      const updated = [...profile.teammates];
+                                      updated[index].canSeePricing = !updated[index].canSeePricing;
+                                      setProfile(prev => ({ ...prev, teammates: updated }));
+                                      saveToDB();
+                                    }}
+                                    className="w-3 h-3 accent-[#10b981]"
+                                  />
+                                  <span>See pricing</span>
+                                </label>
+                                <label className="flex items-center gap-1 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={crew.canSeeEstimatesAndFinancials ?? false}
+                                    onChange={() => {
+                                      const updated = [...profile.teammates];
+                                      updated[index].canSeeEstimatesAndFinancials = !updated[index].canSeeEstimatesAndFinancials;
+                                      setProfile(prev => ({ ...prev, teammates: updated }));
+                                      saveToDB();
+                                    }}
+                                    className="w-3 h-3 accent-[#10b981]"
+                                  />
+                                  <span>See estimates & financials</span>
+                                </label>
+                              </div>
+
                               <Button variant="destructive" size="sm" onClick={() => {
+                                if (!confirm('Delete this crew/sub-contractor member?')) return;
                                 const updated = profile.teammates.filter((_, i) => i !== index);
                                 setProfile(prev => ({ ...prev, teammates: updated }));
-                              }}>Remove</Button>
+                                saveToDB();
+                              }}>Delete</Button>
                             </div>
                           </div>
                         ))}
+                      </div>
+
+                      {/* Subscription status and cancel option */}
+                      <div className="mt-4 pt-4 border-t flex flex-col gap-3">
+                        {profile.crewSubscriptionActive ? (
+                          <>
+                            <div className="flex items-center justify-between text-sm">
+                              <span className="text-green-600 font-medium">✓ Crew subscription active — $20/month</span>
+                              <Button 
+                                variant="outline" 
+                                size="sm" 
+                                onClick={() => {
+                                  if (!confirm('Cancel the $20/month Crew/Sub-contractors subscription?\n\nExisting members will remain but you will need to resubscribe to add new ones.')) return;
+                                  setProfile(prev => ({ ...prev, crewSubscriptionActive: false }));
+                                  showMessage('✅ Subscription canceled. $20/month billing stopped.');
+                                  saveToDB();
+                                }}
+                              >
+                                Cancel Subscription
+                              </Button>
+                            </div>
+                            <p className="text-[10px] text-gray-500">Canceling stops future billing. You can resubscribe anytime by adding another crew member.</p>
+                          </>
+                        ) : (
+                          profile.teammates && profile.teammates.length > 0 && (
+                            <div className="text-sm text-amber-600">
+                              Subscription inactive. Add a new crew member to reactivate at $20/month.
+                            </div>
+                          )
+                        )}
                       </div>
                     </div>
 
@@ -1532,17 +3583,17 @@ export default function Home() {
                         </label>
                         <label className="flex items-center gap-2">
                           <input type="checkbox" checked={exportOptions.photos} onChange={e => setExportOptions(prev => ({...prev, photos: e.target.checked}))} />
-                          Photos
+                          {t('photos')}
                         </label>
                         <label className="flex items-center gap-2">
                           <input type="checkbox" checked={exportOptions.videos} onChange={e => setExportOptions(prev => ({...prev, videos: e.target.checked}))} />
-                          Videos
+                          {t('videos')}
                         </label>
                       </div>
-                      <Button onClick={exportData} className="w-full bg-[#10b981]">Export Selected Data (CSV)</Button>
+                      <Button onClick={exportData} className="w-full bg-[#10b981]">{t('exportData')}</Button>
                     </div>
 
-                    <Button onClick={saveProfile} className="w-full bg-[#10b981]">Save Profile</Button>
+                    <Button onClick={saveProfile} className="w-full bg-[#10b981]">{t('saveProfile')}</Button>
                   </CardContent>
                 </Card>
               )}
@@ -1551,7 +3602,7 @@ export default function Home() {
                 <Card className="mb-8">
                   <CardContent className="p-8">
                     <h3 className="text-xl font-semibold mb-6 flex items-center gap-2">
-                      <span>💳</span> Payment Methods
+                      <span>💳</span> {t('paymentMethods')}
                     </h3>
                     <div className="space-y-8">
                       {Object.entries(profile.paymentSettings || {}).map(([method, settings]: [string, any]) => (
@@ -1567,9 +3618,9 @@ export default function Home() {
                               <div className="font-semibold capitalize text-lg">{method}</div>
                               <div className="text-sm text-gray-500 flex items-center gap-1">
                                 {settings.connected ? (
-                                  <><span className="text-green-500">✓</span> Connected</>
+                                  <><span className="text-green-500">✓</span> {t('connected')}</>
                                 ) : (
-                                  'Not connected'
+                                  t('notConnected')
                                 )}
                               </div>
                             </div>
@@ -1589,13 +3640,56 @@ export default function Home() {
                               variant={settings.connected ? "outline" : "default"}
                               className={settings.connected ? "" : "bg-[#10b981]"}
                             >
-                              {settings.connected ? 'Manage' : 'Link Account'}
+                              {settings.connected ? t('manage') : t('linkAccount')}
                             </Button>
                           </div>
                         </div>
                       ))}
                     </div>
-                    <p className="text-xs text-gray-400 mt-8 text-center">Note: eCheck uses Stripe ACH. Zelle &amp; Venmo are manual transfers (you will confirm receipt in the app).</p>
+
+                    {/* Credit Card Processing Fee Toggle */}
+                    <div className="mt-8 pt-6 border-t">
+                      <h4 className="font-semibold text-lg mb-3 flex items-center gap-2">
+                        💳 Credit Card Processing Fee
+                      </h4>
+
+                      <label className="flex items-start gap-3 cursor-pointer mb-3">
+                        <input
+                          type="checkbox"
+                          checked={!!profile.chargeCCFee}
+                          onChange={(e) => setProfile(prev => ({ ...prev, chargeCCFee: e.target.checked }))}
+                          className="mt-1 w-5 h-5 accent-[#10b981]"
+                        />
+                        <div>
+                          <div className="font-medium">{t('chargeCCFee')}</div>
+                          <div className="text-sm text-gray-500">When enabled, the fee is added automatically when clients pay by card (Stripe / PayPal).</div>
+                        </div>
+                      </label>
+
+                      {profile.chargeCCFee && (
+                        <div className="ml-8 flex items-center gap-2">
+                          <span className="text-sm">Fee rate:</span>
+                          <Input
+                            type="number"
+                            step="0.1"
+                            min="0"
+                            max="10"
+                            value={profile.ccFeePercentage ?? 3}
+                            onChange={(e) => setProfile(prev => ({ 
+                              ...prev, 
+                              ccFeePercentage: parseFloat(e.target.value) || 0 
+                            }))}
+                            className="w-20 text-right"
+                          />
+                          <span className="text-sm">%</span>
+                          <span className="ml-3 text-xs text-gray-500">
+                            (example on ${grandTotal.toFixed(0)} = +${(grandTotal * ((profile.ccFeePercentage || 3)/100)).toFixed(2)})
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    <p className="text-xs text-gray-400 mt-8 text-center">Note: Payments and account linking are simulated for demo purposes. Replace with real integrations for production.</p>
                   </CardContent>
                 </Card>
               )}
@@ -1604,8 +3698,13 @@ export default function Home() {
 
           {view === 'reportsView' && (
             <div>
-              <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to Dashboard</Button>
+              <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to {t('dashboard')}</Button>
               <h2 className="text-3xl font-semibold mb-6">📊 Reports</h2>
+              {currentCrew && !canSeeFinancials && (
+                <div className="p-6 bg-yellow-50 border border-yellow-200 rounded">
+                  Financial reports and profit details are restricted for your crew access level.
+                </div>
+              )}
 
               <div className="flex border-b mb-6">
                 <button 
@@ -1684,63 +3783,69 @@ export default function Home() {
 
               {reportsSubTab === 'tax' && (
                 <div>
-                  <h3 className="font-semibold mb-6 text-xl">🧾 Tax Reports</h3>
+                  {currentCrew && !canSeeFinancials ? (
+                    <p className="text-sm text-gray-500">Tax reports are restricted.</p>
+                  ) : (
+                    <>
+                      <h3 className="font-semibold mb-6 text-xl">🧾 Tax Reports</h3>
 
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                    <Card>
-                      <CardContent className="p-6">
-                        <h4 className="text-sm font-semibold text-gray-500">TOTAL SALES TAX COLLECTED</h4>
-                        <div className="text-5xl font-bold text-[#10b981] mt-3">${totalSalesTaxCollected.toFixed(2)}</div>
-                        <p className="text-xs text-gray-500 mt-1">Year to Date</p>
-                      </CardContent>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                        <Card>
+                          <CardContent className="p-6">
+                            <h4 className="text-sm font-semibold text-gray-500">TOTAL SALES TAX COLLECTED</h4>
+                            <div className="text-5xl font-bold text-[#10b981] mt-3">${totalSalesTaxCollected.toFixed(2)}</div>
+                            <p className="text-xs text-gray-500 mt-1">Year to Date</p>
+                          </CardContent>
+                        </Card>
+
+                        <Card>
+                          <CardContent className="p-6">
+                            <h4 className="text-sm font-semibold text-gray-500">TAX-DEDUCTIBLE RECEIPTS</h4>
+                            <div className="text-5xl font-bold text-[#14b8a6] mt-3">${totalTaxDeductibleReceipts.toFixed(2)}</div>
+                            <p className="text-xs text-gray-500 mt-1">Materials &amp; Expenses</p>
+                          </CardContent>
+                        </Card>
+
+                        <Card>
+                          <CardContent className="p-6">
+                            <h4 className="text-sm font-semibold text-gray-500">NET TAXABLE PROFIT</h4>
+                            <div className="text-5xl font-bold text-[#1e293b] mt-3">${netTaxableProfit.toFixed(2)}</div>
+                            <p className="text-xs text-gray-500 mt-1">After expenses &amp; labor</p>
+                          </CardContent>
+                        </Card>
+                      </div>
+
+                      <Card className="mb-8">
+                        <CardContent className="p-6">
+                          <h4 className="font-semibold mb-4">Quarterly Tax Summary</h4>
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Quarter</TableHead>
+                                <TableHead className="text-right">Tax Collected</TableHead>
+                                <TableHead className="text-right">Deductible Expenses</TableHead>
+                                <TableHead className="text-right">Net Taxable</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {quarterlyTaxData.map(q => (
+                                <TableRow key={q.quarter}>
+                                  <TableCell className="font-medium">{q.quarter}</TableCell>
+                                  <TableCell className="text-right">${q.taxCollected.toFixed(2)}</TableCell>
+                                  <TableCell className="text-right">${q.expenses.toFixed(2)}</TableCell>
+                                  <TableCell className="text-right font-semibold">${(q.taxCollected - q.expenses).toFixed(2)}</TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </CardContent>
                     </Card>
 
-                    <Card>
-                      <CardContent className="p-6">
-                        <h4 className="text-sm font-semibold text-gray-500">TAX-DEDUCTIBLE RECEIPTS</h4>
-                        <div className="text-5xl font-bold text-[#14b8a6] mt-3">${totalTaxDeductibleReceipts.toFixed(2)}</div>
-                        <p className="text-xs text-gray-500 mt-1">Materials &amp; Expenses</p>
-                      </CardContent>
-                    </Card>
-
-                    <Card>
-                      <CardContent className="p-6">
-                        <h4 className="text-sm font-semibold text-gray-500">NET TAXABLE PROFIT</h4>
-                        <div className="text-5xl font-bold text-[#1e293b] mt-3">${netTaxableProfit.toFixed(2)}</div>
-                        <p className="text-xs text-gray-500 mt-1">After expenses &amp; labor</p>
-                      </CardContent>
-                    </Card>
-                  </div>
-
-                  <Card className="mb-8">
-                    <CardContent className="p-6">
-                      <h4 className="font-semibold mb-4">Quarterly Tax Summary</h4>
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Quarter</TableHead>
-                            <TableHead className="text-right">Tax Collected</TableHead>
-                            <TableHead className="text-right">Deductible Expenses</TableHead>
-                            <TableHead className="text-right">Net Taxable</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {quarterlyTaxData.map(q => (
-                            <TableRow key={q.quarter}>
-                              <TableCell className="font-medium">{q.quarter}</TableCell>
-                              <TableCell className="text-right">${q.taxCollected.toFixed(2)}</TableCell>
-                              <TableCell className="text-right">${q.expenses.toFixed(2)}</TableCell>
-                              <TableCell className="text-right font-semibold">${(q.taxCollected - q.expenses).toFixed(2)}</TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </CardContent>
-                  </Card>
-
-                  <Button onClick={exportTaxReport} className="w-full bg-[#10b981]">
-                    📤 Export Full Tax Report (CSV)
-                  </Button>
+                    <Button onClick={exportTaxReport} className="w-full bg-[#10b981]">
+                      📤 Export Full Tax Report (CSV)
+                    </Button>
+                  </>
+                  )}
                 </div>
               )}
             </div>
@@ -1748,8 +3853,8 @@ export default function Home() {
 
           {view === 'archivesView' && (
             <div>
-              <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to Dashboard</Button>
-              <h2 className="text-3xl font-semibold mb-6">Archived Documents</h2>
+              <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to {t('dashboard')}</Button>
+              <h2 className="text-3xl font-semibold mb-6">{t('archivedDocuments')}</h2>
               <div className="space-y-4">
                 {archivesList.map((est) => (
                   <div key={est.id} className="flex justify-between items-center border p-4 rounded-lg bg-white">
@@ -1758,8 +3863,8 @@ export default function Home() {
                       <div className="text-sm text-gray-500">{est.invoiceNumber} • Archived: {new Date(est.archived_at).toLocaleDateString()}</div>
                     </div>
                     <div className="flex gap-3">
-                      <Button size="sm" onClick={() => { loadSelectedEstimate(est); setView('editor'); }}>Open</Button>
-                      <Button size="sm" variant="destructive" onClick={() => deleteSelectedEstimate(est.id)}>Delete</Button>
+                      <Button size="sm" onClick={async () => { await loadSelectedEstimate(est); setView('editor'); }}>{t('open')}</Button>
+                      <Button size="sm" variant="destructive" onClick={() => deleteSelectedEstimate(est.id)}>{t('delete')}</Button>
                     </div>
                   </div>
                 ))}
@@ -1769,33 +3874,101 @@ export default function Home() {
 
           {view === 'sendPreview' && (
             <div className="max-w-4xl mx-auto">
-              <Button variant="outline" onClick={() => setView('editor')} className="mb-6">← Back to Editor</Button>
+              <Button variant="outline" onClick={() => setView('editor')} className="mb-6">← {t('backToEditor')}</Button>
               <h2 className="text-3xl font-semibold mb-6">
-                {documentType === 'invoice' ? '📄 Invoice Preview & Final Payment' : 'Preview of what will be sent'}
+                {documentType === 'invoice' ? '📄 Invoice Preview & Final Payment' : t('sendEstimate') + ' Preview'}
               </h2>
 
-              <Button 
-                onClick={() => { 
-                  setSelectedEmailsForSend([...emails]); 
-                  setSelectedPhonesForSend([...phones]); 
-                  setIsSendModalOpen(true); 
-                }} 
-                className="mb-6 bg-[#f97316] text-white px-8 py-3 text-lg">
-                📧 Choose Recipients & Send
-              </Button>
+              <div className="flex flex-wrap gap-3 mb-6">
+                <Button 
+                  onClick={async () => { 
+                    const nativeLang = getNativeLanguage(profile.zipCode || '', profile.state || '');
+                    let finalTerms = terms;
 
-              <div className="bg-white p-10 shadow-2xl rounded-2xl border mb-8">
-                <h1 className="text-4xl font-bold text-center mb-8">{profile.company || 'Your Company'}</h1>
-                {(profile.phone || profile.email) && (
+                    if (profile.language !== nativeLang && profile.disclosure) {
+                      const translateToNative = confirm(
+                        `The company's native language (based on zip/state) appears to be ${nativeLang.toUpperCase()}. ` +
+                        `Your current document language is ${profile.language.toUpperCase()}. ` +
+                        `Would you like to translate the Terms & Conditions to ${nativeLang.toUpperCase()} for the recipient?`
+                      );
+                      if (translateToNative) {
+                        try {
+                          // Authenticated proxy
+                          const tHeaders: any = { 'Content-Type': 'application/json' };
+                          if (supabase) {
+                            const { data: { session } } = await supabase.auth.getSession();
+                            if (session?.access_token) tHeaders['Authorization'] = `Bearer ${session.access_token}`;
+                          }
+
+                          const res = await fetch('/api/translate', {
+                            method: 'POST',
+                            headers: tHeaders,
+                            body: JSON.stringify({
+                              text: terms || profile.disclosure,
+                              from: profile.language,
+                              to: nativeLang
+                            })
+                          });
+                          const data = await res.json();
+                          if (data.translatedText) finalTerms = data.translatedText;
+                        } catch (e) {
+                          showMessage('⚠️ Could not translate Terms. Sending in current language. (Grok translation failed)');
+                        }
+                      }
+                    }
+
+                    // Temporarily use translated terms for send if applicable
+                    const originalTerms = terms;
+                    if (finalTerms !== terms) {
+                      setTerms(finalTerms);
+                      // Restore after send decision (simple approach)
+                      setTimeout(() => setTerms(originalTerms), 1000);
+                    }
+
+                    setSelectedEmailsForSend([...emails]); 
+                    setSelectedPhonesForSend([...phones]); 
+                    setIsSendModalOpen(true); 
+                  }} 
+                  className="bg-[#f97316] text-white px-8 py-3 text-lg">
+                  📧 Choose Recipients & Send
+                </Button>
+
+                <Button 
+                  onClick={() => {
+                    // One combined button: generate professional PDF (user can print or save from PDF viewer)
+                    saveAsPDF();
+                  }} 
+                  variant="outline" 
+                  className="px-6 py-3 text-lg">
+                  🖨️ Print / Save PDF
+                </Button>
+              </div>
+
+              <div id="preview-document" className="bg-white p-10 shadow-2xl rounded-2xl border mb-8">
+                <div className="flex items-center gap-4 mb-2">
+                  {profile.logoUrl && (
+                    <img src={profile.logoUrl} alt="Logo" className={`${getLogoClass(profile.logoSize)} object-contain`} />
+                  )}
+                  <h1 className="text-4xl font-bold">{profile.company || 'Your Company'}</h1>
+                </div>
+                {(profile.phone || profile.email || profile.address || profile.city || profile.state || profile.zipCode) && (
                   <p className="text-center text-xl text-gray-600 mb-8">
                     {profile.phone && `📞 ${profile.phone}`}{profile.phone && profile.email && ' | '}{profile.email && `✉️ ${profile.email}`}
+                    {(profile.address || profile.city || profile.state || profile.zipCode) && (
+                      <span className="block text-sm mt-1">
+                        {profile.address}
+                        {profile.city && `, ${profile.city}`}
+                        {profile.state && `, ${profile.state}`}
+                        {profile.zipCode && ` ${profile.zipCode}`}
+                      </span>
+                    )}
                   </p>
                 )}
                 <div className="flex justify-between mb-8">
                   <div>
                     <strong>{documentType.toUpperCase()} # {invoiceNumber}</strong><br />
                     Date: {date}<br />
-                    Job: {jobName}
+                    Client: {jobName}
                   </div>
                   <div className="text-right">
                     <strong>Bill To:</strong><br />
@@ -1815,22 +3988,74 @@ export default function Home() {
                   <tbody>
                     {items.map((item, i) => (
                       <tr key={i} className="border-b">
-                        <td className="py-3">{item.description}</td>
+                        <td className="py-3">
+                          <span className="text-xs text-gray-500">Line {i + 1}: </span>{item.description}
+                          {profile.showPriceBreakdownByLine && (item.materialBreakdown || item.laborBreakdown) && (
+                            <div className="mt-1 text-[10px] text-gray-600 leading-tight pl-2">
+                              {item.materialBreakdown && (
+                                <div>Materials: {item.materialBreakdown.description || '—'} — {item.materialBreakdown.qty} {item.materialBreakdown.unit} × ${Number(item.materialBreakdown.unitPrice || 0).toFixed(2)} = ${Number(item.materialBreakdown.total || 0).toFixed(2)}</div>
+                              )}
+                              {item.laborBreakdown && (
+                                <div>Labor: {item.laborBreakdown.description || '—'} — {item.laborBreakdown.hours} hrs × ${Number(item.laborBreakdown.rate || 0).toFixed(2)}/hr = ${Number(item.laborBreakdown.total || 0).toFixed(2)}</div>
+                              )}
+                            </div>
+                          )}
+                        </td>
                         <td className="py-3 text-right">{item.qty}</td>
-                        <td className="py-3 text-right">${item.price.toFixed(2)}</td>
-                        <td className="py-3 text-right">${item.total.toFixed(2)}</td>
+                        <td className="py-3 text-right">{canSeePricing ? `$${item.price.toFixed(2)}` : '—'}</td>
+                        <td className="py-3 text-right">{canSeePricing ? `$${item.total.toFixed(2)}` : '—'}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
-                <div className="text-right text-3xl font-bold">Total: ${grandTotal.toFixed(2)}</div>
+                <div className="text-right text-3xl font-bold">{canSeeFinancials ? `Total: $${grandTotal.toFixed(2)}` : 'Financial details restricted'}</div>
+                {profile.chargeCCFee && ccFeePercent > 0 && (
+                  <div className="text-right mt-1 text-sm text-gray-600">
+                    Credit card fee ({ccFeePercent}%): ${ccFeeAmount.toFixed(2)} &nbsp;
+                    <span className="font-semibold text-[#f59e0b]">Card total: ${totalWithCCFee.toFixed(2)}</span>
+                  </div>
+                )}
 
-                {profile.disclosure && (
+                {terms && (
                   <div className="mt-12">
-                    <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Disclosure / Notes</h3>
+                    <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Terms & Conditions</h3>
                     <div className="text-gray-700 leading-relaxed whitespace-pre-wrap border rounded-xl p-6 bg-gray-50">
-                      {profile.disclosure}
+                      {terms}
                     </div>
+                  </div>
+                )}
+
+                {profile.certificateUrl && (
+                  <div className="mt-12">
+                    <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Certificate of Insurance</h3>
+                    
+                    {profile.certificateUrl.toLowerCase().endsWith('.pdf') ? (
+                      <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+                        <div className="text-3xl mb-2">📄</div>
+                        <p className="font-medium">PDF Certificate of Insurance</p>
+                        <a 
+                          href={profile.certificateUrl} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="inline-block mt-3 text-sm px-4 py-2 bg-[#10b981] hover:bg-[#0ea16b] text-white rounded"
+                        >
+                          Open PDF in new tab
+                        </a>
+                      </div>
+                    ) : (
+                      <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+                        <div className="text-3xl mb-2">🖼️</div>
+                        <p className="font-medium mb-2">Certificate of Insurance</p>
+                        <a 
+                          href={profile.certificateUrl} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="inline-block mt-1 text-sm px-4 py-2 bg-[#10b981] hover:bg-[#0ea16b] text-white rounded"
+                        >
+                          Click here for Certificate of Insurance
+                        </a>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1838,12 +4063,16 @@ export default function Home() {
                   <div className="mt-12 text-center">
                     <Button 
                       onClick={() => {
-                        const deposit = grandTotal * (profile.depositPercentage || 0) / 100;
+                        let deposit = grandTotal * (profile.depositPercentage || 0) / 100;
+                        if (profile.chargeCCFee) {
+                          deposit = deposit * (1 + (profile.ccFeePercentage || 3) / 100);
+                        }
                         openPaymentModal('deposit', deposit);
                       }}
                       className="w-full text-3xl py-8 bg-[#10b981] hover:bg-[#0ea16b] text-white font-semibold rounded-3xl shadow-lg"
                     >
-                      Pay Deposit Now (${(grandTotal * (profile.depositPercentage || 0) / 100).toFixed(2)})
+                      Deposit Due (${(grandTotal * (profile.depositPercentage || 0) / 100 * (profile.chargeCCFee ? (1 + (profile.ccFeePercentage || 3)/100) : 1)).toFixed(2)})
+                      {profile.chargeCCFee && <span className="text-sm block mt-1 font-normal opacity-90">(includes {profile.ccFeePercentage || 3}% CC fee)</span>}
                     </Button>
                   </div>
                 )}
@@ -1854,14 +4083,23 @@ export default function Home() {
                     <p className="text-center text-xl mt-3">
                       Deposit paid on estimate: <strong>{profile.depositPercentage}%</strong><br />
                       Remainder due: <strong>{100 - (profile.depositPercentage || 0)}%</strong> = <span className="font-bold text-2xl"> ${(grandTotal * (100 - (profile.depositPercentage || 0)) / 100).toFixed(2)}</span>
+                      {profile.chargeCCFee && (
+                        <span className="block text-sm mt-1 text-amber-700">
+                          + {profile.ccFeePercentage || 3}% CC processing fee applied at checkout
+                        </span>
+                      )}
                     </p>
                     <Button 
                       onClick={() => {
-                        const remainder = grandTotal * (100 - (profile.depositPercentage || 0)) / 100;
+                        let remainder = grandTotal * (100 - (profile.depositPercentage || 0)) / 100;
+                        if (profile.chargeCCFee) {
+                          remainder = remainder * (1 + (profile.ccFeePercentage || 3) / 100);
+                        }
                         openPaymentModal('balance', remainder);
                       }}
                       className="w-full mt-6 py-8 text-2xl font-bold bg-[#f59e0b] hover:bg-orange-600 text-white rounded-3xl">
-                      Pay the Balance Now (${(grandTotal * (100 - (profile.depositPercentage || 0)) / 100).toFixed(2)})
+                      Pay the Balance Now (${(grandTotal * (100 - (profile.depositPercentage || 0)) / 100 * (profile.chargeCCFee ? (1 + (profile.ccFeePercentage || 3)/100) : 1)).toFixed(2)})
+                      {profile.chargeCCFee && <span className="text-xs block mt-1 font-normal opacity-90">(includes CC fee)</span>}
                     </Button>
                     <p className="text-center text-xs text-gray-500 mt-3">Clicking this completes the invoice conversion</p>
                   </div>
@@ -1871,17 +4109,10 @@ export default function Home() {
                   <div className="mt-12">
                     <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Attached Photos</h3>
                     <div className="grid grid-cols-2 gap-6">
-                      {photoUrls.map((url, i) => (
+                      {photoDisplayUrls.map((url, i) => (
                         <img key={i} src={url} alt={`Photo ${i + 1}`} className="w-full border rounded-xl shadow-sm max-h-64 object-contain" />
                       ))}
                     </div>
-                  </div>
-                )}
-
-                {profile.certificateUrl && (
-                  <div className="mt-12">
-                    <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Certificate of Insurance</h3>
-                    <img src={profile.certificateUrl} alt="Certificate of Insurance" className="max-h-96 mx-auto border rounded-lg shadow" />
                   </div>
                 )}
               </div>
@@ -1893,39 +4124,49 @@ export default function Home() {
         <div className="bg-white border-t shadow-inner flex items-center justify-around py-2 px-1 text-xs">
           <button onClick={goToDashboard} className={`flex flex-col items-center flex-1 py-1 ${view === 'dashboard' ? 'text-[#10b981]' : 'text-gray-500'}`}>
             <span className="text-3xl mb-0.5">📊</span>
-            <span>Dashboard</span>
+            <span>{t('dashboard')}</span>
           </button>
           <button onClick={() => setView('estimatesList')} className="flex flex-col items-center flex-1 py-1 text-gray-500">
             <span className="text-3xl mb-0.5">📋</span>
-            <span>Estimate</span>
+            <span>{t('estimates')}</span>
           </button>
           <button onClick={() => setView('invoicesList')} className="flex flex-col items-center flex-1 py-1 text-gray-500">
             <span className="text-3xl mb-0.5">💰</span>
-            <span>Invoice</span>
+            <span>{t('invoices')}</span>
           </button>
           <button onClick={() => openNewDocument('estimate')} className="flex flex-col items-center flex-1 py-1 text-gray-500">
             <span className="text-3xl mb-0.5">📄</span>
-            <span>New Estimate</span>
+            <span>{t('newEstimate')}</span>
           </button>
           <button onClick={() => setView('reportsView')} className="flex flex-col items-center flex-1 py-1 text-gray-500">
             <span className="text-3xl mb-0.5">📊</span>
-            <span>Reports</span>
+            <span>{t('reports')}</span>
           </button>
           <button onClick={openCalendarModal} className="flex flex-col items-center flex-1 py-1 text-gray-500">
             <span className="text-3xl mb-0.5">📅</span>
-            <span>Calendar</span>
+            <span>{t('calendar')}</span>
           </button>
-          <button onClick={() => setView('profileView')} className="flex flex-col items-center flex-1 py-1 text-gray-500">
+          <button 
+            onClick={() => {
+              if (currentCrew) {
+                showMessage('Profile editing is restricted for crew accounts.');
+                return;
+              }
+              setView('profileView');
+            }} 
+            className="flex flex-col items-center flex-1 py-1 text-gray-500">
             <span className="text-3xl mb-0.5">👤</span>
-            <span>Profile</span>
+            <span>{t('profile')}</span>
           </button>
         </div>
       </div>
 
+      <ToastContainer />
+
       {/* Load Modal */}
       <Dialog open={isLoadModalOpen} onOpenChange={setIsLoadModalOpen}>
         <DialogContent className="max-w-2xl">
-          <DialogHeader><DialogTitle>Saved Documents</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t('savedDocuments')}</DialogTitle></DialogHeader>
           <div className="max-h-96 overflow-auto">
             {savedEstimatesList.map(est => (
               <div key={est.id} className="flex justify-between items-center p-4 border-b">
@@ -1934,8 +4175,8 @@ export default function Home() {
                   <div className="text-xs text-gray-500">{est.date}</div>
                 </div>
                 <div className="flex gap-2">
-                  <Button size="sm" onClick={() => { loadSelectedEstimate(est); setIsLoadModalOpen(false); setView('editor'); }}>Load</Button>
-                  <Button size="sm" variant="destructive" onClick={() => deleteSelectedEstimate(est.id)}>Delete</Button>
+                  <Button size="sm" onClick={async () => { await loadSelectedEstimate(est); setIsLoadModalOpen(false); setView('editor'); }}>{t('load')}</Button>
+                  <Button size="sm" variant="destructive" onClick={() => deleteSelectedEstimate(est.id)}>{t('delete')}</Button>
                 </div>
               </div>
             ))}
@@ -2111,7 +4352,7 @@ export default function Home() {
                     <div className="flex gap-3">
                       <Button 
                         size="sm" 
-                        onClick={() => useQuickLine(quick)}
+                        onClick={() => applyQuickLine(quick)}
                         className="bg-[#10b981]"
                       >
                         Use
@@ -2146,17 +4387,23 @@ export default function Home() {
               <label className="block text-sm font-semibold mb-2">Select Estimate</label>
               <select 
                 className="w-full border rounded-xl p-3"
+                value={selectedEstimateForCalendar?.id || ''}
                 onChange={e => {
-                  const selected = savedEstimatesList.find(est => est.id === e.target.value);
+                  const selected = savedEstimatesList.find(
+                    est => est.id === e.target.value && 
+                           (est.documentType === 'estimate' || est.invoiceNumber?.startsWith('EST'))
+                  );
                   setSelectedEstimateForCalendar(selected || null);
                 }}
               >
                 <option value="">— Choose an estimate —</option>
-                {savedEstimatesList.map(est => (
-                  <option key={est.id} value={est.id}>
-                    {est.jobName || 'Untitled'} — {est.invoiceNumber}
-                  </option>
-                ))}
+                {savedEstimatesList
+                  .filter(est => est.documentType === 'estimate' || est.invoiceNumber?.startsWith('EST'))
+                  .map(est => (
+                    <option key={est.id} value={est.id}>
+                      {est.jobName || 'Untitled'} — {est.invoiceNumber}
+                    </option>
+                  ))}
               </select>
             </div>
 
@@ -2188,6 +4435,11 @@ export default function Home() {
             <div className="text-center mb-6">
               <div className="text-5xl font-bold text-[#10b981]">${paymentAmount.toFixed(2)}</div>
               <p className="text-sm text-gray-500 mt-1">to complete your {paymentType}</p>
+              {profile.chargeCCFee && ccFeePercent > 0 && (
+                <p className="text-xs text-amber-600 mt-1">
+                  (includes {ccFeePercent}% credit card processing fee)
+                </p>
+              )}
             </div>
 
             <div className="space-y-3">
@@ -2236,9 +4488,110 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* PHOTO CAMERA MODAL - stays open on mobile until manually closed */}
+      {/* PAYMENT MODAL FOR ADDING EXTRA ACCOUNTS ($20/mo) */}
+      <Dialog open={isCrewPayModalOpen} onOpenChange={setIsCrewPayModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>💳 Add Additional Account — $20/mo</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <div className="text-center mb-4">
+              <p>Charge <strong>$20/month</strong> to add another user account.</p>
+              <div className="mt-2">
+                Adding account for: <span className="font-semibold">{pendingCrewEmail}</span>
+              </div>
+            </div>
+
+            <div className="text-center mb-6">
+              <div className="text-4xl font-bold text-[#10b981]">$20</div>
+              <p className="text-xs text-gray-500">per month</p>
+            </div>
+
+            <div className="space-y-3">
+              {Object.entries(profile.paymentSettings || {}).map(([method, settings]: [string, any]) => {
+                if (!settings?.enabled) return null;
+                return (
+                  <button
+                    key={method}
+                    onClick={() => setSelectedCrewPaymentMethod(method)}
+                    className={`w-full flex items-center gap-4 p-4 border-2 rounded-2xl hover:bg-gray-50 transition-all ${selectedCrewPaymentMethod === method ? 'border-[#10b981] bg-green-50' : 'border-gray-200'}`}
+                  >
+                    <span className="text-3xl flex-shrink-0">
+                      {method === 'stripe' ? '💳' : 
+                       method === 'echeck' ? '🏦' :
+                       method === 'paypal' ? '💰' :
+                       method === 'venmo' ? '📱' : '🏦'}
+                    </span>
+                    <div className="flex-1 text-left">
+                      <div className="font-semibold capitalize">{method}</div>
+                      <div className="text-xs text-gray-500">
+                        {method === 'stripe' ? 'Cards, Apple Pay, Google Pay' : 
+                         method === 'echeck' ? 'Bank account (ACH)' : 
+                         method === 'paypal' ? 'PayPal balance or card' : 
+                         method === 'venmo' ? 'Mobile app payment' : 'Bank transfer'}
+                      </div>
+                    </div>
+                    {settings.connected && <span className="text-green-500 text-xs font-medium">✓ Connected</span>}
+                  </button>
+                );
+              })}
+            </div>
+
+            {Object.values(profile.paymentSettings || {}).every((s: any) => !s?.enabled) && (
+              <p className="text-xs text-red-500 mt-2 text-center">No payment methods enabled. Enable one in the Payments tab.</p>
+            )}
+          </div>
+          <DialogFooter className="flex gap-3">
+            <Button variant="outline" onClick={() => setIsCrewPayModalOpen(false)} className="flex-1">
+              Cancel
+            </Button>
+            <Button 
+              onClick={() => {
+                if (!selectedCrewPaymentMethod) {
+                  showMessage('Please select a payment method');
+                  return;
+                }
+                const method = selectedCrewPaymentMethod;
+                setIsCrewPayModalOpen(false);
+
+                // Add the additional account now that "payment" succeeded
+                const newCrew = { 
+                  email: pendingCrewEmail, 
+                  role: 'limited' as 'full' | 'limited', 
+                  canSeePricing: false, 
+                  canSeeEstimatesAndFinancials: false 
+                };
+                setProfile(prev => ({
+                  ...prev,
+                  teammates: [...(prev.teammates || []), newCrew],
+                  crewSubscriptionActive: true
+                }));
+
+                showMessage(`✅ [DEMO] Extra account added for ${pendingCrewEmail}.\n$20/month (simulated charge) for this additional account.`);
+
+                // Persist
+                setTimeout(() => saveToDB(), 150);
+
+                // Clean up
+                setPendingCrewEmail('');
+                setSelectedCrewPaymentMethod(null);
+              }}
+              disabled={!selectedCrewPaymentMethod}
+              className="flex-1 bg-[#10b981]"
+            >
+              Pay $20/mo &amp; Activate Account
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* PHOTO CAMERA MODAL - stays open until manually closed so you can take multiple photos */}
       <Dialog open={isPhotoCameraOpen} onOpenChange={setIsPhotoCameraOpen}>
-        <DialogContent className="max-w-4xl p-0 h-[90vh] flex flex-col">
+        <DialogContent 
+          className="max-w-4xl p-0 h-[90vh] flex flex-col"
+          onInteractOutside={(e) => e.preventDefault()}
+          onEscapeKeyDown={(e) => e.preventDefault()}
+        >
           <DialogHeader className="px-6 py-4 border-b">
             <DialogTitle className="flex items-center justify-between">
               📸 Live Camera
@@ -2255,6 +4608,7 @@ export default function Home() {
               autoPlay
               playsInline
               muted
+              controls={false}
             />
             <canvas ref={canvasRef} className="hidden" />
           </div>
@@ -2268,6 +4622,7 @@ export default function Home() {
           </div>
         </DialogContent>
       </Dialog>
+      </ErrorBoundary>
     </>
   );
 }
