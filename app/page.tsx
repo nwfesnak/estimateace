@@ -2027,8 +2027,11 @@ export default function Home() {
     photoUploadInputRef.current?.click();
   };
 
+  const nativeMultiCaptureRef = useRef(false);
+
   const triggerNativePhotoCapture = () => {
     setIsPhotoPickerOpen(false);
+    nativeMultiCaptureRef.current = true;
     photoCameraCaptureInputRef.current?.click();
   };
 
@@ -2043,14 +2046,13 @@ export default function Home() {
   const handleTakePhotoOption = async () => {
     setIsPhotoPickerOpen(false);
 
-    if (isMobileDevice()) {
-      triggerNativePhotoCapture();
-      return;
-    }
+    const openedLiveCamera = await openPhotoCamera();
+    if (openedLiveCamera) return;
 
     const cameraAvailable = await hasVideoInput();
-    if (cameraAvailable) {
-      await openPhotoCamera();
+    if (isMobileDevice() || cameraAvailable) {
+      showMessage('Each photo saves automatically. Cancel the camera when you are finished.');
+      triggerNativePhotoCapture();
       return;
     }
 
@@ -2058,17 +2060,31 @@ export default function Home() {
     photoUploadInputRef.current?.click();
   };
 
-  const handlePhotoFileChange = (files: FileList | null) => {
+  const handlePhotoUploadChange = (files: FileList | null) => {
     void handleMediaUpload(files, 'photo');
     if (photoUploadInputRef.current) photoUploadInputRef.current.value = '';
-    if (photoCameraCaptureInputRef.current) photoCameraCaptureInputRef.current.value = '';
   };
 
-  // NEW CAMERA FUNCTIONS
-  const openPhotoCamera = async () => {
+  const handlePhotoCameraCaptureChange = (files: FileList | null) => {
+    if (!files?.length) {
+      nativeMultiCaptureRef.current = false;
+      return;
+    }
+
+    void handleMediaUpload(files, 'photo');
+    if (photoCameraCaptureInputRef.current) photoCameraCaptureInputRef.current.value = '';
+
+    if (nativeMultiCaptureRef.current) {
+      window.setTimeout(() => {
+        photoCameraCaptureInputRef.current?.click();
+      }, 350);
+    }
+  };
+
+  const openPhotoCamera = async (): Promise<boolean> => {
     if (!user || !supabase) {
       showMessage('Please log in before taking photos.');
-      return;
+      return false;
     }
 
     setCameraReady(false);
@@ -2089,31 +2105,23 @@ export default function Home() {
         }
       };
       tryAttach();
+      return true;
     } catch (err) {
       console.error('Camera access error:', err);
       stopCameraStream();
       setIsPhotoCameraOpen(false);
-      const notFound = err instanceof DOMException && err.name === 'NotFoundError';
-      if (notFound || !(await hasVideoInput())) {
-        showMessage('No camera found. Choose photos from your device instead.');
-        photoUploadInputRef.current?.click();
-      } else if (isMobileDevice()) {
-        showMessage('Opening your device camera…');
-        photoCameraCaptureInputRef.current?.click();
-      } else {
-        showMessage('Cannot access camera. Allow camera permission or upload photos from your device.');
-        photoUploadInputRef.current?.click();
-      }
+      return false;
     }
   };
 
   const closePhotoCamera = () => {
+    const captured = photosCapturedSession;
     stopCameraStream();
     setCameraReady(false);
     setPhotosCapturedSession(0);
     setIsPhotoCameraOpen(false);
-    if (photosCapturedSession > 0) {
-      showMessage(`Camera closed. ${photosCapturedSession} photo${photosCapturedSession === 1 ? '' : 's'} saved.`);
+    if (captured > 0) {
+      showMessage(`Camera closed. ${captured} photo${captured === 1 ? '' : 's'} saved.`);
     }
   };
 
@@ -2609,29 +2617,6 @@ export default function Home() {
     }
   };
 
-  const openPhotoQuotePicker = (itemId: number) => {
-    pendingPhotoQuoteItemIdRef.current = itemId;
-    photoQuoteInputRef.current?.click();
-  };
-
-  const handlePhotoQuoteFile = async (files: FileList | null) => {
-    const itemId = pendingPhotoQuoteItemIdRef.current;
-    pendingPhotoQuoteItemIdRef.current = null;
-    if (photoQuoteInputRef.current) photoQuoteInputRef.current.value = '';
-    if (!files?.[0] || itemId == null) return;
-
-    const item = items.find(row => row.id === itemId);
-    if (!item) return;
-
-    try {
-      const imageBase64 = await compressImageFileForAi(files[0]);
-      await requestAiQuote(item, { imageBase64, fromPhoto: true });
-    } catch (err) {
-      console.error('Photo quote failed:', err);
-      showMessage('⚠️ Could not read that photo. Try another image.');
-    }
-  };
-
   const openGalleryPhotoQuote = (imageUrl: string) => {
     if (!imageUrl) return;
     setPhotoQuoteImageUrl(imageUrl);
@@ -2652,7 +2637,7 @@ export default function Home() {
       await requestAiQuote(item, { imageBase64, fromPhoto: true });
     } catch (err) {
       console.error('Gallery photo quote failed:', err);
-      showMessage('⚠️ Could not read that job photo. Try uploading it again or use AI Quote from Photo on the line item.');
+      showMessage('⚠️ Could not read that job photo. Try uploading it again.');
     } finally {
       setPhotoQuoteImageUrl('');
     }
@@ -3540,8 +3525,6 @@ export default function Home() {
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const photoUploadInputRef = useRef<HTMLInputElement>(null);
   const photoCameraCaptureInputRef = useRef<HTMLInputElement>(null);
-  const photoQuoteInputRef = useRef<HTMLInputElement>(null);
-  const pendingPhotoQuoteItemIdRef = useRef<number | null>(null);
 
   const debouncedSave = () => {
     if (!profile.autoSaveEnabled) return;
@@ -4682,16 +4665,6 @@ export default function Home() {
 <Button
   size="sm"
   variant="ghost"
-  className="mt-2 w-full text-xs flex items-center gap-1 justify-center bg-violet-100 hover:bg-violet-200"
-  onClick={() => openPhotoQuotePicker(item.id)}
-  disabled={aiQuoteLoadingId === item.id}
->
-  {aiQuoteLoadingId === item.id ? '⏳ Analyzing photo...' : '📷 AI Quote from Photo'}
-</Button>
-
-<Button
-  size="sm"
-  variant="ghost"
   className="mt-2 w-full text-xs flex items-center gap-1 justify-center bg-slate-100 hover:bg-slate-200"
   onClick={() => openBreakdownEditor(item)}
 >
@@ -5012,7 +4985,7 @@ export default function Home() {
                 <CardContent className="p-6">
                   <h3 className="text-xl font-semibold mb-4">{t('photosSection')} ({photoUrls.length})</h3>
                   <p className="text-sm text-gray-500 mb-4">
-                    Use AI Quote from Photo on a line item, or quote from a saved job photo below.
+                    Tap 📷 AI Quote on any saved job photo below to price a line item from that image.
                   </p>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     {photoDisplayUrls.map((url, i) => (
@@ -5049,24 +5022,15 @@ export default function Home() {
                     accept="image/*"
                     multiple
                     className="hidden"
-                    onChange={e => handlePhotoFileChange(e.target.files)}
+                    onChange={e => handlePhotoUploadChange(e.target.files)}
                   />
                   <input
                     ref={photoCameraCaptureInputRef}
                     type="file"
                     accept="image/*"
                     capture="environment"
-                    multiple
                     className="hidden"
-                    onChange={e => handlePhotoFileChange(e.target.files)}
-                  />
-                  <input
-                    ref={photoQuoteInputRef}
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    className="hidden"
-                    onChange={e => void handlePhotoQuoteFile(e.target.files)}
+                    onChange={e => handlePhotoCameraCaptureChange(e.target.files)}
                   />
                 </CardContent>
               </Card>
@@ -7132,7 +7096,9 @@ export default function Home() {
               <span className="text-left">
                 <span className="block font-semibold">{t('takePhotoWithCamera')}</span>
                 <span className="block text-xs font-normal opacity-90">
-                  {isMobileDevice() ? 'Opens your phone or tablet camera' : 'Uses webcam when available'}
+                  {isMobileDevice()
+                    ? 'Take multiple photos before closing the camera'
+                    : 'Take multiple shots — camera stays open until you tap Close'}
                 </span>
               </span>
             </Button>
