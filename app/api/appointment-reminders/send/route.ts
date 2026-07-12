@@ -52,19 +52,30 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
+    const body = await request.json().catch(() => ({}));
+    const forceTest = body?.force === true;
+
     const profile = data?.profile || {};
-    if (!profile.appointmentReminderEnabled) {
+    if (!profile.appointmentReminderEnabled && !forceTest) {
       return NextResponse.json({ skipped: true, reason: 'Appointment reminders are off.' });
     }
 
     const todayKey = getTodayDateKey();
-    if (profile._lastReminderSentDate === todayKey) {
+    if (!forceTest && profile._lastReminderSentDate === todayKey) {
       return NextResponse.json({ skipped: true, reason: 'Reminder already sent today.' });
     }
 
     const appointments = (profile._appointments || []) as StoredAppointment[];
-    const tomorrowAppointments = getTomorrowsAppointments(appointments);
-    if (tomorrowAppointments.length === 0) {
+    let tomorrowAppointments = getTomorrowsAppointments(appointments);
+    if (tomorrowAppointments.length === 0 && forceTest) {
+      tomorrowAppointments = appointments
+        .filter(appt => new Date(appt.datetime).getTime() > Date.now())
+        .sort((a, b) => new Date(a.datetime).getTime() - new Date(b.datetime).getTime())
+        .slice(0, 5);
+      if (tomorrowAppointments.length === 0) {
+        return NextResponse.json({ skipped: true, reason: 'No upcoming appointments to test with.' });
+      }
+    } else if (tomorrowAppointments.length === 0) {
       return NextResponse.json({ skipped: true, reason: 'No appointments tomorrow.' });
     }
 
@@ -99,7 +110,7 @@ export async function POST(request: NextRequest) {
     }
 
     const notified = result.emailsSent.length > 0 || result.smsSent.length > 0;
-    if (notified) {
+    if (notified && !forceTest) {
       await supabase.from('estimates').upsert({
         id: settingsDocId(user.id),
         user_id: user.id,
@@ -114,7 +125,12 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    return NextResponse.json({ ...result, notified, appointmentCount: tomorrowAppointments.length });
+    return NextResponse.json({
+      ...result,
+      notified,
+      appointmentCount: tomorrowAppointments.length,
+      testMode: forceTest,
+    });
   } catch (err: unknown) {
     console.error('Appointment reminder send error:', err);
     return NextResponse.json(

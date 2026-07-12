@@ -1,0 +1,7 @@
+# EstimateAce marketing site — keep this file simple for Hostinger
+DirectoryIndex index.php index.html
+
+# Block direct download of lead list only (not the whole site)
+<Files "leads.csv">
+  Require all denied
+</Files>

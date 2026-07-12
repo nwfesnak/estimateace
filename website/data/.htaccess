@@ -1,0 +1,2 @@
+# Block web access to lead data folder
+Require all denied

@@ -1,0 +1,18 @@
+---
+pid: 12028
+cwd: "D:\estimateace"
+command: "npm run dev"
+started_at: 2026-07-05T19:07:31.558Z
+running_for_ms: 22335005 
+---
+At line:1 char:22
++ (cd "D:\\estimateace" ; npm run dev)
++                      ~
+Missing closing ')' in expression.
+At line:1 char:36
++ (cd "D:\\estimateace" ; npm run dev)
++                                    ~
+Unexpected token ')' in expression or statement.
+    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException
+    + FullyQualifiedErrorId : MissingEndParenthesisInExpression
+ 

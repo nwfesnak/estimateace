@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "eslint",
     "audit": "npm audit --audit-level=high",
-    "audit:fix": "npm audit fix"
+    "audit:fix": "npm audit fix",
+    "test:cron": "powershell -ExecutionPolicy Bypass -File scripts/test-cron.ps1",
+    "test:sms": "node scripts/test-sms.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.2",

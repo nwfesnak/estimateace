@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { getLineItemUnitOptions, LINE_ITEM_UNITS } from '@/lib/quote-units';
 
 const DEFAULT_DISCOUNT_NAMES = ['Military', 'Return customer'];
 
@@ -71,6 +72,88 @@ const mergeDiscountNames = (names: string[]) => {
     result.push(trimmed);
   }
   return result;
+};
+
+const roundMoney = (n: number) => Math.round(n * 100) / 100;
+
+const computeDiscountAmount = (
+  subtotal: number,
+  description: string,
+  value: number,
+  type: 'percent' | 'dollar'
+) => {
+  if (!description?.trim() || !value || value <= 0 || subtotal <= 0) return 0;
+  if (type === 'percent') {
+    return roundMoney(Math.min(subtotal, subtotal * (value / 100)));
+  }
+  return roundMoney(Math.min(subtotal, value));
+};
+
+const getLineItemTotal = (item: { total?: number; qty?: number; price?: number }) => {
+  const qty = Number(item.qty) || 0;
+  const price = Number(item.price) || 0;
+  if (item.total != null && Number.isFinite(Number(item.total))) {
+    return roundMoney(Number(item.total));
+  }
+  return roundMoney(qty * price);
+};
+
+const normalizeLoadedLineItem = (item: any) => {
+  const qty = Number(item.qty) || 0;
+  const price = roundMoney(Number(item.price) || 0);
+  const total = getLineItemTotal({ ...item, qty, price });
+  return { ...item, qty, price, total };
+};
+
+const computeEstimateTotals = (input: {
+  items: Array<{ total?: number; qty?: number; price?: number }>;
+  laborAmount?: number;
+  isTaxExempt?: boolean;
+  taxesEnabled?: boolean;
+  taxRate: number;
+  discountDescription?: string;
+  discountValue?: number;
+  discountType?: 'percent' | 'dollar';
+  storedDiscountAmount?: number;
+}) => {
+  const labor = roundMoney(Number(input.laborAmount) || 0);
+  const itemsTotal = roundMoney(
+    (input.items || []).reduce((sum, item) => sum + getLineItemTotal(item), 0)
+  );
+  const subtotalBeforeDiscount = itemsTotal;
+
+  let discountAmount = 0;
+  if (input.storedDiscountAmount && input.storedDiscountAmount > 0) {
+    discountAmount = roundMoney(Math.min(subtotalBeforeDiscount, input.storedDiscountAmount));
+  } else {
+    discountAmount = computeDiscountAmount(
+      subtotalBeforeDiscount,
+      input.discountDescription || '',
+      Number(input.discountValue) || 0,
+      input.discountType || 'dollar'
+    );
+  }
+
+  const taxableTotal = roundMoney(Math.max(0, itemsTotal - discountAmount));
+  const taxRate = Number(input.taxRate) || 0;
+  const taxesEnabled = input.taxesEnabled !== false;
+  const taxAmount =
+    taxesEnabled && !input.isTaxExempt
+      ? roundMoney(taxableTotal * (taxRate / 100))
+      : 0;
+  const subtotalAfterDiscount = roundMoney(Math.max(0, itemsTotal - discountAmount));
+  const grandTotal = roundMoney(Math.max(0, subtotalAfterDiscount + taxAmount));
+
+  return {
+    itemsTotal,
+    laborAmount: labor,
+    subtotalBeforeDiscount,
+    subtotalAfterDiscount,
+    discountAmount,
+    taxableTotal,
+    taxAmount,
+    grandTotal,
+  };
 };
 
 export default function Home() {
@@ -206,6 +289,9 @@ export default function Home() {
       viewAppointments: "View Appointments",
       backToSchedule: "Back to Schedule",
       scheduleAppointment: "Schedule Appointment",
+      editAppointment: "Edit Appointment",
+      edit: "Edit",
+      saveChanges: "Save Changes",
       noAppointmentsThisMonth: "No appointments scheduled for this month.",
       previousMonth: "Previous month",
       nextMonth: "Next month",
@@ -213,6 +299,8 @@ export default function Home() {
       appointmentReminderToggle: "Daily Appointment Reminder",
       appointmentReminderHelp: "Sends a text and email to you every morning at 8:00 AM (Eastern) with appointments scheduled for the following day.",
       appointmentReminderContact: "Uses your company email and phone from this profile",
+      testReminderNow: "Test Reminder Now",
+      testingReminder: "Sending test...",
       cryptoPayments: "Cryptocurrency Payments",
       cryptoPaymentsHelp: "Link third-party crypto processors to accept digital currency from clients.",
       paymentDisclosureTitle: "Third-Party Payment Disclosure",
@@ -311,6 +399,9 @@ export default function Home() {
       viewAppointments: "Ver Citas",
       backToSchedule: "Volver a Programar",
       scheduleAppointment: "Programar Cita",
+      editAppointment: "Editar Cita",
+      edit: "Editar",
+      saveChanges: "Guardar Cambios",
       noAppointmentsThisMonth: "No hay citas programadas para este mes.",
       previousMonth: "Mes anterior",
       nextMonth: "Mes siguiente",
@@ -318,6 +409,8 @@ export default function Home() {
       appointmentReminderToggle: "Recordatorio Diario de Citas",
       appointmentReminderHelp: "Envía un mensaje de texto y correo cada mañana a las 8:00 AM (Este) con las citas del día siguiente.",
       appointmentReminderContact: "Usa el correo y teléfono de la empresa en este perfil",
+      testReminderNow: "Probar Recordatorio",
+      testingReminder: "Enviando prueba...",
       cryptoPayments: "Pagos con Criptomonedas",
       cryptoPaymentsHelp: "Vincula procesadores de criptomonedas de terceros para aceptar moneda digital de clientes.",
       paymentDisclosureTitle: "Aviso de Pagos de Terceros",
@@ -416,6 +509,9 @@ export default function Home() {
       viewAppointments: "Voir les Rendez-vous",
       backToSchedule: "Retour à la Planification",
       scheduleAppointment: "Planifier un Rendez-vous",
+      editAppointment: "Modifier le Rendez-vous",
+      edit: "Modifier",
+      saveChanges: "Enregistrer les Modifications",
       noAppointmentsThisMonth: "Aucun rendez-vous prévu pour ce mois.",
       previousMonth: "Mois précédent",
       nextMonth: "Mois suivant",
@@ -423,6 +519,8 @@ export default function Home() {
       appointmentReminderToggle: "Rappel Quotidien de Rendez-vous",
       appointmentReminderHelp: "Envoie un SMS et un e-mail chaque matin à 8h00 (Heure de l'Est) avec les rendez-vous du lendemain.",
       appointmentReminderContact: "Utilise l'e-mail et le téléphone de l'entreprise dans ce profil",
+      testReminderNow: "Tester le Rappel",
+      testingReminder: "Envoi du test...",
       cryptoPayments: "Paiements en Cryptomonnaie",
       cryptoPaymentsHelp: "Liez des processeurs crypto tiers pour accepter les paiements numériques des clients.",
       paymentDisclosureTitle: "Avis sur les Paiements Tiers",
@@ -451,6 +549,12 @@ export default function Home() {
   const [date, setDate] = useState('');
   const [invoiceNumber, setInvoiceNumber] = useState('EST-0001');
   const [items, setItems] = useState<any[]>([{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
+  const DEFAULT_ESTIMATE_BREAKDOWN = {
+    showMaterialBreakdownOnEstimate: false,
+    showLaborBreakdownOnEstimate: false,
+    showCostBreakdownOnEstimate: false,
+  };
+  const [estimateBreakdownSettings, setEstimateBreakdownSettings] = useState(DEFAULT_ESTIMATE_BREAKDOWN);
   const [terms, setTerms] = useState('');
   const [photoUrls, setPhotoUrls] = useState<string[]>([]);   // stores permanent paths (or legacy signed urls)
   const [videoUrls, setVideoUrls] = useState<string[]>([]);
@@ -467,6 +571,9 @@ export default function Home() {
 
   // For AI Price Quote loading state (per item)
   const [aiQuoteLoadingId, setAiQuoteLoadingId] = useState<number | null>(null);
+  const [isPhotoQuoteLinePickerOpen, setIsPhotoQuoteLinePickerOpen] = useState(false);
+  const [photoQuoteImageUrl, setPhotoQuoteImageUrl] = useState('');
+  const [photoQuoteLineId, setPhotoQuoteLineId] = useState<number | null>(null);
 
   // Resolve paths to fresh signed URLs for display (handles both paths and legacy signed URLs)
   useEffect(() => {
@@ -537,35 +644,10 @@ export default function Home() {
     return stateRates[fallbackState.toUpperCase()] || 7;
   };
 
-  const computeDiscountAmount = (
-    subtotal: number,
-    description: string,
-    value: number,
-    type: 'percent' | 'dollar'
-  ) => {
-    if (!description?.trim() || !value || value <= 0 || subtotal <= 0) return 0;
-    if (type === 'percent') {
-      return Math.min(subtotal, subtotal * (value / 100));
-    }
-    return Math.min(subtotal, value);
-  };
-
   const baseTaxRate = getTaxRateFromZip(zipCode, state);
-  const taxableSubtotal = items.reduce((sum, item) => sum + (item.total || 0), 0);
-  const taxableLabor = taxLabor ? laborAmount : 0;
-  const subtotalBeforeDiscount = taxableSubtotal + laborAmount;
-  const discountAmount = computeDiscountAmount(
-    subtotalBeforeDiscount,
-    appliedDiscountDescription,
-    appliedDiscountValue,
-    appliedDiscountType
-  );
-  const taxableTotal = Math.max(0, taxableSubtotal + taxableLabor - discountAmount);
-  const taxAmount = isTaxExempt ? 0 : taxableTotal * (baseTaxRate / 100);
-  const grandTotal = Math.max(0, subtotalBeforeDiscount - discountAmount + taxAmount);
 
   // Profile (with payment settings)
-  const [profile, setProfile] = useState({ 
+  const [profile, setProfile] = useState({
     name: '', company: '', address: '', phone: '', email: '', slogan: '',
     city: '', state: '', zipCode: '',
     disclosure: '',
@@ -576,6 +658,7 @@ export default function Home() {
     depositPercentage: 10,
     showDepositOnApproval: true,
     thirdPartyEscrowEnabled: false,
+    escrowMinimumAmount: 10000,
     autoSaveEnabled: true,
     showPriceBreakdownByLine: false,
     showMaterialBreakdownOnEstimate: false,
@@ -583,6 +666,7 @@ export default function Home() {
     showCostBreakdownOnEstimate: false,
     appointmentReminderEnabled: false,
     showDiscountOnEstimate: true,
+    taxesEnabled: true,
     teammates: [] as { email: string; role: 'full' | 'limited'; canSeePricing: boolean; canSeeEstimatesAndFinancials: boolean }[], // NOTE: No password stored for security (was demo-only plaintext)
     crewSubscriptionActive: false,
     chargeCCFee: false,
@@ -605,11 +689,64 @@ export default function Home() {
 
   const [profileTab, setProfileTab] = useState<'info' | 'payments'>('info');
 
+  const getProfileSettingsCache = (): Record<string, any> => {
+    if (typeof window === 'undefined') return {};
+    try {
+      const raw = localStorage.getItem('estimateace_profile_settings');
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  };
+
+  const setProfileSettingsCache = (settings: Record<string, any>) => {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem('estimateace_profile_settings', JSON.stringify({
+      ...getProfileSettingsCache(),
+      ...settings,
+    }));
+  };
+
   const hasActiveDiscount = () =>
     appliedDiscountDescription.trim().length > 0 && appliedDiscountValue > 0;
 
+  const getShowDiscountOnEstimate = (): boolean => {
+    const cached = getProfileSettingsCache();
+    if ('showDiscountOnEstimate' in cached) {
+      return cached.showDiscountOnEstimate === true;
+    }
+    return profile.showDiscountOnEstimate === true;
+  };
+
   const shouldShowClientDiscount = () =>
-    hasActiveDiscount() && profile.showDiscountOnEstimate !== false;
+    hasActiveDiscount() && getShowDiscountOnEstimate();
+
+  const getTaxesEnabled = (): boolean => {
+    const cached = getProfileSettingsCache();
+    if ('taxesEnabled' in cached) {
+      return cached.taxesEnabled !== false;
+    }
+    return profile.taxesEnabled !== false;
+  };
+
+  const estimateTotals = computeEstimateTotals({
+    items,
+    laborAmount,
+    isTaxExempt,
+    taxesEnabled: getTaxesEnabled(),
+    taxRate: baseTaxRate,
+    discountDescription: appliedDiscountDescription,
+    discountValue: appliedDiscountValue,
+    discountType: appliedDiscountType,
+  });
+  const {
+    itemsTotal: taxableSubtotal,
+    subtotalBeforeDiscount,
+    subtotalAfterDiscount,
+    discountAmount,
+    taxAmount,
+    grandTotal,
+  } = estimateTotals;
 
   // Credit card processing fee derived values (must be after profile state)
   const ccFeePercent = profile.chargeCCFee ? (profile.ccFeePercentage || 3) : 0;
@@ -647,24 +784,6 @@ export default function Home() {
     return ((profile as any).language || 'en');
   };
 
-  const getProfileSettingsCache = (): Record<string, any> => {
-    if (typeof window === 'undefined') return {};
-    try {
-      const raw = localStorage.getItem('estimateace_profile_settings');
-      return raw ? JSON.parse(raw) : {};
-    } catch {
-      return {};
-    }
-  };
-
-  const setProfileSettingsCache = (settings: Record<string, any>) => {
-    if (typeof window === 'undefined') return;
-    localStorage.setItem('estimateace_profile_settings', JSON.stringify({
-      ...getProfileSettingsCache(),
-      ...settings,
-    }));
-  };
-
   // Snapshot only safe, non-sensitive fields to avoid duplicating teammates/passwords etc. in every document
   const getSafeProfileSnapshot = (full: any) => ({
     company: full.company || '',
@@ -678,13 +797,11 @@ export default function Home() {
     depositPercentage: Number(full.depositPercentage) || 0,
     showDepositOnApproval: full.showDepositOnApproval !== false,
     thirdPartyEscrowEnabled: !!full.thirdPartyEscrowEnabled,
+    escrowMinimumAmount: Math.max(0, Number(full.escrowMinimumAmount) || 0),
     autoSaveEnabled: full.autoSaveEnabled !== false,
-    showPriceBreakdownByLine: !!full.showPriceBreakdownByLine,
-    showMaterialBreakdownOnEstimate: !!full.showMaterialBreakdownOnEstimate,
-    showLaborBreakdownOnEstimate: !!full.showLaborBreakdownOnEstimate,
-    showCostBreakdownOnEstimate: !!full.showCostBreakdownOnEstimate,
     appointmentReminderEnabled: !!full.appointmentReminderEnabled,
-    showDiscountOnEstimate: full.showDiscountOnEstimate !== false,
+    showDiscountOnEstimate: full.showDiscountOnEstimate === true,
+    taxesEnabled: full.taxesEnabled !== false,
     paymentSettings: mergePaymentSettings(full.paymentSettings),
     // deliberately omit: teammates, ccFee*, crewSubscriptionActive, etc.
   });
@@ -699,8 +816,21 @@ export default function Home() {
     };
   };
 
-  const getDocumentProfileSnapshot = (fullProfile = profile) => ({
+  const getBreakdownSettingsFromDoc = (docProfile: any = {}) => ({
+    showMaterialBreakdownOnEstimate: !!docProfile.showMaterialBreakdownOnEstimate,
+    showLaborBreakdownOnEstimate: !!docProfile.showLaborBreakdownOnEstimate,
+    showCostBreakdownOnEstimate: !!docProfile.showCostBreakdownOnEstimate,
+  });
+
+  const getDocumentProfileSnapshot = (
+    fullProfile = profile,
+    breakdown = estimateBreakdownSettings
+  ) => ({
     ...getSafeProfileSnapshot(fullProfile),
+    ...breakdown,
+    showPriceBreakdownByLine:
+      breakdown.showMaterialBreakdownOnEstimate ||
+      breakdown.showLaborBreakdownOnEstimate,
     _discount: {
       discountDescription: appliedDiscountDescription,
       discountValue: appliedDiscountValue,
@@ -765,7 +895,7 @@ export default function Home() {
     return addrs.slice(0, 20);
   }, [savedEstimatesList, archivesList, invoiceNumber]);
 
-  // Debounced address auto-suggest (Google Places primary + previous jobs fallback)
+  // Debounced address auto-suggest (Grok AI primary + previous jobs fallback)
   useEffect(() => {
     const q = address.trim();
     if (!q) {
@@ -852,7 +982,7 @@ export default function Home() {
       } finally {
         setIsLoadingSuggestions(false);
       }
-    }, 280);
+    }, 450);
 
     return () => clearTimeout(timer);
   }, [address, previousAddresses, profile]);
@@ -863,11 +993,30 @@ export default function Home() {
   const [itemTranslations, setItemTranslations] = useState<{ [key: number]: string }>({});
 
   const [isQuickLinesModalOpen, setIsQuickLinesModalOpen] = useState(false);
+  const [isBreakdownModalOpen, setIsBreakdownModalOpen] = useState(false);
+  const [breakdownEditItemId, setBreakdownEditItemId] = useState<number | null>(null);
+  const [breakdownMaterials, setBreakdownMaterials] = useState<Array<{
+    description: string;
+    qty: number;
+    unit: string;
+    unitPrice: number;
+    total: number;
+  }>>([]);
+  const [breakdownLabor, setBreakdownLabor] = useState<{
+    description: string;
+    hours: number;
+    rate: number;
+    total: number;
+  } | null>(null);
+  const [breakdownIncludeLabor, setBreakdownIncludeLabor] = useState(true);
+  const [breakdownSyncLinePrice, setBreakdownSyncLinePrice] = useState(true);
   const [isCalendarModalOpen, setIsCalendarModalOpen] = useState(false);
   const [calendarView, setCalendarView] = useState<'schedule' | 'appointments'>('schedule');
   const [selectedEstimateForCalendar, setSelectedEstimateForCalendar] = useState<any>(null);
   const [selectedDateTime, setSelectedDateTime] = useState('');
   const [schedulingAppointment, setSchedulingAppointment] = useState(false);
+  const [testingReminder, setTestingReminder] = useState(false);
+  const [editingAppointmentId, setEditingAppointmentId] = useState<string | null>(null);
   const [appointments, setAppointments] = useState<Array<{
     id: string;
     estimateId: string;
@@ -961,7 +1110,7 @@ export default function Home() {
       return;
     }
     if (subtotalBeforeDiscount <= 0) {
-      showMessage('Add line items or labor before applying a discount.');
+      showMessage('Add line items before applying a discount.');
       return;
     }
     setAppliedDiscountDescription(name);
@@ -1007,13 +1156,18 @@ export default function Home() {
     return materialsHaveCost || laborHasCost;
   };
 
-  const getBreakdownSettings = (source: any = profile) => {
-    const legacy = !!source?.showPriceBreakdownByLine;
+  const getBreakdownSettings = (source?: any) => {
+    const settings = source ? getBreakdownSettingsFromDoc(source) : estimateBreakdownSettings;
     return {
-      showMaterials: source?.showMaterialBreakdownOnEstimate ?? legacy,
-      showLabor: source?.showLaborBreakdownOnEstimate ?? legacy,
-      showCosts: !!source?.showCostBreakdownOnEstimate,
+      showMaterials: settings.showMaterialBreakdownOnEstimate,
+      showLabor: settings.showLaborBreakdownOnEstimate,
+      showCosts: settings.showCostBreakdownOnEstimate,
     };
+  };
+
+  const hasAnyBreakdownToggleOn = (source?: any) => {
+    const { showMaterials, showLabor, showCosts } = getBreakdownSettings(source);
+    return showMaterials || showLabor || showCosts;
   };
 
   const renderCostBreakdown = (item: any, className = '') => {
@@ -1053,9 +1207,17 @@ export default function Home() {
           <div className={materialsWithCost.length ? 'mt-1' : ''}>
             <span className="font-medium">Labor cost: </span>
             {labor.description || 'Installation'}
-            {labor.hours != null ? ` — ${labor.hours} hrs` : ''}
+            {labor.hours != null
+              ? ` — ${labor.hours} hrs${(Number(item.qty) || 1) > 1 && Number(labor.hours) >= 8 ? ' (full job)' : ''}`
+              : ''}
             {Number(labor.rate) > 0 ? ` × $${Number(labor.rate).toFixed(2)}/hr` : ''}
-            {laborSubtotal > 0 ? ` = $${laborSubtotal.toFixed(2)}` : ''}
+            {laborSubtotal > 0 ? ` = $${laborSubtotal.toFixed(2)} per unit` : ''}
+            {(Number(item.qty) || 1) > 1 && Number(labor.hours) > 0 && Number(labor.rate) > 0 ? (
+              <span className="text-gray-500">
+                {' '}
+                (≈ ${roundMoney(Number(labor.hours) * Number(labor.rate)).toFixed(2)} full job)
+              </span>
+            ) : null}
           </div>
         )}
         <div className="font-semibold mt-1">
@@ -1075,8 +1237,8 @@ export default function Home() {
   ) => {
     const materials = getItemMaterials(item);
     const labor = item.laborBreakdown;
-    const showMaterials = options?.showMaterials !== false;
-    const showLabor = options?.showLabor !== false;
+    const showMaterials = options?.showMaterials === true;
+    const showLabor = options?.showLabor === true;
     const visibleMaterials = showMaterials ? materials : [];
     const visibleLabor = showLabor ? labor : null;
 
@@ -1117,14 +1279,67 @@ export default function Home() {
     );
   };
 
+  const getVisibleBreakdownParts = (item: any, source?: any) => {
+    const { showMaterials, showLabor, showCosts } = getBreakdownSettings(source);
+    const showMaterialsPreview = showMaterials && getItemMaterials(item).length > 0;
+    const showLaborPreview = showLabor && !!item.laborBreakdown;
+    const showCostsPreview = showCosts && itemHasCostData(item);
+    return {
+      showMaterials: showMaterialsPreview,
+      showLabor: showLaborPreview,
+      showCosts: showCostsPreview,
+      hasVisiblePreview: showMaterialsPreview || showLaborPreview || showCostsPreview,
+    };
+  };
+
+  const fetchServerProfileSettings = async () => {
+    if (!user?.id || !supabase) return null;
+    const { data } = await supabase
+      .from('estimates')
+      .select('profile')
+      .eq('id', `SETTINGS-${user.id}`)
+      .maybeSingle();
+    return data?.profile || null;
+  };
+
+  const getGlobalDisplaySettings = (
+    prev: typeof profile,
+    serverProfile?: any | null
+  ) => {
+    const cached = getProfileSettingsCache();
+    const resolveDiscount = () => {
+      if ('showDiscountOnEstimate' in cached) return cached.showDiscountOnEstimate === true;
+      if (serverProfile && 'showDiscountOnEstimate' in serverProfile) {
+        return serverProfile.showDiscountOnEstimate === true;
+      }
+      return prev.showDiscountOnEstimate === true;
+    };
+
+    return {
+      showDiscountOnEstimate: resolveDiscount(),
+    };
+  };
+
   const renderClientItemBreakdown = (item: any, className: string) => {
+    if (!hasAnyBreakdownToggleOn() || !hasClientVisibleBreakdown(item)) return null;
+
     const { showMaterials, showLabor, showCosts } = getBreakdownSettings();
-    if (!hasClientVisibleBreakdown(item)) return null;
+    const preview = getVisibleBreakdownParts(item);
 
     return (
       <div className={className}>
-        {renderItemBreakdown(item, '', { showMaterials, showLabor })}
-        {showCosts && renderCostBreakdown(item, (showMaterials || showLabor) ? 'mt-2 pt-2 border-t border-gray-200' : '')}
+        {preview.showMaterials || preview.showLabor
+          ? renderItemBreakdown(item, '', {
+              showMaterials: preview.showMaterials,
+              showLabor: preview.showLabor,
+            })
+          : null}
+        {preview.showCosts
+          ? renderCostBreakdown(
+              item,
+              preview.showMaterials || preview.showLabor ? 'mt-2 pt-2 border-t border-gray-200' : ''
+            )
+          : null}
       </div>
     );
   };
@@ -1133,25 +1348,39 @@ export default function Home() {
     const large = options?.large ?? false;
     const textClass = large ? 'text-2xl' : 'text-xl';
     const totalClass = large ? 'text-4xl' : 'text-3xl';
+    const showSubtotalBreakdown = hasActiveDiscount() || items.length > 1;
 
     return (
       <>
-        {laborAmount > 0 && (
-          <div className={`text-right font-semibold text-[#14b8a6] ${textClass}`}>
-            Labor: ${laborAmount.toFixed(2)}
-          </div>
-        )}
-        {shouldShowClientDiscount() && (
-          <div className={`text-right font-semibold text-red-600 ${textClass}`}>
-            {appliedDiscountDescription.trim()}: -${discountAmount.toFixed(2)}
-            {appliedDiscountType === 'percent' ? ` (${appliedDiscountValue}%)` : ''}
-          </div>
-        )}
         {canSeeFinancials ? (
           <>
-            <div className={`text-right font-semibold text-[#14b8a6] ${textClass}`}>
-              Taxes ({state || '—'} {baseTaxRate}%): ${taxAmount.toFixed(2)}
-            </div>
+            {showSubtotalBreakdown && (
+              <div className={`text-right font-semibold text-gray-700 ${textClass}`}>
+                Subtotal: ${taxableSubtotal.toFixed(2)}
+              </div>
+            )}
+            {laborAmount > 0 && (
+              <div className={`text-right font-semibold text-[#14b8a6] ${textClass}`}>
+                Labor: ${laborAmount.toFixed(2)}
+                <span className="block text-sm font-normal text-gray-500">Reference only — not included in total</span>
+              </div>
+            )}
+            {hasActiveDiscount() && (
+              <div className={`text-right font-semibold text-gray-700 ${textClass}`}>
+                Subtotal before discount: ${subtotalBeforeDiscount.toFixed(2)}
+              </div>
+            )}
+            {shouldShowClientDiscount() && (
+              <div className={`text-right font-semibold text-red-600 ${textClass}`}>
+                {appliedDiscountDescription.trim()}: -${discountAmount.toFixed(2)}
+                {appliedDiscountType === 'percent' ? ` (${appliedDiscountValue}%)` : ''}
+              </div>
+            )}
+            {getTaxesEnabled() && (
+              <div className={`text-right font-semibold text-[#14b8a6] ${textClass}`}>
+                Taxes ({state || '—'} {baseTaxRate}%): ${taxAmount.toFixed(2)}
+              </div>
+            )}
             <div className={`text-right font-bold ${totalClass}`}>
               Total: ${grandTotal.toFixed(2)}
             </div>
@@ -1200,6 +1429,36 @@ export default function Home() {
       });
     }
   }, []);
+
+  // Restore client breakdown toggles from cache + server settings doc
+  useEffect(() => {
+    if (!user?.id || !supabase) return;
+    (async () => {
+      const cached = getProfileSettingsCache();
+      const serverProfile = await fetchServerProfileSettings();
+      const hasSavedPrefs =
+        'showDiscountOnEstimate' in cached ||
+        'taxesEnabled' in cached ||
+        !!serverProfile;
+
+      if (!hasSavedPrefs) return;
+
+      setProfile(prev => {
+        const displaySettings = getGlobalDisplaySettings(prev, serverProfile);
+        const taxesEnabled =
+          'taxesEnabled' in cached
+            ? cached.taxesEnabled !== false
+            : (serverProfile && 'taxesEnabled' in serverProfile
+              ? serverProfile.taxesEnabled !== false
+              : prev.taxesEnabled !== false);
+        return {
+          ...prev,
+          ...displaySettings,
+          taxesEnabled,
+        };
+      });
+    })();
+  }, [user?.id]);
 
   // Populate saved lists (for dashboard, lists, reports, etc.) as soon as we have a user
   useEffect(() => {
@@ -1424,21 +1683,27 @@ export default function Home() {
     const ownerDoc = docs.find((d: any) => d.user_id === ownerUserId);
     if (ownerDoc?.profile) {
       const preferredLang = getPreferredLanguage();
+      const displaySettings = getGlobalDisplaySettings(profile);
+      const {
+        showMaterialBreakdownOnEstimate: _sm,
+        showLaborBreakdownOnEstimate: _sl,
+        showCostBreakdownOnEstimate: _sc,
+        showPriceBreakdownByLine: _sp,
+        showDiscountOnEstimate: _sd,
+        ...ownerProfileWithoutBreakdown
+      } = ownerDoc.profile;
       setProfile({
         ...profile,
-        ...ownerDoc.profile,
+        ...ownerProfileWithoutBreakdown,
         crewSubscriptionActive: ownerDoc.profile.crewSubscriptionActive ?? false,
         chargeCCFee: ownerDoc.profile.chargeCCFee ?? false,
         ccFeePercentage: ownerDoc.profile.ccFeePercentage ?? 3,
         autoSaveEnabled: ownerDoc.profile.autoSaveEnabled ?? true,
-        showPriceBreakdownByLine: ownerDoc.profile.showPriceBreakdownByLine ?? false,
-        showMaterialBreakdownOnEstimate: ownerDoc.profile.showMaterialBreakdownOnEstimate ?? ownerDoc.profile.showPriceBreakdownByLine ?? false,
-        showLaborBreakdownOnEstimate: ownerDoc.profile.showLaborBreakdownOnEstimate ?? ownerDoc.profile.showPriceBreakdownByLine ?? false,
-        showCostBreakdownOnEstimate: ownerDoc.profile.showCostBreakdownOnEstimate ?? false,
+        ...displaySettings,
         appointmentReminderEnabled: ownerDoc.profile.appointmentReminderEnabled ?? false,
-        showDiscountOnEstimate: ownerDoc.profile.showDiscountOnEstimate !== false,
         showDepositOnApproval: ownerDoc.profile.showDepositOnApproval !== false,
         thirdPartyEscrowEnabled: ownerDoc.profile.thirdPartyEscrowEnabled ?? false,
+        escrowMinimumAmount: ownerDoc.profile.escrowMinimumAmount ?? profile.escrowMinimumAmount ?? 10000,
         depositPercentage: ownerDoc.profile.depositPercentage ?? profile.depositPercentage ?? 10,
         paymentSettings: mergePaymentSettings(ownerDoc.profile.paymentSettings),
         language: preferredLang,
@@ -1558,13 +1823,17 @@ export default function Home() {
     }
   };
 
-  const saveToDB = async (options?: { profile?: typeof profile }) => {
+  const saveToDB = async (options?: {
+    profile?: typeof profile;
+    breakdown?: typeof estimateBreakdownSettings;
+  }) => {
     if (!user || !supabase) return;
     const profileToSave = options?.profile ?? profile;
+    const breakdownToSave = options?.breakdown ?? estimateBreakdownSettings;
     const data = {
       user_id: user.id,
       jobName, address, city, state, zipCode, phones, emails, date, invoiceNumber,
-      items, terms, profile: getDocumentProfileSnapshot(profileToSave),
+      items, terms, profile: getDocumentProfileSnapshot(profileToSave, breakdownToSave),
       documentType, dueDate, paymentStatus, amountPaid,
       paymentMethod, photoUrls, videoUrls, receiptUrls, receiptDetails,
       laborHours, laborRate, laborFixedAmount, useHourlyLabor, laborAmount,
@@ -1902,35 +2171,61 @@ export default function Home() {
     setEmails(est.emails || ['']);
     setDate(est.date || '');
     setInvoiceNumber(est.invoiceNumber || 'EST-0001');
-    setItems(est.items || [{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
+    setItems(
+      (est.items || [{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]).map(
+        normalizeLoadedLineItem
+      )
+    );
     setTerms(est.terms || '');
     const loadedProfile = est.profile || {};
     const cached = getProfileSettingsCache();
+    const serverProfile = await fetchServerProfileSettings();
+    const displaySettings = getGlobalDisplaySettings(profile, serverProfile);
+    const {
+      showMaterialBreakdownOnEstimate: _sm,
+      showLaborBreakdownOnEstimate: _sl,
+      showCostBreakdownOnEstimate: _sc,
+      showPriceBreakdownByLine: _sp,
+      showDiscountOnEstimate: _sd,
+      ...loadedProfileWithoutBreakdown
+    } = loadedProfile;
+    setEstimateBreakdownSettings(getBreakdownSettingsFromDoc(loadedProfile));
     // IMPORTANT: always force preferred user language. Never use stale language from document snapshot (est.profile).
     const preferredLang = getPreferredLanguage();
     setProfile({
       ...profile,
-      ...loadedProfile,
+      ...loadedProfileWithoutBreakdown,
       crewSubscriptionActive: loadedProfile.crewSubscriptionActive ?? false,
       chargeCCFee: loadedProfile.chargeCCFee ?? false,
       ccFeePercentage: loadedProfile.ccFeePercentage ?? 3,
       autoSaveEnabled: 'autoSaveEnabled' in loadedProfile
         ? loadedProfile.autoSaveEnabled !== false
         : (cached.autoSaveEnabled ?? profile.autoSaveEnabled ?? true),
-      showPriceBreakdownByLine: loadedProfile.showPriceBreakdownByLine ?? false,
-      showMaterialBreakdownOnEstimate: loadedProfile.showMaterialBreakdownOnEstimate ?? loadedProfile.showPriceBreakdownByLine ?? false,
-      showLaborBreakdownOnEstimate: loadedProfile.showLaborBreakdownOnEstimate ?? loadedProfile.showPriceBreakdownByLine ?? false,
-      showCostBreakdownOnEstimate: loadedProfile.showCostBreakdownOnEstimate ?? false,
+      taxesEnabled: 'taxesEnabled' in cached
+        ? cached.taxesEnabled !== false
+        : (serverProfile && 'taxesEnabled' in serverProfile
+          ? serverProfile.taxesEnabled !== false
+          : ('taxesEnabled' in loadedProfile
+            ? loadedProfile.taxesEnabled !== false
+            : profile.taxesEnabled !== false)),
+      ...displaySettings,
       appointmentReminderEnabled: 'appointmentReminderEnabled' in loadedProfile
         ? !!loadedProfile.appointmentReminderEnabled
         : (cached.appointmentReminderEnabled ?? profile.appointmentReminderEnabled ?? false),
-      showDiscountOnEstimate: loadedProfile.showDiscountOnEstimate !== false,
       showDepositOnApproval: 'showDepositOnApproval' in loadedProfile
         ? loadedProfile.showDepositOnApproval !== false
         : (cached.showDepositOnApproval ?? profile.showDepositOnApproval ?? true),
       thirdPartyEscrowEnabled: 'thirdPartyEscrowEnabled' in loadedProfile
         ? !!loadedProfile.thirdPartyEscrowEnabled
         : (cached.thirdPartyEscrowEnabled ?? profile.thirdPartyEscrowEnabled ?? false),
+      escrowMinimumAmount:
+        'escrowMinimumAmount' in cached
+          ? Math.max(0, Number(cached.escrowMinimumAmount) || 0)
+          : (serverProfile && 'escrowMinimumAmount' in serverProfile
+            ? Math.max(0, Number(serverProfile.escrowMinimumAmount) || 0)
+            : ('escrowMinimumAmount' in loadedProfile
+              ? Math.max(0, Number(loadedProfile.escrowMinimumAmount) || 0)
+              : Math.max(0, Number(profile.escrowMinimumAmount) || 0))),
       depositPercentage: loadedProfile.depositPercentage ?? cached.depositPercentage ?? profile.depositPercentage ?? 10,
       paymentSettings: mergePaymentSettings(loadedProfile.paymentSettings),
       logoUrl: loadedProfile.logoUrl ?? '',
@@ -1995,30 +2290,52 @@ export default function Home() {
     if (data && data[0] && data[0].profile) {
       const loaded = data[0].profile;
       const cached = getProfileSettingsCache();
+      const serverProfile = await fetchServerProfileSettings();
       const preferredLang = getPreferredLanguage();
-      setProfile(prev => ({
+      setProfile(prev => {
+        const displaySettings = getGlobalDisplaySettings(prev, serverProfile);
+        const {
+          showMaterialBreakdownOnEstimate: _sm,
+          showLaborBreakdownOnEstimate: _sl,
+          showCostBreakdownOnEstimate: _sc,
+          showPriceBreakdownByLine: _sp,
+          showDiscountOnEstimate: _sd,
+          ...loadedWithoutBreakdown
+        } = loaded;
+        return {
         ...prev,
-        ...loaded,
+        ...loadedWithoutBreakdown,
         crewSubscriptionActive: loaded.crewSubscriptionActive ?? prev.crewSubscriptionActive ?? false,
         chargeCCFee: loaded.chargeCCFee ?? prev.chargeCCFee ?? false,
         ccFeePercentage: loaded.ccFeePercentage ?? prev.ccFeePercentage ?? 3,
         autoSaveEnabled: 'autoSaveEnabled' in loaded
           ? loaded.autoSaveEnabled !== false
           : (cached.autoSaveEnabled ?? prev.autoSaveEnabled ?? true),
-        showPriceBreakdownByLine: loaded.showPriceBreakdownByLine ?? false,
-        showMaterialBreakdownOnEstimate: loaded.showMaterialBreakdownOnEstimate ?? loaded.showPriceBreakdownByLine ?? false,
-        showLaborBreakdownOnEstimate: loaded.showLaborBreakdownOnEstimate ?? loaded.showPriceBreakdownByLine ?? false,
-        showCostBreakdownOnEstimate: loaded.showCostBreakdownOnEstimate ?? false,
+        taxesEnabled: 'taxesEnabled' in cached
+          ? cached.taxesEnabled !== false
+          : (serverProfile && 'taxesEnabled' in serverProfile
+            ? serverProfile.taxesEnabled !== false
+            : ('taxesEnabled' in loaded
+              ? loaded.taxesEnabled !== false
+              : prev.taxesEnabled !== false)),
+        ...displaySettings,
         appointmentReminderEnabled: 'appointmentReminderEnabled' in loaded
           ? !!loaded.appointmentReminderEnabled
           : (cached.appointmentReminderEnabled ?? prev.appointmentReminderEnabled ?? false),
-        showDiscountOnEstimate: loaded.showDiscountOnEstimate !== false,
         showDepositOnApproval: 'showDepositOnApproval' in loaded
           ? loaded.showDepositOnApproval !== false
           : (cached.showDepositOnApproval ?? prev.showDepositOnApproval ?? true),
         thirdPartyEscrowEnabled: 'thirdPartyEscrowEnabled' in loaded
           ? !!loaded.thirdPartyEscrowEnabled
           : (cached.thirdPartyEscrowEnabled ?? prev.thirdPartyEscrowEnabled ?? false),
+        escrowMinimumAmount:
+          'escrowMinimumAmount' in cached
+            ? Math.max(0, Number(cached.escrowMinimumAmount) || 0)
+            : (serverProfile && 'escrowMinimumAmount' in serverProfile
+              ? Math.max(0, Number(serverProfile.escrowMinimumAmount) || 0)
+              : ('escrowMinimumAmount' in loaded
+                ? Math.max(0, Number(loaded.escrowMinimumAmount) || 0)
+                : Math.max(0, Number(prev.escrowMinimumAmount) || 0))),
         depositPercentage: loaded.depositPercentage ?? cached.depositPercentage ?? prev.depositPercentage ?? 10,
         paymentSettings: mergePaymentSettings(loaded.paymentSettings ?? prev.paymentSettings),
         logoUrl: loaded.logoUrl ?? '',
@@ -2032,7 +2349,8 @@ export default function Home() {
           canSeePricing: t.canSeePricing ?? false,
           canSeeEstimatesAndFinancials: t.canSeeEstimatesAndFinancials ?? false,
         })),
-      }));
+        };
+      });
       return loaded;
     }
     return null;
@@ -2052,6 +2370,7 @@ export default function Home() {
     setAppliedDiscountDescription('');
     setAppliedDiscountValue(0);
     setAppliedDiscountType('dollar');
+    setEstimateBreakdownSettings(DEFAULT_ESTIMATE_BREAKDOWN);
     const today = new Date().toISOString().split('T')[0];
     setDate(today);
     const savedCount = parseInt(localStorage.getItem('estimateCount') || '0') + 1;
@@ -2089,19 +2408,359 @@ export default function Home() {
   const openQuickLinesModal = () => setIsQuickLinesModalOpen(true);
 
   const addRow = () => setItems(prev => [{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }, ...prev]);
+
   const updateItem = (id: number, field: string, value: any) => {
     setItems(prev => prev.map(item => {
-      if (item.id === id) {
-        const updatedItem = { ...item, [field]: value };
-        if (field === 'qty' || field === 'price') {
-          const qty = field === 'qty' ? (parseFloat(value) || 0) : (item.qty || 0);
-          const price = field === 'price' ? (parseFloat(value) || 0) : (item.price || 0);
-          updatedItem.total = qty * price;
-        }
-        return updatedItem;
+      if (item.id !== id) return item;
+
+      const updatedItem = { ...item, [field]: value };
+
+      if (field === 'total') {
+        const total = parseFloat(value) || 0;
+        const qty = item.qty || 0;
+        updatedItem.total = roundMoney(total);
+        updatedItem.price = qty > 0 ? roundMoney(total / qty) : roundMoney(total);
+      } else if (field === 'qty' || field === 'price') {
+        const qty = field === 'qty' ? (parseFloat(value) || 0) : (item.qty || 0);
+        const price = field === 'price' ? (parseFloat(value) || 0) : (item.price || 0);
+        updatedItem.total = roundMoney(qty * price);
       }
-      return item;
+
+      return updatedItem;
     }));
+  };
+
+  const compressImageFileForAi = async (file: File): Promise<string> => {
+    const bitmap = await createImageBitmap(file);
+    const maxDim = 1600;
+    const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height, 1));
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Could not prepare image');
+    ctx.drawImage(bitmap, 0, 0, width, height);
+    bitmap.close();
+    return canvas.toDataURL('image/jpeg', 0.85);
+  };
+
+  const applyAiQuoteData = (itemId: number, data: any, options?: { fromPhoto?: boolean }) => {
+    const item = items.find(row => row.id === itemId);
+    if (!item) return;
+
+    const nextQty = data.suggestedQty !== undefined && data.suggestedQty > 0 ? data.suggestedQty : (item.qty || 1);
+    const nextPrice = roundMoney(Number(data.unitPrice) || 0);
+    const nextUnit = (data.unit || item.unit || '').trim();
+    const nextTotal = roundMoney(Number(data.total) > 0 ? Number(data.total) : nextQty * nextPrice);
+    const scopeFromPhoto = String(data.analyzedScope || data.imageAnalysis?.scopeDescription || '').trim();
+
+    setItems(prev =>
+      prev.map(row => {
+        if (row.id !== itemId) return row;
+        const updated: any = {
+          ...row,
+          price: nextPrice,
+          qty: nextQty,
+          unit: nextUnit,
+          total: nextTotal,
+        };
+        if (options?.fromPhoto && scopeFromPhoto && !String(row.description || '').trim()) {
+          updated.description = scopeFromPhoto;
+        }
+        if (data.materials?.length) {
+          updated.materialsList = data.materials;
+          updated.materialBreakdown = null;
+        }
+        if (data.laborBreakdown) {
+          updated.laborBreakdown = {
+            description: data.laborBreakdown.description,
+            hours: data.laborBreakdown.hours,
+            rate: data.laborBreakdown.rate,
+            total: data.laborBreakdown.total,
+          };
+        }
+        return updated;
+      })
+    );
+
+    const regionLabel = data.pricingRegion?.label;
+    const regionNote = regionLabel
+      ? `\nPriced for: ${regionLabel}${data.pricingRegion?.source === 'company' ? ' (from company profile — add job ZIP for best accuracy)' : ''}`
+      : '';
+    const billingLabel = nextUnit === 'SF'
+      ? `${nextQty.toLocaleString()} SF × $${nextPrice.toFixed(2)}/SF`
+      : `1 Unit @ $${nextPrice.toFixed(2)}`;
+    let msg = options?.fromPhoto
+      ? `✅ AI quote from photo applied!${regionNote}`
+      : `✅ AI Price Quote applied!${regionNote}`;
+    msg += `\n\n${billingLabel} = $${nextTotal.toFixed(2)}\nConfidence: ${data.confidence}`;
+    if (scopeFromPhoto && options?.fromPhoto) {
+      msg += `\n\nScope from photo: ${scopeFromPhoto}`;
+    }
+    if (data.breakdown) {
+      msg += `\n\nScope: ${data.breakdown}`;
+    }
+    if (data.materials?.length) {
+      msg += `\n\n${data.materials.length} materials listed.`;
+    }
+    if (data.laborBreakdown?.hours) {
+      msg += `\nLabor: ${data.laborBreakdown.description || 'Installation'} — ${data.laborBreakdown.hours} hrs`;
+    }
+    if (data.materialsCostTotal != null || data.laborCostTotal != null) {
+      const mat = Number(data.materialsCostTotal || 0).toFixed(2);
+      const lab = Number(data.laborCostTotal || 0).toFixed(2);
+      const builtUp = (Number(data.materialsCostTotal || 0) + Number(data.laborCostTotal || 0)).toFixed(2);
+      msg += `\nBuilt-up cost: materials $${mat} + labor $${lab} = $${builtUp} (matches unit price $${nextPrice.toFixed(2)})`;
+    }
+    showMessage(msg);
+  };
+
+  const requestAiQuote = async (
+    item: any,
+    options?: { imageBase64?: string; imageUrl?: string; fromPhoto?: boolean }
+  ) => {
+    setAiQuoteLoadingId(item.id);
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (supabase) {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          headers.Authorization = `Bearer ${session.access_token}`;
+        }
+      }
+
+      const res = await fetch('/api/ai-quote', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          description: item.description?.trim() || '',
+          imageBase64: options?.imageBase64,
+          imageUrl: options?.imageUrl,
+          jobLocation: { address, city, state, zipCode },
+          companyLocation: {
+            city: profile.city,
+            state: profile.state,
+            zipCode: profile.zipCode,
+            address: profile.address,
+          },
+          lineContext: { qty: item.qty, unit: item.unit },
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        const errMsg = data.error || 'AI quote error';
+        if (errMsg.includes('Rate limit')) {
+          showMessage(`⏳ ${errMsg}`);
+        } else if (errMsg.includes('Unauthorized') || errMsg.includes('missing')) {
+          showMessage('🔒 Please log in with a main account to use AI features.');
+        } else if (errMsg.includes('API key') || errMsg.includes('Incorrect') || errMsg.includes('GROK_API_KEY')) {
+          showMessage('🔑 AI service key issue. Check Vercel env vars and redeploy.');
+        } else if (errMsg.includes('invalid format')) {
+          showMessage('⚠️ AI returned invalid data. Try a different description or photo.');
+        } else if (errMsg.includes('Vision') || errMsg.includes('photo') || errMsg.includes('image')) {
+          showMessage(`📷 ${errMsg}`);
+        } else {
+          showMessage(`❌ ${errMsg}`);
+        }
+        return;
+      }
+
+      applyAiQuoteData(item.id, data, { fromPhoto: options?.fromPhoto });
+    } catch (err) {
+      console.error('AI Quote call failed:', err);
+      showMessage('⚠️ Network error. Could not reach AI quote service. Check your connection or console.');
+    } finally {
+      setAiQuoteLoadingId(null);
+    }
+  };
+
+  const openPhotoQuotePicker = (itemId: number) => {
+    pendingPhotoQuoteItemIdRef.current = itemId;
+    photoQuoteInputRef.current?.click();
+  };
+
+  const handlePhotoQuoteFile = async (files: FileList | null) => {
+    const itemId = pendingPhotoQuoteItemIdRef.current;
+    pendingPhotoQuoteItemIdRef.current = null;
+    if (photoQuoteInputRef.current) photoQuoteInputRef.current.value = '';
+    if (!files?.[0] || itemId == null) return;
+
+    const item = items.find(row => row.id === itemId);
+    if (!item) return;
+
+    try {
+      const imageBase64 = await compressImageFileForAi(files[0]);
+      await requestAiQuote(item, { imageBase64, fromPhoto: true });
+    } catch (err) {
+      console.error('Photo quote failed:', err);
+      showMessage('⚠️ Could not read that photo. Try another image.');
+    }
+  };
+
+  const openGalleryPhotoQuote = (imageUrl: string) => {
+    if (!imageUrl) return;
+    setPhotoQuoteImageUrl(imageUrl);
+    setPhotoQuoteLineId(items[0]?.id ?? null);
+    setIsPhotoQuoteLinePickerOpen(true);
+  };
+
+  const runGalleryPhotoQuote = async () => {
+    if (!photoQuoteImageUrl || photoQuoteLineId == null) {
+      showMessage('Select a line item for the photo quote.');
+      return;
+    }
+    const item = items.find(row => row.id === photoQuoteLineId);
+    if (!item) return;
+    setIsPhotoQuoteLinePickerOpen(false);
+    await requestAiQuote(item, { imageUrl: photoQuoteImageUrl, fromPhoto: true });
+    setPhotoQuoteImageUrl('');
+  };
+
+  const emptyBreakdownMaterial = () => ({
+    description: '',
+    qty: 1,
+    unit: 'ea',
+    unitPrice: 0,
+    total: 0,
+  });
+
+  const emptyBreakdownLabor = () => ({
+    description: 'Labor',
+    hours: 0,
+    rate: 0,
+    total: 0,
+  });
+
+  const normalizeBreakdownMaterial = (m: any) => {
+    const qty = Number(m?.qty) || 0;
+    const unitPrice = roundMoney(Number(m?.unitPrice) || 0);
+    const total = roundMoney(Number(m?.total) || qty * unitPrice);
+    return {
+      description: String(m?.description || '').trim(),
+      qty,
+      unit: String(m?.unit || '').trim(),
+      unitPrice,
+      total,
+    };
+  };
+
+  const normalizeBreakdownLabor = (l: any) => {
+    const hours = Number(l?.hours) || 0;
+    const rate = roundMoney(Number(l?.rate) || 0);
+    const total = roundMoney(Number(l?.total) || hours * rate);
+    return {
+      description: String(l?.description || 'Labor').trim(),
+      hours,
+      rate,
+      total,
+    };
+  };
+
+  const getBuiltUpBreakdownPrice = (
+    materials: Array<{ total: number }>,
+    labor: { total: number } | null
+  ) => roundMoney(
+    materials.reduce((sum, m) => sum + (Number(m.total) || 0), 0) +
+    (labor ? Number(labor.total) || 0 : 0)
+  );
+
+  const openBreakdownEditor = (item: any) => {
+    const materials = getItemMaterials(item).map(normalizeBreakdownMaterial);
+    const labor = item.laborBreakdown ? normalizeBreakdownLabor(item.laborBreakdown) : null;
+    setBreakdownEditItemId(item.id);
+    setBreakdownMaterials(materials.length ? materials : [emptyBreakdownMaterial()]);
+    setBreakdownLabor(labor);
+    setBreakdownIncludeLabor(!!labor || materials.length === 0);
+    setBreakdownSyncLinePrice(true);
+    setIsBreakdownModalOpen(true);
+  };
+
+  const closeBreakdownEditor = () => {
+    setIsBreakdownModalOpen(false);
+    setBreakdownEditItemId(null);
+  };
+
+  const updateBreakdownMaterial = (
+    index: number,
+    field: 'description' | 'qty' | 'unit' | 'unitPrice' | 'total',
+    value: string | number
+  ) => {
+    setBreakdownMaterials(prev => prev.map((m, i) => {
+      if (i !== index) return m;
+      const next = { ...m, [field]: value };
+      if (field === 'qty' || field === 'unitPrice') {
+        next.total = roundMoney((Number(next.qty) || 0) * (Number(next.unitPrice) || 0));
+      } else if (field === 'total') {
+        const qty = Number(next.qty) || 0;
+        next.total = roundMoney(Number(value) || 0);
+        next.unitPrice = qty > 0 ? roundMoney(next.total / qty) : roundMoney(next.total);
+      }
+      return next;
+    }));
+  };
+
+  const updateBreakdownLaborField = (
+    field: 'description' | 'hours' | 'rate' | 'total',
+    value: string | number
+  ) => {
+    setBreakdownLabor(prev => {
+      const base = prev || emptyBreakdownLabor();
+      const next = { ...base, [field]: value };
+      if (field === 'hours' || field === 'rate') {
+        next.total = roundMoney((Number(next.hours) || 0) * (Number(next.rate) || 0));
+      } else if (field === 'total') {
+        const hours = Number(next.hours) || 0;
+        next.total = roundMoney(Number(value) || 0);
+        next.rate = hours > 0 ? roundMoney(next.total / hours) : roundMoney(next.total);
+      }
+      return next;
+    });
+  };
+
+  const addBreakdownMaterialRow = () => {
+    setBreakdownMaterials(prev => [...prev, emptyBreakdownMaterial()]);
+  };
+
+  const removeBreakdownMaterialRow = (index: number) => {
+    setBreakdownMaterials(prev => {
+      const next = prev.filter((_, i) => i !== index);
+      return next.length ? next : [emptyBreakdownMaterial()];
+    });
+  };
+
+  const saveBreakdown = () => {
+    if (breakdownEditItemId == null) return;
+
+    const materials = breakdownMaterials
+      .map(normalizeBreakdownMaterial)
+      .filter(m => m.description.length > 0);
+    const labor = breakdownIncludeLabor
+      ? normalizeBreakdownLabor(breakdownLabor || emptyBreakdownLabor())
+      : null;
+    const builtUp = getBuiltUpBreakdownPrice(materials, labor);
+
+    setItems(prev => prev.map(item => {
+      if (item.id !== breakdownEditItemId) return item;
+      const qty = item.qty || 0;
+      const updated: any = {
+        ...item,
+        materialsList: materials,
+        materialBreakdown: null,
+        laborBreakdown: labor && (labor.description || labor.hours || labor.rate || labor.total) ? labor : null,
+      };
+      if (breakdownSyncLinePrice && builtUp > 0) {
+        updated.price = builtUp;
+        updated.total = roundMoney(qty * builtUp);
+      }
+      return updated;
+    }));
+
+    closeBreakdownEditor();
+    showMessage('✅ Line breakdown saved');
+    saveToDB();
   };
 
   // === TRANSLATE FUNCTION (added exactly as requested) ===
@@ -2394,21 +3053,122 @@ export default function Home() {
     }
   };
 
+  const upsertUserSettingsProfile = async (nextProfile: typeof profile) => {
+    if (!user?.id || !supabase) return;
+    const existing = await fetchServerProfileSettings();
+    await supabase.from('estimates').upsert({
+      id: `SETTINGS-${user.id}`,
+      user_id: user.id,
+      jobName: '__settings__',
+      documentType: 'settings',
+      items: [],
+      profile: {
+        ...(existing || {}),
+        ...getSafeProfileSnapshot(nextProfile),
+        email: nextProfile.email || '',
+        phone: nextProfile.phone || '',
+        company: nextProfile.company || '',
+        appointmentReminderEnabled: !!nextProfile.appointmentReminderEnabled,
+      },
+      updated_at: new Date().toISOString(),
+    });
+  };
+
   const saveProfileSettings = async (nextProfile: typeof profile) => {
     setProfileSettingsCache({
       depositPercentage: nextProfile.depositPercentage,
       showDepositOnApproval: nextProfile.showDepositOnApproval,
       thirdPartyEscrowEnabled: nextProfile.thirdPartyEscrowEnabled,
+      escrowMinimumAmount: Math.max(0, Number(nextProfile.escrowMinimumAmount) || 0),
       autoSaveEnabled: nextProfile.autoSaveEnabled,
       appointmentReminderEnabled: nextProfile.appointmentReminderEnabled,
+      showDiscountOnEstimate: nextProfile.showDiscountOnEstimate === true,
+      taxesEnabled: nextProfile.taxesEnabled !== false,
     });
+    await upsertUserSettingsProfile(nextProfile);
     await saveToDB({ profile: nextProfile });
     await syncAppointmentsToServer(appointments, nextProfile);
+  };
+
+  const saveEstimateBreakdownSettings = async (
+    updates: Partial<typeof estimateBreakdownSettings>
+  ) => {
+    const next = { ...estimateBreakdownSettings, ...updates };
+    setEstimateBreakdownSettings(next);
+    await saveToDB({ breakdown: next });
+    showMessage('✅ Breakdown display saved for this estimate.');
+  };
+
+  const saveBreakdownProfileSettings = async (updates: Partial<typeof profile>) => {
+    const nextProfile = { ...profile, ...updates };
+    if ('showDiscountOnEstimate' in updates) {
+      setProfileSettingsCache({
+        ...getProfileSettingsCache(),
+        showDiscountOnEstimate: updates.showDiscountOnEstimate === true,
+      });
+    }
+    setProfile(nextProfile);
+    await saveProfileSettings(nextProfile);
+    showMessage(
+      'showDiscountOnEstimate' in updates
+        ? updates.showDiscountOnEstimate
+          ? '✅ Discount line will show on client estimates.'
+          : '✅ Discount line hidden on client estimates (discount still applies to total).'
+        : '✅ Profile display settings saved.'
+    );
   };
 
   const saveProfile = async () => {
     await saveProfileSettings(profile);
     showMessage('✅ Profile saved!');
+  };
+
+  const testAppointmentReminder = async () => {
+    if (!supabase || testingReminder) return;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) {
+      showMessage('Please log in to test appointment reminders.');
+      return;
+    }
+
+    setTestingReminder(true);
+    try {
+      const response = await fetch('/api/appointment-reminders/send', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ force: true }),
+      });
+      const data = await response.json();
+
+      if (data.skipped) {
+        showMessage(`Reminder test skipped: ${data.reason}`);
+        return;
+      }
+      if (!response.ok) {
+        showMessage(data.error || 'Reminder test failed.');
+        return;
+      }
+
+      const parts: string[] = [];
+      if (data.emailsSent?.length) parts.push(`Email sent to ${data.emailsSent.join(', ')}`);
+      if (data.smsSent?.length) parts.push(`Text sent to ${data.smsSent.join(', ')}`);
+      if (data.errors?.length) parts.push(data.errors.join('\n'));
+
+      if (data.notified) {
+        showMessage(
+          `✅ Test reminder sent (${data.appointmentCount} appointment${data.appointmentCount === 1 ? '' : 's'}).\n\n${parts.join('\n')}`
+        );
+      } else {
+        showMessage(`Reminder test completed but nothing was sent.\n\n${parts.join('\n') || 'Check RESEND_API_KEY / Twilio settings.'}`);
+      }
+    } catch {
+      showMessage('Reminder test failed. Check the server console.');
+    } finally {
+      setTestingReminder(false);
+    }
   };
 
   const persistAppointments = (nextAppointments: typeof appointments) => {
@@ -2419,20 +3179,45 @@ export default function Home() {
     }
   };
 
+  const toDatetimeLocalValue = (iso: string) => {
+    const d = new Date(iso);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
+  const resetAppointmentForm = () => {
+    setEditingAppointmentId(null);
+    setSelectedEstimateForCalendar(null);
+    setSelectedDateTime('');
+  };
+
   const openCalendarModal = async () => {
     await refreshSavedList();
-    // Clear any previously selected non-estimate (e.g. old state from before filter)
-    if (selectedEstimateForCalendar) {
-      const isEstimate = selectedEstimateForCalendar.documentType === 'estimate' ||
-                         selectedEstimateForCalendar.invoiceNumber?.startsWith('EST');
-      if (!isEstimate) {
-        setSelectedEstimateForCalendar(null);
-      }
-    }
+    resetAppointmentForm();
     setCalendarView('schedule');
     setAppointmentsMonth(new Date().getMonth());
     setAppointmentsYear(new Date().getFullYear());
     setIsCalendarModalOpen(true);
+  };
+
+  const openEditAppointment = async (appt: (typeof appointments)[0]) => {
+    if (!user || !supabase) return;
+    const { data } = await supabase
+      .from('estimates')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('updated_at', { ascending: false });
+    const estimates = data || [];
+    setSavedEstimatesList(estimates);
+    const estimate = estimates.find(
+      est =>
+        est.id === appt.estimateId &&
+        (est.documentType === 'estimate' || est.invoiceNumber?.startsWith('EST'))
+    );
+    setEditingAppointmentId(appt.id);
+    setSelectedEstimateForCalendar(estimate || null);
+    setSelectedDateTime(toDatetimeLocalValue(appt.datetime));
+    setCalendarView('schedule');
   };
 
   const goToPreviousAppointmentsMonth = () => {
@@ -2454,10 +3239,11 @@ export default function Home() {
   };
 
   const scheduleAppointment = async () => {
-    const isStillEstimate = selectedEstimateForCalendar && 
+    const isEdit = !!editingAppointmentId;
+    const isStillEstimate = selectedEstimateForCalendar &&
       (selectedEstimateForCalendar.documentType === 'estimate' || selectedEstimateForCalendar.invoiceNumber?.startsWith('EST'));
     if (!selectedEstimateForCalendar || !isStillEstimate || !selectedDateTime) {
-      return showMessage("Select estimate and date/time");
+      return showMessage(isEdit ? 'Select estimate and date/time to save changes' : 'Select estimate and date/time');
     }
     if (schedulingAppointment) return;
 
@@ -2466,14 +3252,30 @@ export default function Home() {
     const clientEmails = (selectedEstimateForCalendar.emails || []).map((e: string) => e?.trim()).filter((e: string) => e && e.includes('@'));
     const clientPhones = (selectedEstimateForCalendar.phones || []).map((p: string) => p?.trim()).filter(Boolean);
 
-    const newAppointment = {
-      id: `${Date.now()}`,
-      estimateId: selectedEstimateForCalendar.id,
-      jobName: selectedEstimateForCalendar.jobName || 'Untitled',
-      invoiceNumber: selectedEstimateForCalendar.invoiceNumber || selectedEstimateForCalendar.id,
-      datetime: appointmentDate.toISOString(),
-    };
-    persistAppointments([...appointments, newAppointment]);
+    if (isEdit) {
+      persistAppointments(
+        appointments.map(appt =>
+          appt.id === editingAppointmentId
+            ? {
+                ...appt,
+                estimateId: selectedEstimateForCalendar.id,
+                jobName: selectedEstimateForCalendar.jobName || 'Untitled',
+                invoiceNumber: selectedEstimateForCalendar.invoiceNumber || selectedEstimateForCalendar.id,
+                datetime: appointmentDate.toISOString(),
+              }
+            : appt
+        )
+      );
+    } else {
+      const newAppointment = {
+        id: `${Date.now()}`,
+        estimateId: selectedEstimateForCalendar.id,
+        jobName: selectedEstimateForCalendar.jobName || 'Untitled',
+        invoiceNumber: selectedEstimateForCalendar.invoiceNumber || selectedEstimateForCalendar.id,
+        datetime: appointmentDate.toISOString(),
+      };
+      persistAppointments([...appointments, newAppointment]);
+    }
 
     setSchedulingAppointment(true);
     let notificationSummary = '';
@@ -2526,12 +3328,19 @@ export default function Home() {
       setSchedulingAppointment(false);
     }
 
-    showMessage(`✅ Appointment scheduled for ${appointmentTime}\n\n${notificationSummary}`);
+    showMessage(
+      isEdit
+        ? `✅ Appointment updated for ${appointmentTime}\n\n${notificationSummary}`
+        : `✅ Appointment scheduled for ${appointmentTime}\n\n${notificationSummary}`
+    );
 
-    setIsCalendarModalOpen(false);
-    setSelectedEstimateForCalendar(null);
-    setSelectedDateTime('');
-    setCalendarView('schedule');
+    if (isEdit) {
+      setCalendarView('appointments');
+    } else {
+      setIsCalendarModalOpen(false);
+      setCalendarView('schedule');
+    }
+    resetAppointmentForm();
   };
 
   const saveAsQuickLine = (item: any) => {
@@ -2692,6 +3501,8 @@ export default function Home() {
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const photoUploadInputRef = useRef<HTMLInputElement>(null);
   const photoCameraCaptureInputRef = useRef<HTMLInputElement>(null);
+  const photoQuoteInputRef = useRef<HTMLInputElement>(null);
+  const pendingPhotoQuoteItemIdRef = useRef<number | null>(null);
 
   const debouncedSave = () => {
     if (!profile.autoSaveEnabled) return;
@@ -2769,7 +3580,22 @@ export default function Home() {
   };
 
   const isDepositOnApprovalEnabled = () => profile.showDepositOnApproval !== false;
-  const isThirdPartyEscrowEnabled = () => !!profile.thirdPartyEscrowEnabled;
+  const isThirdPartyEscrowProfileEnabled = () => !!profile.thirdPartyEscrowEnabled;
+
+  const getEscrowMinimumAmount = (): number => {
+    const cached = getProfileSettingsCache();
+    if ('escrowMinimumAmount' in cached) {
+      return Math.max(0, Number(cached.escrowMinimumAmount) || 0);
+    }
+    return Math.max(0, Number(profile.escrowMinimumAmount) || 0);
+  };
+
+  const shouldShowEscrowOnEstimate = (estimateTotal: number = grandTotal) => {
+    if (!isThirdPartyEscrowProfileEnabled()) return false;
+    const minimum = getEscrowMinimumAmount();
+    if (minimum <= 0) return true;
+    return estimateTotal >= minimum;
+  };
 
   const openPaymentModal = (type: 'deposit' | 'balance', amount: number) => {
     setPaymentType(type);
@@ -2782,7 +3608,7 @@ export default function Home() {
 
   const renderApprovedPaymentSection = (options?: { interactive?: boolean }) => {
     if (documentType === 'invoice') return null;
-    if (!isDepositOnApprovalEnabled() && !isThirdPartyEscrowEnabled()) return null;
+    if (!isDepositOnApprovalEnabled() && !shouldShowEscrowOnEstimate()) return null;
 
     const interactive = options?.interactive ?? true;
     const depositBase = grandTotal * (profile.depositPercentage || 0) / 100;
@@ -2802,13 +3628,13 @@ export default function Home() {
             Credit card payments include an additional {ccFeePercent}% processing fee
           </div>
         )}
-        {isThirdPartyEscrowEnabled() && !isDepositOnApprovalEnabled() && (
+        {shouldShowEscrowOnEstimate() && !isDepositOnApprovalEnabled() && (
           <p className="mt-4 text-lg text-gray-700">
             Funds can be held in a third-party escrow account until work is complete.
           </p>
         )}
         {interactive ? (
-          <div className={`mt-6 flex flex-col sm:flex-row gap-4 justify-center ${isDepositOnApprovalEnabled() && isThirdPartyEscrowEnabled() ? '' : 'max-w-md mx-auto'}`}>
+          <div className={`mt-6 flex flex-col sm:flex-row gap-4 justify-center ${isDepositOnApprovalEnabled() && shouldShowEscrowOnEstimate() ? '' : 'max-w-md mx-auto'}`}>
             {isDepositOnApprovalEnabled() && (
               <Button
                 onClick={openDepositPayment}
@@ -2820,7 +3646,7 @@ export default function Home() {
                 )}
               </Button>
             )}
-            {isThirdPartyEscrowEnabled() && (
+            {shouldShowEscrowOnEstimate() && (
               <Button
                 onClick={() => setIsEscrowModalOpen(true)}
                 variant="outline"
@@ -2831,7 +3657,7 @@ export default function Home() {
             )}
           </div>
         ) : (
-          isThirdPartyEscrowEnabled() && (
+          shouldShowEscrowOnEstimate() && (
             <p className="mt-4 text-sm text-gray-600">
               Third Party Escrow available — contractor and client arrange a neutral escrow account to hold and release funds.
             </p>
@@ -2957,25 +3783,23 @@ export default function Home() {
 
   const calculateGrandTotal = (doc: any): number => {
     if (!doc || !doc.items) return 0;
-    const itemsTotal = doc.items.reduce((sum: number, item: any) => {
-      return sum + (item.total || (item.qty || 0) * (item.price || 0));
-    }, 0);
-    const laborAmountDoc = doc.laborAmount ?? 
-      (doc.useHourlyLabor ? (doc.laborHours || 0) * (doc.laborRate || 0) : (doc.laborFixedAmount || 0));
-    const subtotal = itemsTotal + laborAmountDoc;
+    const laborAmountDoc =
+      doc.laborAmount ??
+      (doc.useHourlyLabor
+        ? (doc.laborHours || 0) * (doc.laborRate || 0)
+        : doc.laborFixedAmount || 0);
     const docDiscountData = getDiscountFromDoc(doc);
-    const docDiscount = docDiscountData.discountAmount > 0
-      ? docDiscountData.discountAmount
-      : computeDiscountAmount(
-          subtotal,
-          docDiscountData.discountDescription,
-          docDiscountData.discountValue,
-          docDiscountData.discountType
-        );
-    const taxableBase = Math.max(0, itemsTotal + (doc.taxLabor !== false ? laborAmountDoc : 0) - docDiscount);
-    const docTaxRate = doc.taxRate ?? 7;
-    const docTaxAmount = doc.isTaxExempt ? 0 : taxableBase * (docTaxRate / 100);
-    return Math.max(0, subtotal - docDiscount + docTaxAmount);
+    return computeEstimateTotals({
+      items: doc.items,
+      laborAmount: laborAmountDoc,
+      isTaxExempt: doc.isTaxExempt,
+      taxesEnabled: getTaxesEnabled(),
+      taxRate: doc.taxRate ?? 7,
+      discountDescription: docDiscountData.discountDescription,
+      discountValue: docDiscountData.discountValue,
+      discountType: docDiscountData.discountType,
+      storedDiscountAmount: docDiscountData.discountAmount,
+    }).grandTotal;
   };
 
   const totalOutstanding = outstandingInvoices.reduce((sum, inv) => sum + calculateGrandTotal(inv), 0);
@@ -3645,34 +4469,89 @@ export default function Home() {
                   </div>
 
                   <div className="md:col-span-2 flex items-center gap-8 pt-4 border-t">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input type="checkbox" checked={isTaxExempt} onChange={e => setIsTaxExempt(e.target.checked)} />
-                      <span className="font-medium">{t('taxExempt')}</span>
-                    </label>
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input type="checkbox" checked={taxLabor} onChange={e => setTaxLabor(e.target.checked)} />
-                      <span className="font-medium">{t('taxLabor')}</span>
-                    </label>
-                    <div className="ml-auto text-sm text-gray-500">
-                      Rate: <span className="font-semibold">{baseTaxRate}%</span>
-                    </div>
+                    {getTaxesEnabled() ? (
+                      <>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input type="checkbox" checked={isTaxExempt} onChange={e => setIsTaxExempt(e.target.checked)} />
+                          <span className="font-medium">{t('taxExempt')}</span>
+                        </label>
+                        <div className="ml-auto text-sm text-gray-500">
+                          Rate: <span className="font-semibold">{baseTaxRate}%</span>
+                        </div>
+                      </>
+                    ) : (
+                      <p className="text-sm text-gray-500">
+                        Taxes are turned off in Profile settings. Enable taxes there to calculate sales tax on estimates.
+                      </p>
+                    )}
                   </div>
                 </CardContent>
               </Card>
 
-              <div className="flex flex-wrap gap-3 mb-8">
+              <div className="flex flex-wrap gap-3 mb-8 items-center">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    const checked = !estimateBreakdownSettings.showMaterialBreakdownOnEstimate;
+                    void saveEstimateBreakdownSettings({
+                      showMaterialBreakdownOnEstimate: checked,
+                    });
+                  }}
+                  className={
+                    estimateBreakdownSettings.showMaterialBreakdownOnEstimate
+                      ? 'bg-[#10b981] hover:bg-[#059669] text-white border-[#10b981]'
+                      : ''
+                  }
+                >
+                  {estimateBreakdownSettings.showMaterialBreakdownOnEstimate ? '✓ ' : ''}Show Materials Breakdown
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    const checked = !estimateBreakdownSettings.showLaborBreakdownOnEstimate;
+                    void saveEstimateBreakdownSettings({
+                      showLaborBreakdownOnEstimate: checked,
+                    });
+                  }}
+                  className={
+                    estimateBreakdownSettings.showLaborBreakdownOnEstimate
+                      ? 'bg-[#10b981] hover:bg-[#059669] text-white border-[#10b981]'
+                      : ''
+                  }
+                >
+                  {estimateBreakdownSettings.showLaborBreakdownOnEstimate ? '✓ ' : ''}Show Labor Breakdown
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    const checked = !estimateBreakdownSettings.showCostBreakdownOnEstimate;
+                    void saveEstimateBreakdownSettings({ showCostBreakdownOnEstimate: checked });
+                  }}
+                  className={
+                    estimateBreakdownSettings.showCostBreakdownOnEstimate
+                      ? 'bg-[#10b981] hover:bg-[#059669] text-white border-[#10b981]'
+                      : ''
+                  }
+                >
+                  {estimateBreakdownSettings.showCostBreakdownOnEstimate ? '✓ ' : ''}Show Cost Breakdown
+                </Button>
+                <div className="hidden sm:block w-px h-8 bg-gray-300 mx-1" aria-hidden />
                 <Button onClick={addRow} variant="outline">{t('addLineItem')}</Button>
                 <Button onClick={openQuickLinesModal} variant="outline">{t('quickLines')}</Button>
               </div>
 
               <Card className="mb-8">
                 <div className="overflow-x-auto">
-                  <Table className="min-w-[800px]">
+                  <Table className="min-w-[900px]">
                     <TableHeader>
                       <TableRow className="bg-[#1e293b]">
                         <TableHead className="text-white w-1/2 min-w-[320px]">Description</TableHead>
                         <TableHead className="text-white text-right w-20">Qty</TableHead>
-                        <TableHead className="text-white text-right w-24">Price</TableHead>
+                        <TableHead className="text-white text-right w-20">SF/Unit</TableHead>
+                        <TableHead className="text-white text-right w-24">SF/Unit Price</TableHead>
                         <TableHead className="text-white text-right w-28">Total</TableHead>
                         <TableHead className="text-white w-16"></TableHead>
                       </TableRow>
@@ -3733,7 +4612,7 @@ export default function Home() {
 
       if (data.suggestion) {
         updateItem(item.id, 'description', data.suggestion);
-        showMessage('✅ Description improved by Grok AI');
+        showMessage('✅ Line description updated — use Grok AI for customer-facing scope and features.');
       }
     } catch (err) {
       console.error('Grok AI call failed:', err);
@@ -3747,104 +4626,62 @@ export default function Home() {
   {improvingDescriptionId === item.id ? '⏳ Improving...' : '🤖 Grok AI'}
 </Button>
 
-{/* AI PRICE QUOTE BUTTON - UPDATED */}
 <Button
   size="sm"
   variant="ghost"
   className="mt-2 w-full text-xs flex items-center gap-1 justify-center bg-amber-100 hover:bg-amber-200"
-  onClick={async () => {
+  onClick={() => {
     const description = item.description?.trim();
     if (!description) return showMessage('Enter a description first');
-
-    setAiQuoteLoadingId(item.id);
-
-    try {
-      // Include Supabase access token so the API route can verify the user
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (supabase) {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.access_token) {
-          headers['Authorization'] = `Bearer ${session.access_token}`;
-        }
-      }
-
-      const res = await fetch('/api/ai-quote', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ description })
-      });
-
-      const data = await res.json();
-
-      if (!res.ok || data.error) {
-        const errMsg = data.error || 'AI quote error';
-        if (errMsg.includes('Rate limit')) {
-          showMessage(`⏳ ${errMsg}`);
-        } else if (errMsg.includes('Unauthorized') || errMsg.includes('missing')) {
-          showMessage('🔒 Please log in with a main account to use AI features.');
-        } else if (errMsg.includes('API key') || errMsg.includes('Incorrect') || errMsg.includes('GROK_API_KEY')) {
-          showMessage('🔑 AI service key issue. Check Vercel env vars and redeploy.');
-        } else if (errMsg.includes('invalid format')) {
-          showMessage('⚠️ AI returned invalid data. Try a different description.');
-        } else {
-          showMessage(`❌ ${errMsg}`);
-        }
-        return;
-      }
-
-      // Auto-update description + price fields
-      if (data.suggestedDescription) {
-        updateItem(item.id, 'description', data.suggestedDescription);
-      }
-      updateItem(item.id, 'price', data.unitPrice);
-      if (data.unit) updateItem(item.id, 'unit', data.unit);
-      if (data.suggestedQty !== undefined) updateItem(item.id, 'qty', data.suggestedQty);
-
-      if (data.materials?.length) {
-        updateItem(item.id, 'materialsList', data.materials);
-        updateItem(item.id, 'materialBreakdown', null);
-      }
-      if (data.laborBreakdown) {
-        updateItem(item.id, 'laborBreakdown', {
-          description: data.laborBreakdown.description,
-          hours: data.laborBreakdown.hours,
-          rate: data.laborBreakdown.rate,
-          total: data.laborBreakdown.total,
-        });
-      }
-
-      let msg = `✅ AI Quote Generated!\n\nDescription updated for customer\n\n${data.breakdown}\nConfidence: ${data.confidence}`;
-      if (data.materials?.length) {
-        msg += `\n\n${data.materials.length} materials listed.`;
-      }
-      if (data.laborBreakdown?.hours) {
-        msg += `\nLabor: ${data.laborBreakdown.description || 'Installation'} — ${data.laborBreakdown.hours} hrs`;
-      }
-      if (data.materialsCostTotal != null || data.laborCostTotal != null) {
-        const mat = Number(data.materialsCostTotal || 0).toFixed(2);
-        const lab = Number(data.laborCostTotal || 0).toFixed(2);
-        msg += `\nBuilt-up cost: materials $${mat} + labor $${lab} = $${(Number(data.materialsCostTotal || 0) + Number(data.laborCostTotal || 0)).toFixed(2)}`;
-      }
-      showMessage(msg);
-    } catch (err: any) {
-      console.error('AI Quote call failed:', err);
-      showMessage('⚠️ Network error. Could not reach AI quote service. Check your connection or console.');
-    } finally {
-      setAiQuoteLoadingId(null);
-    }
+    void requestAiQuote(item);
   }}
   disabled={aiQuoteLoadingId === item.id}
 >
   {aiQuoteLoadingId === item.id ? '⏳ Getting quote...' : '💰 AI Price Quote (Online Data)'}
 </Button>
 
-                            {(hasItemBreakdown(item) || itemHasCostData(item)) && (
-                              <div className="mt-2 p-2 bg-gray-50 border rounded text-[10px] text-gray-700">
-                                <div className="font-semibold mb-1">Line {idx + 1} Breakdown:</div>
-                                {renderItemBreakdown(item)}
-                                {itemHasCostData(item) && renderCostBreakdown(item, 'mt-2 pt-2 border-t border-gray-200')}
-                              </div>
-                            )}
+<Button
+  size="sm"
+  variant="ghost"
+  className="mt-2 w-full text-xs flex items-center gap-1 justify-center bg-violet-100 hover:bg-violet-200"
+  onClick={() => openPhotoQuotePicker(item.id)}
+  disabled={aiQuoteLoadingId === item.id}
+>
+  {aiQuoteLoadingId === item.id ? '⏳ Analyzing photo...' : '📷 AI Quote from Photo'}
+</Button>
+
+<Button
+  size="sm"
+  variant="ghost"
+  className="mt-2 w-full text-xs flex items-center gap-1 justify-center bg-slate-100 hover:bg-slate-200"
+  onClick={() => openBreakdownEditor(item)}
+>
+  ✏️ {hasItemBreakdown(item) || itemHasCostData(item) ? 'Edit Breakdown' : 'Add Breakdown'}
+</Button>
+
+                            {hasAnyBreakdownToggleOn() && (hasItemBreakdown(item) || itemHasCostData(item)) && (() => {
+                              const preview = getVisibleBreakdownParts(item);
+                              if (!preview.hasVisiblePreview) return null;
+                              return (
+                                <div className="mt-2 p-2 bg-gray-50 border rounded text-[10px] text-gray-700">
+                                  <div className="flex items-center justify-between gap-2 mb-1">
+                                    <div className="font-semibold">Line {idx + 1} Breakdown:</div>
+                                    <button
+                                      type="button"
+                                      onClick={() => openBreakdownEditor(item)}
+                                      className="text-[10px] text-[#10b981] hover:underline shrink-0"
+                                    >
+                                      Edit
+                                    </button>
+                                  </div>
+                                  {(preview.showMaterials || preview.showLabor) && renderItemBreakdown(item, '', {
+                                    showMaterials: preview.showMaterials,
+                                    showLabor: preview.showLabor,
+                                  })}
+                                  {preview.showCosts && renderCostBreakdown(item, (preview.showMaterials || preview.showLabor) ? 'mt-2 pt-2 border-t border-gray-200' : '')}
+                                </div>
+                              );
+                            })()}
 
                             {/* TRANSLATE FEATURE - added exactly as requested */}
                             <div className="mt-4 pt-3 border-t flex flex-wrap items-center gap-2 text-xs">
@@ -3920,6 +4757,15 @@ export default function Home() {
                             />
                           </TableCell>
                           <TableCell>
+                            <Input
+                              list="line-item-unit-options"
+                              value={item.unit || ''}
+                              onChange={e => updateItem(item.id, 'unit', e.target.value)}
+                              className="text-right"
+                              placeholder="SF or Unit"
+                            />
+                          </TableCell>
+                          <TableCell>
                             {canSeePricing ? (
                               <Input 
                                 type="number" 
@@ -3931,8 +4777,18 @@ export default function Home() {
                               <div className="text-right text-gray-400">—</div>
                             )}
                           </TableCell>
-                          <TableCell className="text-right font-medium">
-                            {canSeePricing ? `$${(item.total || 0).toFixed(2)}` : '—'}
+                          <TableCell>
+                            {canSeePricing ? (
+                              <Input
+                                type="number"
+                                step="0.01"
+                                value={item.total ?? 0}
+                                onChange={e => updateItem(item.id, 'total', parseFloat(e.target.value) || 0)}
+                                className="text-right font-medium [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [appearance:textfield]"
+                              />
+                            ) : (
+                              <div className="text-right text-gray-400">—</div>
+                            )}
                           </TableCell>
                           <TableCell>
                             <div className="flex gap-1">
@@ -3944,6 +4800,11 @@ export default function Home() {
                       ))}
                     </TableBody>
                   </Table>
+                  <datalist id="line-item-unit-options">
+                    {LINE_ITEM_UNITS.map(unit => (
+                      <option key={unit} value={unit} />
+                    ))}
+                  </datalist>
                 </div>
 
                 <div className="p-6 bg-white border-t">
@@ -4024,7 +4885,12 @@ export default function Home() {
                         </Button>
                       )}
                     </div>
-                    {hasActiveDiscount() && (
+                    {hasActiveDiscount() && !getShowDiscountOnEstimate() && (
+                      <p className="text-sm text-amber-700 mt-2">
+                        Discount applied internally (-${discountAmount.toFixed(2)}) but hidden on client estimate. Turn on in Profile → Show Discount on Estimate.
+                      </p>
+                    )}
+                    {shouldShowClientDiscount() && (
                       <p className="text-sm text-red-600 mt-2">
                         Discount applied: -${discountAmount.toFixed(2)}
                         {appliedDiscountType === 'percent' ? ` (${appliedDiscountValue}% of $${subtotalBeforeDiscount.toFixed(2)})` : ''}
@@ -4034,15 +4900,38 @@ export default function Home() {
 
                   {canSeeFinancials ? (
                     <>
+                      <div className="flex justify-end text-xl font-semibold mb-2 text-gray-700">
+                        Subtotal (line items): <span className="ml-4">${taxableSubtotal.toFixed(2)}</span>
+                      </div>
+                      {laborAmount > 0 && (
+                        <div className="flex justify-end text-xl font-semibold mb-2 text-[#14b8a6]">
+                          <span>
+                            Labor: <span className="ml-4">${laborAmount.toFixed(2)}</span>
+                            <span className="block text-sm font-normal text-gray-500 text-right">Reference only — not included in total</span>
+                          </span>
+                        </div>
+                      )}
                       {hasActiveDiscount() && (
-                        <div className="flex justify-end text-2xl font-semibold mb-2 text-red-600">
+                        <div className="flex justify-end text-xl font-semibold mb-2 text-gray-700">
+                          Subtotal before discount: <span className="ml-4">${subtotalBeforeDiscount.toFixed(2)}</span>
+                        </div>
+                      )}
+                      {hasActiveDiscount() && (
+                        <div className={`flex justify-end text-2xl font-semibold mb-2 ${shouldShowClientDiscount() ? 'text-red-600' : 'text-amber-700'}`}>
                           {appliedDiscountDescription.trim()}: <span className="ml-4">-${discountAmount.toFixed(2)}</span>
                           {appliedDiscountType === 'percent' ? <span className="ml-2 text-base text-gray-500">({appliedDiscountValue}%)</span> : null}
                         </div>
                       )}
-                      <div className="flex justify-end text-2xl font-semibold mb-2">
-                        Taxes ({state || '—'} {baseTaxRate}%): <span className="text-[#14b8a6] ml-4">${taxAmount.toFixed(2)}</span>
-                      </div>
+                      {hasActiveDiscount() && (
+                        <div className="flex justify-end text-xl font-semibold mb-2 text-gray-700">
+                          Subtotal after discount: <span className="ml-4">${subtotalAfterDiscount.toFixed(2)}</span>
+                        </div>
+                      )}
+                      {getTaxesEnabled() && (
+                        <div className="flex justify-end text-2xl font-semibold mb-2">
+                          Taxes ({state || '—'} {baseTaxRate}%): <span className="text-[#14b8a6] ml-4">${taxAmount.toFixed(2)}</span>
+                        </div>
+                      )}
                       <div className="flex justify-end text-4xl font-bold">
                         Grand Total: <span className="text-[#10b981] ml-4">${grandTotal.toFixed(2)}</span>
                       </div>
@@ -4083,10 +4972,20 @@ export default function Home() {
               <Card className="mb-8">
                 <CardContent className="p-6">
                   <h3 className="text-xl font-semibold mb-4">{t('photosSection')} ({photoUrls.length})</h3>
+                  <p className="text-sm text-gray-500 mb-4">
+                    Use AI Quote from Photo on a line item, or quote from a saved job photo below.
+                  </p>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     {photoDisplayUrls.map((url, i) => (
-                      <div key={i} className="relative">
+                      <div key={i} className="relative group">
                         <img src={url} alt="" className="w-full h-40 object-cover rounded-lg border" />
+                        <button
+                          type="button"
+                          onClick={() => openGalleryPhotoQuote(url)}
+                          className="absolute bottom-2 left-2 right-2 bg-violet-600 hover:bg-violet-700 text-white text-xs py-1.5 px-2 rounded-lg shadow-md sm:opacity-0 sm:group-hover:opacity-100 transition"
+                        >
+                          📷 AI Quote
+                        </button>
                         <button 
                           onClick={() => removeMedia('photo', i)} 
                           className="absolute top-2 right-2 bg-red-600 hover:bg-red-700 text-white text-4xl w-10 h-10 flex items-center justify-center rounded-2xl shadow-xl"
@@ -4122,8 +5021,44 @@ export default function Home() {
                     className="hidden"
                     onChange={e => handlePhotoFileChange(e.target.files)}
                   />
+                  <input
+                    ref={photoQuoteInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    capture="environment"
+                    className="hidden"
+                    onChange={e => void handlePhotoQuoteFile(e.target.files)}
+                  />
                 </CardContent>
               </Card>
+
+              <Dialog open={isPhotoQuoteLinePickerOpen} onOpenChange={setIsPhotoQuoteLinePickerOpen}>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>AI Quote from Job Photo</DialogTitle>
+                  </DialogHeader>
+                  <p className="text-sm text-gray-600">
+                    Choose which line item should receive the price quote from this photo.
+                  </p>
+                  <select
+                    value={photoQuoteLineId ?? ''}
+                    onChange={e => setPhotoQuoteLineId(Number(e.target.value))}
+                    className="flex h-10 w-full rounded-lg border border-input bg-white px-3 py-2 text-sm"
+                  >
+                    {items.map((line, i) => (
+                      <option key={line.id} value={line.id}>
+                        Line {i + 1}: {line.description?.trim() || '(empty description)'}
+                      </option>
+                    ))}
+                  </select>
+                  <DialogFooter>
+                    <Button variant="outline" onClick={() => setIsPhotoQuoteLinePickerOpen(false)}>Cancel</Button>
+                    <Button onClick={() => void runGalleryPhotoQuote()} className="bg-violet-600 hover:bg-violet-700">
+                      Generate Quote
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
 
               <Card className="mb-8">
                 <CardContent className="p-6">
@@ -4229,7 +5164,8 @@ export default function Home() {
                     <tr className="border-b-2 border-gray-800">
                       <th className="text-left py-2">Description</th>
                       <th className="text-right py-2">Qty</th>
-                      <th className="text-right py-2">Price</th>
+                      <th className="text-right py-2">SF/Unit</th>
+                      <th className="text-right py-2">SF/Unit Price</th>
                       <th className="text-right py-2">Total</th>
                     </tr>
                   </thead>
@@ -4241,6 +5177,7 @@ export default function Home() {
                           {renderClientItemBreakdown(item, 'mt-1 text-[10px] text-gray-600 leading-tight pl-2')}
                         </td>
                         <td className="py-3 text-right">{item.qty}</td>
+                        <td className="py-3 text-right">{item.unit || '—'}</td>
                         <td className="py-3 text-right">{canSeePricing ? `$${item.price.toFixed(2)}` : '—'}</td>
                         <td className="py-3 text-right">{canSeePricing ? `$${item.total.toFixed(2)}` : '—'}</td>
                       </tr>
@@ -4580,20 +5517,88 @@ export default function Home() {
                           />
                         </div>
                       )}
-                      <div className="flex items-center justify-between pt-2 border-t">
+                      <div className="pt-2 border-t space-y-4">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="font-semibold">Third Party Escrow</p>
+                            <p className="text-sm text-gray-500">Show an escrow option when the client approves the estimate</p>
+                          </div>
+                          <label className="relative inline-flex items-center cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={!!profile.thirdPartyEscrowEnabled}
+                              onChange={async (e) => {
+                                const checked = e.target.checked;
+                                const nextProfile = {
+                                  ...profile,
+                                  thirdPartyEscrowEnabled: checked,
+                                  escrowMinimumAmount:
+                                    profile.escrowMinimumAmount ?? 10000,
+                                };
+                                setProfile(nextProfile);
+                                await saveProfileSettings(nextProfile);
+                              }}
+                              className="sr-only peer"
+                            />
+                            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]"></div>
+                          </label>
+                        </div>
+                        {profile.thirdPartyEscrowEnabled && (
+                          <div>
+                            <label className="block text-sm font-semibold mb-2">
+                              Minimum estimate total for escrow ($)
+                            </label>
+                            <Input
+                              type="number"
+                              min="0"
+                              step="100"
+                              value={profile.escrowMinimumAmount ?? 0}
+                              onChange={e => {
+                                const nextProfile = {
+                                  ...profile,
+                                  escrowMinimumAmount: Math.max(0, parseFloat(e.target.value) || 0),
+                                };
+                                setProfile(nextProfile);
+                              }}
+                              onBlur={async (e) => {
+                                const nextProfile = {
+                                  ...profile,
+                                  escrowMinimumAmount: Math.max(0, parseFloat(e.target.value) || 0),
+                                };
+                                setProfile(nextProfile);
+                                await saveProfileSettings(nextProfile);
+                              }}
+                              placeholder="10000"
+                            />
+                            <p className="text-sm text-gray-500 mt-2">
+                              Escrow appears only when the estimate grand total is at or above this amount.
+                              Set to $0 to show escrow on all approved estimates.
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="border rounded-xl p-4 space-y-4 bg-gray-50">
+                      <div className="flex items-center justify-between">
                         <div>
-                          <p className="font-semibold">Third Party Escrow</p>
-                          <p className="text-sm text-gray-500">Show an escrow option when the client approves the estimate</p>
+                          <p className="font-semibold">Enable Taxes on Estimates</p>
+                          <p className="text-sm text-gray-500">When off, estimates calculate totals from line items only (no sales tax)</p>
                         </div>
                         <label className="relative inline-flex items-center cursor-pointer">
                           <input
                             type="checkbox"
-                            checked={!!profile.thirdPartyEscrowEnabled}
+                            checked={getTaxesEnabled()}
                             onChange={async (e) => {
                               const checked = e.target.checked;
-                              const nextProfile = { ...profile, thirdPartyEscrowEnabled: checked };
+                              const nextProfile = { ...profile, taxesEnabled: checked };
                               setProfile(nextProfile);
                               await saveProfileSettings(nextProfile);
+                              showMessage(
+                                checked
+                                  ? '✅ Taxes enabled on estimates.'
+                                  : '✅ Taxes disabled — totals will exclude sales tax.'
+                              );
                             }}
                             className="sr-only peer"
                           />
@@ -4604,56 +5609,10 @@ export default function Home() {
 
                     <div className="border rounded-xl p-4 space-y-4 bg-gray-50">
                       <div>
-                        <p className="font-semibold">Client Estimate Breakdown</p>
-                        <p className="text-sm text-gray-500">Choose what clients see under each line on sent estimates and PDFs</p>
-                      </div>
-
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="font-semibold">Show Material Breakdown</p>
-                          <p className="text-sm text-gray-500">List materials and quantities (no per-item costs)</p>
-                        </div>
-                        <label className="relative inline-flex items-center cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={!!profile.showMaterialBreakdownOnEstimate}
-                            onChange={(e) => {
-                              const checked = e.target.checked;
-                              setProfile(prev => ({
-                                ...prev,
-                                showMaterialBreakdownOnEstimate: checked,
-                                showPriceBreakdownByLine: checked || !!prev.showLaborBreakdownOnEstimate,
-                              }));
-                              saveToDB();
-                            }}
-                            className="sr-only peer"
-                          />
-                          <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]"></div>
-                        </label>
-                      </div>
-
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="font-semibold">Show Labor Breakdown</p>
-                          <p className="text-sm text-gray-500">Show labor scope and hours (no labor cost)</p>
-                        </div>
-                        <label className="relative inline-flex items-center cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={!!profile.showLaborBreakdownOnEstimate}
-                            onChange={(e) => {
-                              const checked = e.target.checked;
-                              setProfile(prev => ({
-                                ...prev,
-                                showLaborBreakdownOnEstimate: checked,
-                                showPriceBreakdownByLine: checked || !!prev.showMaterialBreakdownOnEstimate,
-                              }));
-                              saveToDB();
-                            }}
-                            className="sr-only peer"
-                          />
-                          <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]"></div>
-                        </label>
+                        <p className="font-semibold">Client Estimate Display</p>
+                        <p className="text-sm text-gray-500">
+                          Material, labor, and cost breakdown buttons are on the estimate editor (above Add Line Item).
+                        </p>
                       </div>
 
                       <div className="flex items-center justify-between">
@@ -4664,37 +5623,10 @@ export default function Home() {
                         <label className="relative inline-flex items-center cursor-pointer">
                           <input
                             type="checkbox"
-                            checked={profile.showDiscountOnEstimate !== false}
+                            checked={getShowDiscountOnEstimate()}
                             onChange={(e) => {
                               const checked = e.target.checked;
-                              setProfile(prev => ({
-                                ...prev,
-                                showDiscountOnEstimate: checked,
-                              }));
-                              saveToDB();
-                            }}
-                            className="sr-only peer"
-                          />
-                          <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]"></div>
-                        </label>
-                      </div>
-
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="font-semibold">Show Cost Breakdown</p>
-                          <p className="text-sm text-gray-500">Show material costs + labor cost that build up to the line price</p>
-                        </div>
-                        <label className="relative inline-flex items-center cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={!!profile.showCostBreakdownOnEstimate}
-                            onChange={(e) => {
-                              const checked = e.target.checked;
-                              setProfile(prev => ({
-                                ...prev,
-                                showCostBreakdownOnEstimate: checked,
-                              }));
-                              saveToDB();
+                              void saveBreakdownProfileSettings({ showDiscountOnEstimate: checked });
                             }}
                             className="sr-only peer"
                           />
@@ -4731,6 +5663,14 @@ export default function Home() {
                           <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]"></div>
                         </label>
                       </div>
+                      <Button
+                        variant="outline"
+                        className="w-full"
+                        onClick={testAppointmentReminder}
+                        disabled={testingReminder}
+                      >
+                        {testingReminder ? t('testingReminder') : t('testReminderNow')}
+                      </Button>
                     </div>
 
                     <div className="border-t pt-8">
@@ -5255,7 +6195,8 @@ export default function Home() {
                     <tr className="border-b-2 border-gray-800">
                       <th className="text-left py-2">Description</th>
                       <th className="text-right py-2 border-l border-gray-400 px-3">Qty</th>
-                      <th className="text-right py-2 border-l border-gray-400 px-3">Price</th>
+                      <th className="text-right py-2 border-l border-gray-400 px-3">SF/Unit</th>
+                      <th className="text-right py-2 border-l border-gray-400 px-3">SF/Unit Price</th>
                       <th className="text-right py-2 border-l border-gray-400 px-3">Total</th>
                     </tr>
                   </thead>
@@ -5267,6 +6208,7 @@ export default function Home() {
                           {renderClientItemBreakdown(item, 'mt-1 text-[10px] text-gray-600 leading-tight pl-2')}
                         </td>
                         <td className="py-3 text-right border-l border-gray-400 px-3">{item.qty}</td>
+                        <td className="py-3 text-right border-l border-gray-400 px-3">{item.unit || '—'}</td>
                         <td className="py-3 text-right border-l border-gray-400 px-3">{canSeePricing ? `$${item.price.toFixed(2)}` : '—'}</td>
                         <td className="py-3 text-right border-l border-gray-400 px-3">{canSeePricing ? `$${item.total.toFixed(2)}` : '—'}</td>
                       </tr>
@@ -5571,6 +6513,180 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
+      {/* Line Breakdown Editor Modal */}
+      <Dialog
+        open={isBreakdownModalOpen}
+        onOpenChange={(open) => {
+          if (!open) closeBreakdownEditor();
+          else setIsBreakdownModalOpen(true);
+        }}
+      >
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>✏️ Edit Line Breakdown</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-6 py-2">
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="font-semibold">Materials</h4>
+                <Button size="sm" variant="outline" onClick={addBreakdownMaterialRow}>
+                  + Add Material
+                </Button>
+              </div>
+              <div className="space-y-3">
+                {breakdownMaterials.map((material, index) => (
+                  <div key={index} className="border rounded-xl p-3 bg-gray-50 space-y-2">
+                    <div className="flex items-start gap-2">
+                      <Input
+                        value={material.description}
+                        onChange={e => updateBreakdownMaterial(index, 'description', e.target.value)}
+                        placeholder="Material description"
+                        className="flex-1"
+                      />
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => removeBreakdownMaterialRow(index)}
+                      >
+                        ×
+                      </Button>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                      <div>
+                        <label className="block text-[10px] text-gray-500 mb-1">Qty</label>
+                        <Input
+                          type="number"
+                          value={material.qty}
+                          onChange={e => updateBreakdownMaterial(index, 'qty', parseFloat(e.target.value) || 0)}
+                          className="text-right"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-gray-500 mb-1">Unit</label>
+                        <select
+                          value={material.unit || ''}
+                          onChange={e => updateBreakdownMaterial(index, 'unit', e.target.value)}
+                          className="flex h-10 w-full rounded-lg border border-input bg-white px-2 py-2 text-sm"
+                        >
+                          <option value="">—</option>
+                          {getLineItemUnitOptions(material.unit).map(unit => (
+                            <option key={unit} value={unit}>{unit}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-gray-500 mb-1">Unit Price</label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          value={material.unitPrice}
+                          onChange={e => updateBreakdownMaterial(index, 'unitPrice', parseFloat(e.target.value) || 0)}
+                          className="text-right"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-gray-500 mb-1">Total</label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          value={material.total}
+                          onChange={e => updateBreakdownMaterial(index, 'total', parseFloat(e.target.value) || 0)}
+                          className="text-right"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="border rounded-xl p-4 bg-gray-50 space-y-3">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={breakdownIncludeLabor}
+                  onChange={e => {
+                    const checked = e.target.checked;
+                    setBreakdownIncludeLabor(checked);
+                    if (checked && !breakdownLabor) setBreakdownLabor(emptyBreakdownLabor());
+                  }}
+                  className="w-4 h-4 accent-[#10b981]"
+                />
+                <span className="font-semibold">Include labor breakdown</span>
+              </label>
+
+              {breakdownIncludeLabor && (
+                <div className="space-y-2">
+                  <Input
+                    value={breakdownLabor?.description || ''}
+                    onChange={e => updateBreakdownLaborField('description', e.target.value)}
+                    placeholder="Labor description"
+                  />
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="block text-[10px] text-gray-500 mb-1">Hours</label>
+                      <Input
+                        type="number"
+                        step="0.25"
+                        value={breakdownLabor?.hours ?? 0}
+                        onChange={e => updateBreakdownLaborField('hours', parseFloat(e.target.value) || 0)}
+                        className="text-right"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-gray-500 mb-1">Rate / hr</label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={breakdownLabor?.rate ?? 0}
+                        onChange={e => updateBreakdownLaborField('rate', parseFloat(e.target.value) || 0)}
+                        className="text-right"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-gray-500 mb-1">Labor Total</label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={breakdownLabor?.total ?? 0}
+                        onChange={e => updateBreakdownLaborField('total', parseFloat(e.target.value) || 0)}
+                        className="text-right"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm">
+              <div className="font-semibold text-emerald-900">
+                Built-up line price: ${getBuiltUpBreakdownPrice(
+                  breakdownMaterials.map(normalizeBreakdownMaterial),
+                  breakdownIncludeLabor ? normalizeBreakdownLabor(breakdownLabor || emptyBreakdownLabor()) : null
+                ).toFixed(2)}
+              </div>
+              <label className="flex items-start gap-2 mt-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={breakdownSyncLinePrice}
+                  onChange={e => setBreakdownSyncLinePrice(e.target.checked)}
+                  className="mt-1 w-4 h-4 accent-[#10b981]"
+                />
+                <span className="text-emerald-950">
+                  Update line unit price from this built-up total (line total = qty × unit price)
+                </span>
+              </label>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={closeBreakdownEditor}>Cancel</Button>
+            <Button onClick={saveBreakdown} className="bg-[#10b981]">Save Breakdown</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Quick Lines Modal */}
       <Dialog open={isQuickLinesModalOpen} onOpenChange={setIsQuickLinesModalOpen}>
         <DialogContent className="max-w-2xl">
@@ -5626,14 +6742,19 @@ export default function Home() {
         open={isCalendarModalOpen}
         onOpenChange={(open) => {
           setIsCalendarModalOpen(open);
-          if (!open) setCalendarView('schedule');
+          if (!open) {
+            setCalendarView('schedule');
+            resetAppointmentForm();
+          }
         }}
       >
         <DialogContent className="max-w-md">
           {calendarView === 'schedule' ? (
             <>
               <DialogHeader>
-                <DialogTitle>📅 {t('scheduleAppointment')}</DialogTitle>
+                <DialogTitle>
+                  📅 {editingAppointmentId ? t('editAppointment') : t('scheduleAppointment')}
+                </DialogTitle>
               </DialogHeader>
               <div className="space-y-6 py-4">
                 <div>
@@ -5678,9 +6799,27 @@ export default function Home() {
                 </Button>
               </div>
               <DialogFooter>
-                <Button variant="outline" onClick={() => setIsCalendarModalOpen(false)}>Cancel</Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    if (editingAppointmentId) {
+                      resetAppointmentForm();
+                      setCalendarView('appointments');
+                    } else {
+                      setIsCalendarModalOpen(false);
+                    }
+                  }}
+                >
+                  Cancel
+                </Button>
                 <Button onClick={scheduleAppointment} className="bg-[#10b981]" disabled={schedulingAppointment}>
-                  {schedulingAppointment ? 'Scheduling...' : t('scheduleAppointment')}
+                  {schedulingAppointment
+                    ? editingAppointmentId
+                      ? 'Saving...'
+                      : 'Scheduling...'
+                    : editingAppointmentId
+                      ? t('saveChanges')
+                      : t('scheduleAppointment')}
                 </Button>
               </DialogFooter>
             </>
@@ -5718,13 +6857,25 @@ export default function Home() {
                 <div className="max-h-72 overflow-y-auto space-y-3">
                   {appointmentsForSelectedMonth.map(appt => (
                     <div key={appt.id} className="border rounded-xl p-3 bg-gray-50">
-                      <div className="font-semibold text-[#1e293b]">{appt.jobName}</div>
-                      <div className="text-sm text-gray-600">{appt.invoiceNumber}</div>
-                      <div className="text-sm text-[#10b981] mt-1">
-                        {new Date(appt.datetime).toLocaleString(
-                          profile.language === 'es' ? 'es-ES' : profile.language === 'fr' ? 'fr-FR' : 'en-US',
-                          { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }
-                        )}
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="font-semibold text-[#1e293b]">{appt.jobName}</div>
+                          <div className="text-sm text-gray-600">{appt.invoiceNumber}</div>
+                          <div className="text-sm text-[#10b981] mt-1">
+                            {new Date(appt.datetime).toLocaleString(
+                              profile.language === 'es' ? 'es-ES' : profile.language === 'fr' ? 'fr-FR' : 'en-US',
+                              { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }
+                            )}
+                          </div>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="shrink-0"
+                          onClick={() => openEditAppointment(appt)}
+                        >
+                          {t('edit')}
+                        </Button>
                       </div>
                     </div>
                   ))}
@@ -5734,7 +6885,15 @@ export default function Home() {
                 </div>
               </div>
               <DialogFooter>
-                <Button variant="outline" onClick={() => setCalendarView('schedule')}>{t('backToSchedule')}</Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    resetAppointmentForm();
+                    setCalendarView('schedule');
+                  }}
+                >
+                  {t('backToSchedule')}
+                </Button>
                 <Button onClick={() => setIsCalendarModalOpen(false)}>Close</Button>
               </DialogFooter>
             </>

@@ -1,0 +1,53 @@
+FIX 403 FORBIDDEN ON estimateace.com
+====================================
+
+MOST COMMON CAUSE (90%):
+You uploaded the "website" FOLDER instead of its CONTENTS.
+
+WRONG:
+  public_html/website/index.php   ← site is buried in a subfolder
+
+CORRECT:
+  public_html/index.php           ← must be at this level
+  public_html/solutions.php
+  public_html/css/style.css
+  public_html/includes/header.php
+  public_html/data/
+  public_html/.htaccess
+
+FIX IN HOSTINGER FILE MANAGER:
+1. Open public_html
+2. If you see a folder named "website", open it
+3. Select ALL files inside (index.php, css, includes, etc.)
+4. Move them UP into public_html (not inside website/)
+5. Delete the empty website folder
+
+OTHER FIXES:
+------------
+A) TEMPORARILY REMOVE .htaccess
+   - Rename public_html/.htaccess to .htaccess.bak
+   - Reload https://estimateace.com
+   - If it works, re-upload the new simple .htaccess from this project
+
+B) CHECK index file exists
+   - public_html must contain index.php OR index.html
+
+C) FILE PERMISSIONS (if you can change them)
+   - Folders: 755
+   - Files (index.php): 644
+
+D) TEST PHP
+   - Upload test.php to public_html
+   - Visit https://estimateace.com/test.php
+   - If test.php works but / gives 403 → missing index.php in public_html root
+   - If test.php also 403 → domain/hosting/DNS problem
+
+E) DOMAIN ATTACHED TO HOSTING
+   - hPanel → Websites → estimateace.com must be linked to a hosting plan
+   - Domain-only registration without hosting = no public_html site
+
+F) DNS @ RECORD
+   - For Hostinger-hosted marketing site, @ A record should point to Hostinger
+   - app.estimateace.com CNAME stays on Vercel (separate)
+
+DELETE test.php after fixing.

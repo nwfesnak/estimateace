@@ -1,0 +1,909 @@
+---
+pid: 1320
+cwd: "D:\estimateace"
+command: "Set-Location D:\\estimateace; npm run dev"
+started_at: 2026-07-05T19:07:56.379Z
+running_for_ms: 22309998 
+---
+
+> estimateace@0.1.0 dev
+> next dev
+
+▲ Next.js 16.2.6 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://10.2.0.2:3000
+- Environments: .env.local
+✓ Ready in 642ms
+
+ GET / 200 in 388ms (next.js: 149ms, application-code: 238ms)
+ GET / 200 in 46ms (next.js: 8ms, application-code: 38ms)
+[browser] GoTrueClient@sb-jiujzujkednnkjymawdk-auth-token:1 (2.106.2) 2026-07-05T19:08:20.707Z Multiple GoTrueClient instances detected in the same browser context. It is not an error, but this should be avoided as it may produce undefined behavior when used concurrently under the same storage key. (app/page.tsx:16:24)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 816ms (next.js: 73ms, application-code: 743ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 12ms (next.js: 5ms, application-code: 7ms)
+ GET / 200 in 82ms (next.js: 7ms, application-code: 76ms)
+[browser] GoTrueClient@sb-jiujzujkednnkjymawdk-auth-token:1 (2.106.2) 2026-07-05T19:10:38.514Z Multiple GoTrueClient instances detected in the same browser context. It is not an error, but this should be avoided as it may produce undefined behavior when used concurrently under the same storage key. (app/page.tsx:16:24)
+✓ Compiled in 123ms
+[browser] GoTrueClient@sb-jiujzujkednnkjymawdk-auth-token:2 (2.106.2) 2026-07-05T19:11:03.323Z Multiple GoTrueClient instances detected in the same browser context. It is not an error, but this should be avoided as it may produce undefined behavior when used concurrently under the same storage key. (app/page.tsx:16:24)
+ GET / 200 in 126ms (next.js: 86ms, application-code: 40ms)
+[browser] GoTrueClient@sb-jiujzujkednnkjymawdk-auth-token:3 (2.106.2) 2026-07-05T19:11:03.331Z Multiple GoTrueClient instances detected in the same browser context. It is not an error, but this should be avoided as it may produce undefined behavior when used concurrently under the same storage key. (app/page.tsx:16:24)
+✓ Compiled in 226ms
+ GET / 200 in 133ms (next.js: 66ms, application-code: 67ms)
+ GET / 200 in 77ms (next.js: 3ms, application-code: 73ms)
+ GET / 200 in 46ms (next.js: 22ms, application-code: 24ms)
+ GET / 200 in 47ms (next.js: 4ms, application-code: 43ms)
+✓ Compiled in 177ms
+ GET / 200 in 106ms (next.js: 56ms, application-code: 50ms)
+✓ Compiled in 273ms
+ GET / 200 in 82ms (next.js: 54ms, application-code: 28ms)
+✓ Compiled in 205ms
+ GET / 200 in 87ms (next.js: 58ms, application-code: 29ms)
+✓ Compiled in 160ms
+ GET / 200 in 82ms (next.js: 55ms, application-code: 27ms)
+✓ Compiled in 187ms
+ GET / 200 in 85ms (next.js: 56ms, application-code: 29ms)
+ GET / 200 in 170ms (next.js: 4ms, application-code: 166ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 681ms (next.js: 36ms, application-code: 645ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 6ms (next.js: 2ms, application-code: 4ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 7ms (next.js: 2ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 581ms (next.js: 1796µs, application-code: 579ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 6ms (next.js: 1986µs, application-code: 4ms)
+✓ Compiled in 201ms
+ GET / 200 in 112ms (next.js: 68ms, application-code: 44ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 55ms (next.js: 43ms, application-code: 12ms)
+✓ Compiled in 284ms
+ GET / 200 in 106ms (next.js: 69ms, application-code: 37ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 9ms (next.js: 2ms, application-code: 7ms)
+ GET / 200 in 154ms (next.js: 3ms, application-code: 151ms)
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+✓ Compiled in 176ms
+ GET / 200 in 113ms (next.js: 74ms, application-code: 39ms)
+✓ Compiled in 170ms
+ GET / 200 in 107ms (next.js: 71ms, application-code: 36ms)
+✓ Compiled in 214ms
+ GET / 200 in 129ms (next.js: 86ms, application-code: 44ms)
+✓ Compiled in 206ms
+ GET / 200 in 114ms (next.js: 76ms, application-code: 39ms)
+✓ Compiled in 183ms
+ GET / 200 in 108ms (next.js: 75ms, application-code: 33ms)
+✓ Compiled in 217ms
+ GET / 200 in 111ms (next.js: 77ms, application-code: 34ms)
+✓ Compiled in 210ms
+ GET / 200 in 124ms (next.js: 79ms, application-code: 45ms)
+✓ Compiled in 176ms
+ GET / 200 in 91ms (next.js: 57ms, application-code: 34ms)
+✓ Compiled in 238ms
+ GET / 200 in 98ms (next.js: 64ms, application-code: 34ms)
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+✓ Compiled in 275ms
+ GET / 200 in 498ms (next.js: 284ms, application-code: 214ms)
+ GET / 200 in 197ms (next.js: 67ms, application-code: 130ms)
+ GET / 200 in 105ms (next.js: 4ms, application-code: 101ms)
+ GET / 200 in 104ms (next.js: 52ms, application-code: 53ms)
+ GET / 200 in 105ms (next.js: 34ms, application-code: 71ms)
+ GET / 200 in 107ms (next.js: 19ms, application-code: 88ms)
+ GET / 200 in 46ms (next.js: 4ms, application-code: 42ms)
+✓ Compiled in 186ms
+ GET / 200 in 453ms (next.js: 241ms, application-code: 212ms)
+ GET / 200 in 441ms (next.js: 260ms, application-code: 181ms)
+ GET / 200 in 437ms (next.js: 409ms, application-code: 28ms)
+ GET / 200 in 444ms (next.js: 283ms, application-code: 161ms)
+ GET / 200 in 443ms (next.js: 369ms, application-code: 74ms)
+ GET / 200 in 444ms (next.js: 398ms, application-code: 46ms)
+ GET / 200 in 96ms (next.js: 4ms, application-code: 92ms)
+ GET / 200 in 95ms (next.js: 35ms, application-code: 60ms)
+ GET / 200 in 96ms (next.js: 20ms, application-code: 76ms)
+ GET / 200 in 97ms (next.js: 51ms, application-code: 46ms)
+ GET / 200 in 97ms (next.js: 68ms, application-code: 29ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 695ms (next.js: 34ms, application-code: 661ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 7ms (next.js: 1942µs, application-code: 5ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 6ms (next.js: 2ms, application-code: 4ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 5ms (next.js: 1565µs, application-code: 3ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 6ms (next.js: 1615µs, application-code: 4ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 7ms (next.js: 3ms, application-code: 3ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 6ms (next.js: 2ms, application-code: 4ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 7ms (next.js: 1727µs, application-code: 5ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 7ms (next.js: 2ms, application-code: 5ms)
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 6ms (next.js: 1925µs, application-code: 4ms)
+ POST /api/appointment-notify 200 in 636ms (next.js: 276ms, application-code: 360ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 572ms (next.js: 3ms, application-code: 570ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 857ms (next.js: 2ms, application-code: 854ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 668ms (next.js: 3ms, application-code: 666ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 5ms (next.js: 2ms, application-code: 3ms)
+✓ Compiled in 188ms
+ GET / 200 in 106ms (next.js: 75ms, application-code: 32ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 663ms (next.js: 30ms, application-code: 633ms)
+✓ Compiled in 111ms
+ GET / 200 in 98ms (next.js: 69ms, application-code: 29ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 38ms (next.js: 29ms, application-code: 9ms)
+ GET / 200 in 145ms (next.js: 4ms, application-code: 141ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 542ms (next.js: 3ms, application-code: 539ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 7ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 8ms (next.js: 3ms, application-code: 5ms)
+✓ Compiled in 172ms
+ GET / 200 in 94ms (next.js: 60ms, application-code: 34ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 721ms (next.js: 31ms, application-code: 690ms)
+ GET / 200 in 135ms (next.js: 4ms, application-code: 131ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 606ms (next.js: 3ms, application-code: 603ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 6ms (next.js: 3ms, application-code: 4ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 7ms (next.js: 2ms, application-code: 4ms)
+✓ Compiled in 175ms
+ GET / 200 in 111ms (next.js: 62ms, application-code: 49ms)
+✓ Compiled in 200ms
+ GET / 200 in 81ms (next.js: 53ms, application-code: 27ms)
+✓ Compiled in 227ms
+ GET / 200 in 83ms (next.js: 56ms, application-code: 26ms)
+✓ Compiled in 225ms
+ GET / 200 in 85ms (next.js: 56ms, application-code: 28ms)
+✓ Compiled in 221ms
+[browser] Uncaught ReferenceError: pendingCameraStreamRef is not defined
+    at Home.useEffect (file://D:/estimateace/.next/dev/static/chunks/app_page_tsx_0~3a212._.js?id=%255Bproject%255D%252Fapp%252Fpage.tsx+%255Bapp-client%255D+%2528ecmascript%2529:2367:21)
+    at Home (<anonymous>)
+⨯ ./app/page.tsx:3179:27
+Expected '</', got 'jsx text'
+  3177 |                       <div className="text-4xl mb-1">📷</div>
+  3178 |                       <div className="text-xs text-gray-500">Take Photo</div>
+> 3179 |                     </div>
+       |                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 3180 |                   </div>
+       | ^^^^^^^^^^^^^^^^^^
+  3181 |                 </CardContent>
+  3182 |               </Card>
+  3183 |
+
+Parsing ecmascript source code failed
+
+Import traces:
+  Client Component Browser:
+    ./app/page.tsx [Client Component Browser]
+    ./app/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./app/page.tsx [Client Component SSR]
+    ./app/page.tsx [Server Component]
+
+
+ GET / 500 in 235ms (next.js: 128ms, application-code: 107ms)
+[browser] ./app/page.tsx:3179:27
+Expected '</', got 'jsx text'
+  3177 |                       <div className="text-4xl mb-1">📷</div>
+  3178 |                       <div className="text-xs text-gray-500">Take Photo</div>
+> 3179 |                     </div>
+       |                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 3180 |                   </div>
+       | ^^^^^^^^^^^^^^^^^^
+  3181 |                 </CardContent>
+  3182 |               </Card>
+  3183 |
+
+Parsing ecmascript source code failed
+
+Import traces:
+  Client Component Browser:
+    ./app/page.tsx [Client Component Browser]
+    ./app/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./app/page.tsx [Client Component SSR]
+    ./app/page.tsx [Server Component] 
+✓ Compiled in 370ms
+[browser] Uncaught Error: ./app/page.tsx:3179:27
+Expected '</', got 'jsx text'
+  3177 |                       <div className="text-4xl mb-1">📷</div>
+  3178 |                       <div className="text-xs text-gray-500">Take Photo</div>
+> 3179 |                     </div>
+       |                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 3180 |                   </div>
+       | ^^^^^^^^^^^^^^^^^^
+  3181 |                 </CardContent>
+  3182 |               </Card>
+  3183 |
+
+Parsing ecmascript source code failed
+
+Import traces:
+  Client Component Browser:
+    ./app/page.tsx [Client Component Browser]
+    ./app/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./app/page.tsx [Client Component SSR]
+    ./app/page.tsx [Server Component]
+
+
+    at <unknown> (Error: ./app/page.tsx:3179:27)
+    at <unknown> (Error: (./app/page.tsx:3179:27)
+[browser] ./app/page.tsx:3179:27
+Expected '</', got 'jsx text'
+  3177 |                       <div className="text-4xl mb-1">📷</div>
+  3178 |                       <div className="text-xs text-gray-500">Take Photo</div>
+> 3179 |                     </div>
+       |                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 3180 |                   </div>
+       | ^^^^^^^^^^^^^^^^^^
+  3181 |                 </CardContent>
+  3182 |               </Card>
+  3183 |
+
+Parsing ecmascript source code failed
+
+Import traces:
+  Client Component Browser:
+    ./app/page.tsx [Client Component Browser]
+    ./app/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./app/page.tsx [Client Component SSR]
+    ./app/page.tsx [Server Component] 
+ GET / 200 in 597ms (next.js: 386ms, application-code: 211ms)
+ GET / 200 in 69ms (next.js: 6ms, application-code: 63ms)
+✓ Compiled in 190ms
+ GET / 200 in 90ms (next.js: 62ms, application-code: 28ms)
+✓ Compiled in 291ms
+ GET / 200 in 391ms (next.js: 316ms, application-code: 75ms)
+ GET / 200 in 58ms (next.js: 4ms, application-code: 54ms)
+ GET / 200 in 22ms (next.js: 4ms, application-code: 17ms)
+✓ Compiled in 264ms
+ GET / 200 in 231ms (next.js: 176ms, application-code: 56ms)
+✓ Compiled in 250ms
+ GET / 200 in 293ms (next.js: 218ms, application-code: 75ms)
+✓ Compiled in 238ms
+ GET / 200 in 284ms (next.js: 209ms, application-code: 75ms)
+ GET / 200 in 121ms (next.js: 90ms, application-code: 32ms)
+ POST /api/grok 200 in 3.8s (next.js: 66ms, application-code: 3.7s)
+ POST /api/ai-quote 200 in 9.9s (next.js: 33ms, application-code: 9.8s)
+✓ Compiled in 163ms
+ GET / 200 in 95ms (next.js: 57ms, application-code: 39ms)
+✓ Compiled in 230ms
+ GET / 200 in 87ms (next.js: 58ms, application-code: 28ms)
+✓ Compiled in 221ms
+ GET / 200 in 84ms (next.js: 57ms, application-code: 27ms)
+✓ Compiled in 217ms
+ GET / 200 in 84ms (next.js: 56ms, application-code: 28ms)
+✓ Compiled in 218ms
+ GET / 200 in 87ms (next.js: 59ms, application-code: 27ms)
+✓ Compiled in 203ms
+ GET / 200 in 89ms (next.js: 59ms, application-code: 29ms)
+✓ Compiled in 177ms
+ GET / 200 in 93ms (next.js: 65ms, application-code: 28ms)
+✓ Compiled in 167ms
+ GET / 200 in 97ms (next.js: 66ms, application-code: 31ms)
+✓ Compiled in 260ms
+ GET / 200 in 88ms (next.js: 60ms, application-code: 28ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 664ms (next.js: 38ms, application-code: 625ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 9ms (next.js: 3ms, application-code: 6ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 625ms (next.js: 3ms, application-code: 622ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 7ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 7ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 7ms (next.js: 3ms, application-code: 4ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 8ms (next.js: 3ms, application-code: 4ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 592ms (next.js: 3ms, application-code: 589ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 7ms (next.js: 3ms, application-code: 4ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 51ms (next.js: 47ms, application-code: 4ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 7ms (next.js: 3ms, application-code: 5ms)
+ POST /api/ai-quote 200 in 8.4s (next.js: 36ms, application-code: 8.4s)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 8ms (next.js: 4ms, application-code: 4ms)
+ POST /api/ai-quote 200 in 8.3s (next.js: 4ms, application-code: 8.3s)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 720ms (next.js: 3ms, application-code: 717ms)
+✓ Compiled in 184ms
+ GET / 200 in 102ms (next.js: 64ms, application-code: 38ms)
+✓ Compiled in 217ms
+ GET / 200 in 92ms (next.js: 58ms, application-code: 34ms)
+✓ Compiled in 171ms
+ GET / 200 in 262ms (next.js: 212ms, application-code: 50ms)
+✓ Compiled in 207ms
+ GET / 200 in 343ms (next.js: 274ms, application-code: 69ms)
+ GET / 200 in 34ms (next.js: 2ms, application-code: 32ms)
+ GET / 200 in 18ms (next.js: 2ms, application-code: 16ms)
+✓ Compiled in 234ms
+✓ Compiled in 211ms
+ GET / 200 in 353ms (next.js: 212ms, application-code: 141ms)
+ GET / 200 in 90ms (next.js: 62ms, application-code: 29ms)
+✓ Compiled in 167ms
+ GET / 200 in 91ms (next.js: 58ms, application-code: 32ms)
+✓ Compiled in 171ms
+ GET / 200 in 84ms (next.js: 58ms, application-code: 26ms)
+✓ Compiled in 195ms
+ GET / 200 in 90ms (next.js: 63ms, application-code: 27ms)
+✓ Compiled in 169ms
+ GET / 200 in 86ms (next.js: 56ms, application-code: 30ms)
+✓ Compiled in 125ms
+ GET / 200 in 83ms (next.js: 56ms, application-code: 27ms)
+✓ Compiled in 225ms
+ GET / 200 in 84ms (next.js: 57ms, application-code: 27ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 619ms (next.js: 35ms, application-code: 584ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ POST /api/ai-quote 200 in 11.4s (next.js: 55ms, application-code: 11.3s)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 8ms (next.js: 3ms, application-code: 5ms)
+✓ Compiled in 190ms
+ GET / 200 in 130ms (next.js: 85ms, application-code: 45ms)
+✓ Compiled in 207ms
+ GET / 200 in 89ms (next.js: 62ms, application-code: 28ms)
+✓ Compiled in 219ms
+ GET / 200 in 86ms (next.js: 59ms, application-code: 27ms)
+✓ Compiled in 187ms
+ GET / 200 in 88ms (next.js: 61ms, application-code: 26ms)
+✓ Compiled in 176ms
+ GET / 200 in 95ms (next.js: 59ms, application-code: 36ms)
+✓ Compiled in 188ms
+ GET / 200 in 129ms (next.js: 82ms, application-code: 47ms)
+✓ Compiled in 247ms
+ GET / 200 in 92ms (next.js: 64ms, application-code: 28ms)
+✓ Compiled in 190ms
+ GET / 200 in 93ms (next.js: 66ms, application-code: 27ms)
+✓ Compiled in 184ms
+ GET / 200 in 98ms (next.js: 69ms, application-code: 28ms)
+✓ Compiled in 164ms
+ GET / 200 in 95ms (next.js: 67ms, application-code: 28ms)
+✓ Compiled in 139ms
+ GET / 200 in 88ms (next.js: 60ms, application-code: 28ms)
+[browser] The final argument passed to useEffect changed size between renders. The order and size of this array must remain constant.
+
+Previous: [, , , , , , , , EST-0001, [object Object], , [object Object], estimate, , pending, 0, , dashboard, , false, true]
+Incoming: [, , , , , , , , EST-0001, [object Object], , [object Object], estimate, , pending, 0, , dashboard, , false, true, , 0, dollar] 
+    at Home (app/page.tsx:2269:12)
+    at Set.forEach (<anonymous>)
+  2267 |   };
+  2268 |
+> 2269 |   useEffect(() => {
+       |            ^
+  2270 |     if (view === 'editor') debouncedSave();
+  2271 |     return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
+  2272 |   }, [jobName, address, city, state, zipCode, phones, emails, date, invoiceNumber, items... (app/page.tsx:2269:12)
+✓ Compiled in 267ms
+ GET / 200 in 90ms (next.js: 63ms, application-code: 27ms)
+✓ Compiled in 171ms
+ GET / 200 in 107ms (next.js: 62ms, application-code: 45ms)
+✓ Compiled in 207ms
+ GET / 200 in 112ms (next.js: 81ms, application-code: 31ms)
+✓ Compiled in 223ms
+ GET / 200 in 93ms (next.js: 65ms, application-code: 28ms)
+✓ Compiled in 228ms
+ GET / 200 in 86ms (next.js: 59ms, application-code: 27ms)
+✓ Compiled in 222ms
+ GET / 200 in 102ms (next.js: 73ms, application-code: 29ms)
+✓ Compiled in 243ms
+ GET / 200 in 93ms (next.js: 64ms, application-code: 28ms)
+✓ Compiled in 195ms
+ GET / 200 in 105ms (next.js: 74ms, application-code: 31ms)
+[browser] Save error: {
+  code: 'PGRST204',
+  details: null,
+  hint: null,
+  message: "Could not find the 'discountAmount' column of 'estimates' in the schema cache"
+} 
+    at saveToDB (app/page.tsx:1290:15)
+  1288 |     const { error } = await supabase.from('estimates').upsert({ id: invoiceNumber, ...da...
+  1289 |     if (error) {
+> 1290 |       console.error('Save error:', error);
+       |               ^
+  1291 |       showMessage('Failed to save document. Please try again.');
+  1292 |     } else {
+  1293 |       setLastSaved(new Date().toLocaleTimeString()); (app/page.tsx:1290:15)
+[browser] Save error: {
+  code: 'PGRST204',
+  details: null,
+  hint: null,
+  message: "Could not find the 'discountAmount' column of 'estimates' in the schema cache"
+} 
+    at saveToDB (app/page.tsx:1290:15)
+  1288 |     const { error } = await supabase.from('estimates').upsert({ id: invoiceNumber, ...da...
+  1289 |     if (error) {
+> 1290 |       console.error('Save error:', error);
+       |               ^
+  1291 |       showMessage('Failed to save document. Please try again.');
+  1292 |     } else {
+  1293 |       setLastSaved(new Date().toLocaleTimeString()); (app/page.tsx:1290:15)
+[browser] Save error: {
+  code: 'PGRST204',
+  details: null,
+  hint: null,
+  message: "Could not find the 'discountAmount' column of 'estimates' in the schema cache"
+} 
+    at saveToDB (app/page.tsx:1290:15)
+  1288 |     const { error } = await supabase.from('estimates').upsert({ id: invoiceNumber, ...da...
+  1289 |     if (error) {
+> 1290 |       console.error('Save error:', error);
+       |               ^
+  1291 |       showMessage('Failed to save document. Please try again.');
+  1292 |     } else {
+  1293 |       setLastSaved(new Date().toLocaleTimeString()); (app/page.tsx:1290:15)
+ GET / 200 in 152ms (next.js: 3ms, application-code: 149ms)
+✓ Compiled in 234ms
+[browser] Uncaught Error: Internal Next.js error: Router action dispatched before initialization.
+✓ Compiled in 191ms
+[browser] Uncaught Error: Internal Next.js error: Router action dispatched before initialization.
+✓ Compiled in 275ms
+[browser] Uncaught Error: Internal Next.js error: Router action dispatched before initialization.
+✓ Compiled in 187ms
+[browser] Uncaught Error: Internal Next.js error: Router action dispatched before initialization.
+[browser] Uncaught Error: Internal Next.js error: Router action dispatched before initialization.
+✓ Compiled in 202ms
+✓ Compiled in 233ms
+[browser] Uncaught Error: Internal Next.js error: Router action dispatched before initialization.
+ GET / 200 in 254ms (next.js: 76ms, application-code: 178ms)
+[browser] Save error: {
+  code: 'PGRST204',
+  details: null,
+  hint: null,
+  message: "Could not find the 'discountAmount' column of 'estimates' in the schema cache"
+} 
+    at saveToDB (app/page.tsx:1302:15)
+  1300 |     const { error } = await supabase.from('estimates').upsert({ id: invoiceNumber, ...da...
+  1301 |     if (error) {
+> 1302 |       console.error('Save error:', error);
+       |               ^
+  1303 |       showMessage('Failed to save document. Please try again.');
+  1304 |     } else {
+  1305 |       setLastSaved(new Date().toLocaleTimeString()); (app/page.tsx:1302:15)
+✓ Compiled in 252ms
+✓ Compiled in 261ms
+ GET / 200 in 389ms (next.js: 315ms, application-code: 74ms)
+ GET / 200 in 26ms (next.js: 3ms, application-code: 23ms)
+✓ Compiled in 254ms
+ GET / 200 in 132ms (next.js: 97ms, application-code: 35ms)
+✓ Compiled in 200ms
+ GET / 200 in 144ms (next.js: 107ms, application-code: 37ms)
+✓ Compiled in 265ms
+ GET / 200 in 141ms (next.js: 104ms, application-code: 37ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 743ms (next.js: 48ms, application-code: 695ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 7ms (next.js: 2ms, application-code: 4ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 7ms (next.js: 3ms, application-code: 4ms)
+✓ Compiled in 181ms
+[browser] Uncaught Error: Internal Next.js error: Router action dispatched before initialization.
+✓ Compiled in 211ms
+[browser] Uncaught Error: Internal Next.js error: Router action dispatched before initialization.
+ GET / 200 in 251ms (next.js: 76ms, application-code: 175ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 698ms (next.js: 42ms, application-code: 656ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 7ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 7ms (next.js: 3ms, application-code: 4ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 7ms (next.js: 3ms, application-code: 4ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 7ms (next.js: 2ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 7ms (next.js: 3ms, application-code: 4ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 7ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 7ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 7ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 6ms (next.js: 3ms, application-code: 4ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 7ms (next.js: 3ms, application-code: 5ms)
+ POST /api/ai-quote 200 in 15.1s (next.js: 62ms, application-code: 15.1s)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 607ms (next.js: 3ms, application-code: 604ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 612ms (next.js: 3ms, application-code: 609ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 7ms (next.js: 3ms, application-code: 4ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 7ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 7ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 7ms (next.js: 3ms, application-code: 4ms)
+✓ Compiled in 194ms
+ GET / 200 in 131ms (next.js: 82ms, application-code: 49ms)
+✓ Compiled in 289ms
+ GET / 200 in 101ms (next.js: 74ms, application-code: 27ms)
+✓ Compiled in 241ms
+ GET / 200 in 108ms (next.js: 75ms, application-code: 33ms)
+✓ Compiled in 223ms
+ GET / 200 in 97ms (next.js: 69ms, application-code: 28ms)
+✓ Compiled in 186ms
+ GET / 200 in 97ms (next.js: 69ms, application-code: 28ms)
+✓ Compiled in 186ms
+ GET / 200 in 99ms (next.js: 74ms, application-code: 25ms)
+✓ Compiled in 194ms
+ GET / 200 in 99ms (next.js: 70ms, application-code: 28ms)
+✓ Compiled in 142ms
+ GET / 200 in 100ms (next.js: 70ms, application-code: 31ms)
+✓ Compiled in 214ms
+ GET / 200 in 95ms (next.js: 68ms, application-code: 27ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 801ms (next.js: 44ms, application-code: 757ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 8ms (next.js: 2ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 6ms (next.js: 3ms, application-code: 4ms)
+✓ Compiled in 193ms
+ GET / 200 in 110ms (next.js: 75ms, application-code: 35ms)
+✓ Compiled in 198ms
+ GET / 200 in 130ms (next.js: 100ms, application-code: 29ms)
+✓ Compiled in 221ms
+ GET / 200 in 103ms (next.js: 74ms, application-code: 29ms)
+✓ Compiled in 272ms
+ GET / 200 in 96ms (next.js: 70ms, application-code: 26ms)
+✓ Compiled in 205ms
+ GET / 200 in 95ms (next.js: 71ms, application-code: 25ms)
+✓ Compiled in 187ms
+ GET / 200 in 107ms (next.js: 81ms, application-code: 25ms)
+✓ Compiled in 136ms
+ GET / 200 in 132ms (next.js: 106ms, application-code: 27ms)
+✓ Compiled in 190ms
+ GET / 200 in 99ms (next.js: 73ms, application-code: 26ms)
+✓ Compiled in 140ms
+ GET / 200 in 99ms (next.js: 73ms, application-code: 26ms)
+✓ Compiled in 167ms
+ GET / 200 in 98ms (next.js: 71ms, application-code: 27ms)
+✓ Compiled in 165ms
+ GET / 200 in 110ms (next.js: 80ms, application-code: 30ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 767ms (next.js: 55ms, application-code: 712ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 9ms (next.js: 3ms, application-code: 6ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 635ms (next.js: 3ms, application-code: 632ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 10ms (next.js: 3ms, application-code: 6ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 655ms (next.js: 3ms, application-code: 652ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 9ms (next.js: 3ms, application-code: 6ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 642ms (next.js: 3ms, application-code: 639ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 9ms (next.js: 3ms, application-code: 6ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 9ms (next.js: 3ms, application-code: 6ms)
+✓ Compiled in 178ms
+ GET / 200 in 177ms (next.js: 127ms, application-code: 50ms)
+✓ Compiled in 240ms
+ GET / 200 in 134ms (next.js: 88ms, application-code: 46ms)
+✓ Compiled in 275ms
+ GET / 200 in 115ms (next.js: 83ms, application-code: 32ms)
+✓ Compiled in 243ms
+ GET / 200 in 140ms (next.js: 99ms, application-code: 40ms)
+✓ Compiled in 191ms
+ GET / 200 in 122ms (next.js: 88ms, application-code: 34ms)
+✓ Compiled in 211ms
+ GET / 200 in 111ms (next.js: 84ms, application-code: 27ms)
+✓ Compiled in 198ms
+ GET / 200 in 108ms (next.js: 82ms, application-code: 26ms)
+✓ Compiled in 231ms
+ GET / 200 in 132ms (next.js: 105ms, application-code: 27ms)
+✓ Compiled in 221ms
+ GET / 200 in 108ms (next.js: 82ms, application-code: 27ms)
+✓ Compiled in 229ms
+ GET / 200 in 108ms (next.js: 81ms, application-code: 26ms)
+✓ Compiled in 205ms
+ GET / 200 in 135ms (next.js: 107ms, application-code: 28ms)
+✓ Compiled in 225ms
+ GET / 200 in 107ms (next.js: 79ms, application-code: 28ms)
+✓ Compiled in 249ms
+ GET / 200 in 130ms (next.js: 96ms, application-code: 34ms)
+✓ Compiled in 236ms
+ GET / 200 in 107ms (next.js: 79ms, application-code: 27ms)
+✓ Compiled in 183ms
+ GET / 200 in 159ms (next.js: 117ms, application-code: 42ms)
+✓ Compiled in 227ms
+ GET / 200 in 84ms (next.js: 66ms, application-code: 18ms)
+✓ Compiled in 228ms
+ GET / 200 in 71ms (next.js: 54ms, application-code: 16ms)
+✓ Compiled in 223ms
+ GET / 200 in 73ms (next.js: 55ms, application-code: 18ms)
+✓ Compiled in 137ms
+ GET / 200 in 83ms (next.js: 64ms, application-code: 19ms)
+✓ Compiled in 201ms
+ GET / 200 in 94ms (next.js: 74ms, application-code: 21ms)
+✓ Compiled in 176ms
+ GET / 200 in 77ms (next.js: 59ms, application-code: 18ms)
+✓ Compiled in 153ms
+ GET / 200 in 72ms (next.js: 55ms, application-code: 17ms)
+✓ Compiled in 249ms
+ GET / 200 in 82ms (next.js: 63ms, application-code: 19ms)
+✓ Compiled in 135ms
+ GET / 200 in 72ms (next.js: 54ms, application-code: 18ms)
+✓ Compiled in 185ms
+ GET / 200 in 71ms (next.js: 51ms, application-code: 20ms)
+ GET / 200 in 192ms (next.js: 5ms, application-code: 187ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 722ms (next.js: 49ms, application-code: 673ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 8ms (next.js: 3ms, application-code: 6ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 9ms (next.js: 3ms, application-code: 6ms)
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 602ms (next.js: 3ms, application-code: 599ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 9ms (next.js: 3ms, application-code: 6ms)
+✓ Compiled in 190ms
+ GET / 200 in 93ms (next.js: 65ms, application-code: 27ms)
+✓ Compiled in 243ms
+ GET / 200 in 89ms (next.js: 70ms, application-code: 19ms)
+✓ Compiled in 237ms
+ GET / 200 in 75ms (next.js: 57ms, application-code: 18ms)
+✓ Compiled in 147ms
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 720ms (next.js: 50ms, application-code: 669ms)
+ GET / 200 in 129ms (next.js: 55ms, application-code: 74ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 12ms (next.js: 4ms, application-code: 9ms)
+✓ Compiled in 139ms
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 543ms (next.js: 42ms, application-code: 501ms)
+ GET / 200 in 74ms (next.js: 55ms, application-code: 20ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 58ms (next.js: 49ms, application-code: 9ms)
+✓ Compiled in 148ms
+ GET / 200 in 69ms (next.js: 53ms, application-code: 16ms)
+✓ Compiled in 235ms
+ GET / 200 in 74ms (next.js: 57ms, application-code: 17ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 49ms (next.js: 42ms, application-code: 8ms)
+✓ Compiled in 190ms
+ GET / 200 in 90ms (next.js: 71ms, application-code: 19ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 51ms (next.js: 40ms, application-code: 11ms)
+✓ Compiled in 267ms
+ GET / 200 in 122ms (next.js: 104ms, application-code: 17ms)
+✓ Compiled in 188ms
+ GET / 200 in 74ms (next.js: 57ms, application-code: 17ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 49ms (next.js: 40ms, application-code: 9ms)
+ GET / 200 in 187ms (next.js: 6ms, application-code: 181ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 722ms (next.js: 3ms, application-code: 718ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 8ms (next.js: 3ms, application-code: 5ms)
+[browser] Camera access error: NotFoundError: Requested device not found (app/page.tsx:1641:15)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 629ms (next.js: 3ms, application-code: 626ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 610ms (next.js: 3ms, application-code: 607ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 9ms (next.js: 3ms, application-code: 6ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 10ms (next.js: 4ms, application-code: 7ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 8ms (next.js: 3ms, application-code: 6ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 605ms (next.js: 3ms, application-code: 603ms)
+✓ Compiled in 264ms
+ GET / 200 in 109ms (next.js: 80ms, application-code: 29ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 67ms (next.js: 54ms, application-code: 13ms)
+✓ Compiled in 243ms
+ GET / 200 in 106ms (next.js: 82ms, application-code: 24ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 64ms (next.js: 54ms, application-code: 11ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 609ms (next.js: 3ms, application-code: 606ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 10ms (next.js: 3ms, application-code: 7ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 7ms (next.js: 3ms, application-code: 5ms)
+[browser] Camera access error: NotFoundError: Requested device not found (app/page.tsx:1641:15)
+✓ Compiled in 197ms
+ GET / 200 in 95ms (next.js: 65ms, application-code: 30ms)
+✓ Compiled in 212ms
+ GET / 200 in 72ms (next.js: 54ms, application-code: 18ms)
+✓ Compiled in 236ms
+ GET / 200 in 80ms (next.js: 62ms, application-code: 18ms)
+✓ Compiled in 213ms
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 681ms (next.js: 43ms, application-code: 638ms)
+ GET / 200 in 78ms (next.js: 57ms, application-code: 21ms)
+✓ Compiled in 221ms
+ GET / 200 in 86ms (next.js: 69ms, application-code: 17ms)
+✓ Compiled in 182ms
+ GET / 200 in 78ms (next.js: 56ms, application-code: 21ms)
+✓ Compiled in 203ms
+ GET / 200 in 80ms (next.js: 62ms, application-code: 19ms)
+✓ Compiled in 229ms
+ GET / 200 in 70ms (next.js: 53ms, application-code: 17ms)
+✓ Compiled in 289ms
+ GET / 200 in 78ms (next.js: 59ms, application-code: 19ms)
+✓ Compiled in 198ms
+ GET / 200 in 72ms (next.js: 52ms, application-code: 20ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 684ms (next.js: 51ms, application-code: 634ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 9ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 9ms (next.js: 3ms, application-code: 6ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20Drive 200 in 9ms (next.js: 3ms, application-code: 6ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 608ms (next.js: 3ms, application-code: 605ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 10ms (next.js: 4ms, application-code: 6ms)
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 9ms (next.js: 3ms, application-code: 6ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2033i%20have%20to 200 in 624ms (next.js: 3ms, application-code: 621ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 253ms (next.js: 3ms, application-code: 250ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 9ms (next.js: 3ms, application-code: 6ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 8ms (next.js: 3ms, application-code: 5ms)
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 606ms (next.js: 3ms, application-code: 603ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 811ms (next.js: 3ms, application-code: 808ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET / 200 in 282ms (next.js: 76ms, application-code: 206ms)
+ GET / 200 in 165ms (next.js: 7ms, application-code: 158ms)
+ GET / 200 in 150ms (next.js: 6ms, application-code: 144ms)
+ GET / 200 in 149ms (next.js: 28ms, application-code: 121ms)
+ GET / 200 in 149ms (next.js: 74ms, application-code: 75ms)
+ GET / 200 in 150ms (next.js: 49ms, application-code: 101ms)
+ GET / 200 in 149ms (next.js: 6ms, application-code: 143ms)
+ GET / 200 in 125ms (next.js: 4ms, application-code: 121ms)
+ GET / 200 in 146ms (next.js: 6ms, application-code: 140ms)
+ GET / 200 in 146ms (next.js: 50ms, application-code: 96ms)
+ GET / 200 in 146ms (next.js: 28ms, application-code: 118ms)
+ GET / 200 in 147ms (next.js: 73ms, application-code: 74ms)
+ GET / 200 in 163ms (next.js: 6ms, application-code: 157ms)
+ GET / 200 in 140ms (next.js: 5ms, application-code: 136ms)
+ GET / 200 in 170ms (next.js: 26ms, application-code: 144ms)
+ GET / 200 in 171ms (next.js: 6ms, application-code: 165ms)
+ GET / 200 in 171ms (next.js: 55ms, application-code: 116ms)
+ GET / 200 in 122ms (next.js: 33ms, application-code: 89ms)
+ GET / 200 in 62ms (next.js: 5ms, application-code: 57ms)
+ GET / 200 in 33ms (next.js: 5ms, application-code: 27ms)
+✓ Compiled in 239ms
+ GET / 200 in 106ms (next.js: 79ms, application-code: 27ms)
+✓ Compiled in 280ms
+ GET / 200 in 224ms (next.js: 84ms, application-code: 140ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 718ms (next.js: 81ms, application-code: 637ms)
+✓ Compiled in 257ms
+ GET / 200 in 111ms (next.js: 82ms, application-code: 29ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20dr%20charlotte%20nc 200 in 736ms (next.js: 3ms, application-code: 734ms)
+✓ Compiled in 299ms
+ GET / 200 in 116ms (next.js: 89ms, application-code: 28ms)
+✓ Compiled in 281ms
+ GET / 200 in 99ms (next.js: 76ms, application-code: 23ms)
+✓ Compiled in 238ms
+ GET / 200 in 122ms (next.js: 94ms, application-code: 27ms)
+✓ Compiled in 272ms
+ GET / 200 in 102ms (next.js: 78ms, application-code: 24ms)
+✓ Compiled in 257ms
+ GET / 200 in 96ms (next.js: 71ms, application-code: 24ms)
+✓ Compiled in 248ms
+ GET / 200 in 101ms (next.js: 78ms, application-code: 23ms)
+✓ Compiled in 258ms
+ GET / 200 in 123ms (next.js: 86ms, application-code: 37ms)
+✓ Compiled in 321ms
+ GET / 200 in 101ms (next.js: 75ms, application-code: 27ms)
+✓ Compiled in 351ms
+ GET / 200 in 96ms (next.js: 73ms, application-code: 23ms)
+✓ Compiled in 248ms
+ GET / 200 in 120ms (next.js: 90ms, application-code: 30ms)
+✓ Compiled in 332ms
+ GET / 200 in 99ms (next.js: 76ms, application-code: 23ms)
+ POST /api/appointments/sync 200 in 787ms (next.js: 372ms, application-code: 415ms)
+ POST /api/appointments/sync 200 in 359ms (next.js: 3ms, application-code: 356ms)
+ POST /api/appointments/sync 200 in 182ms (next.js: 3ms, application-code: 179ms)
+✓ Compiled in 180ms
+ GET / 200 in 97ms (next.js: 73ms, application-code: 24ms)
+✓ Compiled in 210ms
+ GET / 200 in 69ms (next.js: 53ms, application-code: 17ms)
+✓ Compiled in 214ms
+ GET / 200 in 76ms (next.js: 58ms, application-code: 18ms)
+✓ Compiled in 197ms
+ GET / 200 in 72ms (next.js: 52ms, application-code: 19ms)
+✓ Compiled in 220ms
+ GET / 200 in 72ms (next.js: 53ms, application-code: 18ms)
+✓ Compiled in 228ms
+ GET / 200 in 142ms (next.js: 56ms, application-code: 86ms)
+ POST /api/appointments/sync 200 in 462ms (next.js: 58ms, application-code: 405ms)
+✓ Compiled in 251ms
+ GET / 200 in 68ms (next.js: 51ms, application-code: 17ms)
+✓ Compiled in 230ms
+✓ Compiled in 228ms
+ GET / 200 in 328ms (next.js: 282ms, application-code: 46ms)
+ GET / 200 in 19ms (next.js: 4ms, application-code: 15ms)
+✓ Compiled in 187ms
+ GET / 200 in 70ms (next.js: 50ms, application-code: 20ms)
+✓ Compiled in 206ms
+ GET / 200 in 90ms (next.js: 63ms, application-code: 27ms)
+✓ Compiled in 254ms
+ GET / 200 in 70ms (next.js: 52ms, application-code: 18ms)
+✓ Compiled in 175ms
+ GET / 200 in 69ms (next.js: 51ms, application-code: 18ms)
+ POST /api/appointments/sync 200 in 339ms (next.js: 66ms, application-code: 273ms)
+✓ Compiled in 212ms
+ GET / 200 in 98ms (next.js: 65ms, application-code: 33ms)
+✓ Compiled in 329ms
+ GET / 200 in 77ms (next.js: 57ms, application-code: 20ms)
+✓ Compiled in 255ms
+ GET / 200 in 82ms (next.js: 64ms, application-code: 18ms)
+✓ Compiled in 241ms
+ GET / 200 in 82ms (next.js: 61ms, application-code: 20ms)
+✓ Compiled in 254ms
+ GET / 200 in 99ms (next.js: 79ms, application-code: 20ms)
+ POST /api/appointments/sync 200 in 535ms (next.js: 69ms, application-code: 466ms)
+✓ Compiled in 251ms
+ GET / 200 in 84ms (next.js: 61ms, application-code: 23ms)
+✓ Compiled in 192ms
+ GET / 200 in 73ms (next.js: 54ms, application-code: 19ms)
+✓ Compiled in 221ms
+ GET / 200 in 79ms (next.js: 61ms, application-code: 19ms)
+✓ Compiled in 151ms
+ GET / 200 in 82ms (next.js: 64ms, application-code: 18ms)
+✓ Compiled in 148ms
+ GET / 200 in 106ms (next.js: 82ms, application-code: 23ms)
+✓ Compiled in 232ms
+ GET / 200 in 73ms (next.js: 56ms, application-code: 17ms)
+✓ Compiled in 182ms
+ GET / 200 in 75ms (next.js: 56ms, application-code: 19ms)
+  Reload env: .env.local
+ GET / 200 in 101ms (next.js: 74ms, application-code: 27ms)
+✓ Compiled in 233ms
+ GET / 200 in 100ms (next.js: 65ms, application-code: 34ms)
+✓ Compiled in 235ms
+ GET / 200 in 71ms (next.js: 54ms, application-code: 17ms)
+✓ Compiled in 214ms
+ GET / 200 in 77ms (next.js: 58ms, application-code: 18ms)
+✓ Compiled in 332ms
+ GET / 200 in 75ms (next.js: 57ms, application-code: 18ms)
+✓ Compiled in 223ms
+ GET / 200 in 168ms (next.js: 58ms, application-code: 110ms)
+ POST /api/appointments/sync 200 in 627ms (next.js: 75ms, application-code: 552ms)
+ GET /api/cron/appointment-reminders 500 in 296ms (next.js: 291ms, application-code: 5ms)
+ GET /api/cron/appointment-reminders 500 in 6ms (next.js: 3ms, application-code: 4ms)
+  Reload env: .env.local
+ GET / 200 in 84ms (next.js: 62ms, application-code: 21ms)
+ GET /api/cron/appointment-reminders 200 in 660ms (next.js: 65ms, application-code: 595ms)
+ GET / 200 in 218ms (next.js: 8ms, application-code: 210ms)
+ POST /api/appointments/sync 200 in 520ms (next.js: 27ms, application-code: 492ms)
+ POST /api/appointments/sync 200 in 256ms (next.js: 3ms, application-code: 252ms)
+ POST /api/appointments/sync 200 in 122ms (next.js: 3ms, application-code: 119ms)
+ POST /api/appointment-reminders/send 200 in 433ms (next.js: 286ms, application-code: 147ms)
+ POST /api/appointments/sync 200 in 269ms (next.js: 4ms, application-code: 265ms)
+ POST /api/appointments/sync 200 in 244ms (next.js: 6ms, application-code: 238ms)
+ POST /api/appointments/sync 200 in 264ms (next.js: 12ms, application-code: 252ms)
+ POST /api/appointments/sync 200 in 267ms (next.js: 22ms, application-code: 244ms)
+ POST /api/appointments/sync 200 in 298ms (next.js: 5ms, application-code: 293ms)
+ POST /api/appointments/sync 200 in 311ms (next.js: 5ms, application-code: 306ms)
+ POST /api/appointments/sync 200 in 130ms (next.js: 3ms, application-code: 126ms)
+ POST /api/appointments/sync 200 in 168ms (next.js: 9ms, application-code: 159ms)
+ POST /api/appointments/sync 200 in 239ms (next.js: 4ms, application-code: 235ms)
+ POST /api/appointments/sync 200 in 230ms (next.js: 7ms, application-code: 223ms)
+ POST /api/appointments/sync 200 in 220ms (next.js: 3ms, application-code: 217ms)
+ POST /api/appointments/sync 200 in 247ms (next.js: 20ms, application-code: 227ms)
+ POST /api/appointments/sync 200 in 304ms (next.js: 5ms, application-code: 299ms)
+ POST /api/appointments/sync 200 in 328ms (next.js: 14ms, application-code: 315ms)
+ POST /api/appointments/sync 200 in 125ms (next.js: 3ms, application-code: 122ms)
+ POST /api/appointments/sync 200 in 135ms (next.js: 3ms, application-code: 133ms)
+ POST /api/appointments/sync 200 in 120ms (next.js: 3ms, application-code: 117ms)
+ POST /api/appointments/sync 200 in 127ms (next.js: 11ms, application-code: 117ms)
+ POST /api/appointments/sync 200 in 239ms (next.js: 3ms, application-code: 236ms)
+ POST /api/appointment-reminders/send 200 in 224ms (next.js: 3ms, application-code: 221ms)
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+ POST /api/appointments/sync 200 in 241ms (next.js: 5ms, application-code: 236ms)
+ POST /api/appointments/sync 200 in 273ms (next.js: 44ms, application-code: 229ms)
+ POST /api/appointment-notify 200 in 349ms (next.js: 39ms, application-code: 310ms)
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+ POST /api/appointment-reminders/send 200 in 224ms (next.js: 3ms, application-code: 221ms)
+ POST /api/appointment-reminders/send 200 in 227ms (next.js: 5ms, application-code: 222ms)
+ POST /api/appointments/sync 200 in 297ms (next.js: 3ms, application-code: 294ms)
+ POST /api/appointments/sync 200 in 299ms (next.js: 9ms, application-code: 290ms)
+ POST /api/appointments/sync 200 in 313ms (next.js: 3ms, application-code: 309ms)
+ POST /api/appointments/sync 200 in 136ms (next.js: 5ms, application-code: 131ms)
+ POST /api/appointments/sync 200 in 132ms (next.js: 4ms, application-code: 128ms)
+ POST /api/appointments/sync 200 in 136ms (next.js: 12ms, application-code: 124ms)
+ POST /api/appointments/sync 200 in 220ms (next.js: 10ms, application-code: 210ms)
+ POST /api/appointments/sync 200 in 123ms (next.js: 3ms, application-code: 121ms)
+ POST /api/appointments/sync 200 in 258ms (next.js: 18ms, application-code: 240ms)
+ POST /api/appointments/sync 200 in 289ms (next.js: 4ms, application-code: 285ms)
+ POST /api/appointments/sync 200 in 213ms (next.js: 3ms, application-code: 210ms)
+ POST /api/appointments/sync 200 in 215ms (next.js: 3ms, application-code: 212ms)
+ POST /api/appointments/sync 200 in 131ms (next.js: 3ms, application-code: 127ms)
+ GET /api/cron/appointment-reminders 200 in 139ms (next.js: 3ms, application-code: 136ms)
+  Reload env: .env.local
+ GET / 200 in 119ms (next.js: 84ms, application-code: 34ms)
+ GET /api/cron/appointment-reminders 200 in 885ms (next.js: 74ms, application-code: 812ms)
+  Reload env: .env.local
+ GET / 200 in 119ms (next.js: 81ms, application-code: 37ms)
+✓ Compiled in 202ms
+ GET / 200 in 312ms (next.js: 233ms, application-code: 79ms)
+✓ Compiled in 241ms
+ GET / 200 in 321ms (next.js: 267ms, application-code: 54ms)
+ GET / 200 in 97ms (next.js: 71ms, application-code: 26ms)
+ GET /api/address-autocomplete?q=2334%20Senior%20Dr%20Charlotte%20NC 200 in 7.2s (next.js: 45ms, application-code: 7.1s)
+✓ Compiled in 1057ms
+ GET / 200 in 1557ms (next.js: 1053ms, application-code: 503ms)
+ GET / 200 in 32ms (next.js: 7ms, application-code: 24ms)
+ GET / 200 in 727ms (next.js: 419ms, application-code: 308ms)
+ GET /manifest.webmanifest 200 in 205ms (next.js: 197ms, application-code: 8ms)
+ GET /apple-icon 200 in 556ms (next.js: 297ms, application-code: 259ms)
+ POST /api/appointments/sync 200 in 724ms (next.js: 62ms, application-code: 662ms)
+ GET /manifest.webmanifest 200 in 6ms (next.js: 3ms, application-code: 4ms)
