@@ -9,6 +9,8 @@
     "lint": "eslint",
     "audit": "npm audit --audit-level=high",
     "audit:fix": "npm audit fix",
+    "update:check": "node scripts/check-updates.mjs",
+    "update:deps": "npm update && npm audit --audit-level=high",
     "test:cron": "powershell -ExecutionPolicy Bypass -File scripts/test-cron.ps1",
     "test:sms": "node scripts/test-sms.mjs"
   },
@@ -18,10 +20,10 @@
     "clsx": "^2.1.1",
     "html2pdf.js": "^0.14.0",
     "lucide-react": "^1.17.0",
-    "next": "16.2.6",
+    "next": "^16.2.6",
     "radix-ui": "^1.4.3",
-    "react": "19.2.4",
-    "react-dom": "19.2.4",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
     "shadcn": "^4.8.3",
     "stripe": "^22.2.0",
     "tailwind-merge": "^3.6.0",
@@ -33,7 +35,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.2.6",
+    "eslint-config-next": "^16.2.6",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

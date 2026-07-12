@@ -8,6 +8,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { isMediaPdfRef, resolveMediaDisplayUrl } from '@/lib/media-url';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { getLineItemUnitOptions, LINE_ITEM_UNITS } from '@/lib/quote-units';
 
@@ -564,6 +565,8 @@ export default function Home() {
   const [photoDisplayUrls, setPhotoDisplayUrls] = useState<string[]>([]);
   const [videoDisplayUrls, setVideoDisplayUrls] = useState<string[]>([]);
   const [receiptDisplayUrls, setReceiptDisplayUrls] = useState<string[]>([]);
+  const [logoDisplayUrl, setLogoDisplayUrl] = useState('');
+  const [certificateDisplayUrl, setCertificateDisplayUrl] = useState('');
   const [receiptDetails, setReceiptDetails] = useState<any[]>([]);
 
   // For Grok AI description improvement loading state (per item)
@@ -575,15 +578,11 @@ export default function Home() {
   const [photoQuoteImageUrl, setPhotoQuoteImageUrl] = useState('');
   const [photoQuoteLineId, setPhotoQuoteLineId] = useState<number | null>(null);
 
-  // Resolve paths to fresh signed URLs for display (handles both paths and legacy signed URLs)
+  // Resolve storage paths (and legacy signed URLs) to fresh signed URLs for display
   useEffect(() => {
     const resolveUrls = async (paths: string[]) => {
       const resolved = await Promise.all(
-        paths.map(async (p) => {
-          if (!p) return '';
-          if (p.startsWith('http')) return p; // legacy signed URL, use as-is (may be expired)
-          return await getMediaUrl(p);
-        })
+        paths.map((p) => resolveMediaDisplayUrl(p, getMediaUrl))
       );
       return resolved.filter(Boolean);
     };
@@ -591,7 +590,7 @@ export default function Home() {
     resolveUrls(photoUrls).then(setPhotoDisplayUrls);
     resolveUrls(videoUrls).then(setVideoDisplayUrls);
     resolveUrls(receiptUrls).then(setReceiptDisplayUrls);
-  }, [photoUrls, videoUrls, receiptUrls]);
+  }, [photoUrls, videoUrls, receiptUrls, supabase]);
 
   const [dueDate, setDueDate] = useState('');
   const [paymentStatus, setPaymentStatus] = useState<'pending' | 'paid'>('pending');
@@ -1417,6 +1416,14 @@ export default function Home() {
     return () => listener.subscription.unsubscribe();
   }, [supabase]);
 
+  useEffect(() => {
+    resolveMediaDisplayUrl(profile.logoUrl, getMediaUrl).then(setLogoDisplayUrl);
+  }, [profile.logoUrl, supabase]);
+
+  useEffect(() => {
+    resolveMediaDisplayUrl(profile.certificateUrl, getMediaUrl).then(setCertificateDisplayUrl);
+  }, [profile.certificateUrl, supabase]);
+
   // Load language preference from localStorage
   useEffect(() => {
     const savedLang = localStorage.getItem('appLanguage');
@@ -1901,13 +1908,10 @@ export default function Home() {
     const filePath = `${user.id}/certificate/${Date.now()}-${file.name}`;
     const { error } = await supabase.storage.from('media').upload(filePath, file, { upsert: true });
     if (!error) {
-      const url = await getMediaUrl(filePath);
-      if (url) {
-        setProfile(prev => ({ ...prev, certificateUrl: url }));
-        const isPdf = file.name.toLowerCase().endsWith('.pdf');
-        showMessage(isPdf ? '✅ PDF Certificate of Insurance uploaded' : '✅ Certificate of Insurance uploaded');
-        await saveToDB();
-      }
+      setProfile(prev => ({ ...prev, certificateUrl: filePath }));
+      const isPdf = file.name.toLowerCase().endsWith('.pdf');
+      showMessage(isPdf ? '✅ PDF Certificate of Insurance uploaded' : '✅ Certificate of Insurance uploaded');
+      await saveToDB();
     }
   };
 
@@ -1917,12 +1921,9 @@ export default function Home() {
     const filePath = `${user.id}/logo/${Date.now()}-${file.name}`;
     const { error } = await supabase.storage.from('media').upload(filePath, file, { upsert: true });
     if (!error) {
-      const url = await getMediaUrl(filePath);
-      if (url) {
-        setProfile(prev => ({ ...prev, logoUrl: url }));
-        showMessage('✅ Company logo uploaded');
-        await saveToDB();
-      }
+      setProfile(prev => ({ ...prev, logoUrl: filePath }));
+      showMessage('✅ Company logo uploaded');
+      await saveToDB();
     }
   };
 
@@ -2430,20 +2431,51 @@ export default function Home() {
     }));
   };
 
-  const compressImageFileForAi = async (file: File): Promise<string> => {
-    const bitmap = await createImageBitmap(file);
+  const compressImageSourceForAi = async (
+    source: CanvasImageSource & { width: number; height: number },
+    cleanup?: () => void
+  ): Promise<string> => {
     const maxDim = 1600;
-    const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height, 1));
-    const width = Math.max(1, Math.round(bitmap.width * scale));
-    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const scale = Math.min(1, maxDim / Math.max(source.width, source.height, 1));
+    const width = Math.max(1, Math.round(source.width * scale));
+    const height = Math.max(1, Math.round(source.height * scale));
     const canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('Could not prepare image');
-    ctx.drawImage(bitmap, 0, 0, width, height);
-    bitmap.close();
+    ctx.drawImage(source, 0, 0, width, height);
+    cleanup?.();
     return canvas.toDataURL('image/jpeg', 0.85);
+  };
+
+  const compressImageFileForAi = async (file: File): Promise<string> => {
+    try {
+      const bitmap = await createImageBitmap(file);
+      return await compressImageSourceForAi(bitmap, () => bitmap.close());
+    } catch {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const img = new Image();
+          img.onload = () => {
+            void compressImageSourceForAi(img).then(resolve).catch(reject);
+          };
+          img.onerror = () => reject(new Error('Could not load image'));
+          img.src = String(reader.result || '');
+        };
+        reader.onerror = () => reject(new Error('Could not read image file'));
+        reader.readAsDataURL(file);
+      });
+    }
+  };
+
+  const imageUrlToBase64ForAi = async (url: string): Promise<string> => {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('Could not load job photo');
+    const blob = await res.blob();
+    const file = new File([blob], 'job-photo.jpg', { type: blob.type || 'image/jpeg' });
+    return compressImageFileForAi(file);
   };
 
   const applyAiQuoteData = (itemId: number, data: any, options?: { fromPhoto?: boolean }) => {
@@ -2466,7 +2498,7 @@ export default function Home() {
           unit: nextUnit,
           total: nextTotal,
         };
-        if (options?.fromPhoto && scopeFromPhoto && !String(row.description || '').trim()) {
+        if (options?.fromPhoto && scopeFromPhoto) {
           updated.description = scopeFromPhoto;
         }
         if (data.materials?.length) {
@@ -2615,8 +2647,15 @@ export default function Home() {
     const item = items.find(row => row.id === photoQuoteLineId);
     if (!item) return;
     setIsPhotoQuoteLinePickerOpen(false);
-    await requestAiQuote(item, { imageUrl: photoQuoteImageUrl, fromPhoto: true });
-    setPhotoQuoteImageUrl('');
+    try {
+      const imageBase64 = await imageUrlToBase64ForAi(photoQuoteImageUrl);
+      await requestAiQuote(item, { imageBase64, fromPhoto: true });
+    } catch (err) {
+      console.error('Gallery photo quote failed:', err);
+      showMessage('⚠️ Could not read that job photo. Try uploading it again or use AI Quote from Photo on the line item.');
+    } finally {
+      setPhotoQuoteImageUrl('');
+    }
   };
 
   const emptyBreakdownMaterial = () => ({
@@ -4068,9 +4107,9 @@ export default function Home() {
           {view === 'dashboard' && (
             <div>
               <div className="flex items-center gap-4 mb-8">
-                {profile.logoUrl && (
+                {logoDisplayUrl && (
                   <img 
-                    src={profile.logoUrl} 
+                    src={logoDisplayUrl} 
                     alt="Company Logo" 
                     className="w-20 h-20 object-contain border rounded flex-shrink-0" 
                   />
@@ -4337,9 +4376,9 @@ export default function Home() {
 
               <div className="flex justify-between items-start mb-8">
                 <div className="flex items-start gap-4">
-                  {profile.logoUrl && (
+                  {logoDisplayUrl && (
                     <img 
-                      src={profile.logoUrl} 
+                      src={logoDisplayUrl} 
                       alt="Company Logo" 
                       className={`${getLogoClass(profile.logoSize)} object-contain border rounded flex-shrink-0`} 
                     />
@@ -5024,7 +5063,7 @@ export default function Home() {
                   <input
                     ref={photoQuoteInputRef}
                     type="file"
-                    accept="image/jpeg,image/png,image/webp"
+                    accept="image/*"
                     capture="environment"
                     className="hidden"
                     onChange={e => void handlePhotoQuoteFile(e.target.files)}
@@ -5129,8 +5168,8 @@ export default function Home() {
 
               <div id="print-document" className="max-w-4xl mx-auto bg-white p-10 shadow-2xl hidden print:block">
                 <div className="flex items-center gap-4 mb-2">
-                  {profile.logoUrl && (
-                    <img src={profile.logoUrl} alt="Logo" className={`${getLogoClass(profile.logoSize)} object-contain`} />
+                  {logoDisplayUrl && (
+                    <img src={logoDisplayUrl} alt="Logo" className={`${getLogoClass(profile.logoSize)} object-contain`} />
                   )}
                   <h1 className="text-4xl font-bold">{profile.company || 'Your Company'}</h1>
                 </div>
@@ -5196,16 +5235,16 @@ export default function Home() {
                   </div>
                 )}
 
-                {profile.certificateUrl && (
+                {profile.certificateUrl && certificateDisplayUrl && (
                   <div className="mt-12">
                     <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Certificate of Insurance</h3>
                     
-                    {profile.certificateUrl.toLowerCase().endsWith('.pdf') ? (
+                    {isMediaPdfRef(profile.certificateUrl) ? (
                       <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
                         <div className="text-3xl mb-2">📄</div>
                         <p className="font-medium">PDF Certificate of Insurance</p>
                         <a 
-                          href={profile.certificateUrl} 
+                          href={certificateDisplayUrl} 
                           target="_blank" 
                           rel="noopener noreferrer"
                           className="inline-block mt-3 text-sm px-4 py-2 bg-[#10b981] hover:bg-[#0ea16b] text-white rounded"
@@ -5218,7 +5257,7 @@ export default function Home() {
                         <div className="text-3xl mb-2">🖼️</div>
                         <p className="font-medium mb-2">Certificate of Insurance</p>
                         <a 
-                          href={profile.certificateUrl} 
+                          href={certificateDisplayUrl} 
                           target="_blank" 
                           rel="noopener noreferrer"
                           className="inline-block mt-1 text-sm px-4 py-2 bg-[#10b981] hover:bg-[#0ea16b] text-white rounded"
@@ -5395,9 +5434,9 @@ export default function Home() {
                       </div>
                     </div>
 
-                    {profile.logoUrl && (
+                    {profile.logoUrl && logoDisplayUrl && (
                       <div className="mt-2 flex items-center gap-3">
-                        <img src={profile.logoUrl} alt="Company Logo" className={`${getLogoClass(profile.logoSize)} object-contain border rounded`} />
+                        <img src={logoDisplayUrl} alt="Company Logo" className={`${getLogoClass(profile.logoSize)} object-contain border rounded`} />
                         <button 
                           onClick={() => {
                             setProfile(prev => ({ ...prev, logoUrl: '' }));
@@ -5421,17 +5460,17 @@ export default function Home() {
                       <p className="text-xs text-gray-500 mt-1">Accepted: PDF, JPG, PNG (most common formats for COI)</p>
                     </div>
 
-                    {profile.certificateUrl && (
+                    {profile.certificateUrl && certificateDisplayUrl && (
                       <div className="mt-8 border rounded-lg p-6">
                         <h3 className="font-semibold mb-4">Certificate of Insurance</h3>
                         
-                        {profile.certificateUrl.toLowerCase().endsWith('.pdf') ? (
+                        {isMediaPdfRef(profile.certificateUrl) ? (
                           <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center bg-gray-50">
                             <div className="text-4xl mb-2">📄</div>
                             <p className="font-medium mb-1">PDF Document</p>
                             <p className="text-xs text-gray-500 mb-3">Certificate of Insurance</p>
                             <a 
-                              href={profile.certificateUrl} 
+                              href={certificateDisplayUrl} 
                               target="_blank" 
                               rel="noopener noreferrer"
                               className="inline-block px-5 py-2 bg-[#10b981] hover:bg-[#0ea16b] text-white text-sm font-semibold rounded-lg"
@@ -5444,7 +5483,7 @@ export default function Home() {
                             <div className="text-4xl mb-2">🖼️</div>
                             <p className="font-medium mb-1">Certificate of Insurance</p>
                             <a 
-                              href={profile.certificateUrl} 
+                              href={certificateDisplayUrl} 
                               target="_blank" 
                               rel="noopener noreferrer"
                               className="inline-block px-5 py-2 bg-[#10b981] hover:bg-[#0ea16b] text-white text-sm font-semibold rounded-lg"
@@ -6160,8 +6199,8 @@ export default function Home() {
 
               <div id="preview-document" className="bg-white p-10 shadow-2xl rounded-2xl border mb-8">
                 <div className="flex items-center gap-4 mb-2">
-                  {profile.logoUrl && (
-                    <img src={profile.logoUrl} alt="Logo" className={`${getLogoClass(profile.logoSize)} object-contain`} />
+                  {logoDisplayUrl && (
+                    <img src={logoDisplayUrl} alt="Logo" className={`${getLogoClass(profile.logoSize)} object-contain`} />
                   )}
                   <h1 className="text-4xl font-bold">{profile.company || 'Your Company'}</h1>
                 </div>
@@ -6228,16 +6267,16 @@ export default function Home() {
                   </div>
                 )}
 
-                {profile.certificateUrl && (
+                {profile.certificateUrl && certificateDisplayUrl && (
                   <div className="mt-12">
                     <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Certificate of Insurance</h3>
                     
-                    {profile.certificateUrl.toLowerCase().endsWith('.pdf') ? (
+                    {isMediaPdfRef(profile.certificateUrl) ? (
                       <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
                         <div className="text-3xl mb-2">📄</div>
                         <p className="font-medium">PDF Certificate of Insurance</p>
                         <a 
-                          href={profile.certificateUrl} 
+                          href={certificateDisplayUrl} 
                           target="_blank" 
                           rel="noopener noreferrer"
                           className="inline-block mt-3 text-sm px-4 py-2 bg-[#10b981] hover:bg-[#0ea16b] text-white rounded"
@@ -6250,7 +6289,7 @@ export default function Home() {
                         <div className="text-3xl mb-2">🖼️</div>
                         <p className="font-medium mb-2">Certificate of Insurance</p>
                         <a 
-                          href={profile.certificateUrl} 
+                          href={certificateDisplayUrl} 
                           target="_blank" 
                           rel="noopener noreferrer"
                           className="inline-block mt-1 text-sm px-4 py-2 bg-[#10b981] hover:bg-[#0ea16b] text-white rounded"

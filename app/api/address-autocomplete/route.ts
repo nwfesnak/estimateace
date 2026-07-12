@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getXaiApiKey, getXaiChatModel } from '@/lib/xai-config';
 
 const GOOGLE_KEY = process.env.GOOGLE_PLACES_API_KEY;
-const GROK_KEY = process.env.GROK_API_KEY;
 
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
 const RATE_LIMIT = 25;
@@ -58,7 +58,8 @@ function parseGrokSuggestions(aiText: string): AddressSuggestion[] {
 }
 
 async function fetchGrokAutocomplete(q: string): Promise<AddressSuggestion[]> {
-  if (!GROK_KEY) {
+  const grokKey = getXaiApiKey();
+  if (!grokKey) {
     throw new Error('GROK_API_KEY not configured');
   }
 
@@ -66,10 +67,10 @@ async function fetchGrokAutocomplete(q: string): Promise<AddressSuggestion[]> {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${GROK_KEY}`,
+      Authorization: `Bearer ${grokKey}`,
     },
     body: JSON.stringify({
-      model: 'grok-3',
+      model: getXaiChatModel(),
       messages: [
         {
           role: 'system',
@@ -196,7 +197,7 @@ async function fetchPhoton(q: string): Promise<AddressSuggestion[]> {
 }
 
 async function fetchAutocompleteSuggestions(q: string): Promise<AddressSuggestion[]> {
-  if (GROK_KEY) {
+  if (getXaiApiKey()) {
     try {
       const grokResults = await fetchGrokAutocomplete(q);
       if (grokResults.length > 0) return grokResults;

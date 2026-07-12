@@ -1,0 +1,31 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":semanticCommits",
+    ":separateMajorReleases"
+  ],
+  "schedule": ["before 6am on Monday"],
+  "packageRules": [
+    {
+      "description": "Group Next.js framework updates",
+      "matchPackageNames": ["next", "eslint-config-next"],
+      "groupName": "nextjs"
+    },
+    {
+      "description": "Group React updates",
+      "matchPackageNames": ["react", "react-dom", "@types/react", "@types/react-dom"],
+      "groupName": "react"
+    },
+    {
+      "description": "Auto-merge patch/minor devDependencies after CI passes",
+      "matchDepTypes": ["devDependencies"],
+      "matchUpdateTypes": ["patch", "minor"],
+      "automerge": true,
+      "automergeType": "pr"
+    }
+  ],
+  "vulnerabilityAlerts": {
+    "enabled": true
+  }
+}

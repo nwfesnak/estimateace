@@ -1,4 +1,4 @@
-const VISION_MODEL = process.env.GROK_VISION_MODEL || 'grok-2-vision-1212';
+import { getXaiVisionModel, requireXaiApiKey } from '@/lib/xai-config';
 
 export type JobImageAnalysis = {
   scopeDescription: string;
@@ -14,7 +14,11 @@ function normalizeImageDataUrl(imageBase64: string): string {
 }
 
 function parseAnalysisJson(aiText: string): JobImageAnalysis | null {
-  const jsonMatch = aiText.match(/\{[\s\S]*\}/);
+  const stripped = aiText
+    .replace(/```json\s*/gi, '')
+    .replace(/```\s*/g, '')
+    .trim();
+  const jsonMatch = stripped.match(/\{[\s\S]*\}/);
   if (!jsonMatch) return null;
 
   try {
@@ -50,10 +54,7 @@ export async function analyzeJobImage(options: {
   imageUrl?: string;
   hint?: string;
 }): Promise<JobImageAnalysis> {
-  const apiKey = process.env.GROK_API_KEY;
-  if (!apiKey) {
-    throw new Error('GROK_API_KEY is missing');
-  }
+  const apiKey = requireXaiApiKey();
 
   const imageUrl = options.imageBase64
     ? normalizeImageDataUrl(options.imageBase64)
@@ -89,7 +90,7 @@ Return ONLY valid JSON:
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: VISION_MODEL,
+      model: getXaiVisionModel(),
       messages: [
         {
           role: 'user',

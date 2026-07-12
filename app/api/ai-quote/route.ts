@@ -11,6 +11,7 @@ import {
 import { computePricingAnchor, detectWholeHomeInteriorPaint, estimateInteriorPaintableSqft } from '@/lib/ai-quote-anchor';
 import { resolveQuoteLineStructure } from '@/lib/quote-units';
 import { analyzeJobImage, type JobImageAnalysis } from '@/lib/analyze-job-image';
+import { getXaiApiKey, getXaiChatModel } from '@/lib/xai-config';
 
 // Simple in-memory rate limiter (per-user, resets on server restart)
 // For production: use Redis / Upstash / Vercel KV with proper middleware
@@ -594,7 +595,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const apiKey = process.env.GROK_API_KEY;
+    const apiKey = getXaiApiKey();
     if (!apiKey) {
       return NextResponse.json({ error: 'GROK_API_KEY is missing! In Vercel: Settings → Environment Variables → Add New. In the "Key" field type exactly: GROK_API_KEY. In the "Value" field paste the real key from https://console.x.ai/. Select Production and Save. Then redeploy.' }, { status: 500 });
     }
@@ -682,7 +683,7 @@ export async function POST(request: NextRequest) {
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: 'grok-3',
+        model: getXaiChatModel(),
         messages: [
           {
             role: 'system',

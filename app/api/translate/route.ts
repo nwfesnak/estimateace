@@ -4,6 +4,7 @@
 // Uses Grok for high-quality translations.
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { getXaiApiKey, getXaiChatModel } from '@/lib/xai-config';
 
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
 const RATE_LIMIT = 20;
@@ -61,7 +62,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Valid text is required' }, { status: 400 });
     }
 
-    const apiKey = process.env.GROK_API_KEY;
+    const apiKey = getXaiApiKey();
 
     if (!apiKey) {
       return NextResponse.json({ 
@@ -78,7 +79,7 @@ export async function POST(request: NextRequest) {
         'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: "grok-3",
+        model: getXaiChatModel(),
         messages: [
           {
             role: "system",
