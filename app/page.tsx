@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { TouchDoubleTapTextarea } from '@/components/TouchDoubleTapTextarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { getSupabaseClient } from '@/lib/supabase/client';
@@ -4583,9 +4584,9 @@ export default function Home() {
                         <TableRow key={item.id}>
                           <TableCell>
                             <div className="text-xs text-gray-500 mb-1">Line {idx + 1}</div>
-                            <Textarea 
-                              value={item.description} 
-                              onChange={e => updateItem(item.id, 'description', e.target.value)} 
+                            <TouchDoubleTapTextarea
+                              value={item.description}
+                              onChange={e => updateItem(item.id, 'description', e.target.value)}
                               rows={5}
                               className="resize-y min-h-[120px]"
                             />
@@ -5126,7 +5127,7 @@ export default function Home() {
                       </select>
                     )}
                   </div>
-                  <Textarea value={terms} onChange={e => setTerms(e.target.value)} rows={6} />
+                  <TouchDoubleTapTextarea value={terms} onChange={e => setTerms(e.target.value)} rows={6} />
                 </CardContent>
               </Card>
 
