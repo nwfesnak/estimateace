@@ -1,4 +1,5 @@
 import type { RegionalPricing } from './ai-quote-region';
+import { buildSmallRepairAnchorQuote } from './small-job-pricing';
 import {
   BILLING_SF,
   detectWholeHomeInteriorPaint,
@@ -147,6 +148,9 @@ export function computePricingAnchor(
   description: string,
   regional: RegionalPricing
 ): PricingAnchorQuote | null {
+  const smallRepair = buildSmallRepairAnchorQuote(description, regional);
+  if (smallRepair) return smallRepair;
+
   const wholeHome = detectWholeHomeInteriorPaint(description);
   if (wholeHome) {
     return buildWholeHomeInteriorPaintQuote(wholeHome, regional);

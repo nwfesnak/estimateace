@@ -219,6 +219,14 @@ function detectLaborRateCap(
   if (/roof|shingle|gutter/i.test(text)) {
     return { maxRate: scale(85), typicalRate: scale(70), maxHoursPerUnit: 16 };
   }
+  if (
+    /screen\s*door|door\s*(?:handle|knob|latch|lever|hinge|lockset)|handle\s*on\s*(?:the\s*)?(?:screen|storm)\s*door/i.test(
+      text
+    ) &&
+    !/full\s*door|new\s*door|prehung|entry\s*door\s*install/i.test(text)
+  ) {
+    return { maxRate: scale(72), typicalRate: scale(58), maxHoursPerUnit: 2.5 };
+  }
   if (/paint|drywall|texture|mud|tape/i.test(text)) {
     return { maxRate: scale(75), typicalRate: scale(62), maxHoursPerUnit: 20 };
   }
@@ -704,6 +712,12 @@ PRICING METHODOLOGY (critical):
 - laborBreakdown.hours = TOTAL crew-hours for the ENTIRE job scope (all sqft, squares, or units in the description) — never hours per sqft.
 - Labor production guides (total job hours): roof replacement ~1.5–3.5 hrs per square (100 sqft); 4800 sqft roof ≈ 48 squares ≈ 72–170 hrs. Flooring ~1 hr per 25–35 sqft. Interior paint on a whole home: use PAINTABLE wall+ceiling sqft (~3–4× home floor sqft for a ranch), NOT floor sqft alone — e.g. 1500 sq ft ranch with 9 ft ceilings ≈ 5200 paintable sq ft ≈ 30–40 crew-hours. Small fixture swap 1–3 hrs.
 - Do NOT return 4 hours for a large roof, whole-house paint, or other large-area work.
+
+SMALL REPAIR / HARDWARE JOBS (critical — do NOT price like a remodel):
+- Screen door handle, door knob, latch, hinge, lockset, outlet, switch, faucet cartridge: suggestedQty = 1, unit = "Unit", unitPrice = FULL job total only.
+- Typical totals: screen door / storm door handle replacement $150–$450 | door knob or latch $175–$400 | single outlet/switch $175–$500 | minor faucet repair $165–$550.
+- Labor: 1–2.5 hours total for one handle/knob/outlet — NOT 8+ hours. Materials: handle kit $25–$95, not a full door.
+- NEVER quote $800+ for replacing only a handle, knob, or small hardware unless the description explicitly includes a full door, frame, or large-area work.
 - The final unitPrice must cover realistic materials PLUS labor at production-based hours × local labor rate. Do not under-quote large jobs.
 
 MATERIAL PRICE ANCHORS (per unit, mid-grade retail — scale up/down for the job region vs US average):

@@ -1,4 +1,5 @@
 import { getXaiVisionModel, requireXaiApiKey } from '@/lib/xai-config';
+import { isSmallRepairScope } from '@/lib/small-job-pricing';
 
 export type JobImageAnalysis = {
   scopeDescription: string;
@@ -70,7 +71,8 @@ export async function analyzeJobImage(options: {
 Analyze the image and write scope text a contractor can price. Focus on:
 - What trade/work is shown (paint, roofing, flooring, drywall, siding, concrete, plumbing, electrical, etc.)
 - Visible damage, materials, finishes, or scope of work
-- Approximate dimensions or square footage ONLY if reasonably inferable from the photo
+- For SMALL repairs (handle, knob, latch, hinge, outlet, faucet part, weatherstrip): describe ONLY that fixture repair — do NOT inflate to full door/window/room replacement
+- Approximate square footage ONLY for large area work (floors, roofs, whole-room paint) — NEVER add sqft for a single handle, lock, outlet, or similar hardware
 - Number of coats, stories, or fixtures if visible
 
 ${hint ? `Contractor notes already entered: ${hint}\nUse the photo plus these notes.` : ''}
@@ -118,8 +120,16 @@ Return ONLY valid JSON:
   const parsed = parseAnalysisJson(aiText);
 
   if (parsed) {
-    if (parsed.estimatedSqft && !/\d+\s*(?:sq\.?\s*ft|sqft|sf)\b/i.test(parsed.scopeDescription)) {
+    const scopeIsSmallRepair = isSmallRepairScope(parsed.scopeDescription);
+    if (
+      parsed.estimatedSqft &&
+      !scopeIsSmallRepair &&
+      !/\d+\s*(?:sq\.?\s*ft|sqft|sf)\b/i.test(parsed.scopeDescription)
+    ) {
       parsed.scopeDescription = `${parsed.scopeDescription} (~${parsed.estimatedSqft} sq ft)`;
+    }
+    if (scopeIsSmallRepair) {
+      parsed.estimatedSqft = null;
     }
     return parsed;
   }

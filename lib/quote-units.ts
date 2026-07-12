@@ -1,4 +1,5 @@
 import type { RegionalPricing } from './ai-quote-region';
+import { capSmallRepairUnitPrice, isSmallRepairScope } from './small-job-pricing';
 
 const roundMoney = (n: number) => Math.round(n * 100) / 100;
 
@@ -195,6 +196,8 @@ export function detectSqftBillingContext(
   suggestedQty = 1,
   rawUnit?: string
 ): SqftBillingContext | null {
+  if (isSmallRepairScope(description)) return null;
+
   const text = description.toLowerCase();
   const wholeHome = detectWholeHomeInteriorPaint(description);
   if (wholeHome) {
@@ -310,12 +313,17 @@ export function resolveQuoteLineStructure(
   const aiTotal = roundMoney(
     Number(ai.total) > 0 ? Number(ai.total) : aiUnitPrice * aiQty
   );
-  const total = roundMoney(Math.max(aiTotal, aiUnitPrice));
+  let total = roundMoney(Math.max(aiTotal, aiUnitPrice));
+  let unitPrice = total;
+
+  const capped = capSmallRepairUnitPrice(description, regional, unitPrice, total);
+  unitPrice = capped.unitPrice;
+  total = capped.total;
 
   return {
     suggestedQty: 1,
     unit: BILLING_UNIT,
-    unitPrice: total,
+    unitPrice,
     total,
     billingMode: 'unit',
   };
