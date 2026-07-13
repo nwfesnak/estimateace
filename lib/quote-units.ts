@@ -93,22 +93,22 @@ export type SqftJobType =
   | 'insulation'
   | 'general_sqft';
 
-/** Higher end of 2026 US contractor averages (per sqft, national baseline). */
-const HIGH_END_SQFT_RATES: Record<SqftJobType, number> = {
-  interior_paint_whole_home: 2.55,
-  interior_paint: 1.45,
-  exterior_paint: 2.1,
-  roofing: 5.5,
-  flooring_lvp: 3.5,
-  flooring_tile: 5.25,
-  flooring_hardwood: 7.0,
-  flooring_carpet: 4.25,
-  flooring_general: 3.25,
-  drywall: 2.75,
-  siding: 5.75,
-  stucco: 8.5,
-  insulation: 2.25,
-  general_sqft: 3.5,
+/** Mid-market 2026 US installed contractor rates per sqft (national baseline). */
+const MID_MARKET_SQFT_RATES: Record<SqftJobType, number> = {
+  interior_paint_whole_home: 2.2,
+  interior_paint: 1.3,
+  exterior_paint: 1.95,
+  roofing: 4.9,
+  flooring_lvp: 3.1,
+  flooring_tile: 4.75,
+  flooring_hardwood: 6.25,
+  flooring_carpet: 3.85,
+  flooring_general: 2.95,
+  drywall: 2.45,
+  siding: 5.1,
+  stucco: 7.5,
+  insulation: 2.05,
+  general_sqft: 3.1,
 };
 
 export type SqftBillingContext = {
@@ -260,11 +260,11 @@ export function detectSqftBillingContext(
   return null;
 }
 
-export function getHighEndSqftUnitPrice(
+export function getMarketSqftUnitPrice(
   context: SqftBillingContext,
   regional: RegionalPricing
 ): number {
-  const base = HIGH_END_SQFT_RATES[context.jobType];
+  const base = MID_MARKET_SQFT_RATES[context.jobType];
   const adjusted =
     context.jobType === 'interior_paint_whole_home' || context.jobType === 'interior_paint'
       ? base * context.ceilingFactor * context.coatFactor
@@ -273,6 +273,9 @@ export function getHighEndSqftUnitPrice(
         : base;
   return roundMoney(adjusted * regionalBlend(regional));
 }
+
+/** @deprecated Use getMarketSqftUnitPrice */
+export const getHighEndSqftUnitPrice = getMarketSqftUnitPrice;
 
 /**
  * Normalize AI quote output: sqft-capable jobs → qty = sqft, unit = SF, high-end $/sqft.
@@ -295,7 +298,16 @@ export function resolveQuoteLineStructure(
   );
 
   if (sqftContext) {
-    const unitPrice = getHighEndSqftUnitPrice(sqftContext, regional);
+    const marketUnitPrice = getMarketSqftUnitPrice(sqftContext, regional);
+    const aiUnitPrice = roundMoney(Number(ai.unitPrice) || 0);
+    let unitPrice = marketUnitPrice;
+    if (
+      aiUnitPrice > 0 &&
+      aiUnitPrice >= marketUnitPrice * 0.65 &&
+      aiUnitPrice <= marketUnitPrice * 1.35
+    ) {
+      unitPrice = roundMoney(marketUnitPrice * 0.55 + aiUnitPrice * 0.45);
+    }
     const suggestedQty = sqftContext.sqft;
     const total = roundMoney(unitPrice * suggestedQty);
     return {

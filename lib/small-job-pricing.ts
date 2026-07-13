@@ -113,13 +113,17 @@ export function buildSmallRepairAnchorQuote(
 
   const guide = SMALL_REPAIR_GUIDES[category];
   const laborRate = regionalLaborRate(regional, category);
-  const materialsJobTotal = roundMoney(guide.materialsTypical * regional.materialMultiplier);
-  const laborJobTotal = roundMoney(guide.typicalHours * laborRate);
-  const rawTotal = roundMoney(materialsJobTotal + laborJobTotal);
+  const materialsRetail = roundMoney(guide.materialsTypical * regional.materialMultiplier);
+  const laborAtGuide = roundMoney(guide.typicalHours * laborRate);
+  const rawTotal = roundMoney(materialsRetail + laborAtGuide);
   const total = clampTotal(rawTotal, guide, regional);
 
-  const materialsShare = roundMoney(total * 0.32);
-  const laborShare = roundMoney(total - materialsShare);
+  let materialsShare = roundMoney(Math.min(materialsRetail, total * 0.42));
+  let laborShare = roundMoney(total - materialsShare);
+  if (laborShare < roundMoney(guide.typicalHours * 45)) {
+    laborShare = roundMoney(Math.max(guide.typicalHours * 45, total - materialsShare));
+    materialsShare = roundMoney(total - laborShare);
+  }
 
   const materials = [
     {
@@ -131,9 +135,13 @@ export function buildSmallRepairAnchorQuote(
     },
   ];
 
+  const laborHours =
+    laborRate > 0
+      ? roundMoney(Math.max(0.5, Math.min(guide.typicalHours * 2, laborShare / laborRate)))
+      : guide.typicalHours;
   const laborBreakdown = {
     description: `Labor — ${guide.label}`,
-    hours: guide.typicalHours,
+    hours: laborHours,
     rate: laborRate,
     total: laborShare,
   };

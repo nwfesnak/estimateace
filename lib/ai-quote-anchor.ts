@@ -4,7 +4,7 @@ import {
   BILLING_SF,
   detectWholeHomeInteriorPaint,
   estimateInteriorPaintableSqft,
-  getHighEndSqftUnitPrice,
+  getMarketSqftUnitPrice,
   type WholeHomePaintScope,
 } from './quote-units';
 
@@ -65,7 +65,7 @@ function buildWholeHomeInteriorPaintQuote(
   const paintableSqft = estimateInteriorPaintableSqft(floorSqft, ceilingFt);
   const coatFactor = coats === 1 ? 1 : coats === 2 ? 1.58 : 2.15;
 
-  const unitPrice = getHighEndSqftUnitPrice(
+  const unitPrice = getMarketSqftUnitPrice(
     {
       jobType: 'interior_paint_whole_home',
       sqft: floorSqft,
@@ -102,29 +102,15 @@ function buildWholeHomeInteriorPaintQuote(
     }),
   ].filter(m => m.total > 0);
 
-  const materialsPerUnit = roundMoney(materialsJobTotal / floorSqft);
-  const materials = jobMaterials.map(m => {
-    const share = materialsJobTotal > 0 ? m.total / materialsJobTotal : 0;
-    const lineJobTotal = roundMoney(materialsJobTotal * share);
-    const perUnitTotal = roundMoney(lineJobTotal / floorSqft);
-    const qty = m.qty;
-    return recalcMaterialLine({
-      ...m,
-      unitPrice: qty > 0 ? roundMoney(perUnitTotal / qty) : perUnitTotal,
-      total: perUnitTotal,
-    });
-  });
-
   const productionSqftPerHour = coats === 1 ? 145 : coats === 2 ? 95 : 70;
   const hours = roundMoney(Math.max(8, paintableSqft / productionSqftPerHour));
   const { typicalRate } = paintLaborRates(regional);
-  const laborPerUnit = roundMoney(laborJobTotal / floorSqft);
 
   const laborBreakdown: AnchorLaborBreakdown = {
     description: `Interior painting labor (${paintableSqft.toLocaleString()} sq ft surfaces)`,
     hours,
     rate: typicalRate,
-    total: laborPerUnit,
+    total: laborJobTotal,
   };
 
   return {
@@ -136,11 +122,11 @@ function buildWholeHomeInteriorPaintQuote(
     floorSqft,
     paintableSqft,
     confidence: 'high',
-    breakdown: `Whole-home interior paint: ${floorSqft.toLocaleString()} sq ft home, ${ceilingFt} ft ceilings, ${coats} coat${coats > 1 ? 's' : ''}. ~${paintableSqft.toLocaleString()} sq ft walls + ceiling. ${floorSqft.toLocaleString()} SF × $${unitPrice.toFixed(2)}/SF (high-end market rate).`,
-    materials,
+    breakdown: `Whole-home interior paint: ${floorSqft.toLocaleString()} sq ft home, ${ceilingFt} ft ceilings, ${coats} coat${coats > 1 ? 's' : ''}. ~${paintableSqft.toLocaleString()} sq ft walls + ceiling. ${floorSqft.toLocaleString()} SF × $${unitPrice.toFixed(2)}/SF (mid-market installed rate).`,
+    materials: jobMaterials,
     laborBreakdown,
-    materialsCostTotal: materialsPerUnit,
-    laborCostTotal: laborPerUnit,
+    materialsCostTotal: materialsJobTotal,
+    laborCostTotal: laborJobTotal,
   };
 }
 
