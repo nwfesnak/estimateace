@@ -12,7 +12,8 @@
     "update:check": "node scripts/check-updates.mjs",
     "update:deps": "npm update && npm audit --audit-level=high",
     "test:cron": "powershell -ExecutionPolicy Bypass -File scripts/test-cron.ps1",
-    "test:sms": "node scripts/test-sms.mjs"
+    "test:sms": "node scripts/test-sms.mjs",
+    "test:google-places": "node scripts/test-google-places.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.2",

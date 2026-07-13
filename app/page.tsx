@@ -12,6 +12,17 @@ import { getSupabaseClient } from '@/lib/supabase/client';
 import { isMediaPdfRef, resolveMediaDisplayUrl } from '@/lib/media-url';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { getLineItemUnitOptions, LINE_ITEM_UNITS } from '@/lib/quote-units';
+import {
+  cleanVenmoHandle,
+  hasVenmoHandle,
+  openVenmoPaymentPage,
+  type PaymentMethodSettings,
+} from '@/lib/payment-links';
+import {
+  normalizeStoredCostBreakdown,
+  syncLineItemPricingFromJobTotal,
+} from '@/lib/breakdown-pricing';
+import { rankAddressSuggestions } from '@/lib/address-autocomplete';
 
 const DEFAULT_DISCOUNT_NAMES = ['Military', 'Return customer'];
 
@@ -40,13 +51,14 @@ const getPaymentMethodMeta = (method: string) => {
   return meta[method] || { icon: '💳', label: method, description: 'Payment provider', category: 'traditional' };
 };
 
-const mergePaymentSettings = (settings?: Record<string, { enabled?: boolean; connected?: boolean }>) => {
-  const merged: Record<string, { enabled: boolean; connected: boolean }> = {};
+const mergePaymentSettings = (settings?: Record<string, PaymentMethodSettings>) => {
+  const merged: Record<string, { enabled: boolean; connected: boolean; handle?: string }> = {};
   for (const [key, defaults] of Object.entries(DEFAULT_PAYMENT_SETTINGS)) {
     const saved = settings?.[key];
     merged[key] = {
       enabled: saved?.enabled ?? defaults.enabled,
-      connected: saved?.connected ?? defaults.connected,
+      connected: key === 'venmo' ? false : (saved?.connected ?? defaults.connected),
+      handle: saved?.handle,
     };
   }
   if (settings) {
@@ -55,6 +67,7 @@ const mergePaymentSettings = (settings?: Record<string, { enabled?: boolean; con
         merged[key] = {
           enabled: !!saved?.enabled,
           connected: !!saved?.connected,
+          handle: saved?.handle,
         };
       }
     }
@@ -286,6 +299,9 @@ export default function Home() {
       notConnected: "Not connected",
       manage: "Manage",
       linkAccount: "Link Account",
+      venmoUsername: "Venmo Username",
+      venmoUsernameHelp: "Clients will be sent to this Venmo username when they pay by Venmo.",
+      venmoUsernamePlaceholder: "YourBusiness",
       chargeCCFee: "Charge customers a credit card processing fee",
       exportData: "Export Selected Data (CSV)",
       viewAppointments: "View Appointments",
@@ -396,6 +412,9 @@ export default function Home() {
       notConnected: "No conectado",
       manage: "Administrar",
       linkAccount: "Vincular Cuenta",
+      venmoUsername: "Usuario de Venmo",
+      venmoUsernameHelp: "Ingresa el @usuario con el que los clientes te pagan en Venmo.",
+      venmoUsernamePlaceholder: "TuNegocio",
       chargeCCFee: "Cobrar a los clientes una tarifa de procesamiento de tarjetas",
       exportData: "Exportar Datos Seleccionados (CSV)",
       viewAppointments: "Ver Citas",
@@ -506,6 +525,9 @@ export default function Home() {
       notConnected: "Non connecté",
       manage: "Gérer",
       linkAccount: "Lier le Compte",
+      venmoUsername: "Nom d'utilisateur Venmo",
+      venmoUsernameHelp: "Entrez le @nom d'utilisateur que les clients utilisent pour vous payer sur Venmo.",
+      venmoUsernamePlaceholder: "VotreEntreprise",
       chargeCCFee: "Facturer aux clients des frais de traitement par carte",
       exportData: "Exporter les Données Sélectionnées (CSV)",
       viewAppointments: "Voir les Rendez-vous",
@@ -853,7 +875,6 @@ export default function Home() {
   // End users / account holders of sold instances cannot change it.
   const CREW_MONTHLY_FEE = 20;
   const [selectedCrewPaymentMethod, setSelectedCrewPaymentMethod] = useState<string | null>(null);
-
   // Other states
   const [isLoadModalOpen, setIsLoadModalOpen] = useState(false);
   const [savedEstimatesList, setSavedEstimatesList] = useState<any[]>([]);
@@ -865,10 +886,11 @@ export default function Home() {
   // Multi-select for lists
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
-  // Address auto-suggest states (Google Places primary + previous addresses fallback)
+  // Address auto-suggest states (geocoding APIs + previous addresses fallback)
   const [showAddressSuggestions, setShowAddressSuggestions] = useState(false);
   const [addressSuggestions, setAddressSuggestions] = useState<any[]>([]);
   const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
+  const addressSuggestAbortRef = useRef<AbortController | null>(null);
 
   const [quickLines, setQuickLines] = useState<any[]>([]);
   const [savedTemplates, setSavedTemplates] = useState<any[]>([]);
@@ -895,97 +917,98 @@ export default function Home() {
     return addrs.slice(0, 20);
   }, [savedEstimatesList, archivesList, invoiceNumber]);
 
-  // Debounced address auto-suggest (Grok AI primary + previous jobs fallback)
+  const buildInternalAddressSuggestions = (q: string) => {
+    const qLower = q.trim().toLowerCase();
+    const candidates: any[] = [];
+
+    if (profile.address?.trim()) {
+      candidates.push({
+        address: profile.address.trim(),
+        city: profile.city || '',
+        state: profile.state || '',
+        zipCode: profile.zipCode || '',
+        display: [profile.address, profile.city, profile.state, profile.zipCode].filter(Boolean).join(', '),
+        source: 'profile',
+      });
+    }
+
+    previousAddresses.forEach((entry: any) => candidates.push({ ...entry, source: 'history' }));
+
+    if (!qLower) {
+      return candidates.slice(0, 8);
+    }
+
+    const tokens = qLower.split(/[\s,]+/).filter((token: string) => token.length > 0);
+    return candidates.filter((entry: any) => {
+      const haystack = [
+        entry.address,
+        entry.city,
+        entry.state,
+        entry.zipCode,
+        entry.display,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return tokens.every((token: string) => haystack.includes(token));
+    });
+  };
+
+  // Debounced address auto-suggest (geocoding APIs + saved addresses)
   useEffect(() => {
     const q = address.trim();
-    if (!q) {
-      // show profile + recent previous even when empty or very short
-      let base = [];
-      if (profile.address && profile.address.trim()) {
-        base.push({
-          address: profile.address.trim(),
-          city: profile.city || '',
-          state: profile.state || '',
-          zipCode: profile.zipCode || '',
-          display: [profile.address, profile.city, profile.state, profile.zipCode].filter(Boolean).join(', '),
-        });
-      }
-      const recent = previousAddresses.slice(0, 7);
-      setAddressSuggestions([...base, ...recent].slice(0, 8));
-      return;
-    }
-    if (q.length < 2) {
-      // for 1 char, still show matching previous/profile
-      const qLower = q.toLowerCase();
-      let base = [];
-      if (profile.address && profile.address.trim()) {
-        base.push({
-          address: profile.address.trim(),
-          city: profile.city || '',
-          state: profile.state || '',
-          zipCode: profile.zipCode || '',
-          display: [profile.address, profile.city, profile.state, profile.zipCode].filter(Boolean).join(', '),
-        });
-      }
-      const matching = previousAddresses.filter((a: any) =>
-        a.address.toLowerCase().includes(qLower) ||
-        (a.city && a.city.toLowerCase().includes(qLower))
-      );
-      setAddressSuggestions([...base, ...matching].slice(0, 8));
+
+    if (!q || q.length < 2) {
+      setAddressSuggestions(buildInternalAddressSuggestions(q).slice(0, 8));
       return;
     }
 
     const timer = setTimeout(async () => {
+      addressSuggestAbortRef.current?.abort();
+      const controller = new AbortController();
+      addressSuggestAbortRef.current = controller;
+
       setIsLoadingSuggestions(true);
       try {
-        const res = await fetch(`/api/address-autocomplete?q=${encodeURIComponent(q)}`);
-        let live: any[] = [];
-        if (res.ok) live = await res.json();
+        const params = new URLSearchParams({ q });
+        if (city.trim()) params.set('city', city.trim());
+        if (state.trim()) params.set('state', state.trim());
+        if (zipCode.trim()) params.set('zip', zipCode.trim());
 
-        const qLower = q.toLowerCase();
-        const internal = previousAddresses.filter((a: any) =>
-          a.address.toLowerCase().includes(qLower) ||
-          (a.city && a.city.toLowerCase().includes(qLower)) ||
-          (a.state && a.state.toLowerCase().includes(qLower)) ||
-          (a.zipCode && a.zipCode.toLowerCase().includes(qLower))
-        );
-
-        let combined = live.length > 0 ? [...live] : [];
-        internal.forEach((int: any) => {
-          if (!combined.some((c: any) => (c.address || '').toLowerCase() === int.address.toLowerCase())) {
-            combined.push(int);
-          }
+        const res = await fetch(`/api/address-autocomplete?${params.toString()}`, {
+          signal: controller.signal,
+          cache: 'no-store',
         });
-
-        // Always offer company profile if it matches or as top pick
-        if (profile.address && profile.address.trim()) {
-          const prof = {
-            address: profile.address.trim(),
-            city: profile.city || '',
-            state: profile.state || '',
-            zipCode: profile.zipCode || '',
-            display: [profile.address, profile.city, profile.state, profile.zipCode].filter(Boolean).join(', '),
-          };
-          const has = combined.some((c: any) => (c.address || '').toLowerCase() === prof.address.toLowerCase());
-          if (!has) combined.unshift(prof);
+        let live: any[] = [];
+        if (res.ok) {
+          const data = await res.json();
+          live = Array.isArray(data) ? data : [];
         }
 
-        setAddressSuggestions(combined.slice(0, 8));
-      } catch (e) {
-        // fallback to internal only
-        const qLower = q.toLowerCase();
-        const internal = previousAddresses.filter((a: any) =>
-          a.address.toLowerCase().includes(qLower) ||
-          (a.city && a.city.toLowerCase().includes(qLower))
+        const internal = buildInternalAddressSuggestions(q);
+        const combined = rankAddressSuggestions(
+          [...live, ...internal],
+          q,
+          city,
+          state
         );
-        setAddressSuggestions(internal.slice(0, 8));
-      } finally {
-        setIsLoadingSuggestions(false);
-      }
-    }, 450);
 
-    return () => clearTimeout(timer);
-  }, [address, previousAddresses, profile]);
+        setAddressSuggestions(combined.slice(0, 8));
+      } catch (e: any) {
+        if (e?.name === 'AbortError') return;
+        setAddressSuggestions(buildInternalAddressSuggestions(q).slice(0, 8));
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsLoadingSuggestions(false);
+        }
+      }
+    }, 300);
+
+    return () => {
+      clearTimeout(timer);
+      addressSuggestAbortRef.current?.abort();
+    };
+  }, [address, city, state, zipCode, previousAddresses, profile]);
 
   // === TRANSLATE STATES (added exactly as requested) ===
   const [translateFrom, setTranslateFrom] = useState<'en' | 'es' | 'fr' | 'de' | 'pt' | 'it'>('en');
@@ -1170,23 +1193,54 @@ export default function Home() {
     return showMaterials || showLabor || showCosts;
   };
 
+  const getLineItemExpectedTotal = (item: any) => {
+    const qty = Number(item.qty) || 1;
+    const lineTotal = Number(item.total);
+    if (lineTotal > 0) return lineTotal;
+    return roundMoney((Number(item.price) || 0) * qty);
+  };
+
   const renderCostBreakdown = (item: any, className = '') => {
-    const materials = getItemMaterials(item);
-    const labor = item.laborBreakdown;
-    const materialsWithCost = materials.filter(
+    const rawMaterials = getItemMaterials(item);
+    const rawLabor = item.laborBreakdown;
+    if (!rawMaterials.length && !rawLabor) return null;
+
+    const normalized = normalizeStoredCostBreakdown({
+      description: item.description || '',
+      qty: Number(item.qty) || 1,
+      unit: item.unit || '',
+      unitPrice: Number(item.price) || 0,
+      total: getLineItemExpectedTotal(item),
+      materials: rawMaterials,
+      labor: rawLabor
+        ? {
+            description: rawLabor.description || 'Labor',
+            hours: Number(rawLabor.hours) || 0,
+            rate: Number(rawLabor.rate) || 0,
+            total: Number(rawLabor.total) || 0,
+          }
+        : null,
+      typicalLaborRate: 62,
+      maxLaborRate: 75,
+      expectedLaborHours: Number(rawLabor?.hours) || undefined,
+    });
+
+    const materialsWithCost = normalized.materials.filter(
       (m: any) => Number(m.unitPrice) > 0 || Number(m.total) > 0
     );
+    const labor = normalized.labor;
     const laborHasCost = !!labor && (Number(labor.rate) > 0 || Number(labor.total) > 0);
-
     if (!materialsWithCost.length && !laborHasCost) return null;
 
-    const materialsSubtotal = getMaterialCostTotal(materialsWithCost);
-    const laborSubtotal = Number(labor?.total) || Number(labor?.hours || 0) * Number(labor?.rate || 0);
-    const builtUpPrice = materialsSubtotal + laborSubtotal;
+    const materialsSubtotal = normalized.materialsCostTotal;
+    const laborSubtotal = normalized.laborCostTotal;
+    const builtUpPrice = roundMoney(materialsSubtotal + laborSubtotal);
+    const { billing, linePricing } = normalized;
+    const lineTotal = linePricing.total;
 
     return (
       <div className={className}>
-        <div className="font-semibold mb-0.5">Cost breakdown:</div>
+        <div className="font-semibold mb-0.5">Cost breakdown (full job):</div>
         {materialsWithCost.length > 0 && (
           <>
             <div className="font-medium">Materials cost:</div>
@@ -1203,28 +1257,22 @@ export default function Home() {
             <div>Materials subtotal: ${materialsSubtotal.toFixed(2)}</div>
           </>
         )}
-        {laborHasCost && (
+        {laborHasCost && labor && (
           <div className={materialsWithCost.length ? 'mt-1' : ''}>
             <span className="font-medium">Labor cost: </span>
             {labor.description || 'Installation'}
-            {labor.hours != null
-              ? ` — ${labor.hours} hrs${(Number(item.qty) || 1) > 1 && Number(labor.hours) >= 8 ? ' (full job)' : ''}`
-              : ''}
+            {labor.hours != null ? ` — ${labor.hours} hrs` : ''}
             {Number(labor.rate) > 0 ? ` × $${Number(labor.rate).toFixed(2)}/hr` : ''}
-            {laborSubtotal > 0 ? ` = $${laborSubtotal.toFixed(2)} per unit` : ''}
-            {(Number(item.qty) || 1) > 1 && Number(labor.hours) > 0 && Number(labor.rate) > 0 ? (
-              <span className="text-gray-500">
-                {' '}
-                (≈ ${roundMoney(Number(labor.hours) * Number(labor.rate)).toFixed(2)} full job)
-              </span>
-            ) : null}
+            {laborSubtotal > 0 ? ` = $${laborSubtotal.toFixed(2)}` : ''}
           </div>
         )}
         <div className="font-semibold mt-1">
-          Built-up line price: ${builtUpPrice.toFixed(2)}
-          {Number(item.price) > 0 && Math.abs(builtUpPrice - Number(item.price)) > 0.05
-            ? ` (line shows $${Number(item.price).toFixed(2)})`
-            : ''}
+          Built-up job total: ${builtUpPrice.toFixed(2)}
+          {lineTotal > 0 && Math.abs(builtUpPrice - lineTotal) > 0.05
+            ? ` (quoted line total $${lineTotal.toFixed(2)}${billing.perSqft ? ` — ${linePricing.qty.toLocaleString()} SF × $${linePricing.price.toFixed(2)}/SF` : ''})`
+            : billing.perSqft && lineTotal > 0
+              ? ` (${linePricing.qty.toLocaleString()} SF × $${linePricing.price.toFixed(2)}/SF = $${lineTotal.toFixed(2)})`
+              : ''}
         </div>
       </div>
     );
@@ -2237,7 +2285,17 @@ export default function Home() {
               ? Math.max(0, Number(loadedProfile.escrowMinimumAmount) || 0)
               : Math.max(0, Number(profile.escrowMinimumAmount) || 0))),
       depositPercentage: loadedProfile.depositPercentage ?? cached.depositPercentage ?? profile.depositPercentage ?? 10,
-      paymentSettings: mergePaymentSettings(loadedProfile.paymentSettings),
+      paymentSettings: mergePaymentSettings({
+        ...loadedProfile.paymentSettings,
+        ...(serverProfile?.paymentSettings || {}),
+        venmo: {
+          ...mergePaymentSettings(loadedProfile.paymentSettings).venmo,
+          ...mergePaymentSettings(serverProfile?.paymentSettings).venmo,
+          handle:
+            mergePaymentSettings(serverProfile?.paymentSettings).venmo?.handle ||
+            mergePaymentSettings(loadedProfile.paymentSettings).venmo?.handle,
+        },
+      }),
       logoUrl: loadedProfile.logoUrl ?? '',
       logoSize: loadedProfile.logoSize ?? 'medium',
       language: preferredLang,
@@ -2347,7 +2405,18 @@ export default function Home() {
                 ? Math.max(0, Number(loaded.escrowMinimumAmount) || 0)
                 : Math.max(0, Number(prev.escrowMinimumAmount) || 0))),
         depositPercentage: loaded.depositPercentage ?? cached.depositPercentage ?? prev.depositPercentage ?? 10,
-        paymentSettings: mergePaymentSettings(loaded.paymentSettings ?? prev.paymentSettings),
+        paymentSettings: mergePaymentSettings({
+          ...(loaded.paymentSettings ?? prev.paymentSettings),
+          ...(serverProfile?.paymentSettings || {}),
+          venmo: {
+            ...mergePaymentSettings(loaded.paymentSettings ?? prev.paymentSettings).venmo,
+            ...mergePaymentSettings(serverProfile?.paymentSettings).venmo,
+            handle:
+              mergePaymentSettings(serverProfile?.paymentSettings).venmo?.handle ||
+              mergePaymentSettings(loaded.paymentSettings).venmo?.handle ||
+              mergePaymentSettings(prev.paymentSettings).venmo?.handle,
+          },
+        }),
         logoUrl: loaded.logoUrl ?? '',
         logoSize: loaded.logoSize ?? 'medium',
         language: preferredLang,
@@ -2496,31 +2565,49 @@ export default function Home() {
     const nextUnit = (data.unit || item.unit || '').trim();
     const nextTotal = roundMoney(Number(data.total) > 0 ? Number(data.total) : nextQty * nextPrice);
     const scopeFromPhoto = String(data.analyzedScope || data.imageAnalysis?.scopeDescription || '').trim();
+    const quoteDescription = (options?.fromPhoto && scopeFromPhoto) ? scopeFromPhoto : (item.description || '');
+
+    const normalizedBreakdown = normalizeStoredCostBreakdown({
+      description: quoteDescription,
+      qty: nextQty,
+      unit: nextUnit,
+      unitPrice: nextPrice,
+      total: nextTotal,
+      materials: data.materials || [],
+      labor: data.laborBreakdown
+        ? {
+            description: data.laborBreakdown.description,
+            hours: data.laborBreakdown.hours,
+            rate: data.laborBreakdown.rate,
+            total: data.laborBreakdown.total,
+          }
+        : null,
+      materialMultiplier: data.pricingRegion?.materialMultiplier,
+      typicalLaborRate: 62,
+      maxLaborRate: 75,
+      expectedLaborHours: data.laborBreakdown?.hours,
+    });
+    const { linePricing, billing } = normalizedBreakdown;
 
     setItems(prev =>
       prev.map(row => {
         if (row.id !== itemId) return row;
         const updated: any = {
           ...row,
-          price: nextPrice,
-          qty: nextQty,
-          unit: nextUnit,
-          total: nextTotal,
+          price: linePricing.price,
+          qty: linePricing.qty,
+          unit: linePricing.unit,
+          total: linePricing.total,
         };
         if (options?.fromPhoto && scopeFromPhoto) {
           updated.description = scopeFromPhoto;
         }
-        if (data.materials?.length) {
-          updated.materialsList = data.materials;
+        if (normalizedBreakdown.materials.length) {
+          updated.materialsList = normalizedBreakdown.materials;
           updated.materialBreakdown = null;
         }
-        if (data.laborBreakdown) {
-          updated.laborBreakdown = {
-            description: data.laborBreakdown.description,
-            hours: data.laborBreakdown.hours,
-            rate: data.laborBreakdown.rate,
-            total: data.laborBreakdown.total,
-          };
+        if (normalizedBreakdown.labor) {
+          updated.laborBreakdown = normalizedBreakdown.labor;
         }
         return updated;
       })
@@ -2530,13 +2617,15 @@ export default function Home() {
     const regionNote = regionLabel
       ? `\nPriced for: ${regionLabel}${data.pricingRegion?.source === 'company' ? ' (from company profile — add job ZIP for best accuracy)' : ''}`
       : '';
-    const billingLabel = nextUnit === 'SF'
-      ? `${nextQty.toLocaleString()} SF × $${nextPrice.toFixed(2)}/SF`
-      : `1 Unit @ $${nextPrice.toFixed(2)}`;
+    const billingLabel = billing.perSqft
+      ? `${linePricing.qty.toLocaleString()} SF × $${linePricing.price.toFixed(2)}/SF`
+      : linePricing.qty > 1
+        ? `${linePricing.qty} ${linePricing.unit} × $${linePricing.price.toFixed(2)}`
+        : `1 Unit @ $${linePricing.price.toFixed(2)}`;
     let msg = options?.fromPhoto
       ? `✅ AI quote from photo applied!${regionNote}`
       : `✅ AI Price Quote applied!${regionNote}`;
-    msg += `\n\n${billingLabel} = $${nextTotal.toFixed(2)}\nConfidence: ${data.confidence}`;
+    msg += `\n\n${billingLabel} = $${linePricing.total.toFixed(2)}\nConfidence: ${data.confidence}`;
     if (scopeFromPhoto && options?.fromPhoto) {
       msg += `\n\nScope from photo: ${scopeFromPhoto}`;
     }
@@ -2549,11 +2638,14 @@ export default function Home() {
     if (data.laborBreakdown?.hours) {
       msg += `\nLabor: ${data.laborBreakdown.description || 'Installation'} — ${data.laborBreakdown.hours} hrs`;
     }
-    if (data.materialsCostTotal != null || data.laborCostTotal != null) {
-      const mat = Number(data.materialsCostTotal || 0).toFixed(2);
-      const lab = Number(data.laborCostTotal || 0).toFixed(2);
-      const builtUp = (Number(data.materialsCostTotal || 0) + Number(data.laborCostTotal || 0)).toFixed(2);
-      msg += `\nBuilt-up cost: materials $${mat} + labor $${lab} = $${builtUp} (matches unit price $${nextPrice.toFixed(2)})`;
+    if (normalizedBreakdown.materials.length || normalizedBreakdown.labor) {
+      const mat = normalizedBreakdown.materialsCostTotal.toFixed(2);
+      const lab = normalizedBreakdown.laborCostTotal.toFixed(2);
+      const builtUp = roundMoney(normalizedBreakdown.materialsCostTotal + normalizedBreakdown.laborCostTotal).toFixed(2);
+      const matchNote = billing.perSqft
+        ? `matches line total $${linePricing.total.toFixed(2)} (${linePricing.qty.toLocaleString()} SF × $${linePricing.price.toFixed(2)}/SF)`
+        : `matches line total $${linePricing.total.toFixed(2)}`;
+      msg += `\nBuilt-up cost: materials $${mat} + labor $${lab} = $${builtUp} (${matchNote})`;
     }
     showMessage(msg);
   };
@@ -2777,8 +2869,16 @@ export default function Home() {
         laborBreakdown: labor && (labor.description || labor.hours || labor.rate || labor.total) ? labor : null,
       };
       if (breakdownSyncLinePrice && builtUp > 0) {
-        updated.price = builtUp;
-        updated.total = roundMoney(qty * builtUp);
+        const pricing = syncLineItemPricingFromJobTotal(
+          item.description || '',
+          qty || 1,
+          item.unit || '',
+          builtUp
+        );
+        updated.qty = pricing.qty;
+        updated.unit = pricing.unit;
+        updated.price = pricing.price;
+        updated.total = pricing.total;
       }
       return updated;
     }));
@@ -3629,6 +3729,65 @@ export default function Home() {
 
   const openDepositPayment = () => openPaymentModal('deposit', getDepositDueAmount());
 
+  const getVenmoSettings = () => mergePaymentSettings(profile.paymentSettings).venmo;
+
+  const isVenmoPaymentReady = () => {
+    const venmo = getVenmoSettings();
+    return !!venmo?.enabled && hasVenmoHandle(venmo.handle);
+  };
+
+  const startVenmoPayment = (amount: number, label: string) => {
+    const venmo = getVenmoSettings();
+    const handle = cleanVenmoHandle(venmo?.handle || '');
+    if (!handle) {
+      showMessage('Add your Venmo username in Profile → Payments.');
+      return false;
+    }
+
+    const note = `${profile.company || 'EstimateAce'} ${invoiceNumber} ${label}`;
+    const opened = openVenmoPaymentPage(handle, amount, note);
+    if (!opened) {
+      showMessage('Could not open Venmo. Check the username in Profile → Payments.');
+      return false;
+    }
+
+    showMessage(`Opening Venmo to pay $${amount.toFixed(2)}. Complete payment in the Venmo app, then your contractor will confirm receipt.`);
+    return true;
+  };
+
+  const renderVenmoPayButton = (
+    amount: number,
+    label: string,
+    options?: { className?: string; size?: 'default' | 'large' }
+  ) => {
+    if (!isVenmoPaymentReady()) return null;
+    const handle = cleanVenmoHandle(getVenmoSettings()?.handle || '');
+    const isLarge = options?.size === 'large';
+
+    return (
+      <Button
+        type="button"
+        onClick={() => startVenmoPayment(amount, label)}
+        className={
+          options?.className ||
+          (isLarge
+            ? 'flex-1 text-xl py-6 bg-[#008cff] hover:bg-[#0070cc] text-white font-semibold rounded-2xl shadow-lg'
+            : 'w-full bg-[#008cff] hover:bg-[#0070cc] text-white font-semibold')
+        }
+      >
+        <span className="inline-flex items-center justify-center gap-2">
+          <span>📱</span>
+          <span>
+            Pay ${amount.toFixed(2)} with Venmo
+            <span className={`block font-normal opacity-90 ${isLarge ? 'text-sm' : 'text-xs'}`}>
+              @{handle}
+            </span>
+          </span>
+        </span>
+      </Button>
+    );
+  };
+
   const renderApprovedPaymentSection = (options?: { interactive?: boolean }) => {
     if (documentType === 'invoice') return null;
     if (!isDepositOnApprovalEnabled() && !shouldShowEscrowOnEstimate()) return null;
@@ -3657,17 +3816,20 @@ export default function Home() {
           </p>
         )}
         {interactive ? (
-          <div className={`mt-6 flex flex-col sm:flex-row gap-4 justify-center ${isDepositOnApprovalEnabled() && shouldShowEscrowOnEstimate() ? '' : 'max-w-md mx-auto'}`}>
+          <div className={`mt-6 flex flex-col gap-4 justify-center max-w-lg mx-auto`}>
             {isDepositOnApprovalEnabled() && (
-              <Button
-                onClick={openDepositPayment}
-                className="flex-1 text-xl py-6 bg-[#10b981] hover:bg-[#0ea16b] text-white font-semibold rounded-2xl shadow-lg"
-              >
-                Pay Deposit (${depositDue.toFixed(2)})
-                {profile.chargeCCFee && (
-                  <span className="text-sm block mt-1 font-normal opacity-90">(includes {profile.ccFeePercentage || 3}% CC fee)</span>
-                )}
-              </Button>
+              <div className="flex flex-col sm:flex-row gap-4">
+                <Button
+                  onClick={openDepositPayment}
+                  className="flex-1 text-xl py-6 bg-[#10b981] hover:bg-[#0ea16b] text-white font-semibold rounded-2xl shadow-lg"
+                >
+                  Pay Deposit (${depositDue.toFixed(2)})
+                  {profile.chargeCCFee && (
+                    <span className="text-sm block mt-1 font-normal opacity-90">(includes {profile.ccFeePercentage || 3}% CC fee)</span>
+                  )}
+                </Button>
+                {isVenmoPaymentReady() && renderVenmoPayButton(depositDue, 'deposit', { size: 'large' })}
+              </div>
             )}
             {shouldShowEscrowOnEstimate() && (
               <Button
@@ -3701,22 +3863,93 @@ export default function Home() {
 
   const proceedWithPayment = () => {
     if (!selectedPaymentMethod) return showMessage('Please select a payment method');
-    closePaymentModal();
 
-    const message = `✅ Payment of $${paymentAmount.toFixed(2)} for ${paymentType} received via ${selectedPaymentMethod.toUpperCase()}.`;
-
-    if (paymentType === 'deposit') {
-      setAmountPaid(paymentAmount);
-    } else {
-      setAmountPaid(paymentAmount);
-      setPaymentStatus('paid');
+    if (selectedPaymentMethod === 'venmo') {
+      closePaymentModal();
+      startVenmoPayment(paymentAmount, paymentType);
+      return;
     }
-    saveToDB();
-    showMessage(message);
+
+    closePaymentModal();
+    const meta = getPaymentMethodMeta(selectedPaymentMethod);
+    showMessage(
+      `${meta.label} is not connected for automatic checkout. Use Venmo or pay ${profile.company || 'the contractor'} directly.`
+    );
   };
 
-  const renderPaymentMethodRow = (method: string, settings: { enabled?: boolean; connected?: boolean }) => {
+  const updateVenmoUsername = (value: string) => {
+    const nextProfile = {
+      ...profile,
+      paymentSettings: {
+        ...mergePaymentSettings(profile.paymentSettings),
+        venmo: {
+          ...mergePaymentSettings(profile.paymentSettings).venmo,
+          enabled: mergePaymentSettings(profile.paymentSettings).venmo?.enabled ?? true,
+          handle: value,
+        },
+      },
+    };
+    setProfile(nextProfile);
+    void saveProfileSettings(nextProfile);
+  };
+
+  const renderPaymentMethodRow = (method: string, settings: { enabled?: boolean; connected?: boolean; handle?: string }) => {
     const meta = getPaymentMethodMeta(method);
+
+    if (method === 'venmo') {
+      return (
+        <div key={method} className="border rounded-2xl p-6 hover:shadow-sm transition-all">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className="text-4xl">{meta.icon}</div>
+              <div>
+                <div className="font-semibold text-lg">{meta.label}</div>
+                <div className="text-sm text-gray-500">{meta.description}</div>
+              </div>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
+              <input
+                type="checkbox"
+                checked={!!settings.enabled}
+                onChange={(e) => togglePaymentMethod(method, e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]"></div>
+            </label>
+          </div>
+          <div className="mt-4 pl-14">
+            <label className="block text-sm font-medium text-gray-700 mb-2">{t('venmoUsername')}</label>
+            <div className="flex items-center gap-2 max-w-md">
+              <span className="text-lg text-gray-500">@</span>
+              <Input
+                value={settings.handle || ''}
+                onChange={(e) => {
+                  const handle = e.target.value;
+                  setProfile((prev) => ({
+                    ...prev,
+                    paymentSettings: {
+                      ...mergePaymentSettings(prev.paymentSettings),
+                      venmo: {
+                        ...mergePaymentSettings(prev.paymentSettings).venmo,
+                        handle,
+                      },
+                    },
+                  }));
+                }}
+                onBlur={(e) => updateVenmoUsername(e.target.value)}
+                placeholder={t('venmoUsernamePlaceholder')}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </div>
+            <p className="text-xs text-gray-500 mt-2">{t('venmoUsernameHelp')}</p>
+          </div>
+        </div>
+      );
+    }
+
+    const connected = !!settings.connected;
+
     return (
       <div key={method} className="flex items-center justify-between border rounded-2xl p-6 hover:shadow-sm transition-all">
         <div className="flex items-center gap-4">
@@ -3725,7 +3958,7 @@ export default function Home() {
             <div className="font-semibold text-lg">{meta.label}</div>
             <div className="text-sm text-gray-500">{meta.description}</div>
             <div className="text-sm text-gray-500 flex items-center gap-1 mt-1">
-              {settings.connected ? (
+              {connected ? (
                 <><span className="text-green-500">✓</span> {t('connected')}</>
               ) : (
                 t('notConnected')
@@ -3743,13 +3976,15 @@ export default function Home() {
             />
             <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]"></div>
           </label>
-          <Button
-            onClick={() => linkPaymentAccount(method)}
-            variant={settings.connected ? 'outline' : 'default'}
-            className={settings.connected ? '' : 'bg-[#10b981]'}
-          >
-            {settings.connected ? t('manage') : t('linkAccount')}
-          </Button>
+          {method !== 'venmo' && (
+            <Button
+              onClick={() => linkPaymentAccount(method)}
+              variant={connected ? 'outline' : 'default'}
+              className={connected ? '' : 'bg-[#10b981]'}
+            >
+              {connected ? t('manage') : t('linkAccount')}
+            </Button>
+          )}
         </div>
       </div>
     );
@@ -3764,21 +3999,22 @@ export default function Home() {
       },
     };
     setProfile(nextProfile);
-    void saveToDB({ profile: nextProfile });
+    void saveProfileSettings(nextProfile);
   };
 
   const linkPaymentAccount = (method: string) => {
+    if (method === 'venmo') return;
+
     const meta = getPaymentMethodMeta(method);
     const providerUrls: { [key: string]: string } = {
       stripe: 'https://dashboard.stripe.com/connect',
       echeck: 'https://dashboard.stripe.com/connect',
       paypal: 'https://www.paypal.com/businessmanage/credentials',
-      venmo: 'https://venmo.com/account',
       zelle: 'https://www.zellepay.com/',
       nowpayments: 'https://account.nowpayments.io/create-account',
       coinbase_commerce: 'https://commerce.coinbase.com/signup',
     };
-    window.open(providerUrls[method] || `https://${method}.com`, '_blank');
+    window.open(providerUrls[method] || `https://${method}.com`, '_blank', 'noopener,noreferrer');
 
     setTimeout(() => {
       const nextProfile = {
@@ -4411,26 +4647,28 @@ export default function Home() {
                         }
                       }}
                       onBlur={() => setTimeout(() => setShowAddressSuggestions(false), 200)}
-                      placeholder="Start typing for address suggestions..." 
+                      placeholder="Street address — include city & state for best results"
+                      autoComplete="street-address"
                     />
                     {showAddressSuggestions && (
-                      <div className="absolute z-[60] mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg max-h-52 overflow-auto text-sm">
+                      <div className="absolute z-[60] mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-auto text-sm">
                         {isLoadingSuggestions && (
                           <div className="px-3 py-2 text-xs text-gray-500">Searching addresses...</div>
                         )}
                         {!isLoadingSuggestions && addressSuggestions.length === 0 && address.trim().length >= 2 && (
-                          <div className="px-3 py-2 text-xs text-gray-500">No suggestions. Try a longer address or city name.</div>
+                          <div className="px-3 py-2 text-xs text-gray-500">
+                            No matches yet. Try adding the city and state (e.g. 2334 Senior Dr, Charlotte NC).
+                          </div>
                         )}
                         {addressSuggestions.map((sugg, idx) => (
                           <div 
-                            key={idx}
-                            className="px-3 py-1.5 hover:bg-gray-100 cursor-pointer"
+                            key={`${sugg.place_id || sugg.display || sugg.address}-${idx}`}
+                            className="px-3 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0"
                             onMouseDown={async (e) => {
                               e.preventDefault();
                               setShowAddressSuggestions(false);
 
                               if (sugg.place_id) {
-                                // Fetch structured details from Google for accurate city/state/zip
                                 try {
                                   const res = await fetch(`/api/address-autocomplete?place_id=${sugg.place_id}`);
                                   if (res.ok) {
@@ -4444,19 +4682,22 @@ export default function Home() {
                                 } catch (err) {
                                   console.error('Failed to fetch place details:', err);
                                 }
-                                // Fallback
-                                setAddress(sugg.address || sugg.display || '');
-                              } else {
-                                setAddress(sugg.address || '');
-                                if (sugg.city) setCity(sugg.city);
-                                if (sugg.state) setState(sugg.state);
-                                if (sugg.zipCode) setZipCode(sugg.zipCode);
                               }
+
+                              setAddress(sugg.address || sugg.display || '');
+                              if (sugg.city) setCity(sugg.city);
+                              if (sugg.state) setState(sugg.state);
+                              if (sugg.zipCode) setZipCode(sugg.zipCode);
                             }}
                           >
-                            <div className="font-medium">{sugg.address || sugg.display}</div>
-                            {(sugg.city || sugg.state || sugg.zipCode) && (
-                              <div className="text-[10px] text-gray-500">
+                            <div className="font-medium leading-snug">
+                              {sugg.display || sugg.address}
+                            </div>
+                            {sugg.address && sugg.display && sugg.display !== sugg.address && (
+                              <div className="text-[11px] text-gray-600 mt-0.5">{sugg.address}</div>
+                            )}
+                            {(sugg.city || sugg.state || sugg.zipCode) && !sugg.display?.includes(sugg.city) && (
+                              <div className="text-[10px] text-gray-500 mt-0.5">
                                 {[sugg.city, sugg.state, sugg.zipCode].filter(Boolean).join(', ')}
                               </div>
                             )}
@@ -6280,19 +6521,27 @@ export default function Home() {
                         </span>
                       )}
                     </p>
-                    <Button 
-                      onClick={() => {
-                        let remainder = grandTotal * (100 - (profile.depositPercentage || 0)) / 100;
-                        if (profile.chargeCCFee) {
-                          remainder = remainder * (1 + (profile.ccFeePercentage || 3) / 100);
-                        }
-                        openPaymentModal('balance', remainder);
-                      }}
-                      className="w-full mt-6 py-8 text-2xl font-bold bg-[#f59e0b] hover:bg-orange-600 text-white rounded-3xl">
-                      Pay the Balance Now (${(grandTotal * (100 - (profile.depositPercentage || 0)) / 100 * (profile.chargeCCFee ? (1 + (profile.ccFeePercentage || 3)/100) : 1)).toFixed(2)})
-                      {profile.chargeCCFee && <span className="text-xs block mt-1 font-normal opacity-90">(includes CC fee)</span>}
-                    </Button>
-                    <p className="text-center text-xs text-gray-500 mt-3">Clicking this completes the invoice conversion</p>
+                    {(() => {
+                      let remainder = grandTotal * (100 - (profile.depositPercentage || 0)) / 100;
+                      if (profile.chargeCCFee) {
+                        remainder = remainder * (1 + (profile.ccFeePercentage || 3) / 100);
+                      }
+                      return (
+                        <div className="mt-6 space-y-4">
+                          <Button
+                            onClick={() => openPaymentModal('balance', remainder)}
+                            className="w-full py-8 text-2xl font-bold bg-[#f59e0b] hover:bg-orange-600 text-white rounded-3xl"
+                          >
+                            Pay the Balance Now (${remainder.toFixed(2)})
+                            {profile.chargeCCFee && <span className="text-xs block mt-1 font-normal opacity-90">(includes CC fee)</span>}
+                          </Button>
+                          {isVenmoPaymentReady() && renderVenmoPayButton(remainder, 'balance', {
+                            className: 'w-full py-8 text-2xl font-bold bg-[#008cff] hover:bg-[#0070cc] text-white rounded-3xl',
+                          })}
+                        </div>
+                      );
+                    })()}
+                    <p className="text-center text-xs text-gray-500 mt-3">Choose a payment option above to pay the remaining balance</p>
                   </div>
                 )}
 
@@ -6664,23 +6913,50 @@ export default function Home() {
             </div>
 
             <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm">
-              <div className="font-semibold text-emerald-900">
-                Built-up line price: ${getBuiltUpBreakdownPrice(
-                  breakdownMaterials.map(normalizeBreakdownMaterial),
-                  breakdownIncludeLabor ? normalizeBreakdownLabor(breakdownLabor || emptyBreakdownLabor()) : null
-                ).toFixed(2)}
-              </div>
-              <label className="flex items-start gap-2 mt-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={breakdownSyncLinePrice}
-                  onChange={e => setBreakdownSyncLinePrice(e.target.checked)}
-                  className="mt-1 w-4 h-4 accent-[#10b981]"
-                />
-                <span className="text-emerald-950">
-                  Update line unit price from this built-up total (line total = qty × unit price)
-                </span>
-              </label>
+              {(() => {
+                const editItem = breakdownEditItemId != null
+                  ? items.find(row => row.id === breakdownEditItemId)
+                  : null;
+                const previewMaterials = breakdownMaterials.map(normalizeBreakdownMaterial);
+                const previewLabor = breakdownIncludeLabor
+                  ? normalizeBreakdownLabor(breakdownLabor || emptyBreakdownLabor())
+                  : null;
+                const builtUp = getBuiltUpBreakdownPrice(previewMaterials, previewLabor);
+                const pricing = editItem && builtUp > 0
+                  ? syncLineItemPricingFromJobTotal(
+                      editItem.description || '',
+                      editItem.qty || 1,
+                      editItem.unit || '',
+                      builtUp
+                    )
+                  : null;
+                return (
+                  <>
+                    <div className="font-semibold text-emerald-900">
+                      Built-up job total: ${builtUp.toFixed(2)}
+                    </div>
+                    {pricing && pricing.qty > 1 && (
+                      <div className="text-emerald-800 mt-1">
+                        Line: {pricing.qty.toLocaleString()} {pricing.unit} × ${pricing.price.toFixed(2)}
+                        {' '}= ${pricing.total.toFixed(2)}
+                      </div>
+                    )}
+                    <label className="flex items-start gap-2 mt-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={breakdownSyncLinePrice}
+                        onChange={e => setBreakdownSyncLinePrice(e.target.checked)}
+                        className="mt-1 w-4 h-4 accent-[#10b981]"
+                      />
+                      <span className="text-emerald-950">
+                        {pricing && pricing.qty > 1
+                          ? `Update line from built-up total (${pricing.qty.toLocaleString()} ${pricing.unit} × $${pricing.price.toFixed(2)} = $${pricing.total.toFixed(2)})`
+                          : 'Update line price from this built-up total'}
+                      </span>
+                    </label>
+                  </>
+                );
+              })()}
             </div>
           </div>
 
@@ -6961,10 +7237,35 @@ export default function Home() {
             <div className="space-y-3">
               {Object.entries(mergePaymentSettings(profile.paymentSettings)).map(([method, settings]) => {
                 if (!settings.enabled) return null;
+                if (method === 'venmo' && !hasVenmoHandle(settings.handle)) return null;
                 const meta = getPaymentMethodMeta(method);
+                const venmoHandle = method === 'venmo' ? cleanVenmoHandle(settings.handle || '') : '';
+
+                if (method === 'venmo') {
+                  return (
+                    <button
+                      key={method}
+                      type="button"
+                      onClick={() => {
+                        closePaymentModal();
+                        startVenmoPayment(paymentAmount, paymentType);
+                      }}
+                      className="w-full flex items-center gap-4 p-4 border-2 rounded-2xl border-[#008cff] bg-blue-50 hover:bg-blue-100 transition-all"
+                    >
+                      <span className="text-3xl flex-shrink-0">{meta.icon}</span>
+                      <div className="flex-1 text-left">
+                        <div className="font-semibold text-[#005fa3]">{meta.label}</div>
+                        <div className="text-xs text-gray-600">Tap to open Venmo and pay @{venmoHandle}</div>
+                      </div>
+                      <span className="text-xs font-semibold text-[#008cff]">Open app →</span>
+                    </button>
+                  );
+                }
+
                 return (
                   <button
                     key={method}
+                    type="button"
                     onClick={() => selectPaymentMethod(method)}
                     className={`w-full flex items-center gap-4 p-4 border-2 rounded-2xl hover:bg-gray-50 transition-all ${selectedPaymentMethod === method ? 'border-[#10b981] bg-green-50' : 'border-gray-200'}`}
                   >
@@ -6973,7 +7274,6 @@ export default function Home() {
                       <div className="font-semibold">{meta.label}</div>
                       <div className="text-xs text-gray-500">{meta.description}</div>
                     </div>
-                    {settings.connected && <span className="text-green-500 text-xs font-medium">✓ Connected</span>}
                   </button>
                 );
               })}
@@ -6983,12 +7283,12 @@ export default function Home() {
             <Button variant="outline" onClick={closePaymentModal} className="flex-1">
               Cancel
             </Button>
-            <Button 
-              onClick={proceedWithPayment} 
-              disabled={!selectedPaymentMethod}
+            <Button
+              onClick={proceedWithPayment}
+              disabled={!selectedPaymentMethod || selectedPaymentMethod === 'venmo'}
               className="flex-1 bg-[#10b981]"
             >
-              Continue to Pay
+              {selectedPaymentMethod === 'venmo' ? 'Tap Venmo above' : 'Continue to Pay'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -7016,7 +7316,9 @@ export default function Home() {
             <div className="space-y-3">
               {Object.entries(mergePaymentSettings(profile.paymentSettings)).map(([method, settings]) => {
                 if (!settings?.enabled) return null;
+                if (method === 'venmo' && !hasVenmoHandle(settings.handle)) return null;
                 const meta = getPaymentMethodMeta(method);
+                const venmoHandle = method === 'venmo' ? cleanVenmoHandle(settings.handle || '') : '';
                 return (
                   <button
                     key={method}
@@ -7026,9 +7328,10 @@ export default function Home() {
                     <span className="text-3xl flex-shrink-0">{meta.icon}</span>
                     <div className="flex-1 text-left">
                       <div className="font-semibold">{meta.label}</div>
-                      <div className="text-xs text-gray-500">{meta.description}</div>
+                      <div className="text-xs text-gray-500">
+                        {venmoHandle ? `@${venmoHandle}` : meta.description}
+                      </div>
                     </div>
-                    {settings.connected && <span className="text-green-500 text-xs font-medium">✓ Connected</span>}
                   </button>
                 );
               })}
