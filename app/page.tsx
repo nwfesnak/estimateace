@@ -9,7 +9,7 @@ import { TouchDoubleTapTextarea } from '@/components/TouchDoubleTapTextarea';
 import { DeviceCamera, type DeviceCameraMode } from '@/components/DeviceCamera';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { getSupabaseClient } from '@/lib/supabase/client';
+import { getSupabaseClient, getSupabaseConfigHelpMessage } from '@/lib/supabase/client';
 import { isMediaPdfRef, resolveMediaDisplayUrl } from '@/lib/media-url';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { getLineItemUnitOptions, LINE_ITEM_UNITS } from '@/lib/quote-units';
@@ -1599,7 +1599,7 @@ export default function Home() {
   const login = async () => {
     setLoginError('');
     if (!supabase) {
-      const msg = 'Supabase is not configured. Check NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in .env.local.';
+      const msg = getSupabaseConfigHelpMessage();
       setLoginError(msg);
       showMessage(msg);
       return;
@@ -1667,7 +1667,7 @@ export default function Home() {
   const signup = async () => {
     setLoginError('');
     if (!supabase) {
-      const msg = 'Supabase is not configured. Check .env.local.';
+      const msg = getSupabaseConfigHelpMessage();
       setLoginError(msg);
       showMessage(msg);
       return;
