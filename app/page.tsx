@@ -3752,16 +3752,19 @@ export default function Home() {
 
     if (method === 'venmo') {
       return (
-        <div key={method} className="border rounded-2xl p-6 hover:shadow-sm transition-all">
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-4">
-              <div className="text-4xl">{meta.icon}</div>
-              <div>
-                <div className="font-semibold text-lg">{meta.label}</div>
-                <div className="text-sm text-gray-500">{meta.description}</div>
+        <div
+          key={method}
+          className="border rounded-2xl p-4 sm:p-6 hover:shadow-sm transition-all w-full max-w-full min-w-0 overflow-hidden box-border"
+        >
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 min-w-0">
+            <div className="flex items-start sm:items-center gap-3 min-w-0 flex-1">
+              <div className="text-3xl sm:text-4xl shrink-0">{meta.icon}</div>
+              <div className="min-w-0 flex-1">
+                <div className="font-semibold text-base sm:text-lg break-words">{meta.label}</div>
+                <div className="text-sm text-gray-500 break-words">{meta.description}</div>
               </div>
             </div>
-            <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
+            <label className="relative inline-flex items-center cursor-pointer shrink-0 self-end sm:self-center">
               <input
                 type="checkbox"
                 checked={!!settings.enabled}
@@ -3771,10 +3774,10 @@ export default function Home() {
               <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]"></div>
             </label>
           </div>
-          <div className="mt-4 pl-14">
+          <div className="mt-4 w-full min-w-0 sm:pl-12">
             <label className="block text-sm font-medium text-gray-700 mb-2">{t('venmoUsername')}</label>
-            <div className="flex items-center gap-2 max-w-md">
-              <span className="text-lg text-gray-500">@</span>
+            <div className="flex items-center gap-2 w-full min-w-0 max-w-full">
+              <span className="text-lg text-gray-500 shrink-0">@</span>
               <Input
                 value={settings.handle || ''}
                 onChange={(e) => {
@@ -3794,9 +3797,10 @@ export default function Home() {
                 placeholder={t('venmoUsernamePlaceholder')}
                 autoComplete="off"
                 spellCheck={false}
+                className="min-w-0 flex-1 w-full max-w-full"
               />
             </div>
-            <p className="text-xs text-gray-500 mt-2">{t('venmoUsernameHelp')}</p>
+            <p className="text-xs text-gray-500 mt-2 break-words">{t('venmoUsernameHelp')}</p>
           </div>
         </div>
       );
@@ -3805,13 +3809,16 @@ export default function Home() {
     const connected = !!settings.connected;
 
     return (
-      <div key={method} className="flex items-center justify-between border rounded-2xl p-6 hover:shadow-sm transition-all">
-        <div className="flex items-center gap-4">
-          <div className="text-4xl">{meta.icon}</div>
-          <div>
-            <div className="font-semibold text-lg">{meta.label}</div>
-            <div className="text-sm text-gray-500">{meta.description}</div>
-            <div className="text-sm text-gray-500 flex items-center gap-1 mt-1">
+      <div
+        key={method}
+        className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 border rounded-2xl p-4 sm:p-6 hover:shadow-sm transition-all w-full max-w-full min-w-0 overflow-hidden box-border"
+      >
+        <div className="flex items-start sm:items-center gap-3 min-w-0 flex-1">
+          <div className="text-3xl sm:text-4xl shrink-0">{meta.icon}</div>
+          <div className="min-w-0 flex-1">
+            <div className="font-semibold text-base sm:text-lg break-words">{meta.label}</div>
+            <div className="text-sm text-gray-500 break-words">{meta.description}</div>
+            <div className="text-sm text-gray-500 flex items-center gap-1 mt-1 flex-wrap">
               {connected ? (
                 <><span className="text-green-500">✓</span> {t('connected')}</>
               ) : (
@@ -3820,8 +3827,8 @@ export default function Home() {
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-6">
-          <label className="relative inline-flex items-center cursor-pointer">
+        <div className="flex items-center justify-end gap-3 sm:gap-4 shrink-0 w-full sm:w-auto min-w-0">
+          <label className="relative inline-flex items-center cursor-pointer shrink-0">
             <input
               type="checkbox"
               checked={!!settings.enabled}
@@ -3834,7 +3841,9 @@ export default function Home() {
             <Button
               onClick={() => linkPaymentAccount(method)}
               variant={connected ? 'outline' : 'default'}
-              className={connected ? '' : 'bg-[#10b981]'}
+              className={`min-w-0 max-w-full h-auto min-h-9 px-3 py-2 text-sm whitespace-normal text-center leading-snug ${
+                connected ? '' : 'bg-[#10b981]'
+              }`}
             >
               {connected ? t('manage') : t('linkAccount')}
             </Button>
@@ -5993,23 +6002,25 @@ export default function Home() {
               )}
 
               {profileTab === 'payments' && (
-                <Card className="mb-8">
-                  <CardContent className="p-8">
-                    <h3 className="text-xl font-semibold mb-6 flex items-center gap-2">
-                      <span>💳</span> {t('paymentMethods')}
+                <Card className="mb-8 w-full max-w-full min-w-0 overflow-hidden">
+                  <CardContent className="p-4 sm:p-6 md:p-8 w-full max-w-full min-w-0 box-border overflow-hidden">
+                    <h3 className="text-lg sm:text-xl font-semibold mb-4 sm:mb-6 flex items-center gap-2 min-w-0">
+                      <span className="shrink-0">💳</span>
+                      <span className="break-words">{t('paymentMethods')}</span>
                     </h3>
-                    <div className="space-y-4">
+                    <div className="space-y-3 sm:space-y-4 w-full max-w-full min-w-0">
                       {Object.entries(mergePaymentSettings(profile.paymentSettings))
                         .filter(([method]) => !CRYPTO_PAYMENT_METHODS.has(method))
                         .map(([method, settings]) => renderPaymentMethodRow(method, settings))}
                     </div>
 
-                    <div className="mt-10 pt-8 border-t">
-                      <h4 className="font-semibold text-lg mb-1 flex items-center gap-2">
-                        <span>₿</span> {t('cryptoPayments')}
+                    <div className="mt-8 sm:mt-10 pt-6 sm:pt-8 border-t w-full max-w-full min-w-0">
+                      <h4 className="font-semibold text-base sm:text-lg mb-1 flex items-center gap-2 min-w-0">
+                        <span className="shrink-0">₿</span>
+                        <span className="break-words">{t('cryptoPayments')}</span>
                       </h4>
-                      <p className="text-sm text-gray-500 mb-4">{t('cryptoPaymentsHelp')}</p>
-                      <div className="space-y-4">
+                      <p className="text-sm text-gray-500 mb-4 break-words">{t('cryptoPaymentsHelp')}</p>
+                      <div className="space-y-3 sm:space-y-4 w-full max-w-full min-w-0">
                         {Object.entries(mergePaymentSettings(profile.paymentSettings))
                           .filter(([method]) => CRYPTO_PAYMENT_METHODS.has(method))
                           .map(([method, settings]) => renderPaymentMethodRow(method, settings))}
