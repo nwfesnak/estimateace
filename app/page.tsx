@@ -6,6 +6,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { TouchDoubleTapTextarea } from '@/components/TouchDoubleTapTextarea';
+import { DeviceCamera, type DeviceCameraMode } from '@/components/DeviceCamera';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { getSupabaseClient } from '@/lib/supabase/client';
@@ -1076,11 +1077,10 @@ export default function Home() {
   const [selectedReportJob, setSelectedReportJob] = useState<any>(null);
   const [reportsSubTab, setReportsSubTab] = useState<'profit' | 'tax'>('profit');
 
-  // NEW STATE FOR MOBILE PHOTO CAMERA
+  // Photo / video media picker + device-style in-app camera (fixed chrome)
   const [isPhotoPickerOpen, setIsPhotoPickerOpen] = useState(false);
-  const [isPhotoCameraOpen, setIsPhotoCameraOpen] = useState(false);
-  const [cameraReady, setCameraReady] = useState(false);
-  const [photosCapturedSession, setPhotosCapturedSession] = useState(0);
+  const [isDeviceCameraOpen, setIsDeviceCameraOpen] = useState(false);
+  const [deviceCameraMode, setDeviceCameraMode] = useState<DeviceCameraMode>('photo');
 
   // Last saved state (required for existing saveToDB call)
   const [lastSaved, setLastSaved] = useState('');
@@ -1910,15 +1910,20 @@ export default function Home() {
   };
 
   const handleMediaUpload = async (files: FileList | null, type: 'photo' | 'video' | 'receipt') => {
-    if (!files || !user || !supabase) return;
+    if (!files || !user || !supabase) return 0;
     const newUrls: string[] = [];
-    for (const file of Array.from(files)) {
-      const fileExt = file.name.split('.').pop();
-      const filePath = `${user.id}/${type}/${Date.now()}.${fileExt}`;
+    const list = Array.from(files);
+    for (let i = 0; i < list.length; i++) {
+      const file = list[i];
+      const fileExt = file.name.split('.').pop() || (type === 'video' ? 'mp4' : 'jpg');
+      const filePath = `${user.id}/${type}/${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}.${fileExt}`;
       const { error } = await supabase.storage.from('media').upload(filePath, file, { upsert: true });
       if (!error) {
         // Store the permanent storage path (not the temporary signed URL)
         newUrls.push(filePath);
+      } else {
+        console.error('Media upload failed:', error);
+        showMessage(`Failed to upload ${type}. Check your connection and try again.`);
       }
     }
     if (type === 'photo') setPhotoUrls(prev => [...prev, ...newUrls]);
@@ -1933,7 +1938,10 @@ export default function Home() {
       setTempReceiptData({ date: new Date().toISOString().split('T')[0], vendor: '', amount: 0, notes: '' });
       setIsReceiptExtractModalOpen(true);
     }
-    await saveToDB();
+    if (newUrls.length > 0) {
+      await saveToDB();
+    }
+    return newUrls.length;
   };
 
   const saveReceiptExtraction = () => {
@@ -1986,104 +1994,6 @@ export default function Home() {
     saveToDB();
   };
 
-  const stopCameraStream = () => {
-    if (cameraStreamRef.current) {
-      cameraStreamRef.current.getTracks().forEach(track => track.stop());
-      cameraStreamRef.current = null;
-    }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-  };
-
-  const attachCameraStream = () => {
-    const video = videoRef.current;
-    const stream = cameraStreamRef.current;
-    if (!video || !stream) return false;
-
-    if (video.srcObject !== stream) {
-      video.srcObject = stream;
-    }
-
-    video.muted = true;
-    video.playsInline = true;
-    video.setAttribute('playsinline', 'true');
-    video.setAttribute('webkit-playsinline', 'true');
-
-    void video.play().then(() => {
-      setCameraReady(true);
-    }).catch((err) => {
-      console.warn('Camera play() failed:', err);
-    });
-
-    return true;
-  };
-
-  const requestCameraStream = async (): Promise<MediaStream> => {
-    const legacyGetUserMedia = (
-      navigator as Navigator & {
-        getUserMedia?: (constraints: MediaStreamConstraints, ok: (s: MediaStream) => void, err: (e: Error) => void) => void;
-      }
-    ).getUserMedia?.bind(navigator);
-
-    const getUserMedia = navigator.mediaDevices?.getUserMedia?.bind(navigator.mediaDevices)
-      ?? (legacyGetUserMedia
-        ? (constraints: MediaStreamConstraints) =>
-            new Promise<MediaStream>((resolve, reject) => legacyGetUserMedia(constraints, resolve, reject))
-        : null);
-
-    if (!getUserMedia) {
-      throw new Error('Camera is not supported in this browser. Try Chrome or Safari on HTTPS.');
-    }
-
-    const attempts: MediaStreamConstraints[] = [
-      { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false },
-      { video: { facingMode: { ideal: 'environment' } }, audio: false },
-      { video: { facingMode: 'environment' }, audio: false },
-      { video: true, audio: false },
-    ];
-
-    let lastError: unknown;
-    for (const constraints of attempts) {
-      try {
-        return await getUserMedia(constraints);
-      } catch (err) {
-        lastError = err;
-      }
-    }
-
-    throw lastError ?? new Error('Unable to access camera');
-  };
-
-  const isMobileDevice = () => {
-    if (typeof window === 'undefined') return false;
-    return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
-      || (navigator.maxTouchPoints > 1 && window.innerWidth < 1024);
-  };
-
-  const hasVideoInput = async (): Promise<boolean> => {
-    if (!navigator.mediaDevices?.enumerateDevices) return false;
-    try {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      return devices.some(device => device.kind === 'videoinput');
-    } catch {
-      return false;
-    }
-  };
-
-  const triggerPhotoUpload = () => {
-    setIsPhotoPickerOpen(false);
-    photoUploadInputRef.current?.click();
-  };
-
-  const nativeMultiCaptureRef = useRef(false);
-
-  const triggerNativePhotoCapture = () => {
-    setIsPhotoPickerOpen(false);
-    nativeMultiCaptureRef.current = true;
-    photoCameraCaptureInputRef.current?.click();
-  };
-
   const openPhotoPicker = () => {
     if (!user || !supabase) {
       showMessage('Please log in before adding photos.');
@@ -2092,119 +2002,77 @@ export default function Home() {
     setIsPhotoPickerOpen(true);
   };
 
-  const handleTakePhotoOption = async () => {
+  /** Opens device-style camera UI (fixed border + shutter; zoom only the preview). */
+  const openDevicePhotoCamera = () => {
     setIsPhotoPickerOpen(false);
-
-    const openedLiveCamera = await openPhotoCamera();
-    if (openedLiveCamera) return;
-
-    const cameraAvailable = await hasVideoInput();
-    if (isMobileDevice() || cameraAvailable) {
-      showMessage('Each photo saves automatically. Cancel the camera when you are finished.');
-      triggerNativePhotoCapture();
-      return;
-    }
-
-    showMessage('No camera detected. Choose photos from your device instead.');
-    photoUploadInputRef.current?.click();
-  };
-
-  const handlePhotoUploadChange = (files: FileList | null) => {
-    void handleMediaUpload(files, 'photo');
-    if (photoUploadInputRef.current) photoUploadInputRef.current.value = '';
-  };
-
-  const handlePhotoCameraCaptureChange = (files: FileList | null) => {
-    if (!files?.length) {
-      nativeMultiCaptureRef.current = false;
-      return;
-    }
-
-    void handleMediaUpload(files, 'photo');
-    if (photoCameraCaptureInputRef.current) photoCameraCaptureInputRef.current.value = '';
-
-    if (nativeMultiCaptureRef.current) {
-      window.setTimeout(() => {
-        photoCameraCaptureInputRef.current?.click();
-      }, 350);
-    }
-  };
-
-  const openPhotoCamera = async (): Promise<boolean> => {
     if (!user || !supabase) {
       showMessage('Please log in before taking photos.');
-      return false;
-    }
-
-    setCameraReady(false);
-    setPhotosCapturedSession(0);
-    stopCameraStream();
-
-    try {
-      const stream = await requestCameraStream();
-      cameraStreamRef.current = stream;
-      setIsPhotoCameraOpen(true);
-
-      let attempts = 0;
-      const tryAttach = () => {
-        if (attachCameraStream()) return;
-        attempts += 1;
-        if (attempts < 40) {
-          requestAnimationFrame(tryAttach);
-        }
-      };
-      tryAttach();
-      return true;
-    } catch (err) {
-      console.error('Camera access error:', err);
-      stopCameraStream();
-      setIsPhotoCameraOpen(false);
-      return false;
-    }
-  };
-
-  const closePhotoCamera = () => {
-    const captured = photosCapturedSession;
-    stopCameraStream();
-    setCameraReady(false);
-    setPhotosCapturedSession(0);
-    setIsPhotoCameraOpen(false);
-    if (captured > 0) {
-      showMessage(`Camera closed. ${captured} photo${captured === 1 ? '' : 's'} saved.`);
-    }
-  };
-
-  const capturePhoto = () => {
-    if (!videoRef.current || !canvasRef.current) return;
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    if (!cameraReady || video.videoWidth === 0 || video.videoHeight === 0) {
-      showMessage('Camera not ready yet — wait a moment and try again.');
       return;
     }
+    setDeviceCameraMode('photo');
+    setIsDeviceCameraOpen(true);
+  };
 
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+  /** Opens device-style video recorder with the same fixed chrome. */
+  const openDeviceVideoCamera = () => {
+    setIsPhotoPickerOpen(false);
+    if (!user || !supabase) {
+      showMessage('Please log in before recording video.');
+      return;
+    }
+    setDeviceCameraMode('video');
+    setIsDeviceCameraOpen(true);
+  };
 
-    ctx.drawImage(video, 0, 0);
-    canvas.toBlob((blob) => {
-      if (!blob) {
-        showMessage('Could not capture photo. Try again.');
-        return;
-      }
+  const triggerPhotoGallery = () => {
+    setIsPhotoPickerOpen(false);
+    window.setTimeout(() => {
+      photoGalleryInputRef.current?.click();
+    }, 150);
+  };
 
-      const file = new File([blob], `photo-${Date.now()}.jpg`, { type: 'image/jpeg' });
-      const dataTransfer = new DataTransfer();
-      dataTransfer.items.add(file);
-      void handleMediaUpload(dataTransfer.files, 'photo');
-      setPhotosCapturedSession(prev => {
-        const next = prev + 1;
-        showMessage(`Photo ${next} captured. Tap again for more, or Close when done.`);
-        return next;
-      });
-    }, 'image/jpeg', 0.92);
+  const triggerVideoGallery = () => {
+    setIsPhotoPickerOpen(false);
+    window.setTimeout(() => {
+      videoGalleryInputRef.current?.click();
+    }, 150);
+  };
+
+  const handlePhotoGalleryChange = async (files: FileList | null) => {
+    const saved = await handleMediaUpload(files, 'photo');
+    if (saved > 0) {
+      showMessage(`${saved} photo${saved === 1 ? '' : 's'} added to this estimate.`);
+    }
+    if (photoGalleryInputRef.current) photoGalleryInputRef.current.value = '';
+  };
+
+  const handleVideoGalleryChange = async (files: FileList | null) => {
+    const saved = await handleMediaUpload(files, 'video');
+    if (saved > 0) {
+      showMessage(`${saved} video${saved === 1 ? '' : 's'} added to this estimate.`);
+    }
+    if (videoGalleryInputRef.current) videoGalleryInputRef.current.value = '';
+  };
+
+  const handleDeviceCameraPhoto = async (file: File) => {
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    await handleMediaUpload(dt.files, 'photo');
+  };
+
+  const handleDeviceCameraVideo = async (file: File) => {
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    await handleMediaUpload(dt.files, 'video');
+  };
+
+  const handleDeviceCameraClose = (count: number) => {
+    setIsDeviceCameraOpen(false);
+    if (count > 0) {
+      showMessage(
+        `${count} ${deviceCameraMode === 'video' ? 'video' : 'photo'}${count === 1 ? '' : 's'} saved to this estimate.`
+      );
+    }
   };
 
   const refreshSavedList = async () => {
@@ -3620,12 +3488,9 @@ export default function Home() {
 
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // NEW REFS FOR CAMERA
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const cameraStreamRef = useRef<MediaStream | null>(null);
-  const photoUploadInputRef = useRef<HTMLInputElement>(null);
-  const photoCameraCaptureInputRef = useRef<HTMLInputElement>(null);
+  /** Gallery pickers (no capture) — camera uses DeviceCamera component instead. */
+  const photoGalleryInputRef = useRef<HTMLInputElement>(null);
+  const videoGalleryInputRef = useRef<HTMLInputElement>(null);
 
   const debouncedSave = () => {
     if (!profile.autoSaveEnabled) return;
@@ -3672,26 +3537,6 @@ export default function Home() {
       loadLatestProfile();
     }
   }, [view]);
-
-  useEffect(() => {
-    if (!isPhotoCameraOpen) return;
-
-    document.body.style.overflow = 'hidden';
-    const retryTimer = window.setInterval(() => {
-      attachCameraStream();
-    }, 200);
-
-    return () => {
-      document.body.style.overflow = '';
-      window.clearInterval(retryTimer);
-    };
-  }, [isPhotoCameraOpen]);
-
-  useEffect(() => {
-    return () => {
-      stopCameraStream();
-    };
-  }, []);
 
   // Payment functions
   const getDepositDueAmount = () => {
@@ -5219,15 +5064,29 @@ export default function Home() {
                 </div>
               )}
 
-              {/* Top quick access buttons kept for convenience. Icons inside each section below for "under photos/videos". */}
-
-              <input id="video-camera" type="file" accept="video/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'video')} className="hidden" />
+              {/* Gallery pickers only — live camera uses DeviceCamera (fixed border + shutter) */}
+              <input
+                ref={photoGalleryInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={e => void handlePhotoGalleryChange(e.target.files)}
+              />
+              <input
+                ref={videoGalleryInputRef}
+                type="file"
+                accept="video/*"
+                multiple
+                className="hidden"
+                onChange={e => void handleVideoGalleryChange(e.target.files)}
+              />
 
               <Card className="mb-8">
                 <CardContent className="p-6">
                   <h3 className="text-xl font-semibold mb-4">{t('photosSection')} ({photoUrls.length})</h3>
                   <p className="text-sm text-gray-500 mb-4">
-                    Tap 📷 AI Quote on any saved job photo below to price a line item from that image.
+                    Use your phone camera to capture job photos. Tap 📷 AI Quote on any photo to price a line item.
                   </p>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     {photoDisplayUrls.map((url, i) => (
@@ -5248,7 +5107,7 @@ export default function Home() {
                         </button>
                       </div>
                     ))}
-                    {/* Add photo icon/button inside the photos section */}
+                    {/* Opens picker: device camera or gallery */}
                     <button
                       type="button"
                       onClick={openPhotoPicker}
@@ -5258,22 +5117,6 @@ export default function Home() {
                       <div className="text-xs text-gray-500">{t('addPhoto')}</div>
                     </button>
                   </div>
-                  <input
-                    ref={photoUploadInputRef}
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    className="hidden"
-                    onChange={e => handlePhotoUploadChange(e.target.files)}
-                  />
-                  <input
-                    ref={photoCameraCaptureInputRef}
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    className="hidden"
-                    onChange={e => handlePhotoCameraCaptureChange(e.target.files)}
-                  />
                 </CardContent>
               </Card>
 
@@ -5308,21 +5151,34 @@ export default function Home() {
               <Card className="mb-8">
                 <CardContent className="p-6">
                   <h3 className="text-xl font-semibold mb-4">{t('videosSection')} ({videoUrls.length})</h3>
+                  <p className="text-sm text-gray-500 mb-4">
+                    Record with your phone camera or upload an existing video. Videos save to this estimate automatically.
+                  </p>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     {videoDisplayUrls.map((url, i) => (
                       <div key={i} className="relative group">
-                        <video src={url} controls className="w-full h-40 object-cover rounded-lg border" />
+                        <video src={url} controls playsInline className="w-full h-40 object-cover rounded-lg border" />
                         <button onClick={() => removeMedia('video', i)} className="absolute top-2 right-2 bg-red-500 hover:bg-red-600 text-white text-xs px-3 py-1 rounded-full shadow-md opacity-0 group-hover:opacity-100 transition">✕</button>
                       </div>
                     ))}
-                    {/* Add video icon/button inside the videos section */}
-                    <div 
-                      onClick={() => document.getElementById('video-camera')?.click()}
-                      className="flex flex-col items-center justify-center h-40 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition"
+                    <button
+                      type="button"
+                      onClick={openDeviceVideoCamera}
+                      className="flex flex-col items-center justify-center h-40 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition w-full"
                     >
                       <div className="text-4xl mb-1">🎥</div>
-                      <div className="text-xs text-gray-500">Record Video</div>
-                    </div>
+                      <div className="text-xs text-gray-500 font-medium">Record Video</div>
+                      <div className="text-[10px] text-gray-400 mt-1 px-2 text-center">Fixed shutter</div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={triggerVideoGallery}
+                      className="flex flex-col items-center justify-center h-40 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition w-full"
+                    >
+                      <div className="text-4xl mb-1">📁</div>
+                      <div className="text-xs text-gray-500 font-medium">Upload Video</div>
+                      <div className="text-[10px] text-gray-400 mt-1 px-2 text-center">From device</div>
+                    </button>
                   </div>
                 </CardContent>
               </Card>
@@ -7385,7 +7241,15 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* Photo picker — camera or upload */}
+      <DeviceCamera
+        open={isDeviceCameraOpen}
+        mode={deviceCameraMode}
+        onClose={handleDeviceCameraClose}
+        onPhoto={handleDeviceCameraPhoto}
+        onVideo={handleDeviceCameraVideo}
+      />
+
+      {/* Media picker — device-style camera or gallery upload */}
       <Dialog open={isPhotoPickerOpen} onOpenChange={setIsPhotoPickerOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
@@ -7393,22 +7257,32 @@ export default function Home() {
           </DialogHeader>
           <div className="flex flex-col gap-3 py-2">
             <Button
-              onClick={handleTakePhotoOption}
+              onClick={openDevicePhotoCamera}
               className="w-full justify-start gap-3 h-auto py-4 bg-[#10b981] hover:bg-[#0ea16b]"
             >
               <span className="text-2xl">📸</span>
               <span className="text-left">
                 <span className="block font-semibold">{t('takePhotoWithCamera')}</span>
                 <span className="block text-xs font-normal opacity-90">
-                  {isMobileDevice()
-                    ? 'Take multiple photos before closing the camera'
-                    : 'Take multiple shots — camera stays open until you tap Close'}
+                  Fixed frame + shutter · zoom only the shot · each photo auto-saves
+                </span>
+              </span>
+            </Button>
+            <Button
+              onClick={openDeviceVideoCamera}
+              className="w-full justify-start gap-3 h-auto py-4 bg-[#0ea5e9] hover:bg-[#0284c7]"
+            >
+              <span className="text-2xl">🎥</span>
+              <span className="text-left">
+                <span className="block font-semibold">Record Video with Camera</span>
+                <span className="block text-xs font-normal opacity-90">
+                  Same fixed controls · record and auto-save to this estimate
                 </span>
               </span>
             </Button>
             <Button
               variant="outline"
-              onClick={triggerPhotoUpload}
+              onClick={triggerPhotoGallery}
               className="w-full justify-start gap-3 h-auto py-4"
             >
               <span className="text-2xl">🖼️</span>
@@ -7416,6 +7290,19 @@ export default function Home() {
                 <span className="block font-semibold">{t('uploadPhotos')}</span>
                 <span className="block text-xs font-normal text-gray-500">
                   Choose existing photos from your device
+                </span>
+              </span>
+            </Button>
+            <Button
+              variant="outline"
+              onClick={triggerVideoGallery}
+              className="w-full justify-start gap-3 h-auto py-4"
+            >
+              <span className="text-2xl">📁</span>
+              <span className="text-left">
+                <span className="block font-semibold">Upload Videos</span>
+                <span className="block text-xs font-normal text-gray-500">
+                  Choose existing videos from your device
                 </span>
               </span>
             </Button>
@@ -7427,56 +7314,6 @@ export default function Home() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* PHOTO CAMERA - fullscreen overlay for live webcam / multi-shot capture */}
-      {isPhotoCameraOpen && (
-        <div className="fixed inset-0 z-[200] flex flex-col bg-black touch-manipulation" style={{ height: '100dvh' }}>
-          <div className="flex items-center justify-between px-4 py-3 bg-black/90 text-white border-b border-white/10">
-            <div>
-              <div className="font-semibold">📸 Live Camera</div>
-              <div className="text-xs text-gray-300">
-                {photosCapturedSession > 0
-                  ? `${photosCapturedSession} photo${photosCapturedSession === 1 ? '' : 's'} taken — tap shutter for more`
-                  : 'Tap the shutter repeatedly for multiple photos'}
-              </div>
-            </div>
-            <Button variant="outline" size="sm" onClick={closePhotoCamera} className="bg-white/10 text-white border-white/30">
-              Close
-            </Button>
-          </div>
-
-          <div className="relative flex-1 min-h-0 bg-black">
-            <video
-              ref={videoRef}
-              className="absolute inset-0 w-full h-full object-cover"
-              autoPlay
-              playsInline
-              muted
-              controls={false}
-              onLoadedMetadata={() => setCameraReady(true)}
-            />
-            <canvas ref={canvasRef} className="hidden" />
-            {!cameraReady && (
-              <div className="absolute inset-0 flex items-center justify-center text-white text-sm bg-black/70">
-                Starting camera...
-              </div>
-            )}
-          </div>
-
-          <div className="p-6 pb-8 bg-black flex flex-col items-center justify-center gap-3 border-t border-white/10">
-            <button
-              type="button"
-              onClick={capturePhoto}
-              disabled={!cameraReady}
-              className="h-20 w-20 rounded-full bg-white text-black flex items-center justify-center text-5xl shadow-2xl border-8 border-red-500 active:scale-95 transition-transform disabled:opacity-50"
-              aria-label="Capture photo"
-            >
-              📸
-            </button>
-            <p className="text-xs text-gray-400">Camera stays open until you tap Close</p>
-          </div>
-        </div>
-      )}
       </ErrorBoundary>
     </>
   );

@@ -128,3 +128,356 @@
     @apply font-sans;
   }
 }
+
+/* ========== Device-style camera (stationary chrome; zoom only the preview) ========== */
+
+html.device-camera-lock,
+html.device-camera-lock body {
+  touch-action: none;
+  overscroll-behavior: none;
+  overflow: hidden !important;
+  height: 100% !important;
+  position: relative;
+}
+
+.device-camera-shell {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  display: flex;
+  flex-direction: column;
+  background: #000;
+  color: #fff;
+  width: 100vw;
+  height: 100dvh;
+  max-width: 100vw;
+  max-height: 100dvh;
+  /* Shell itself never scales — chrome stays on-screen */
+  transform: none !important;
+  touch-action: manipulation;
+  overscroll-behavior: none;
+  box-sizing: border-box;
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+.device-camera-flash-layer {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  background: #fff;
+  transition: opacity 80ms linear;
+}
+
+@keyframes device-camera-flash-anim {
+  0% { opacity: 1; }
+  40% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.device-camera-flash-layer.device-camera-flash {
+  animation: device-camera-flash-anim 220ms ease-out forwards;
+}
+
+/* Top bar — fixed chrome */
+.device-camera-top {
+  flex: 0 0 auto;
+  z-index: 20;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.65rem 0.85rem 0.5rem;
+  background: #000;
+}
+
+.device-camera-top-info {
+  min-width: 0;
+}
+
+.device-camera-title {
+  font-weight: 600;
+  font-size: 1rem;
+  line-height: 1.2;
+}
+
+.device-camera-subtitle {
+  font-size: 0.7rem;
+  color: #c4c4c4;
+  margin-top: 0.15rem;
+  line-height: 1.3;
+}
+
+.device-camera-done {
+  flex-shrink: 0;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  border-radius: 999px;
+  padding: 0.55rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.device-camera-done:active {
+  transform: scale(0.96);
+}
+
+/*
+ * STATIONARY FRAME BORDER
+ * The border never moves. Only the video inside the viewfinder scales.
+ */
+.device-camera-frame {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  padding: 0 0.65rem;
+  z-index: 10;
+}
+
+.device-camera-frame-border {
+  flex: 1 1 auto;
+  min-height: 0;
+  border: 3px solid #f5f5f5;
+  border-radius: 18px;
+  box-shadow:
+    0 0 0 2px rgba(0, 0, 0, 0.85),
+    0 0 0 6px rgba(255, 255, 255, 0.12),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+  overflow: hidden;
+  background: #0a0a0a;
+  position: relative;
+}
+
+.device-camera-viewfinder {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: #000;
+  /* Critical: clip scaled video so it never covers chrome outside the border */
+  contain: paint;
+}
+
+/* Live preview — FILL_CENTER; digital zoom applied only here */
+.device-camera-video {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 100%;
+  height: 100%;
+  min-width: 100%;
+  min-height: 100%;
+  object-fit: cover;
+  object-position: center center;
+  transform: translate(-50%, -50%);
+  transform-origin: center center;
+  background: #000;
+  pointer-events: none;
+  will-change: transform;
+}
+
+.device-camera-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.72);
+  font-size: 0.875rem;
+}
+
+.device-camera-retry {
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  border-radius: 999px;
+  padding: 0.5rem 1rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.device-camera-rec-badge {
+  position: absolute;
+  top: 0.75rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: rgba(0, 0, 0, 0.65);
+  border: 1px solid rgba(255, 80, 80, 0.6);
+  border-radius: 999px;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.device-camera-rec-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  background: #ef4444;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.25);
+  animation: device-camera-rec-pulse 1s ease-in-out infinite;
+}
+
+@keyframes device-camera-rec-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.device-camera-zoom-bar {
+  position: absolute;
+  bottom: 0.75rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  padding: 0.25rem 0.4rem;
+  /* Not part of the video transform tree */
+}
+
+.device-camera-zoom-btn {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 1.35rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.device-camera-zoom-btn:disabled {
+  opacity: 0.35;
+}
+
+.device-camera-zoom-label {
+  min-width: 2.75rem;
+  text-align: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+/* Bottom chrome with shutter — STATIONARY, attached to shell */
+.device-camera-bottom {
+  flex: 0 0 auto;
+  z-index: 20;
+  padding: 0.85rem 1rem 0.65rem;
+  background: #000;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.device-camera-shutter-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  max-width: 22rem;
+  margin: 0 auto;
+  gap: 1rem;
+}
+
+.device-camera-side-slot {
+  width: 3.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.device-camera-count {
+  min-width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  background: #10b981;
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.45rem;
+}
+
+.device-camera-zoom-reset {
+  min-width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.device-camera-zoom-reset:disabled {
+  opacity: 0.35;
+}
+
+/* Classic phone shutter — outside zoomed video */
+.device-camera-shutter {
+  width: 4.75rem;
+  height: 4.75rem;
+  border-radius: 999px;
+  border: 5px solid #fff;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.85);
+  flex-shrink: 0;
+}
+
+.device-camera-shutter:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+.device-camera-shutter:disabled {
+  opacity: 0.45;
+}
+
+.device-camera-shutter-inner {
+  width: 3.55rem;
+  height: 3.55rem;
+  border-radius: 999px;
+  background: #fff;
+  display: block;
+  transition: border-radius 120ms ease, background 120ms ease, width 120ms ease, height 120ms ease;
+}
+
+.device-camera-shutter-recording {
+  box-shadow: 0 0 0 3px #ef4444;
+}
+
+.device-camera-shutter-recording .device-camera-shutter-inner {
+  width: 1.85rem;
+  height: 1.85rem;
+  border-radius: 0.35rem;
+  background: #ef4444;
+}
+
+.device-camera-hint {
+  margin: 0.65rem 0 0;
+  text-align: center;
+  font-size: 0.68rem;
+  color: #9ca3af;
+  line-height: 1.35;
+  max-width: 22rem;
+  margin-left: auto;
+  margin-right: auto;
+}

@@ -98,7 +98,10 @@ export function TouchDoubleTapTextarea({
   const showEngageOverlay = isTouch && !engaged && !readOnly;
 
   return (
-    <div className="relative touch-pan-y">
+    // pan-x + pan-y so horizontal table swipes work over the description area.
+    // Double-tap-to-edit is handled in JS (not blocked by pan). Previously touch-pan-y
+    // only allowed vertical gestures and blocked left/right scrolling.
+    <div className="relative" style={{ touchAction: 'pan-x pan-y' }}>
       <Textarea
         ref={textareaRef}
         {...props}
@@ -109,12 +112,13 @@ export function TouchDoubleTapTextarea({
       />
       {showEngageOverlay && (
         <div
-          className="absolute inset-0 z-10 flex items-end justify-center rounded-lg bg-white/35 pb-2 touch-manipulation"
+          className="absolute inset-0 z-10 flex items-end justify-center rounded-lg bg-white/35 pb-2"
+          style={{ touchAction: 'pan-x pan-y' }}
           onTouchStart={handleOverlayTouchStart}
           onTouchEnd={handleOverlayTouchEnd}
           aria-hidden="true"
         >
-          <span className="rounded-full bg-black/55 px-2.5 py-1 text-[10px] font-medium text-white shadow-sm">
+          <span className="rounded-full bg-black/55 px-2.5 py-1 text-[10px] font-medium text-white shadow-sm pointer-events-none">
             {engageHint}
           </span>
         </div>
