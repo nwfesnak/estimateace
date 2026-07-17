@@ -711,6 +711,13 @@ export default function Home() {
   };
 
   const [profileTab, setProfileTab] = useState<'info' | 'payments'>('info');
+  /** Skip profile auto-save while hydrating from server/local cache */
+  const profileHydratingRef = useRef(false);
+  const profileAutoSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSavedCompanyFingerprintRef = useRef('');
+  const profileRef = useRef(profile);
+  profileRef.current = profile;
+  const [profileAutoSaveLabel, setProfileAutoSaveLabel] = useState('');
 
   const getProfileSettingsCache = (): Record<string, any> => {
     if (typeof window === 'undefined') return {};
@@ -809,10 +816,15 @@ export default function Home() {
 
   // Snapshot only safe, non-sensitive fields to avoid duplicating teammates/passwords etc. in every document
   const getSafeProfileSnapshot = (full: any) => ({
+    name: full.name || '',
     company: full.company || '',
     slogan: full.slogan || '',
+    address: full.address || '',
+    phone: full.phone || '',
+    email: full.email || '',
     logoUrl: full.logoUrl || '',
     logoSize: full.logoSize || 'medium',
+    certificateUrl: full.certificateUrl || '',
     disclosure: full.disclosure || '', // terms
     city: full.city || '',
     state: full.state || '',
@@ -828,6 +840,24 @@ export default function Home() {
     paymentSettings: mergePaymentSettings(full.paymentSettings),
     // deliberately omit: teammates, ccFee*, crewSubscriptionActive, etc.
   });
+
+  /** Prefer non-empty values so a blank estimate snapshot never wipes company info. */
+  const pickFilled = (...values: any[]) => {
+    for (const v of values) {
+      if (v == null) continue;
+      if (typeof v === 'string') {
+        if (v.trim() !== '') return v;
+        continue;
+      }
+      if (typeof v === 'number' && !Number.isNaN(v)) return v;
+      if (typeof v === 'boolean') return v;
+      if (typeof v === 'object') return v;
+    }
+    for (const v of values) {
+      if (v !== undefined) return v;
+    }
+    return '';
+  };
 
   const getDiscountFromDoc = (doc: any) => {
     const stored = doc?.profile?._discount || {};
@@ -2228,17 +2258,26 @@ export default function Home() {
 
   const loadLatestProfile = async () => {
     if (!user || !supabase) return null;
-    const { data } = await supabase
-      .from('estimates')
-      .select('profile')
-      .eq('user_id', user.id)
-      .order('updated_at', { ascending: false })
-      .limit(1);
-    if (data && data[0] && data[0].profile) {
-      const loaded = data[0].profile;
-      const cached = getProfileSettingsCache();
+    profileHydratingRef.current = true;
+    try {
+      // SETTINGS row is the durable company profile (not wiped by blank estimate saves)
       const serverProfile = await fetchServerProfileSettings();
+      const { data } = await supabase
+        .from('estimates')
+        .select('profile, id, jobName, documentType')
+        .eq('user_id', user.id)
+        .neq('id', `SETTINGS-${user.id}`)
+        .order('updated_at', { ascending: false })
+        .limit(1);
+      const loaded = data?.[0]?.profile || null;
+      const cached = getProfileSettingsCache();
+      const cachedCompany = (cached.companyProfile || {}) as Record<string, any>;
       const preferredLang = getPreferredLanguage();
+
+      // Prefer: SETTINGS → local company cache → latest estimate → current state
+      const s = serverProfile || {};
+      const l = loaded || {};
+
       setProfile(prev => {
         const displaySettings = getGlobalDisplaySettings(prev, serverProfile);
         const {
@@ -2248,70 +2287,96 @@ export default function Home() {
           showPriceBreakdownByLine: _sp,
           showDiscountOnEstimate: _sd,
           ...loadedWithoutBreakdown
-        } = loaded;
+        } = l as any;
+
         return {
-        ...prev,
-        ...loadedWithoutBreakdown,
-        crewSubscriptionActive: loaded.crewSubscriptionActive ?? prev.crewSubscriptionActive ?? false,
-        chargeCCFee: loaded.chargeCCFee ?? prev.chargeCCFee ?? false,
-        ccFeePercentage: loaded.ccFeePercentage ?? prev.ccFeePercentage ?? 3,
-        autoSaveEnabled: 'autoSaveEnabled' in loaded
-          ? loaded.autoSaveEnabled !== false
-          : (cached.autoSaveEnabled ?? prev.autoSaveEnabled ?? true),
-        taxesEnabled: 'taxesEnabled' in cached
-          ? cached.taxesEnabled !== false
-          : (serverProfile && 'taxesEnabled' in serverProfile
-            ? serverProfile.taxesEnabled !== false
-            : ('taxesEnabled' in loaded
-              ? loaded.taxesEnabled !== false
-              : prev.taxesEnabled !== false)),
-        ...displaySettings,
-        appointmentReminderEnabled: 'appointmentReminderEnabled' in loaded
-          ? !!loaded.appointmentReminderEnabled
-          : (cached.appointmentReminderEnabled ?? prev.appointmentReminderEnabled ?? false),
-        showDepositOnApproval: 'showDepositOnApproval' in loaded
-          ? loaded.showDepositOnApproval !== false
-          : (cached.showDepositOnApproval ?? prev.showDepositOnApproval ?? true),
-        thirdPartyEscrowEnabled: 'thirdPartyEscrowEnabled' in loaded
-          ? !!loaded.thirdPartyEscrowEnabled
-          : (cached.thirdPartyEscrowEnabled ?? prev.thirdPartyEscrowEnabled ?? false),
-        escrowMinimumAmount:
-          'escrowMinimumAmount' in cached
-            ? Math.max(0, Number(cached.escrowMinimumAmount) || 0)
-            : (serverProfile && 'escrowMinimumAmount' in serverProfile
-              ? Math.max(0, Number(serverProfile.escrowMinimumAmount) || 0)
-              : ('escrowMinimumAmount' in loaded
-                ? Math.max(0, Number(loaded.escrowMinimumAmount) || 0)
-                : Math.max(0, Number(prev.escrowMinimumAmount) || 0))),
-        depositPercentage: loaded.depositPercentage ?? cached.depositPercentage ?? prev.depositPercentage ?? 10,
-        paymentSettings: mergePaymentSettings({
-          ...(loaded.paymentSettings ?? prev.paymentSettings),
-          ...(serverProfile?.paymentSettings || {}),
-          venmo: {
-            ...mergePaymentSettings(loaded.paymentSettings ?? prev.paymentSettings).venmo,
-            ...mergePaymentSettings(serverProfile?.paymentSettings).venmo,
-            handle:
-              mergePaymentSettings(serverProfile?.paymentSettings).venmo?.handle ||
-              mergePaymentSettings(loaded.paymentSettings).venmo?.handle ||
-              mergePaymentSettings(prev.paymentSettings).venmo?.handle,
-          },
-        }),
-        logoUrl: loaded.logoUrl ?? '',
-        logoSize: loaded.logoSize ?? 'medium',
-        language: preferredLang,
-        city: loaded.city ?? '',
-        state: loaded.state ?? '',
-        zipCode: loaded.zipCode ?? '',
-        teammates: (loaded.teammates || []).map((t: any) => ({
-          ...t,
-          canSeePricing: t.canSeePricing ?? false,
-          canSeeEstimatesAndFinancials: t.canSeeEstimatesAndFinancials ?? false,
-        })),
+          ...prev,
+          // non-company fields may still come from latest estimate
+          ...loadedWithoutBreakdown,
+          // Company identity: never overwrite filled values with empty ones
+          name: pickFilled(s.name, cachedCompany.name, l.name, prev.name),
+          company: pickFilled(s.company, cachedCompany.company, l.company, prev.company),
+          slogan: pickFilled(s.slogan, cachedCompany.slogan, l.slogan, prev.slogan),
+          address: pickFilled(s.address, cachedCompany.address, l.address, prev.address),
+          phone: pickFilled(s.phone, cachedCompany.phone, l.phone, prev.phone),
+          email: pickFilled(s.email, cachedCompany.email, l.email, prev.email),
+          city: pickFilled(s.city, cachedCompany.city, l.city, prev.city),
+          state: pickFilled(s.state, cachedCompany.state, l.state, prev.state),
+          zipCode: pickFilled(s.zipCode, cachedCompany.zipCode, l.zipCode, prev.zipCode),
+          disclosure: pickFilled(s.disclosure, cachedCompany.disclosure, l.disclosure, prev.disclosure),
+          logoUrl: pickFilled(s.logoUrl, cachedCompany.logoUrl, l.logoUrl, prev.logoUrl),
+          certificateUrl: pickFilled(s.certificateUrl, cachedCompany.certificateUrl, l.certificateUrl, prev.certificateUrl),
+          logoSize: pickFilled(s.logoSize, cachedCompany.logoSize, l.logoSize, prev.logoSize, 'medium'),
+          crewSubscriptionActive: s.crewSubscriptionActive ?? l.crewSubscriptionActive ?? prev.crewSubscriptionActive ?? false,
+          chargeCCFee: s.chargeCCFee ?? l.chargeCCFee ?? prev.chargeCCFee ?? false,
+          ccFeePercentage: s.ccFeePercentage ?? l.ccFeePercentage ?? prev.ccFeePercentage ?? 3,
+          autoSaveEnabled: 'autoSaveEnabled' in (s as any)
+            ? (s as any).autoSaveEnabled !== false
+            : ('autoSaveEnabled' in l
+              ? l.autoSaveEnabled !== false
+              : (cached.autoSaveEnabled ?? prev.autoSaveEnabled ?? true)),
+          taxesEnabled: 'taxesEnabled' in cached
+            ? cached.taxesEnabled !== false
+            : (serverProfile && 'taxesEnabled' in serverProfile
+              ? serverProfile.taxesEnabled !== false
+              : ('taxesEnabled' in l
+                ? l.taxesEnabled !== false
+                : prev.taxesEnabled !== false)),
+          ...displaySettings,
+          appointmentReminderEnabled: 'appointmentReminderEnabled' in (s as any)
+            ? !!(s as any).appointmentReminderEnabled
+            : ('appointmentReminderEnabled' in l
+              ? !!l.appointmentReminderEnabled
+              : (cached.appointmentReminderEnabled ?? prev.appointmentReminderEnabled ?? false)),
+          showDepositOnApproval: 'showDepositOnApproval' in (s as any)
+            ? (s as any).showDepositOnApproval !== false
+            : ('showDepositOnApproval' in l
+              ? l.showDepositOnApproval !== false
+              : (cached.showDepositOnApproval ?? prev.showDepositOnApproval ?? true)),
+          thirdPartyEscrowEnabled: 'thirdPartyEscrowEnabled' in (s as any)
+            ? !!(s as any).thirdPartyEscrowEnabled
+            : ('thirdPartyEscrowEnabled' in l
+              ? !!l.thirdPartyEscrowEnabled
+              : (cached.thirdPartyEscrowEnabled ?? prev.thirdPartyEscrowEnabled ?? false)),
+          escrowMinimumAmount:
+            'escrowMinimumAmount' in cached
+              ? Math.max(0, Number(cached.escrowMinimumAmount) || 0)
+              : (serverProfile && 'escrowMinimumAmount' in serverProfile
+                ? Math.max(0, Number(serverProfile.escrowMinimumAmount) || 0)
+                : ('escrowMinimumAmount' in l
+                  ? Math.max(0, Number(l.escrowMinimumAmount) || 0)
+                  : Math.max(0, Number(prev.escrowMinimumAmount) || 0))),
+          depositPercentage: s.depositPercentage ?? l.depositPercentage ?? cached.depositPercentage ?? prev.depositPercentage ?? 10,
+          paymentSettings: mergePaymentSettings({
+            ...(prev.paymentSettings || {}),
+            ...(l.paymentSettings || {}),
+            ...(serverProfile?.paymentSettings || {}),
+            venmo: {
+              ...mergePaymentSettings(prev.paymentSettings).venmo,
+              ...mergePaymentSettings(l.paymentSettings).venmo,
+              ...mergePaymentSettings(serverProfile?.paymentSettings).venmo,
+              handle: pickFilled(
+                mergePaymentSettings(serverProfile?.paymentSettings).venmo?.handle,
+                mergePaymentSettings(l.paymentSettings).venmo?.handle,
+                mergePaymentSettings(prev.paymentSettings).venmo?.handle
+              ),
+            },
+          }),
+          language: preferredLang,
+          teammates: ((s.teammates || l.teammates || prev.teammates || []) as any[]).map((t: any) => ({
+            ...t,
+            canSeePricing: t.canSeePricing ?? false,
+            canSeeEstimatesAndFinancials: t.canSeeEstimatesAndFinancials ?? false,
+          })),
         };
       });
-      return loaded;
+      return serverProfile || loaded;
+    } finally {
+      // Allow auto-save only after hydrate settles
+      window.setTimeout(() => {
+        profileHydratingRef.current = false;
+      }, 400);
     }
-    return null;
   };
 
   const newEstimate = async () => {
@@ -3060,25 +3125,56 @@ export default function Home() {
   const upsertUserSettingsProfile = async (nextProfile: typeof profile) => {
     if (!user?.id || !supabase) return;
     const existing = await fetchServerProfileSettings();
+    const snapshot = getSafeProfileSnapshot(nextProfile);
+    // Merge so we never wipe previously saved company fields with blanks
+    const mergedProfile = {
+      ...(existing || {}),
+      ...snapshot,
+      name: pickFilled(snapshot.name, existing?.name),
+      company: pickFilled(snapshot.company, existing?.company),
+      slogan: pickFilled(snapshot.slogan, existing?.slogan),
+      address: pickFilled(snapshot.address, existing?.address),
+      phone: pickFilled(snapshot.phone, existing?.phone),
+      email: pickFilled(snapshot.email, existing?.email),
+      city: pickFilled(snapshot.city, existing?.city),
+      state: pickFilled(snapshot.state, existing?.state),
+      zipCode: pickFilled(snapshot.zipCode, existing?.zipCode),
+      disclosure: pickFilled(snapshot.disclosure, existing?.disclosure),
+      logoUrl: pickFilled(snapshot.logoUrl, existing?.logoUrl),
+      certificateUrl: pickFilled(snapshot.certificateUrl, existing?.certificateUrl),
+      logoSize: pickFilled(snapshot.logoSize, existing?.logoSize, 'medium'),
+      appointmentReminderEnabled: !!nextProfile.appointmentReminderEnabled,
+    };
     await supabase.from('estimates').upsert({
       id: `SETTINGS-${user.id}`,
       user_id: user.id,
       jobName: '__settings__',
       documentType: 'settings',
       items: [],
-      profile: {
-        ...(existing || {}),
-        ...getSafeProfileSnapshot(nextProfile),
-        email: nextProfile.email || '',
-        phone: nextProfile.phone || '',
-        company: nextProfile.company || '',
-        appointmentReminderEnabled: !!nextProfile.appointmentReminderEnabled,
-      },
+      profile: mergedProfile,
       updated_at: new Date().toISOString(),
+    });
+    // Durable local backup of company identity (survives reloads)
+    setProfileSettingsCache({
+      companyProfile: {
+        name: mergedProfile.name,
+        company: mergedProfile.company,
+        slogan: mergedProfile.slogan,
+        address: mergedProfile.address,
+        phone: mergedProfile.phone,
+        email: mergedProfile.email,
+        city: mergedProfile.city,
+        state: mergedProfile.state,
+        zipCode: mergedProfile.zipCode,
+        disclosure: mergedProfile.disclosure,
+        logoUrl: mergedProfile.logoUrl,
+        logoSize: mergedProfile.logoSize,
+        certificateUrl: mergedProfile.certificateUrl,
+      },
     });
   };
 
-  const saveProfileSettings = async (nextProfile: typeof profile) => {
+  const saveProfileSettings = async (nextProfile: typeof profile, options?: { quiet?: boolean }) => {
     setProfileSettingsCache({
       depositPercentage: nextProfile.depositPercentage,
       showDepositOnApproval: nextProfile.showDepositOnApproval,
@@ -3090,8 +3186,12 @@ export default function Home() {
       taxesEnabled: nextProfile.taxesEnabled !== false,
     });
     await upsertUserSettingsProfile(nextProfile);
+    // Keep open estimate's embedded profile in sync, but SETTINGS row is source of truth
     await saveToDB({ profile: nextProfile });
     await syncAppointmentsToServer(appointments, nextProfile);
+    if (!options?.quiet) {
+      // callers that want toast still pass nothing; auto-save uses quiet
+    }
   };
 
   const saveEstimateBreakdownSettings = async (
@@ -3124,8 +3224,84 @@ export default function Home() {
 
   const saveProfile = async () => {
     await saveProfileSettings(profile);
+    lastSavedCompanyFingerprintRef.current = companyProfileFingerprint;
+    setProfileAutoSaveLabel('Saved');
     showMessage('✅ Profile saved!');
   };
+
+  const companyProfileFingerprint = useMemo(
+    () =>
+      JSON.stringify({
+        name: profile.name || '',
+        company: profile.company || '',
+        slogan: profile.slogan || '',
+        address: profile.address || '',
+        phone: profile.phone || '',
+        email: profile.email || '',
+        city: profile.city || '',
+        state: profile.state || '',
+        zipCode: profile.zipCode || '',
+        disclosure: profile.disclosure || '',
+        logoUrl: profile.logoUrl || '',
+        logoSize: profile.logoSize || 'medium',
+        certificateUrl: profile.certificateUrl || '',
+      }),
+    [
+      profile.name,
+      profile.company,
+      profile.slogan,
+      profile.address,
+      profile.phone,
+      profile.email,
+      profile.city,
+      profile.state,
+      profile.zipCode,
+      profile.disclosure,
+      profile.logoUrl,
+      profile.logoSize,
+      profile.certificateUrl,
+    ]
+  );
+
+  /** Auto-save company profile shortly after edits; does not clear fields when blank elsewhere. */
+  useEffect(() => {
+    if (!user || !supabase) return;
+    if (profileHydratingRef.current) {
+      lastSavedCompanyFingerprintRef.current = companyProfileFingerprint;
+      return;
+    }
+    if (companyProfileFingerprint === lastSavedCompanyFingerprintRef.current) return;
+
+    const parsed = JSON.parse(companyProfileFingerprint) as Record<string, string>;
+    const hasAnyCompanyData = Object.entries(parsed).some(([k, v]) => {
+      if (k === 'logoSize') return false;
+      return String(v || '').trim() !== '';
+    });
+    // Don't auto-create empty SETTINGS row on first login with blank profile
+    if (!hasAnyCompanyData && !lastSavedCompanyFingerprintRef.current) return;
+
+    setProfileAutoSaveLabel('Saving…');
+    if (profileAutoSaveTimeoutRef.current) {
+      clearTimeout(profileAutoSaveTimeoutRef.current);
+    }
+    profileAutoSaveTimeoutRef.current = setTimeout(async () => {
+      try {
+        await saveProfileSettings(profile, { quiet: true });
+        lastSavedCompanyFingerprintRef.current = companyProfileFingerprint;
+        setProfileAutoSaveLabel('Saved');
+      } catch (err) {
+        console.error('Company profile auto-save failed:', err);
+        setProfileAutoSaveLabel('Save failed');
+      }
+    }, 750);
+
+    return () => {
+      if (profileAutoSaveTimeoutRef.current) {
+        clearTimeout(profileAutoSaveTimeoutRef.current);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- save when company fields fingerprint changes
+  }, [companyProfileFingerprint, user?.id, supabase]);
 
   const testAppointmentReminder = async () => {
     if (!supabase || testingReminder) return;
@@ -5517,44 +5693,62 @@ export default function Home() {
               {profileTab === 'info' && (
                 <Card className="mb-8">
                   <CardContent className="p-8 space-y-8">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-sm text-gray-500">
+                        Company info saves automatically as you type. It stays until you edit it.
+                      </p>
+                      {profileAutoSaveLabel && (
+                        <span
+                          className={`text-xs font-medium ${
+                            profileAutoSaveLabel === 'Save failed'
+                              ? 'text-red-600'
+                              : profileAutoSaveLabel === 'Saving…'
+                                ? 'text-amber-600'
+                                : 'text-emerald-600'
+                          }`}
+                        >
+                          {profileAutoSaveLabel === 'Saved' ? '✓ Saved' : profileAutoSaveLabel}
+                        </span>
+                      )}
+                    </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div>
                         <label className="block text-sm font-semibold mb-2">{t('companyName')}</label>
-                        <Input value={profile.company} onChange={e => setProfile({...profile, company: e.target.value})} />
+                        <Input value={profile.company} onChange={e => setProfile(prev => ({...prev, company: e.target.value}))} />
                       </div>
                       <div>
                         <label className="block text-sm font-semibold mb-2">{t('slogan')}</label>
-                        <Input value={profile.slogan} onChange={e => setProfile({...profile, slogan: e.target.value})} />
+                        <Input value={profile.slogan} onChange={e => setProfile(prev => ({...prev, slogan: e.target.value}))} />
                       </div>
                       <div>
                         <label className="block text-sm font-semibold mb-2">{t('phone')}</label>
-                        <Input value={profile.phone} onChange={e => setProfile({...profile, phone: e.target.value})} />
+                        <Input value={profile.phone} onChange={e => setProfile(prev => ({...prev, phone: e.target.value}))} />
                       </div>
                       <div>
                         <label className="block text-sm font-semibold mb-2">{t('email')}</label>
-                        <Input value={profile.email} onChange={e => setProfile({...profile, email: e.target.value})} />
+                        <Input value={profile.email} onChange={e => setProfile(prev => ({...prev, email: e.target.value}))} />
                       </div>
                       <div className="md:col-span-2">
                         <label className="block text-sm font-semibold mb-2">{t('address')}</label>
-                        <Input value={profile.address} onChange={e => setProfile({...profile, address: e.target.value})} placeholder="Street address" />
+                        <Input value={profile.address} onChange={e => setProfile(prev => ({...prev, address: e.target.value}))} placeholder="Street address" />
                       </div>
                       <div className="grid grid-cols-3 gap-4 md:col-span-2">
                         <div>
                           <label className="block text-sm font-semibold mb-2">{t('city')}</label>
-                          <Input value={profile.city} onChange={e => setProfile({...profile, city: e.target.value})} />
+                          <Input value={profile.city} onChange={e => setProfile(prev => ({...prev, city: e.target.value}))} />
                         </div>
                         <div>
                           <label className="block text-sm font-semibold mb-2">{t('state')}</label>
-                          <Input value={profile.state} onChange={e => setProfile({...profile, state: e.target.value})} placeholder="CA" />
+                          <Input value={profile.state} onChange={e => setProfile(prev => ({...prev, state: e.target.value}))} placeholder="CA" />
                         </div>
                         <div>
                           <label className="block text-sm font-semibold mb-2">{t('zipCode')}</label>
-                          <Input value={profile.zipCode} onChange={e => setProfile({...profile, zipCode: e.target.value})} />
+                          <Input value={profile.zipCode} onChange={e => setProfile(prev => ({...prev, zipCode: e.target.value}))} />
                         </div>
                       </div>
                     </div>
 
-                    <div className="pt-2">
+                    <div className="pt-2 flex flex-wrap items-center gap-3">
                       <Button 
                         size="sm" 
                         variant="outline" 
@@ -5562,6 +5756,7 @@ export default function Home() {
                       >
                         Save Company Info
                       </Button>
+                      <span className="text-xs text-gray-500">Optional — changes already auto-save</span>
                     </div>
 
                     <div>
@@ -5596,18 +5791,11 @@ export default function Home() {
                       <label className="block text-sm font-semibold mb-2">{t('termsConditions')}</label>
                       <Textarea 
                         value={profile.disclosure} 
-                        onChange={e => setProfile({...profile, disclosure: e.target.value})} 
+                        onChange={e => setProfile(prev => ({...prev, disclosure: e.target.value}))} 
                         rows={4}
                         placeholder="Enter your standard terms and conditions here..."
                       />
-                      <Button 
-                        size="sm" 
-                        variant="outline" 
-                        className="mt-2" 
-                        onClick={saveProfile}
-                      >
-                        {t('saveProfile')}
-                      </Button>
+                      <p className="text-xs text-gray-500 mt-2">Terms auto-save with your company profile.</p>
                     </div>
 
                     <div>
@@ -5633,7 +5821,6 @@ export default function Home() {
                               checked={profile.logoSize === size}
                               onChange={(e) => {
                                 setProfile(prev => ({ ...prev, logoSize: e.target.value }));
-                                saveToDB();
                               }}
                               className="accent-[#10b981]"
                             />
@@ -5647,9 +5834,9 @@ export default function Home() {
                       <div className="mt-2 flex items-center gap-3">
                         <img src={logoDisplayUrl} alt="Company Logo" className={`${getLogoClass(profile.logoSize)} object-contain border rounded`} />
                         <button 
+                          type="button"
                           onClick={() => {
                             setProfile(prev => ({ ...prev, logoUrl: '' }));
-                            saveToDB();
                           }}
                           className="text-xs text-red-600 hover:text-red-800"
                         >
