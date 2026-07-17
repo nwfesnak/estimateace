@@ -4,46 +4,54 @@ const globalForSupabase = globalThis as typeof globalThis & {
   __estimateaceSupabase?: SupabaseClient;
 };
 
-function readPublicEnv(name: 'NEXT_PUBLIC_SUPABASE_URL' | 'NEXT_PUBLIC_SUPABASE_ANON_KEY') {
-  // Next inlines NEXT_PUBLIC_* at build time for the browser bundle.
-  // Empty/whitespace values must be treated as missing.
-  const value = process.env[name];
-  if (typeof value !== 'string') return '';
-  return value.trim();
+/**
+ * IMPORTANT: Next.js only inlines NEXT_PUBLIC_* when accessed with a *static*
+ * property name (process.env.NEXT_PUBLIC_FOO). Dynamic access like
+ * process.env[name] is always undefined in the browser bundle — which made
+ * login show "Supabase is not configured" even when Vercel env vars were set.
+ */
+function getSupabaseUrl(): string {
+  return (process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim();
 }
 
-/** True when both public Supabase keys are present (build-time / runtime). */
+function getSupabaseAnonKey(): string {
+  return (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '').trim();
+}
+
+/** True when both public Supabase keys are present in the build. */
 export function isSupabaseConfigured(): boolean {
-  return Boolean(readPublicEnv('NEXT_PUBLIC_SUPABASE_URL') && readPublicEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY'));
+  return Boolean(getSupabaseUrl() && getSupabaseAnonKey());
 }
 
 /**
  * Human-readable setup hint. Does not reveal secret values.
- * Live (Vercel) and local use different places to store the same two keys.
  */
 export function getSupabaseConfigHelpMessage(): string {
-  const hasUrl = Boolean(readPublicEnv('NEXT_PUBLIC_SUPABASE_URL'));
-  const hasKey = Boolean(readPublicEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY'));
+  const hasUrl = Boolean(getSupabaseUrl());
+  const hasKey = Boolean(getSupabaseAnonKey());
   const missing = [
     !hasUrl ? 'NEXT_PUBLIC_SUPABASE_URL' : null,
     !hasKey ? 'NEXT_PUBLIC_SUPABASE_ANON_KEY' : null,
   ].filter(Boolean);
 
-  const where =
-    typeof window !== 'undefined' && !window.location.hostname.includes('localhost')
-      ? 'Vercel → Project → Settings → Environment Variables (Production + Preview), then Redeploy'
-      : '.env.local in the project folder, then restart npm run dev';
+  const onLocalhost =
+    typeof window !== 'undefined' &&
+    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+
+  const where = onLocalhost
+    ? '.env.local in the project folder, then restart npm run dev'
+    : 'Vercel → Project → Settings → Environment Variables (Production + Preview), then Redeploy';
 
   if (missing.length === 0) {
     return 'Supabase keys look present but the client failed to start. Try a hard refresh or redeploy.';
   }
 
-  return `Supabase is not configured (missing ${missing.join(' and ')}). Add them in ${where}. Copy URL + anon key from Supabase → Project Settings → API. This is separate from the last app update — keys are not stored in git.`;
+  return `Supabase is not configured (missing ${missing.join(' and ')}). Add them in ${where}. Copy URL + anon key from Supabase → Project Settings → API.`;
 }
 
 export function getSupabaseClient(): SupabaseClient | null {
-  const url = readPublicEnv('NEXT_PUBLIC_SUPABASE_URL');
-  const key = readPublicEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY');
+  const url = getSupabaseUrl();
+  const key = getSupabaseAnonKey();
   if (!url || !key) return null;
 
   if (!globalForSupabase.__estimateaceSupabase) {
