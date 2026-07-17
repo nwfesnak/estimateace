@@ -1992,6 +1992,15 @@ export default function Home() {
       setReceiptDetails(prev => prev.filter((_, i) => i !== index));
     }
     saveToDB();
+    if (type === 'video') showMessage('Video removed from this estimate.');
+    else if (type === 'photo') showMessage('Photo removed from this estimate.');
+  };
+
+  const confirmRemoveVideo = (index: number) => {
+    if (typeof window !== 'undefined' && !window.confirm('Delete this video from the estimate?')) {
+      return;
+    }
+    removeMedia('video', index);
   };
 
   const openPhotoPicker = () => {
@@ -4436,7 +4445,7 @@ export default function Home() {
           )}
 
           {view === 'editor' && (
-            <div>
+            <div className="w-full max-w-full min-w-0 overflow-x-hidden box-border">
               <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to {t('dashboard')}</Button>
 
               <div className="flex justify-between items-start mb-8">
@@ -4652,259 +4661,287 @@ export default function Home() {
                 <Button onClick={openQuickLinesModal} variant="outline">{t('quickLines')}</Button>
               </div>
 
-              <Card className="mb-8">
-                <div className="overflow-x-auto">
-                  <Table className="min-w-[900px]">
-                    <TableHeader>
-                      <TableRow className="bg-[#1e293b]">
-                        <TableHead className="text-white w-1/2 min-w-[320px]">Description</TableHead>
-                        <TableHead className="text-white text-right w-20">Qty</TableHead>
-                        <TableHead className="text-white text-right w-20">SF/Unit</TableHead>
-                        <TableHead className="text-white text-right w-24">SF/Unit Price</TableHead>
-                        <TableHead className="text-white text-right w-28">Total</TableHead>
-                        <TableHead className="text-white w-16"></TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {items.map((item, idx) => (
-                        <TableRow key={item.id}>
-                          <TableCell>
-                            <div className="text-xs text-gray-500 mb-1">Line {idx + 1}</div>
+              <Card className="mb-8 overflow-hidden w-full max-w-full min-w-0">
+                {/* Responsive line items: description block + pricing block (stacks under on narrow screens) */}
+                <div className="space-y-4 p-3 sm:p-4 w-full max-w-full min-w-0 box-border">
+                  {items.map((item, idx) => (
+                    <div
+                      key={item.id}
+                      className="line-item-card rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden"
+                    >
+                      <div className="flex items-center justify-between gap-2 bg-[#1e293b] text-white px-3 py-2.5">
+                        <span className="text-sm font-semibold">Line {idx + 1}</span>
+                        <div className="flex gap-1 shrink-0">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="bg-white/10 text-white border-white/30 hover:bg-white/20 h-8"
+                            onClick={() => saveAsQuickLine(item)}
+                            title="Save as quick line"
+                          >
+                            💾
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            className="h-8"
+                            onClick={() => removeRow(item.id)}
+                            title="Remove line"
+                          >
+                            ×
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div className="line-item-card-body p-3 sm:p-4">
+                        {/* Description block — always full device width on small screens */}
+                        <div className="line-item-description-block space-y-2">
+                          <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                            Description
+                          </div>
+                          <div className="rounded-lg border border-gray-200 bg-white p-2 sm:p-3 w-full max-w-full min-w-0 overflow-hidden box-border">
                             <TouchDoubleTapTextarea
                               value={item.description}
                               onChange={e => updateItem(item.id, 'description', e.target.value)}
-                              rows={5}
-                              className="resize-y min-h-[120px]"
+                              rows={3}
+                              className="min-h-[72px] text-sm leading-relaxed border-0 shadow-none focus-visible:ring-0 px-1 py-1"
                             />
-                           {/* Existing Grok AI button (unchanged) */}
-<Button
-  size="sm"
-  variant="ghost"
-  className="mt-2 w-full text-xs flex items-center gap-1 justify-center"
-  onClick={async () => {
-    const currentDesc = item.description?.trim();
-    if (!currentDesc) return showMessage('Enter a description first');
+                          </div>
 
-    setImprovingDescriptionId(item.id);
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="mt-1 w-full text-xs flex items-center gap-1 justify-center"
+                            onClick={async () => {
+                              const currentDesc = item.description?.trim();
+                              if (!currentDesc) return showMessage('Enter a description first');
 
-    try {
-      // Include Supabase access token for auth
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (supabase) {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.access_token) {
-          headers['Authorization'] = `Bearer ${session.access_token}`;
-        }
-      }
+                              setImprovingDescriptionId(item.id);
 
-      const res = await fetch('/api/grok', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ description: currentDesc })
-      });
+                              try {
+                                const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+                                if (supabase) {
+                                  const { data: { session } } = await supabase.auth.getSession();
+                                  if (session?.access_token) {
+                                    headers['Authorization'] = `Bearer ${session.access_token}`;
+                                  }
+                                }
 
-      const data = await res.json();
+                                const res = await fetch('/api/grok', {
+                                  method: 'POST',
+                                  headers,
+                                  body: JSON.stringify({ description: currentDesc })
+                                });
 
-      if (!res.ok || data.error) {
-        const errMsg = data.error || data.suggestion || 'Grok AI error';
-        if (errMsg.includes('Rate limit')) {
-          showMessage(`⏳ ${errMsg}`);
-        } else if (errMsg.includes('Unauthorized') || errMsg.includes('missing')) {
-          showMessage('🔒 Please log in with a main account to use AI features.');
-        } else if (errMsg.includes('API key') || errMsg.includes('Incorrect')) {
-          showMessage('🔑 AI service key issue. Check Vercel env vars and redeploy.');
-        } else {
-          showMessage(`❌ ${errMsg}`);
-        }
-        return;
-      }
+                                const data = await res.json();
 
-      if (data.suggestion) {
-        updateItem(item.id, 'description', data.suggestion);
-        showMessage('✅ Line description updated — use Grok AI for customer-facing scope and features.');
-      }
-    } catch (err) {
-      console.error('Grok AI call failed:', err);
-      showMessage('⚠️ Network error. Could not reach Grok AI. Check your connection or console.');
-    } finally {
-      setImprovingDescriptionId(null);
-    }
-  }}
-  disabled={improvingDescriptionId === item.id}
->
-  {improvingDescriptionId === item.id ? '⏳ Improving...' : '🤖 Grok AI'}
-</Button>
+                                if (!res.ok || data.error) {
+                                  const errMsg = data.error || data.suggestion || 'Grok AI error';
+                                  if (errMsg.includes('Rate limit')) {
+                                    showMessage(`⏳ ${errMsg}`);
+                                  } else if (errMsg.includes('Unauthorized') || errMsg.includes('missing')) {
+                                    showMessage('🔒 Please log in with a main account to use AI features.');
+                                  } else if (errMsg.includes('API key') || errMsg.includes('Incorrect')) {
+                                    showMessage('🔑 AI service key issue. Check Vercel env vars and redeploy.');
+                                  } else {
+                                    showMessage(`❌ ${errMsg}`);
+                                  }
+                                  return;
+                                }
 
-<Button
-  size="sm"
-  variant="ghost"
-  className="mt-2 w-full text-xs flex items-center gap-1 justify-center bg-amber-100 hover:bg-amber-200"
-  onClick={() => {
-    const description = item.description?.trim();
-    if (!description) return showMessage('Enter a description first');
-    void requestAiQuote(item);
-  }}
-  disabled={aiQuoteLoadingId === item.id}
->
-  {aiQuoteLoadingId === item.id ? '⏳ Getting quote...' : '💰 AI Price Quote (Online Data)'}
-</Button>
+                                if (data.suggestion) {
+                                  updateItem(item.id, 'description', data.suggestion);
+                                  showMessage('✅ Line description updated — use Grok AI for customer-facing scope and features.');
+                                }
+                              } catch (err) {
+                                console.error('Grok AI call failed:', err);
+                                showMessage('⚠️ Network error. Could not reach Grok AI. Check your connection or console.');
+                              } finally {
+                                setImprovingDescriptionId(null);
+                              }
+                            }}
+                            disabled={improvingDescriptionId === item.id}
+                          >
+                            {improvingDescriptionId === item.id ? '⏳ Improving...' : '🤖 Grok AI'}
+                          </Button>
 
-<Button
-  size="sm"
-  variant="ghost"
-  className="mt-2 w-full text-xs flex items-center gap-1 justify-center bg-slate-100 hover:bg-slate-200"
-  onClick={() => openBreakdownEditor(item)}
->
-  ✏️ {hasItemBreakdown(item) || itemHasCostData(item) ? 'Edit Breakdown' : 'Add Breakdown'}
-</Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="w-full text-xs flex items-center gap-1 justify-center bg-amber-100 hover:bg-amber-200"
+                            onClick={() => {
+                              const description = item.description?.trim();
+                              if (!description) return showMessage('Enter a description first');
+                              void requestAiQuote(item);
+                            }}
+                            disabled={aiQuoteLoadingId === item.id}
+                          >
+                            {aiQuoteLoadingId === item.id ? '⏳ Getting quote...' : '💰 AI Price Quote (Online Data)'}
+                          </Button>
 
-                            {hasAnyBreakdownToggleOn() && (hasItemBreakdown(item) || itemHasCostData(item)) && (() => {
-                              const preview = getVisibleBreakdownParts(item);
-                              if (!preview.hasVisiblePreview) return null;
-                              return (
-                                <div className="mt-2 p-2 bg-gray-50 border rounded text-[10px] text-gray-700">
-                                  <div className="flex items-center justify-between gap-2 mb-1">
-                                    <div className="font-semibold">Line {idx + 1} Breakdown:</div>
-                                    <button
-                                      type="button"
-                                      onClick={() => openBreakdownEditor(item)}
-                                      className="text-[10px] text-[#10b981] hover:underline shrink-0"
-                                    >
-                                      Edit
-                                    </button>
-                                  </div>
-                                  {(preview.showMaterials || preview.showLabor) && renderItemBreakdown(item, '', {
-                                    showMaterials: preview.showMaterials,
-                                    showLabor: preview.showLabor,
-                                  })}
-                                  {preview.showCosts && renderCostBreakdown(item, (preview.showMaterials || preview.showLabor) ? 'mt-2 pt-2 border-t border-gray-200' : '')}
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="w-full text-xs flex items-center gap-1 justify-center bg-slate-100 hover:bg-slate-200"
+                            onClick={() => openBreakdownEditor(item)}
+                          >
+                            ✏️ {hasItemBreakdown(item) || itemHasCostData(item) ? 'Edit Breakdown' : 'Add Breakdown'}
+                          </Button>
+
+                          {hasAnyBreakdownToggleOn() && (hasItemBreakdown(item) || itemHasCostData(item)) && (() => {
+                            const preview = getVisibleBreakdownParts(item);
+                            if (!preview.hasVisiblePreview) return null;
+                            return (
+                              <div className="mt-1 p-2 bg-gray-50 border rounded text-[10px] text-gray-700">
+                                <div className="flex items-center justify-between gap-2 mb-1">
+                                  <div className="font-semibold">Line {idx + 1} Breakdown:</div>
+                                  <button
+                                    type="button"
+                                    onClick={() => openBreakdownEditor(item)}
+                                    className="text-[10px] text-[#10b981] hover:underline shrink-0"
+                                  >
+                                    Edit
+                                  </button>
                                 </div>
-                              );
-                            })()}
-
-                            {/* TRANSLATE FEATURE - added exactly as requested */}
-                            <div className="mt-4 pt-3 border-t flex flex-wrap items-center gap-2 text-xs">
-                              <select 
-                                value={translateFrom}
-                                onChange={e => setTranslateFrom(e.target.value as any)}
-                                className="border rounded px-2 py-1 bg-white"
-                              >
-                                <option value="en">English</option>
-                                <option value="es">Spanish</option>
-                                <option value="fr">French</option>
-                                <option value="de">German</option>
-                                <option value="pt">Portuguese</option>
-                                <option value="it">Italian</option>
-                              </select>
-                              
-                              <span className="text-gray-400">→</span>
-                              
-                              <select 
-                                value={translateTo}
-                                onChange={e => setTranslateTo(e.target.value as any)}
-                                className="border rounded px-2 py-1 bg-white"
-                              >
-                                <option value="es">Spanish</option>
-                                <option value="en">English</option>
-                                <option value="fr">French</option>
-                                <option value="de">German</option>
-                                <option value="pt">Portuguese</option>
-                                <option value="it">Italian</option>
-                              </select>
-
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="text-xs"
-                                onClick={() => translateDescription(item.description, item.id)}
-                              >
-                                🔄 Translate
-                              </Button>
-                            </div>
-
-                            {/* Translated box (internal only) */}
-                            {itemTranslations[item.id] && (
-                              <div className="mt-3 relative">
-                                <div className="text-[10px] font-medium text-emerald-600 flex items-center gap-1 mb-1">
-                                  🔄 Translation (Internal team use only — not sent to client)
-                                </div>
-                                <Textarea 
-                                  value={itemTranslations[item.id]}
-                                  readOnly
-                                  rows={3}
-                                  className="resize-y bg-gray-50 text-sm"
-                                />
-                                <button
-                                  onClick={() => setItemTranslations(prev => {
-                                    const copy = { ...prev };
-                                    delete copy[item.id];
-                                    return copy;
-                                  })}
-                                  className="absolute top-1 right-2 text-xs text-red-500 hover:text-red-700"
-                                >
-                                  ✕
-                                </button>
+                                {(preview.showMaterials || preview.showLabor) && renderItemBreakdown(item, '', {
+                                  showMaterials: preview.showMaterials,
+                                  showLabor: preview.showLabor,
+                                })}
+                                {preview.showCosts && renderCostBreakdown(item, (preview.showMaterials || preview.showLabor) ? 'mt-2 pt-2 border-t border-gray-200' : '')}
                               </div>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            <Input 
-                              type="number" 
-                              value={item.qty} 
-                              onChange={e => updateItem(item.id, 'qty', parseFloat(e.target.value) || 0)} 
-                              className="text-right" 
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              list="line-item-unit-options"
-                              value={item.unit || ''}
-                              onChange={e => updateItem(item.id, 'unit', e.target.value)}
-                              className="text-right"
-                              placeholder="SF or Unit"
-                            />
-                          </TableCell>
-                          <TableCell>
-                            {canSeePricing ? (
-                              <Input 
-                                type="number" 
-                                value={item.price} 
-                                onChange={e => updateItem(item.id, 'price', parseFloat(e.target.value) || 0)} 
-                                className="text-right [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [appearance:textfield]" 
+                            );
+                          })()}
+
+                          <div className="mt-2 pt-3 border-t flex flex-wrap items-center gap-2 text-xs">
+                            <select
+                              value={translateFrom}
+                              onChange={e => setTranslateFrom(e.target.value as any)}
+                              className="border rounded px-2 py-1 bg-white"
+                            >
+                              <option value="en">English</option>
+                              <option value="es">Spanish</option>
+                              <option value="fr">French</option>
+                              <option value="de">German</option>
+                              <option value="pt">Portuguese</option>
+                              <option value="it">Italian</option>
+                            </select>
+
+                            <span className="text-gray-400">→</span>
+
+                            <select
+                              value={translateTo}
+                              onChange={e => setTranslateTo(e.target.value as any)}
+                              className="border rounded px-2 py-1 bg-white"
+                            >
+                              <option value="es">Spanish</option>
+                              <option value="en">English</option>
+                              <option value="fr">French</option>
+                              <option value="de">German</option>
+                              <option value="pt">Portuguese</option>
+                              <option value="it">Italian</option>
+                            </select>
+
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="text-xs"
+                              onClick={() => translateDescription(item.description, item.id)}
+                            >
+                              🔄 Translate
+                            </Button>
+                          </div>
+
+                          {itemTranslations[item.id] && (
+                            <div className="mt-2 relative">
+                              <div className="text-[10px] font-medium text-emerald-600 flex items-center gap-1 mb-1">
+                                🔄 Translation (Internal team use only — not sent to client)
+                              </div>
+                              <Textarea
+                                value={itemTranslations[item.id]}
+                                readOnly
+                                rows={3}
+                                className="resize-y bg-gray-50 text-sm w-full"
                               />
-                            ) : (
-                              <div className="text-right text-gray-400">—</div>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            {canSeePricing ? (
-                              <Input
-                                type="number"
-                                step="0.01"
-                                value={item.total ?? 0}
-                                onChange={e => updateItem(item.id, 'total', parseFloat(e.target.value) || 0)}
-                                className="text-right font-medium [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [appearance:textfield]"
-                              />
-                            ) : (
-                              <div className="text-right text-gray-400">—</div>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex gap-1">
-                              <Button size="sm" variant="outline" onClick={() => saveAsQuickLine(item)}>💾</Button>
-                              <Button size="sm" variant="destructive" onClick={() => removeRow(item.id)}>×</Button>
+                              <button
+                                type="button"
+                                onClick={() => setItemTranslations(prev => {
+                                  const copy = { ...prev };
+                                  delete copy[item.id];
+                                  return copy;
+                                })}
+                                className="absolute top-1 right-2 text-xs text-red-500 hover:text-red-700"
+                              >
+                                ✕
+                              </button>
                             </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                  <datalist id="line-item-unit-options">
-                    {LINE_ITEM_UNITS.map(unit => (
-                      <option key={unit} value={unit} />
-                    ))}
-                  </datalist>
+                          )}
+                        </div>
+
+                        {/* Pricing block — under description on phones/tablets; beside on desktop */}
+                        <div className="line-item-pricing-block">
+                          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 sm:p-4 w-full max-w-full min-w-0 box-border">
+                            <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-3">
+                              Qty · SF/Unit · Price · Total
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div className="space-y-1">
+                                <label className="block text-[11px] font-medium text-gray-600">Qty</label>
+                                <Input
+                                  type="number"
+                                  value={item.qty}
+                                  onChange={e => updateItem(item.id, 'qty', parseFloat(e.target.value) || 0)}
+                                  className="text-right bg-white"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="block text-[11px] font-medium text-gray-600">SF/Unit</label>
+                                <Input
+                                  list="line-item-unit-options"
+                                  value={item.unit || ''}
+                                  onChange={e => updateItem(item.id, 'unit', e.target.value)}
+                                  className="text-right bg-white"
+                                  placeholder="SF or Unit"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="block text-[11px] font-medium text-gray-600">SF/Unit Price</label>
+                                {canSeePricing ? (
+                                  <Input
+                                    type="number"
+                                    value={item.price}
+                                    onChange={e => updateItem(item.id, 'price', parseFloat(e.target.value) || 0)}
+                                    className="text-right bg-white [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [appearance:textfield]"
+                                  />
+                                ) : (
+                                  <div className="h-10 flex items-center justify-end text-gray-400 px-3">—</div>
+                                )}
+                              </div>
+                              <div className="space-y-1">
+                                <label className="block text-[11px] font-medium text-gray-600">Total</label>
+                                {canSeePricing ? (
+                                  <Input
+                                    type="number"
+                                    step="0.01"
+                                    value={item.total ?? 0}
+                                    onChange={e => updateItem(item.id, 'total', parseFloat(e.target.value) || 0)}
+                                    className="text-right font-medium bg-white [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [appearance:textfield]"
+                                  />
+                                ) : (
+                                  <div className="h-10 flex items-center justify-end text-gray-400 px-3">—</div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
+                <datalist id="line-item-unit-options">
+                  {LINE_ITEM_UNITS.map(unit => (
+                    <option key={unit} value={unit} />
+                  ))}
+                </datalist>
 
                 <div className="p-6 bg-white border-t">
                   <div className="mb-4 p-4 border rounded-lg bg-gray-50">
@@ -5153,12 +5190,34 @@ export default function Home() {
                   <h3 className="text-xl font-semibold mb-4">{t('videosSection')} ({videoUrls.length})</h3>
                   <p className="text-sm text-gray-500 mb-4">
                     Record with your phone camera or upload an existing video. Videos save to this estimate automatically.
+                    Use <span className="font-medium text-gray-700">Delete</span> on any video to remove it after saving.
                   </p>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     {videoDisplayUrls.map((url, i) => (
-                      <div key={i} className="relative group">
-                        <video src={url} controls playsInline className="w-full h-40 object-cover rounded-lg border" />
-                        <button onClick={() => removeMedia('video', i)} className="absolute top-2 right-2 bg-red-500 hover:bg-red-600 text-white text-xs px-3 py-1 rounded-full shadow-md opacity-0 group-hover:opacity-100 transition">✕</button>
+                      <div key={i} className="relative group rounded-lg border bg-gray-50 overflow-hidden">
+                        <video
+                          src={url}
+                          controls
+                          playsInline
+                          className="w-full h-40 object-cover bg-black"
+                        />
+                        {/* Always visible on mobile (hover-only was easy to miss) */}
+                        <button
+                          type="button"
+                          onClick={() => confirmRemoveVideo(i)}
+                          className="absolute top-2 right-2 z-10 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white text-sm font-semibold w-10 h-10 flex items-center justify-center rounded-2xl shadow-xl"
+                          aria-label={`Delete video ${i + 1}`}
+                          title="Delete video"
+                        >
+                          ×
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => confirmRemoveVideo(i)}
+                          className="w-full py-2 text-sm font-semibold text-red-700 bg-red-50 hover:bg-red-100 border-t border-red-100"
+                        >
+                          Delete video
+                        </button>
                       </div>
                     ))}
                     <button

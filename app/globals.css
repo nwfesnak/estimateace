@@ -481,3 +481,75 @@ html.device-camera-lock body {
   margin-left: auto;
   margin-right: auto;
 }
+
+/* ========== Line-item description: always fit the device width ========== */
+/*
+ * Base Textarea uses Tailwind `field-sizing-content`, which on many mobile
+ * browsers expands the CONTROL WIDTH with long unbroken text instead of wrapping.
+ * Force fixed field-sizing + 100% of the parent so the box matches the screen.
+ */
+.line-item-description-shell {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.line-item-description-textarea,
+textarea.line-item-description-textarea {
+  display: block !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+  field-sizing: fixed !important;
+  overflow-x: hidden !important;
+  overflow-wrap: anywhere !important;
+  word-break: break-word !important;
+  white-space: pre-wrap !important;
+  /* Prevent flex/table ancestors from stretching past the viewport */
+  flex: none !important;
+}
+
+.line-item-card {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.line-item-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+@media (min-width: 1024px) {
+  .line-item-card-body {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+
+  .line-item-description-block {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .line-item-pricing-block {
+    flex: 0 0 min(18rem, 38%);
+    max-width: 20rem;
+  }
+}
+
+.line-item-description-block,
+.line-item-pricing-block {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}

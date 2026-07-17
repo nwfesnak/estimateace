@@ -19,12 +19,21 @@ type TouchDoubleTapTextareaProps = React.ComponentProps<typeof Textarea> & {
   engageHint?: string;
 };
 
+/**
+ * Description field that:
+ * - Fills the available screen/parent width (never wider than the viewport)
+ * - Auto-grows height so full text is visible when not editing
+ * - On touch devices: double-tap to engage editing
+ */
 export function TouchDoubleTapTextarea({
   engageHint = 'Double-tap to edit',
   className,
   readOnly,
   onBlur,
   onFocus,
+  onChange,
+  onInput,
+  style,
   ...props
 }: TouchDoubleTapTextareaProps) {
   const [isTouch, setIsTouch] = React.useState(false);
@@ -45,7 +54,11 @@ export function TouchDoubleTapTextarea({
       if (!el) return;
       el.focus();
       const end = el.value.length;
-      el.setSelectionRange(end, end);
+      try {
+        el.setSelectionRange(end, end);
+      } catch {
+        // ignore selection errors on some mobile browsers
+      }
     });
   }, [readOnly]);
 
@@ -96,24 +109,88 @@ export function TouchDoubleTapTextarea({
   };
 
   const showEngageOverlay = isTouch && !engaged && !readOnly;
+  const value = typeof props.value === 'string' ? props.value : '';
+
+  // Height follows content; WIDTH is always constrained to the parent (see CSS).
+  const syncHeight = React.useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    // Reset width constraints every sync so layout reflows on orientation change
+    el.style.width = '100%';
+    el.style.maxWidth = '100%';
+    el.style.minWidth = '0';
+    el.style.boxSizing = 'border-box';
+    el.style.height = 'auto';
+    const minPx = 72;
+    const next = Math.max(el.scrollHeight, minPx);
+    el.style.height = `${next}px`;
+  }, []);
+
+  React.useLayoutEffect(() => {
+    syncHeight();
+  }, [value, engaged, showEngageOverlay, syncHeight]);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onResize = () => syncHeight();
+    window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', onResize);
+    // Re-measure after fonts/layout settle
+    const t = window.setTimeout(syncHeight, 50);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('orientationchange', onResize);
+      window.clearTimeout(t);
+    };
+  }, [syncHeight]);
 
   return (
-    // pan-x + pan-y so horizontal table swipes work over the description area.
-    // Double-tap-to-edit is handled in JS (not blocked by pan). Previously touch-pan-y
-    // only allowed vertical gestures and blocked left/right scrolling.
-    <div className="relative" style={{ touchAction: 'pan-x pan-y' }}>
+    <div
+      className="line-item-description-shell relative w-full min-w-0 max-w-full"
+      style={{ touchAction: 'pan-y' }}
+    >
       <Textarea
         ref={textareaRef}
         {...props}
+        value={props.value}
         readOnly={readOnly || showEngageOverlay}
         onFocus={handleFocus}
         onBlur={handleBlur}
-        className={cn(showEngageOverlay && 'caret-transparent', className)}
+        onChange={(e) => {
+          onChange?.(e);
+          // Height after React commits new value
+          window.requestAnimationFrame(syncHeight);
+        }}
+        onInput={(e) => {
+          onInput?.(e);
+          syncHeight();
+        }}
+        style={{
+          width: '100%',
+          maxWidth: '100%',
+          minWidth: 0,
+          boxSizing: 'border-box',
+          // Critical: do NOT use field-sizing: content — it expands WIDTH past the screen
+          fieldSizing: 'fixed',
+          overflowWrap: 'anywhere',
+          wordBreak: 'break-word',
+          whiteSpace: 'pre-wrap',
+          ...style,
+        }}
+        className={cn(
+          // Override base Textarea `flex field-sizing-content` which breaks mobile width
+          'line-item-description-textarea block w-full min-w-0 max-w-full',
+          'overflow-x-hidden overflow-y-hidden whitespace-pre-wrap break-words',
+          'box-border',
+          showEngageOverlay && 'caret-transparent resize-none',
+          !showEngageOverlay && 'resize-y',
+          className
+        )}
       />
       {showEngageOverlay && (
         <div
           className="absolute inset-0 z-10 flex items-end justify-center rounded-lg bg-white/35 pb-2"
-          style={{ touchAction: 'pan-x pan-y' }}
+          style={{ touchAction: 'pan-y' }}
           onTouchStart={handleOverlayTouchStart}
           onTouchEnd={handleOverlayTouchEnd}
           aria-hidden="true"
