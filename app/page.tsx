@@ -1997,10 +1997,27 @@ export default function Home() {
     const filePath = `${user.id}/certificate/${Date.now()}-${file.name}`;
     const { error } = await supabase.storage.from('media').upload(filePath, file, { upsert: true });
     if (!error) {
-      setProfile(prev => ({ ...prev, certificateUrl: filePath }));
+      const next = { ...profileRef.current, certificateUrl: filePath };
+      setProfile(next);
+      await saveProfileSettings(next, { quiet: true });
+      lastSavedCompanyFingerprintRef.current = JSON.stringify({
+        name: next.name || '',
+        company: next.company || '',
+        slogan: next.slogan || '',
+        address: next.address || '',
+        phone: next.phone || '',
+        email: next.email || '',
+        city: next.city || '',
+        state: next.state || '',
+        zipCode: next.zipCode || '',
+        disclosure: next.disclosure || '',
+        logoUrl: next.logoUrl || '',
+        logoSize: next.logoSize || 'medium',
+        certificateUrl: next.certificateUrl || '',
+      });
+      setProfileAutoSaveLabel('Saved');
       const isPdf = file.name.toLowerCase().endsWith('.pdf');
       showMessage(isPdf ? '✅ PDF Certificate of Insurance uploaded' : '✅ Certificate of Insurance uploaded');
-      await saveToDB();
     }
   };
 
@@ -2010,9 +2027,26 @@ export default function Home() {
     const filePath = `${user.id}/logo/${Date.now()}-${file.name}`;
     const { error } = await supabase.storage.from('media').upload(filePath, file, { upsert: true });
     if (!error) {
-      setProfile(prev => ({ ...prev, logoUrl: filePath }));
+      const next = { ...profileRef.current, logoUrl: filePath };
+      setProfile(next);
+      await saveProfileSettings(next, { quiet: true });
+      lastSavedCompanyFingerprintRef.current = JSON.stringify({
+        name: next.name || '',
+        company: next.company || '',
+        slogan: next.slogan || '',
+        address: next.address || '',
+        phone: next.phone || '',
+        email: next.email || '',
+        city: next.city || '',
+        state: next.state || '',
+        zipCode: next.zipCode || '',
+        disclosure: next.disclosure || '',
+        logoUrl: next.logoUrl || '',
+        logoSize: next.logoSize || 'medium',
+        certificateUrl: next.certificateUrl || '',
+      });
+      setProfileAutoSaveLabel('Saved');
       showMessage('✅ Company logo uploaded');
-      await saveToDB();
     }
   };
 
@@ -3286,7 +3320,7 @@ export default function Home() {
     }
     profileAutoSaveTimeoutRef.current = setTimeout(async () => {
       try {
-        await saveProfileSettings(profile, { quiet: true });
+        await saveProfileSettings(profileRef.current, { quiet: true });
         lastSavedCompanyFingerprintRef.current = companyProfileFingerprint;
         setProfileAutoSaveLabel('Saved');
       } catch (err) {
