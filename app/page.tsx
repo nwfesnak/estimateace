@@ -886,6 +886,8 @@ export default function Home() {
 
   // Multi-select for lists
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  /** Search filter for All Estimates list */
+  const [estimateListSearch, setEstimateListSearch] = useState('');
 
   // Address auto-suggest states (geocoding APIs + previous addresses fallback)
   const [showAddressSuggestions, setShowAddressSuggestions] = useState(false);
@@ -3894,9 +3896,40 @@ export default function Home() {
   };
 
   // Dashboard calculations
-  const estimatesCount = savedEstimatesList.filter(est => 
-    est.documentType === 'estimate' || est.invoiceNumber?.startsWith('EST')
-  ).length;
+  const isEstimateDoc = (est: any) =>
+    est.documentType === 'estimate' || est.invoiceNumber?.startsWith('EST');
+
+  const estimateMatchesSearch = (est: any, query: string) => {
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    const phones = Array.isArray(est.phones) ? est.phones.join(' ') : (est.phones || '');
+    const emails = Array.isArray(est.emails) ? est.emails.join(' ') : (est.emails || '');
+    const haystack = [
+      est.jobName,
+      est.invoiceNumber,
+      est.date,
+      est.address,
+      est.city,
+      est.state,
+      est.zipCode,
+      phones,
+      emails,
+      est.documentType,
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+    // Support multi-word search: every token must match somewhere
+    return q.split(/\s+/).every((token) => haystack.includes(token));
+  };
+
+  const filteredEstimatesList = useMemo(() => {
+    return (savedEstimatesList || [])
+      .filter(isEstimateDoc)
+      .filter((est) => estimateMatchesSearch(est, estimateListSearch));
+  }, [savedEstimatesList, estimateListSearch]);
+
+  const estimatesCount = savedEstimatesList.filter(isEstimateDoc).length;
 
   const outstandingInvoices = savedEstimatesList.filter(est => 
     (est.documentType === 'invoice' || est.invoiceNumber?.startsWith('INV')) && 
@@ -4315,24 +4348,59 @@ export default function Home() {
           )}
 
           {view === 'estimatesList' && (
-            <div>
+            <div className="w-full max-w-full min-w-0">
               <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to {t('dashboard')}</Button>
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-3xl font-semibold">All {t('estimates')}</h2>
-                {savedEstimatesList.filter(est => est.documentType === 'estimate' || est.invoiceNumber?.startsWith('EST')).length > 0 && (
+              <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4">
+                <h2 className="text-2xl sm:text-3xl font-semibold">All {t('estimates')}</h2>
+                {filteredEstimatesList.length > 0 && (
                   <Button 
                     size="sm" 
                     variant="outline" 
+                    className="shrink-0 self-start sm:self-auto"
                     onClick={() => {
-                      const estIds = savedEstimatesList
-                        .filter(est => est.documentType === 'estimate' || est.invoiceNumber?.startsWith('EST'))
-                        .map(est => est.id);
-                      setSelectedIds(selectedIds.length === estIds.length ? [] : estIds);
+                      const estIds = filteredEstimatesList.map(est => est.id);
+                      const allSelected = estIds.length > 0 && estIds.every(id => selectedIds.includes(id));
+                      setSelectedIds(allSelected ? [] : estIds);
                     }}
                   >
                     {selectedIds.length > 0 ? 'Deselect All' : 'Select All'}
                   </Button>
                 )}
+              </div>
+
+              <div className="mb-4 w-full max-w-full min-w-0">
+                <label htmlFor="estimate-list-search" className="sr-only">
+                  Search estimates
+                </label>
+                <div className="relative w-full max-w-full">
+                  <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm" aria-hidden>
+                    🔍
+                  </span>
+                  <Input
+                    id="estimate-list-search"
+                    type="search"
+                    value={estimateListSearch}
+                    onChange={(e) => setEstimateListSearch(e.target.value)}
+                    placeholder="Search estimates by name, #, date, address, phone, email…"
+                    className="w-full max-w-full pl-9 pr-10 h-11"
+                    autoComplete="off"
+                  />
+                  {estimateListSearch.trim() && (
+                    <button
+                      type="button"
+                      onClick={() => setEstimateListSearch('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700 text-sm px-2 py-1 rounded"
+                      aria-label="Clear search"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+                <p className="mt-1.5 text-xs text-gray-500">
+                  {estimateListSearch.trim()
+                    ? `${filteredEstimatesList.length} result${filteredEstimatesList.length === 1 ? '' : 's'}`
+                    : `${estimatesCount} estimate${estimatesCount === 1 ? '' : 's'}`}
+                </p>
               </div>
 
               {selectedIds.length > 0 && (
@@ -4353,9 +4421,16 @@ export default function Home() {
               )}
 
               <div className="space-y-4">
-                {savedEstimatesList.filter(est => est.documentType === 'estimate' || est.invoiceNumber?.startsWith('EST')).map((est) => (
-                  <div key={est.id} className="flex justify-between items-center border p-4 rounded-lg bg-white">
-                    <div className="flex items-center gap-3">
+                {filteredEstimatesList.length === 0 && (
+                  <div className="border border-dashed rounded-lg p-8 text-center text-sm text-gray-500 bg-white">
+                    {estimateListSearch.trim()
+                      ? `No estimates match “${estimateListSearch.trim()}”.`
+                      : `No estimates yet. Create one from the dashboard.`}
+                  </div>
+                )}
+                {filteredEstimatesList.map((est) => (
+                  <div key={est.id} className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 border p-4 rounded-lg bg-white min-w-0">
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
                       <input 
                         type="checkbox" 
                         checked={selectedIds.includes(est.id)}
@@ -4366,13 +4441,17 @@ export default function Home() {
                               : [...prev, est.id]
                           );
                         }}
+                        className="shrink-0"
                       />
-                      <div>
-                        <div className="font-medium">{est.jobName || 'Untitled'}</div>
-                        <div className="text-sm text-gray-500">{est.invoiceNumber} • {est.date}</div>
+                      <div className="min-w-0">
+                        <div className="font-medium break-words">{est.jobName || 'Untitled'}</div>
+                        <div className="text-sm text-gray-500 break-words">
+                          {est.invoiceNumber} • {est.date}
+                          {(est.address || est.city) ? ` • ${[est.address, est.city, est.state].filter(Boolean).join(', ')}` : ''}
+                        </div>
                       </div>
                     </div>
-                    <div className="flex gap-3">
+                    <div className="flex flex-wrap gap-2 sm:gap-3 shrink-0">
                       <Button size="sm" onClick={async () => { await loadSelectedEstimate(est); setView('editor'); setSelectedIds([]); }}>{t('open')}</Button>
                       <Button size="sm" variant="outline" onClick={() => archiveEstimate(est.id)}>{t('archive')}</Button>
                       <Button size="sm" variant="destructive" onClick={() => deleteSelectedEstimate(est.id)}>{t('delete')}</Button>
