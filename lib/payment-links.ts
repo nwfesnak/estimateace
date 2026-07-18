@@ -1,21 +1,13 @@
 export type PaymentMethodSettings = {
   enabled?: boolean;
   connected?: boolean;
-  /** PayPal.Me username, PayPal email, Zelle name, legacy Venmo @username, etc. */
+  /** Venmo @username, Zelle email/phone/name, etc. */
   handle?: string;
   /** Storage path or URL for a Zelle QR code image */
   qrUrl?: string;
-  /**
-   * PayPal REST app Client ID (from developer.paypal.com).
-   * When set, Smart Payment Buttons can offer PayPal, Venmo, and Pay Later.
-   */
-  clientId?: string;
 };
 
-/** Methods shown as their own rows (Venmo is folded into PayPal). */
-export const isStandalonePaymentMethod = (method: string) => method !== 'venmo';
-
-/** Strip @ and spaces from a Venmo username (legacy). */
+/** Strip @ and spaces from a Venmo username (clients always see @handle). */
 export const cleanVenmoHandle = (value: string): string =>
   value
     .trim()
@@ -41,7 +33,8 @@ export const hasZelleSetup = (settings?: PaymentMethodSettings | null): boolean 
 
 /**
  * Shared payment note / memo so the contractor can match client payments
- * to a specific estimate or invoice.
+ * to a specific estimate or invoice (Venmo note or Zelle memo).
+ * Venmo notes support up to ~280 characters.
  */
 export const buildPaymentTrackingNote = (
   invoiceNumber: string,
@@ -57,29 +50,43 @@ export const buildPaymentTrackingNote = (
 /** @deprecated use buildPaymentTrackingNote */
 export const buildZellePaymentMemo = buildPaymentTrackingNote;
 
+/**
+ * Official-style Venmo web pay link:
+ * https://venmo.com/{username}?txn=pay&amount=10.00&note=Invoice+123
+ */
 export const buildVenmoPayUrl = (handle: string, amount: number, note: string): string => {
   const cleaned = cleanVenmoHandle(handle);
   if (!cleaned) return '';
+
   const params = new URLSearchParams({
     txn: 'pay',
     amount: Math.max(0, amount).toFixed(2),
     note: note.slice(0, 200),
   });
+
   return `https://venmo.com/${encodeURIComponent(cleaned)}?${params.toString()}`;
 };
 
+/** Deep link for the Venmo mobile app */
 export const buildVenmoAppUrl = (handle: string, amount: number, note: string): string => {
   const cleaned = cleanVenmoHandle(handle);
   if (!cleaned) return '';
+
   const params = new URLSearchParams({
     txn: 'pay',
     recipients: cleaned,
     amount: Math.max(0, amount).toFixed(2),
     note: note.slice(0, 200),
   });
+
   return `venmo://paycharge?${params.toString()}`;
 };
 
+/**
+ * Open Venmo with amount + tracking note pre-filled.
+ * Mobile: try app deep link, fall back to web.
+ * Desktop: open web pay link in a new tab.
+ */
 export const openVenmoPaymentPage = (
   handle: string,
   amount: number,
@@ -88,64 +95,60 @@ export const openVenmoPaymentPage = (
 ): boolean => {
   const cleaned = cleanVenmoHandle(handle);
   if (!cleaned) return false;
+
   const webUrl = buildVenmoPayUrl(cleaned, amount, note);
   const appUrl = buildVenmoAppUrl(cleaned, amount, note);
   if (!webUrl) return false;
+
   const isMobile =
     typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
   if (isMobile && appUrl) {
+    // Prefer native app; fall back to web if the app isn't installed
     window.location.href = appUrl;
     window.setTimeout(() => {
       window.location.href = webUrl;
     }, 900);
     return true;
   }
+
   if (options?.newTab !== false && typeof window !== 'undefined') {
     window.open(webUrl, '_blank', 'noopener,noreferrer');
     return true;
   }
+
   window.location.href = webUrl;
   return true;
 };
 
-// ——— PayPal (includes Venmo + Pay Later when using Client ID / Smart Buttons) ———
+// ——— PayPal ———
 
+/** Strip paypal.me/ URL prefixes and @ so we store a clean handle or email. */
 export const cleanPayPalHandle = (value: string): string => {
   let v = value.trim();
   v = v.replace(/^https?:\/\//i, '');
   v = v.replace(/^(www\.)?paypal\.me\//i, '');
   v = v.replace(/^paypal\.me\//i, '');
   v = v.replace(/^@+/, '');
+  // Drop trailing amount path if someone pastes a full pay link
   v = v.split(/[/?#]/)[0] || '';
   return v.trim();
 };
 
-export const cleanPayPalClientId = (value: string): string =>
-  value.trim().replace(/\s+/g, '');
-
 export const hasPayPalHandle = (value?: string): boolean => cleanPayPalHandle(value || '').length > 0;
 
-export const hasPayPalClientId = (value?: string): boolean => cleanPayPalClientId(value || '').length > 10;
-
-/** Ready if PayPal.Me/email and/or Client ID is set (and enabled). */
 export const hasPayPalSetup = (settings?: PaymentMethodSettings | null): boolean => {
   if (!settings?.enabled) return false;
-  return hasPayPalHandle(settings.handle) || hasPayPalClientId(settings.clientId);
-};
-
-/** Smart Buttons can offer PayPal + Venmo + Pay Later when Client ID is present. */
-export const hasPayPalSmartCheckout = (settings?: PaymentMethodSettings | null): boolean => {
-  if (!settings?.enabled) return false;
-  return hasPayPalClientId(settings.clientId);
+  return hasPayPalHandle(settings.handle);
 };
 
 export const isPayPalEmail = (handle: string): boolean =>
   /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanPayPalHandle(handle));
 
 /**
- * Fallback payment URL when Smart Buttons are not configured:
- * - PayPal.Me amount link
- * - Business email _xclick with invoice as item name
+ * Real PayPal payment URL (not just paypal.com home):
+ * - PayPal.Me: https://www.paypal.me/{username}/{amount}USD  (opens pay form for that amount)
+ * - Business email: classic _xclick checkout with item_name = tracking note
  */
 export const buildPayPalPayUrl = (
   handle: string,
@@ -161,6 +164,7 @@ export const buildPayPalPayUrl = (
   const cur = (currency || 'USD').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3) || 'USD';
 
   if (isPayPalEmail(cleaned)) {
+    // Business / email checkout — includes invoice note as item name for tracking
     const params = new URLSearchParams({
       cmd: '_xclick',
       business: cleaned,
@@ -169,11 +173,14 @@ export const buildPayPalPayUrl = (
       currency_code: cur,
       no_shipping: '1',
       no_note: '0',
+      // Pre-fill buyer note when PayPal shows the form
       cn: 'Invoice / estimate reference',
     });
     return `https://www.paypal.com/cgi-bin/webscr?${params.toString()}`;
   }
 
+  // PayPal.Me username — amount + currency in path (documented PayPal.Me format)
+  // Example: https://www.paypal.me/YourBusiness/125.00USD
   return `https://www.paypal.me/${encodeURIComponent(cleaned)}/${amtFixed}${cur}`;
 };
 
@@ -185,6 +192,7 @@ export const openPayPalPaymentPage = (
 ): boolean => {
   const url = buildPayPalPayUrl(handle, amount, note, options?.currency);
   if (!url || typeof window === 'undefined') return false;
+
   if (options?.newTab !== false) {
     window.open(url, '_blank', 'noopener,noreferrer');
     return true;
@@ -192,60 +200,3 @@ export const openPayPalPaymentPage = (
   window.location.href = url;
   return true;
 };
-
-/** PayPal merchant account setup (enable Venmo / Pay Later in the dashboard). */
-export const PAYPAL_BUSINESS_SETUP_URL = 'https://www.paypal.com/businessmanage/account/aboutBusiness';
-export const PAYPAL_DEVELOPER_APPS_URL = 'https://developer.paypal.com/dashboard/applications/live';
-export const PAYPAL_ME_CREATE_URL = 'https://www.paypal.com/paypalme/';
-
-type PayPalNamespace = {
-  Buttons: (config: Record<string, unknown>) => { render: (selector: string | HTMLElement) => Promise<void> };
-};
-
-declare global {
-  interface Window {
-    paypal?: PayPalNamespace;
-  }
-}
-
-/** Load PayPal JS SDK with Venmo + Pay Later funding enabled. */
-export function loadPayPalSdk(clientId: string, currency: string = 'USD'): Promise<PayPalNamespace> {
-  const id = cleanPayPalClientId(clientId);
-  if (!id) return Promise.reject(new Error('Missing PayPal Client ID'));
-
-  if (typeof window !== 'undefined' && window.paypal?.Buttons) {
-    return Promise.resolve(window.paypal);
-  }
-
-  return new Promise((resolve, reject) => {
-    const existing = document.querySelector<HTMLScriptElement>('script[data-estimateace-paypal-sdk]');
-    if (existing) {
-      existing.addEventListener('load', () => {
-        if (window.paypal) resolve(window.paypal);
-        else reject(new Error('PayPal SDK failed to load'));
-      });
-      existing.addEventListener('error', () => reject(new Error('PayPal SDK failed to load')));
-      return;
-    }
-
-    const params = new URLSearchParams({
-      'client-id': id,
-      currency: currency || 'USD',
-      intent: 'capture',
-      components: 'buttons,funding-eligibility',
-      'enable-funding': 'venmo,paylater',
-      'disable-funding': 'card',
-    });
-
-    const script = document.createElement('script');
-    script.src = `https://www.paypal.com/sdk/js?${params.toString()}`;
-    script.async = true;
-    script.dataset.estimateacePaypalSdk = '1';
-    script.onload = () => {
-      if (window.paypal?.Buttons) resolve(window.paypal);
-      else reject(new Error('PayPal SDK loaded without Buttons'));
-    };
-    script.onerror = () => reject(new Error('PayPal SDK network error'));
-    document.body.appendChild(script);
-  });
-}
