@@ -1,12 +1,30 @@
 export type PaymentMethodSettings = {
   enabled?: boolean;
   connected?: boolean;
+  /** Venmo @username, Zelle email/phone/name, etc. */
   handle?: string;
+  /** Storage path or URL for a Zelle QR code image */
+  qrUrl?: string;
 };
 
 export const cleanVenmoHandle = (value: string): string => value.trim().replace(/^@+/, '').trim();
 
 export const hasVenmoHandle = (value?: string): boolean => cleanVenmoHandle(value || '').length > 0;
+
+export const cleanZelleHandle = (value: string): string => value.trim();
+
+export const hasZelleHandle = (value?: string): boolean => cleanZelleHandle(value || '').length > 0;
+
+export const hasZelleSetup = (settings?: PaymentMethodSettings | null): boolean => {
+  if (!settings?.enabled) return false;
+  return hasZelleHandle(settings.handle) || !!String(settings.qrUrl || '').trim();
+};
+
+/** Memo/note for clients to include so the contractor can match the payment. */
+export const buildZellePaymentMemo = (invoiceNumber: string, label: string, company?: string): string => {
+  const parts = [company, invoiceNumber, label].map((p) => String(p || '').trim()).filter(Boolean);
+  return parts.join(' · ').slice(0, 140);
+};
 
 export const buildVenmoPayUrl = (handle: string, amount: number, note: string): string => {
   const cleaned = cleanVenmoHandle(handle);

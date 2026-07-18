@@ -14,8 +14,12 @@ import { isMediaPdfRef, resolveMediaDisplayUrl } from '@/lib/media-url';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { getLineItemUnitOptions, LINE_ITEM_UNITS } from '@/lib/quote-units';
 import {
+  buildZellePaymentMemo,
   cleanVenmoHandle,
+  cleanZelleHandle,
   hasVenmoHandle,
+  hasZelleHandle,
+  hasZelleSetup,
   openVenmoPaymentPage,
   type PaymentMethodSettings,
 } from '@/lib/payment-links';
@@ -45,7 +49,7 @@ const getPaymentMethodMeta = (method: string) => {
     echeck: { icon: '🏦', label: 'eCheck / ACH', description: 'Bank account (ACH)', category: 'traditional' },
     paypal: { icon: '💰', label: 'PayPal', description: 'PayPal balance or card', category: 'traditional' },
     venmo: { icon: '📱', label: 'Venmo', description: 'Mobile app payment', category: 'traditional' },
-    zelle: { icon: '🏦', label: 'Zelle', description: 'Bank-to-bank transfer', category: 'traditional' },
+    zelle: { icon: '🏦', label: 'Zelle', description: 'QR code or unique name/email/phone for client payments', category: 'traditional' },
     nowpayments: { icon: '₿', label: 'NOWPayments', description: 'Bitcoin, Ethereum, and 300+ cryptocurrencies', category: 'crypto' },
     coinbase_commerce: { icon: '🪙', label: 'Coinbase Commerce', description: 'Crypto checkout via Coinbase Commerce', category: 'crypto' },
   };
@@ -53,13 +57,15 @@ const getPaymentMethodMeta = (method: string) => {
 };
 
 const mergePaymentSettings = (settings?: Record<string, PaymentMethodSettings>) => {
-  const merged: Record<string, { enabled: boolean; connected: boolean; handle?: string }> = {};
+  const merged: Record<string, { enabled: boolean; connected: boolean; handle?: string; qrUrl?: string }> = {};
   for (const [key, defaults] of Object.entries(DEFAULT_PAYMENT_SETTINGS)) {
     const saved = settings?.[key];
     merged[key] = {
       enabled: saved?.enabled ?? defaults.enabled,
-      connected: key === 'venmo' ? false : (saved?.connected ?? defaults.connected),
+      // Venmo/Zelle use handle/QR setup instead of fake "connected" from external links
+      connected: key === 'venmo' || key === 'zelle' ? false : (saved?.connected ?? defaults.connected),
       handle: saved?.handle,
+      qrUrl: saved?.qrUrl,
     };
   }
   if (settings) {
@@ -69,6 +75,7 @@ const mergePaymentSettings = (settings?: Record<string, PaymentMethodSettings>) 
           enabled: !!saved?.enabled,
           connected: !!saved?.connected,
           handle: saved?.handle,
+          qrUrl: saved?.qrUrl,
         };
       }
     }
@@ -591,6 +598,10 @@ export default function Home() {
   const [receiptDisplayUrls, setReceiptDisplayUrls] = useState<string[]>([]);
   const [logoDisplayUrl, setLogoDisplayUrl] = useState('');
   const [certificateDisplayUrl, setCertificateDisplayUrl] = useState('');
+  const [zelleQrDisplayUrl, setZelleQrDisplayUrl] = useState('');
+  const [isZellePayOpen, setIsZellePayOpen] = useState(false);
+  const [zellePayAmount, setZellePayAmount] = useState(0);
+  const [zellePayLabel, setZellePayLabel] = useState<'deposit' | 'balance' | 'invoice'>('invoice');
   const [receiptDetails, setReceiptDetails] = useState<any[]>([]);
 
   // For Grok AI description improvement loading state (per item)
@@ -1504,6 +1515,15 @@ export default function Home() {
   useEffect(() => {
     resolveMediaDisplayUrl(profile.certificateUrl, getMediaUrl).then(setCertificateDisplayUrl);
   }, [profile.certificateUrl, supabase]);
+
+  useEffect(() => {
+    const qrPath = mergePaymentSettings(profile.paymentSettings).zelle?.qrUrl || '';
+    if (!qrPath) {
+      setZelleQrDisplayUrl('');
+      return;
+    }
+    resolveMediaDisplayUrl(qrPath, getMediaUrl).then(setZelleQrDisplayUrl);
+  }, [profile.paymentSettings, supabase]);
 
   // Load language preference from localStorage
   useEffect(() => {
@@ -3796,11 +3816,14 @@ export default function Home() {
   const openDepositPayment = () => openPaymentModal('deposit', getDepositDueAmount());
 
   const getVenmoSettings = () => mergePaymentSettings(profile.paymentSettings).venmo;
+  const getZelleSettings = () => mergePaymentSettings(profile.paymentSettings).zelle;
 
   const isVenmoPaymentReady = () => {
     const venmo = getVenmoSettings();
     return !!venmo?.enabled && hasVenmoHandle(venmo.handle);
   };
+
+  const isZellePaymentReady = () => hasZelleSetup(getZelleSettings());
 
   const startVenmoPayment = (amount: number, label: string) => {
     const venmo = getVenmoSettings();
@@ -3895,6 +3918,18 @@ export default function Home() {
                   )}
                 </Button>
                 {isVenmoPaymentReady() && renderVenmoPayButton(depositDue, 'deposit', { size: 'large' })}
+                {isZellePaymentReady() && (
+                  <Button
+                    type="button"
+                    onClick={() => openZellePayment(depositDue, 'deposit')}
+                    className="flex-1 text-xl py-6 bg-[#6d28d9] hover:bg-[#5b21b6] text-white font-semibold rounded-2xl shadow-lg"
+                  >
+                    <span className="inline-flex flex-col items-center">
+                      <span>🏦 Pay ${depositDue.toFixed(2)} with Zelle</span>
+                      <span className="text-sm font-normal opacity-90">Scan QR or send to your unique name</span>
+                    </span>
+                  </Button>
+                )}
               </div>
             )}
             {shouldShowEscrowOnEstimate() && (
@@ -3936,10 +3971,16 @@ export default function Home() {
       return;
     }
 
+    if (selectedPaymentMethod === 'zelle') {
+      closePaymentModal();
+      openZellePayment(paymentAmount, paymentType === 'deposit' ? 'deposit' : 'balance');
+      return;
+    }
+
     closePaymentModal();
     const meta = getPaymentMethodMeta(selectedPaymentMethod);
     showMessage(
-      `${meta.label} is not connected for automatic checkout. Use Venmo or pay ${profile.company || 'the contractor'} directly.`
+      `${meta.label} is not connected for automatic checkout. Use Venmo, Zelle, or pay ${profile.company || 'the contractor'} directly.`
     );
   };
 
@@ -3959,8 +4000,306 @@ export default function Home() {
     void saveProfileSettings(nextProfile);
   };
 
-  const renderPaymentMethodRow = (method: string, settings: { enabled?: boolean; connected?: boolean; handle?: string }) => {
+  const updateZelleSettings = (patch: { handle?: string; qrUrl?: string; enabled?: boolean }) => {
+    const current = mergePaymentSettings(profile.paymentSettings).zelle;
+    const nextProfile = {
+      ...profile,
+      paymentSettings: {
+        ...mergePaymentSettings(profile.paymentSettings),
+        zelle: {
+          ...current,
+          enabled: patch.enabled ?? current?.enabled ?? true,
+          handle: patch.handle !== undefined ? patch.handle : current?.handle,
+          qrUrl: patch.qrUrl !== undefined ? patch.qrUrl : current?.qrUrl,
+          connected: !!(
+            (patch.handle !== undefined ? hasZelleHandle(patch.handle) : hasZelleHandle(current?.handle)) ||
+            (patch.qrUrl !== undefined ? !!patch.qrUrl : !!current?.qrUrl)
+          ),
+        },
+      },
+    };
+    setProfile(nextProfile);
+    void saveProfileSettings(nextProfile);
+  };
+
+  const handleZelleQrUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user || !supabase) return;
+    if (!file.type.startsWith('image/')) {
+      showMessage('Please upload an image of your Zelle QR code (PNG or JPG).');
+      return;
+    }
+    const filePath = `${user.id}/zelle-qr/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+    const { error } = await supabase.storage.from('media').upload(filePath, file, { upsert: true });
+    if (error) {
+      showMessage('Failed to upload Zelle QR. Try again.');
+      return;
+    }
+    updateZelleSettings({ qrUrl: filePath });
+    showMessage('✅ Zelle QR code saved. Clients will see it when paying invoices.');
+    e.target.value = '';
+  };
+
+  const openZellePayment = (amount: number, label: 'deposit' | 'balance' | 'invoice' = 'invoice') => {
+    if (!isZellePaymentReady()) {
+      showMessage('Add your Zelle name/email/phone or QR code in Profile → Payments.');
+      return;
+    }
+    setZellePayAmount(amount);
+    setZellePayLabel(label);
+    setIsZellePayOpen(true);
+  };
+
+  /** Mark current invoice paid (and archive like cash) after Zelle/cash confirmation. */
+  const markInvoicePaid = async (methodLabel: string) => {
+    if (!user || !supabase) return;
+    if (documentType !== 'invoice') {
+      // Deposit / partial: record payment on the open document without full archive
+      const nextPaid = Math.min(grandTotal, Math.max(0, Number(amountPaid) || 0) + zellePayAmount);
+      const fullyPaid = nextPaid >= grandTotal - 0.009;
+      setAmountPaid(nextPaid);
+      setPaymentMethod(methodLabel);
+      setPaymentStatus(fullyPaid ? 'paid' : 'pending');
+      await saveToDB({
+        profile,
+      });
+      // saveToDB uses state which may be stale — write explicitly
+      await supabase.from('estimates').upsert({
+        id: invoiceNumber,
+        user_id: user.id,
+        jobName, address, city, state, zipCode, phones, emails, date, invoiceNumber,
+        items, terms, profile: getDocumentProfileSnapshot(),
+        documentType, dueDate,
+        paymentStatus: fullyPaid ? 'paid' : 'pending',
+        amountPaid: nextPaid,
+        paymentMethod: methodLabel,
+        photoUrls, videoUrls, receiptUrls, receiptDetails,
+        laborHours, laborRate, laborFixedAmount, useHourlyLabor, laborAmount,
+        taxRate: baseTaxRate,
+        taxAmount,
+        isTaxExempt,
+        taxLabor,
+        updated_at: new Date().toISOString(),
+      });
+      showMessage(
+        fullyPaid
+          ? `✅ Payment recorded via ${methodLabel}. Invoice/estimate marked paid.`
+          : `✅ ${methodLabel} payment of $${zellePayAmount.toFixed(2)} recorded.`
+      );
+      setIsZellePayOpen(false);
+      await refreshSavedList();
+      return;
+    }
+
+    if (!confirm(`Mark this invoice as Paid (${methodLabel}) and close it to archives?`)) return;
+
+    const id = invoiceNumber;
+    try {
+      const paidData = {
+        user_id: user.id,
+        jobName, address, city, state, zipCode, phones, emails, date, invoiceNumber: id,
+        items, terms, profile: getDocumentProfileSnapshot(),
+        documentType, dueDate,
+        paymentStatus: 'paid' as const,
+        amountPaid: grandTotal,
+        paymentMethod: methodLabel,
+        photoUrls, videoUrls, receiptUrls, receiptDetails,
+        laborHours, laborRate, laborFixedAmount, useHourlyLabor, laborAmount,
+        taxRate: baseTaxRate,
+        taxAmount,
+        isTaxExempt,
+        taxLabor,
+        updated_at: new Date().toISOString(),
+      };
+      const { error: saveErr } = await supabase.from('estimates').upsert({ id, ...paidData });
+      if (saveErr) {
+        showMessage('❌ Failed to mark as paid.');
+        return;
+      }
+
+      const { data: est, error: fetchErr } = await supabase
+        .from('estimates')
+        .select('*')
+        .eq('id', id)
+        .eq('user_id', user.id)
+        .single();
+      if (fetchErr || !est) {
+        showMessage(`✅ Marked paid (${methodLabel}), but could not load for archiving.`);
+        setPaymentStatus('paid');
+        setAmountPaid(grandTotal);
+        setPaymentMethod(methodLabel);
+        setIsZellePayOpen(false);
+        setView('invoicesList');
+        await refreshSavedList();
+        return;
+      }
+
+      const archiveData = prepareArchiveData({ ...est, paymentStatus: 'paid', amountPaid: grandTotal, paymentMethod: methodLabel });
+      if (archiveData) {
+        await supabase.from('archive-est').delete().eq('id', id).eq('user_id', user.id);
+        const { error } = await supabase.from('archive-est').insert(archiveData);
+        if (!error) {
+          await supabase.from('estimates').delete().eq('id', id);
+          showMessage(`✅ Invoice marked Paid (${methodLabel}) and closed to archives`);
+        } else {
+          showMessage(`✅ Marked paid (${methodLabel}), but archiving failed.`);
+        }
+      } else {
+        showMessage(`✅ Invoice marked Paid (${methodLabel}).`);
+      }
+
+      setPaymentStatus('paid');
+      setAmountPaid(grandTotal);
+      setPaymentMethod(methodLabel);
+      setIsZellePayOpen(false);
+      setView('invoicesList');
+      await refreshSavedList();
+      await refreshArchivesList();
+    } catch (e) {
+      console.error(e);
+      showMessage('Failed to mark invoice paid.');
+    }
+  };
+
+  const confirmClientZellePayment = async () => {
+    // Client (or contractor) confirms Zelle was sent — marks invoice/estimate paid
+    if (documentType === 'invoice') {
+      await markInvoicePaid('Zelle');
+    } else {
+      // Deposit on estimate
+      if (!user || !supabase) return;
+      const payAmt = zellePayAmount > 0 ? zellePayAmount : getDepositDueAmount();
+      const nextPaid = Math.min(grandTotal, Math.max(0, Number(amountPaid) || 0) + payAmt);
+      const fullyPaid = nextPaid >= grandTotal - 0.009;
+      await supabase.from('estimates').upsert({
+        id: invoiceNumber,
+        user_id: user.id,
+        jobName, address, city, state, zipCode, phones, emails, date, invoiceNumber,
+        items, terms, profile: getDocumentProfileSnapshot(),
+        documentType, dueDate,
+        paymentStatus: fullyPaid ? 'paid' : 'pending',
+        amountPaid: nextPaid,
+        paymentMethod: 'Zelle',
+        photoUrls, videoUrls, receiptUrls, receiptDetails,
+        laborHours, laborRate, laborFixedAmount, useHourlyLabor, laborAmount,
+        taxRate: baseTaxRate,
+        taxAmount,
+        isTaxExempt,
+        taxLabor,
+        updated_at: new Date().toISOString(),
+      });
+      setAmountPaid(nextPaid);
+      setPaymentMethod('Zelle');
+      setPaymentStatus(fullyPaid ? 'paid' : 'pending');
+      setIsZellePayOpen(false);
+      showMessage(
+        fullyPaid
+          ? '✅ Zelle payment recorded — document marked paid.'
+          : `✅ Zelle deposit of $${payAmt.toFixed(2)} recorded. Use the invoice # as the Zelle memo.`
+      );
+      await refreshSavedList();
+    }
+  };
+
+  const renderPaymentMethodRow = (method: string, settings: { enabled?: boolean; connected?: boolean; handle?: string; qrUrl?: string }) => {
     const meta = getPaymentMethodMeta(method);
+
+    if (method === 'zelle') {
+      const zelleReady = hasZelleHandle(settings.handle) || !!settings.qrUrl;
+      return (
+        <div
+          key={method}
+          className="border rounded-2xl p-4 sm:p-6 hover:shadow-sm transition-all w-full max-w-full min-w-0 overflow-hidden box-border"
+        >
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 min-w-0">
+            <div className="flex items-start sm:items-center gap-3 min-w-0 flex-1">
+              <div className="text-3xl sm:text-4xl shrink-0">{meta.icon}</div>
+              <div className="min-w-0 flex-1">
+                <div className="font-semibold text-base sm:text-lg break-words">{meta.label}</div>
+                <div className="text-sm text-gray-500 break-words">{meta.description}</div>
+                <div className="text-sm text-gray-500 mt-1">
+                  {zelleReady ? (
+                    <><span className="text-green-500">✓</span> Ready for client payments</>
+                  ) : (
+                    'Add QR and/or unique name to receive payments'
+                  )}
+                </div>
+              </div>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer shrink-0 self-end sm:self-center">
+              <input
+                type="checkbox"
+                checked={!!settings.enabled}
+                onChange={(e) => togglePaymentMethod(method, e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]"></div>
+            </label>
+          </div>
+
+          <div className="mt-4 w-full min-w-0 space-y-4 sm:pl-12">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Zelle unique name / email / phone
+              </label>
+              <Input
+                value={settings.handle || ''}
+                onChange={(e) => {
+                  const handle = e.target.value;
+                  setProfile((prev) => ({
+                    ...prev,
+                    paymentSettings: {
+                      ...mergePaymentSettings(prev.paymentSettings),
+                      zelle: {
+                        ...mergePaymentSettings(prev.paymentSettings).zelle,
+                        handle,
+                        connected: hasZelleHandle(handle) || !!mergePaymentSettings(prev.paymentSettings).zelle?.qrUrl,
+                      },
+                    },
+                  }));
+                }}
+                onBlur={(e) => updateZelleSettings({ handle: e.target.value })}
+                placeholder="business@email.com or (555) 123-4567"
+                autoComplete="off"
+                className="w-full max-w-full min-w-0"
+              />
+              <p className="text-xs text-gray-500 mt-2">
+                Clients use this to find you in Zelle. Ask them to put the invoice number in the memo.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Zelle QR code</label>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => void handleZelleQrUpload(e)}
+                className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-[#6d28d9] file:text-white hover:file:bg-[#5b21b6]"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Upload the QR from your banking app so clients can scan it for this invoice.
+              </p>
+              {settings.qrUrl && zelleQrDisplayUrl && (
+                <div className="mt-3 flex flex-wrap items-start gap-3">
+                  <img
+                    src={zelleQrDisplayUrl}
+                    alt="Zelle QR code"
+                    className="h-36 w-36 object-contain border rounded-xl bg-white p-2"
+                  />
+                  <button
+                    type="button"
+                    className="text-xs text-red-600 hover:text-red-800"
+                    onClick={() => updateZelleSettings({ qrUrl: '' })}
+                  >
+                    Remove QR
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
 
     if (method === 'venmo') {
       return (
@@ -4049,7 +4388,7 @@ export default function Home() {
             />
             <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]"></div>
           </label>
-          {method !== 'venmo' && (
+          {method !== 'venmo' && method !== 'zelle' && (
             <Button
               onClick={() => linkPaymentAccount(method)}
               variant={connected ? 'outline' : 'default'}
@@ -4078,14 +4417,13 @@ export default function Home() {
   };
 
   const linkPaymentAccount = (method: string) => {
-    if (method === 'venmo') return;
+    if (method === 'venmo' || method === 'zelle') return;
 
     const meta = getPaymentMethodMeta(method);
     const providerUrls: { [key: string]: string } = {
       stripe: 'https://dashboard.stripe.com/connect',
       echeck: 'https://dashboard.stripe.com/connect',
       paypal: 'https://www.paypal.com/businessmanage/credentials',
-      zelle: 'https://www.zellepay.com/',
       nowpayments: 'https://account.nowpayments.io/create-account',
       coinbase_commerce: 'https://commerce.coinbase.com/signup',
     };
@@ -5389,6 +5727,23 @@ export default function Home() {
                 <div className="flex flex-wrap gap-3 mb-8">
                   <Button onClick={printDocument} className="bg-[#3b82f6]">{t('printPreview')}</Button>
                   <Button onClick={markAsPaidCash} className="bg-green-600">Paid Cash</Button>
+                  {isZellePaymentReady() && (
+                    <Button
+                      onClick={() => openZellePayment(Math.max(0, grandTotal - (Number(amountPaid) || 0)), 'invoice')}
+                      className="bg-[#6d28d9] hover:bg-[#5b21b6]"
+                    >
+                      Pay / Confirm Zelle
+                    </Button>
+                  )}
+                  {isZellePaymentReady() && paymentStatus !== 'paid' && (
+                    <Button
+                      variant="outline"
+                      className="border-violet-300 text-violet-800"
+                      onClick={() => void markInvoicePaid('Zelle')}
+                    >
+                      Mark Paid (Zelle received)
+                    </Button>
+                  )}
                 </div>
               ) : (
                 <div className="flex flex-wrap gap-3 mb-8">
@@ -7464,8 +7819,10 @@ export default function Home() {
               {Object.entries(mergePaymentSettings(profile.paymentSettings)).map(([method, settings]) => {
                 if (!settings.enabled) return null;
                 if (method === 'venmo' && !hasVenmoHandle(settings.handle)) return null;
+                if (method === 'zelle' && !hasZelleSetup(settings)) return null;
                 const meta = getPaymentMethodMeta(method);
                 const venmoHandle = method === 'venmo' ? cleanVenmoHandle(settings.handle || '') : '';
+                const zelleHandle = method === 'zelle' ? cleanZelleHandle(settings.handle || '') : '';
 
                 if (method === 'venmo') {
                   return (
@@ -7484,6 +7841,31 @@ export default function Home() {
                         <div className="text-xs text-gray-600">Tap to open Venmo and pay @{venmoHandle}</div>
                       </div>
                       <span className="text-xs font-semibold text-[#008cff]">Open app →</span>
+                    </button>
+                  );
+                }
+
+                if (method === 'zelle') {
+                  return (
+                    <button
+                      key={method}
+                      type="button"
+                      onClick={() => {
+                        closePaymentModal();
+                        openZellePayment(paymentAmount, paymentType === 'deposit' ? 'deposit' : 'balance');
+                      }}
+                      className="w-full flex items-center gap-4 p-4 border-2 rounded-2xl border-violet-500 bg-violet-50 hover:bg-violet-100 transition-all"
+                    >
+                      <span className="text-3xl flex-shrink-0">{meta.icon}</span>
+                      <div className="flex-1 text-left min-w-0">
+                        <div className="font-semibold text-violet-900">{meta.label}</div>
+                        <div className="text-xs text-gray-600 break-words">
+                          {zelleHandle
+                            ? `Send to ${zelleHandle} · include invoice # in memo`
+                            : 'Scan QR · include invoice # in memo'}
+                        </div>
+                      </div>
+                      <span className="text-xs font-semibold text-violet-700 shrink-0">Pay →</span>
                     </button>
                   );
                 }
@@ -7511,10 +7893,92 @@ export default function Home() {
             </Button>
             <Button
               onClick={proceedWithPayment}
-              disabled={!selectedPaymentMethod || selectedPaymentMethod === 'venmo'}
+              disabled={!selectedPaymentMethod || selectedPaymentMethod === 'venmo' || selectedPaymentMethod === 'zelle'}
               className="flex-1 bg-[#10b981]"
             >
-              {selectedPaymentMethod === 'venmo' ? 'Tap Venmo above' : 'Continue to Pay'}
+              {selectedPaymentMethod === 'venmo' || selectedPaymentMethod === 'zelle'
+                ? 'Tap method above'
+                : 'Continue to Pay'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Zelle pay instructions — QR + unique name for this invoice */}
+      <Dialog open={isZellePayOpen} onOpenChange={setIsZellePayOpen}>
+        <DialogContent className="max-w-md max-h-[90dvh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Pay with Zelle</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="text-center">
+              <div className="text-4xl font-bold text-[#6d28d9]">
+                ${zellePayAmount.toFixed(2)}
+              </div>
+              <p className="text-sm text-gray-500 mt-1">
+                {zellePayLabel === 'deposit' ? 'Deposit' : zellePayLabel === 'balance' ? 'Balance' : 'Invoice total'}
+                {' · '}{invoiceNumber}
+              </p>
+            </div>
+
+            {zelleQrDisplayUrl && (
+              <div className="flex flex-col items-center gap-2">
+                <img
+                  src={zelleQrDisplayUrl}
+                  alt="Zelle QR code"
+                  className="h-48 w-48 object-contain border rounded-2xl bg-white p-3 shadow-sm"
+                />
+                <p className="text-xs text-gray-500">Scan this QR in your banking app</p>
+              </div>
+            )}
+
+            {hasZelleHandle(getZelleSettings()?.handle) && (
+              <div className="rounded-xl border bg-violet-50 p-4 text-center">
+                <div className="text-xs uppercase tracking-wide text-violet-700 font-semibold">Send Zelle to</div>
+                <div className="text-lg font-bold text-violet-950 break-all mt-1">
+                  {cleanZelleHandle(getZelleSettings()?.handle || '')}
+                </div>
+              </div>
+            )}
+
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+              <p className="font-semibold mb-1">Important — memo / note</p>
+              <p>
+                Put this exact text in the Zelle memo so payment matches this invoice:
+              </p>
+              <p className="mt-2 font-mono text-sm font-bold break-all bg-white/80 rounded-lg px-2 py-1.5 border">
+                {buildZellePaymentMemo(invoiceNumber, zellePayLabel, profile.company)}
+              </p>
+              <button
+                type="button"
+                className="mt-2 text-xs font-semibold text-violet-800 underline"
+                onClick={async () => {
+                  const memo = buildZellePaymentMemo(invoiceNumber, zellePayLabel, profile.company);
+                  try {
+                    await navigator.clipboard.writeText(memo);
+                    showMessage('Memo copied — paste it into Zelle.');
+                  } catch {
+                    showMessage(`Memo: ${memo}`);
+                  }
+                }}
+              >
+                Copy memo
+              </button>
+            </div>
+
+            <p className="text-xs text-gray-500 text-center">
+              Zelle does not notify this app automatically. After you send payment, tap below to mark this invoice paid.
+            </p>
+          </div>
+          <DialogFooter className="flex flex-col sm:flex-row gap-2">
+            <Button variant="outline" onClick={() => setIsZellePayOpen(false)} className="flex-1">
+              Close
+            </Button>
+            <Button
+              className="flex-1 bg-[#6d28d9] hover:bg-[#5b21b6]"
+              onClick={() => void confirmClientZellePayment()}
+            >
+              I paid with Zelle — mark paid
             </Button>
           </DialogFooter>
         </DialogContent>
