@@ -14,10 +14,12 @@ import { isMediaPdfRef, resolveMediaDisplayUrl } from '@/lib/media-url';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { getLineItemUnitOptions, LINE_ITEM_UNITS } from '@/lib/quote-units';
 import {
+  buildPaymentTrackingNote,
   buildZellePaymentMemo,
   cleanVenmoHandle,
   cleanZelleHandle,
   hasVenmoHandle,
+  hasVenmoSetup,
   hasZelleHandle,
   hasZelleSetup,
   openVenmoPaymentPage,
@@ -602,6 +604,9 @@ export default function Home() {
   const [isZellePayOpen, setIsZellePayOpen] = useState(false);
   const [zellePayAmount, setZellePayAmount] = useState(0);
   const [zellePayLabel, setZellePayLabel] = useState<'deposit' | 'balance' | 'invoice'>('invoice');
+  const [isVenmoPayOpen, setIsVenmoPayOpen] = useState(false);
+  const [venmoPayAmount, setVenmoPayAmount] = useState(0);
+  const [venmoPayLabel, setVenmoPayLabel] = useState<'deposit' | 'balance' | 'invoice'>('invoice');
   const [receiptDetails, setReceiptDetails] = useState<any[]>([]);
 
   // For Grok AI description improvement loading state (per item)
@@ -3818,30 +3823,85 @@ export default function Home() {
   const getVenmoSettings = () => mergePaymentSettings(profile.paymentSettings).venmo;
   const getZelleSettings = () => mergePaymentSettings(profile.paymentSettings).zelle;
 
-  const isVenmoPaymentReady = () => {
-    const venmo = getVenmoSettings();
-    return !!venmo?.enabled && hasVenmoHandle(venmo.handle);
-  };
+  const isVenmoPaymentReady = () => hasVenmoSetup(getVenmoSettings());
 
   const isZellePaymentReady = () => hasZelleSetup(getZelleSettings());
 
-  const startVenmoPayment = (amount: number, label: string) => {
-    const venmo = getVenmoSettings();
-    const handle = cleanVenmoHandle(venmo?.handle || '');
+  const getVenmoTrackingNote = (label: string) =>
+    buildPaymentTrackingNote(invoiceNumber, label, profile.company || 'EstimateAce');
+
+  /** Open the Venmo pay panel (note + @username + mark paid) — same tracking model as Zelle. */
+  const openVenmoPayment = (amount: number, label: 'deposit' | 'balance' | 'invoice' | string = 'invoice') => {
+    if (!isVenmoPaymentReady()) {
+      showMessage('Add and save your Venmo username in Profile → Payments (without typing @ — we add it).');
+      return false;
+    }
+    setVenmoPayAmount(amount);
+    setVenmoPayLabel(
+      label === 'deposit' || label === 'balance' || label === 'invoice' ? label : 'invoice'
+    );
+    setIsVenmoPayOpen(true);
+    return true;
+  };
+
+  const launchVenmoAppWithNote = (amount: number, label: string) => {
+    const handle = cleanVenmoHandle(getVenmoSettings()?.handle || '');
     if (!handle) {
       showMessage('Add your Venmo username in Profile → Payments.');
       return false;
     }
-
-    const note = `${profile.company || 'EstimateAce'} ${invoiceNumber} ${label}`;
-    const opened = openVenmoPaymentPage(handle, amount, note);
+    const note = getVenmoTrackingNote(label);
+    const opened = openVenmoPaymentPage(handle, amount, note, { newTab: true });
     if (!opened) {
       showMessage('Could not open Venmo. Check the username in Profile → Payments.');
       return false;
     }
-
-    showMessage(`Opening Venmo to pay $${amount.toFixed(2)}. Complete payment in the Venmo app, then your contractor will confirm receipt.`);
+    showMessage(
+      `Opening Venmo to pay $${amount.toFixed(2)} with note “${note}”. Complete payment, then tap “I paid with Venmo”.`
+    );
     return true;
+  };
+
+  /** @deprecated use openVenmoPayment */
+  const startVenmoPayment = (amount: number, label: string) => openVenmoPayment(amount, label);
+
+  const confirmClientVenmoPayment = async () => {
+    if (documentType === 'invoice') {
+      await markInvoicePaid('Venmo');
+      setIsVenmoPayOpen(false);
+      return;
+    }
+    if (!user || !supabase) return;
+    const payAmt = venmoPayAmount > 0 ? venmoPayAmount : getDepositDueAmount();
+    const nextPaid = Math.min(grandTotal, Math.max(0, Number(amountPaid) || 0) + payAmt);
+    const fullyPaid = nextPaid >= grandTotal - 0.009;
+    await supabase.from('estimates').upsert({
+      id: invoiceNumber,
+      user_id: user.id,
+      jobName, address, city, state, zipCode, phones, emails, date, invoiceNumber,
+      items, terms, profile: getDocumentProfileSnapshot(),
+      documentType, dueDate,
+      paymentStatus: fullyPaid ? 'paid' : 'pending',
+      amountPaid: nextPaid,
+      paymentMethod: 'Venmo',
+      photoUrls, videoUrls, receiptUrls, receiptDetails,
+      laborHours, laborRate, laborFixedAmount, useHourlyLabor, laborAmount,
+      taxRate: baseTaxRate,
+      taxAmount,
+      isTaxExempt,
+      taxLabor,
+      updated_at: new Date().toISOString(),
+    });
+    setAmountPaid(nextPaid);
+    setPaymentMethod('Venmo');
+    setPaymentStatus(fullyPaid ? 'paid' : 'pending');
+    setIsVenmoPayOpen(false);
+    showMessage(
+      fullyPaid
+        ? '✅ Venmo payment recorded — document marked paid.'
+        : `✅ Venmo deposit of $${payAmt.toFixed(2)} recorded. Keep the invoice # in the Venmo note.`
+    );
+    await refreshSavedList();
   };
 
   const renderVenmoPayButton = (
@@ -3856,7 +3916,7 @@ export default function Home() {
     return (
       <Button
         type="button"
-        onClick={() => startVenmoPayment(amount, label)}
+        onClick={() => openVenmoPayment(amount, label)}
         className={
           options?.className ||
           (isLarge
@@ -3869,7 +3929,7 @@ export default function Home() {
           <span>
             Pay ${amount.toFixed(2)} with Venmo
             <span className={`block font-normal opacity-90 ${isLarge ? 'text-sm' : 'text-xs'}`}>
-              @{handle}
+              @{handle} · invoice note included
             </span>
           </span>
         </span>
@@ -3985,6 +4045,7 @@ export default function Home() {
   };
 
   const updateVenmoUsername = (value: string) => {
+    const handle = cleanVenmoHandle(value);
     const nextProfile = {
       ...profile,
       paymentSettings: {
@@ -3992,12 +4053,16 @@ export default function Home() {
         venmo: {
           ...mergePaymentSettings(profile.paymentSettings).venmo,
           enabled: mergePaymentSettings(profile.paymentSettings).venmo?.enabled ?? true,
-          handle: value,
+          handle,
+          connected: hasVenmoHandle(handle),
         },
       },
     };
     setProfile(nextProfile);
     void saveProfileSettings(nextProfile);
+    if (handle) {
+      showMessage(`✅ Venmo username saved as @${handle}`);
+    }
   };
 
   const updateZelleSettings = (patch: { handle?: string; qrUrl?: string; enabled?: boolean }) => {
@@ -4152,6 +4217,7 @@ export default function Home() {
       setAmountPaid(grandTotal);
       setPaymentMethod(methodLabel);
       setIsZellePayOpen(false);
+      setIsVenmoPayOpen(false);
       setView('invoicesList');
       await refreshSavedList();
       await refreshArchivesList();
@@ -4302,6 +4368,8 @@ export default function Home() {
     }
 
     if (method === 'venmo') {
+      const venmoHandle = cleanVenmoHandle(settings.handle || '');
+      const venmoReady = hasVenmoHandle(venmoHandle);
       return (
         <div
           key={method}
@@ -4312,7 +4380,16 @@ export default function Home() {
               <div className="text-3xl sm:text-4xl shrink-0">{meta.icon}</div>
               <div className="min-w-0 flex-1">
                 <div className="font-semibold text-base sm:text-lg break-words">{meta.label}</div>
-                <div className="text-sm text-gray-500 break-words">{meta.description}</div>
+                <div className="text-sm text-gray-500 break-words">
+                  Clients pay your @username with an invoice note so you can track and mark paid
+                </div>
+                <div className="text-sm text-gray-500 mt-1">
+                  {venmoReady ? (
+                    <><span className="text-green-500">✓</span> Ready — clients pay <span className="font-semibold text-[#008cff]">@{venmoHandle}</span></>
+                  ) : (
+                    'Add your Venmo username below (you can edit it anytime)'
+                  )}
+                </div>
               </div>
             </div>
             <label className="relative inline-flex items-center cursor-pointer shrink-0 self-end sm:self-center">
@@ -4325,33 +4402,53 @@ export default function Home() {
               <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]"></div>
             </label>
           </div>
-          <div className="mt-4 w-full min-w-0 sm:pl-12">
-            <label className="block text-sm font-medium text-gray-700 mb-2">{t('venmoUsername')}</label>
+          <div className="mt-4 w-full min-w-0 space-y-3 sm:pl-12">
+            <label className="block text-sm font-medium text-gray-700">
+              Venmo username (editable)
+            </label>
             <div className="flex items-center gap-2 w-full min-w-0 max-w-full">
-              <span className="text-lg text-gray-500 shrink-0">@</span>
+              <span className="text-lg font-semibold text-[#008cff] shrink-0 select-none">@</span>
               <Input
                 value={settings.handle || ''}
                 onChange={(e) => {
-                  const handle = e.target.value;
+                  // Allow free typing; strip invalid chars but keep editable
+                  const raw = e.target.value.replace(/^@+/, '');
                   setProfile((prev) => ({
                     ...prev,
                     paymentSettings: {
                       ...mergePaymentSettings(prev.paymentSettings),
                       venmo: {
                         ...mergePaymentSettings(prev.paymentSettings).venmo,
-                        handle,
+                        handle: raw,
+                        connected: hasVenmoHandle(raw),
                       },
                     },
                   }));
                 }}
                 onBlur={(e) => updateVenmoUsername(e.target.value)}
-                placeholder={t('venmoUsernamePlaceholder')}
+                placeholder="YourBusiness"
                 autoComplete="off"
                 spellCheck={false}
                 className="min-w-0 flex-1 w-full max-w-full"
               />
+              <Button
+                type="button"
+                size="sm"
+                className="shrink-0 bg-[#008cff] hover:bg-[#0070cc] text-white"
+                onClick={() => updateVenmoUsername(settings.handle || '')}
+              >
+                Save
+              </Button>
             </div>
-            <p className="text-xs text-gray-500 mt-2 break-words">{t('venmoUsernameHelp')}</p>
+            <div className="rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-950">
+              <span className="font-medium">Clients will pay:</span>{' '}
+              <span className="font-bold text-[#008cff]">
+                @{venmoHandle || 'YourBusiness'}
+              </span>
+              <p className="text-xs text-blue-900/80 mt-1">
+                Type only the username — the @ is added automatically. Payment notes include the invoice # so you can match and mark paid (Venmo has no auto-notify API).
+              </p>
+            </div>
           </div>
         </div>
       );
@@ -5727,6 +5824,23 @@ export default function Home() {
                 <div className="flex flex-wrap gap-3 mb-8">
                   <Button onClick={printDocument} className="bg-[#3b82f6]">{t('printPreview')}</Button>
                   <Button onClick={markAsPaidCash} className="bg-green-600">Paid Cash</Button>
+                  {isVenmoPaymentReady() && (
+                    <Button
+                      onClick={() => openVenmoPayment(Math.max(0, grandTotal - (Number(amountPaid) || 0)), 'invoice')}
+                      className="bg-[#008cff] hover:bg-[#0070cc]"
+                    >
+                      Pay / Confirm Venmo
+                    </Button>
+                  )}
+                  {isVenmoPaymentReady() && paymentStatus !== 'paid' && (
+                    <Button
+                      variant="outline"
+                      className="border-blue-300 text-blue-800"
+                      onClick={() => void markInvoicePaid('Venmo')}
+                    >
+                      Mark Paid (Venmo received)
+                    </Button>
+                  )}
                   {isZellePaymentReady() && (
                     <Button
                       onClick={() => openZellePayment(Math.max(0, grandTotal - (Number(amountPaid) || 0)), 'invoice')}
@@ -7831,16 +7945,18 @@ export default function Home() {
                       type="button"
                       onClick={() => {
                         closePaymentModal();
-                        startVenmoPayment(paymentAmount, paymentType);
+                        openVenmoPayment(paymentAmount, paymentType === 'deposit' ? 'deposit' : 'balance');
                       }}
                       className="w-full flex items-center gap-4 p-4 border-2 rounded-2xl border-[#008cff] bg-blue-50 hover:bg-blue-100 transition-all"
                     >
                       <span className="text-3xl flex-shrink-0">{meta.icon}</span>
-                      <div className="flex-1 text-left">
+                      <div className="flex-1 text-left min-w-0">
                         <div className="font-semibold text-[#005fa3]">{meta.label}</div>
-                        <div className="text-xs text-gray-600">Tap to open Venmo and pay @{venmoHandle}</div>
+                        <div className="text-xs text-gray-600 break-words">
+                          Pay @{venmoHandle} · invoice note auto-filled for tracking
+                        </div>
                       </div>
-                      <span className="text-xs font-semibold text-[#008cff]">Open app →</span>
+                      <span className="text-xs font-semibold text-[#008cff] shrink-0">Pay →</span>
                     </button>
                   );
                 }
@@ -7899,6 +8015,84 @@ export default function Home() {
               {selectedPaymentMethod === 'venmo' || selectedPaymentMethod === 'zelle'
                 ? 'Tap method above'
                 : 'Continue to Pay'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Venmo pay — @username + tracking note + mark paid */}
+      <Dialog open={isVenmoPayOpen} onOpenChange={setIsVenmoPayOpen}>
+        <DialogContent className="max-w-md max-h-[90dvh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Pay with Venmo</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="text-center">
+              <div className="text-4xl font-bold text-[#008cff]">
+                ${venmoPayAmount.toFixed(2)}
+              </div>
+              <p className="text-sm text-gray-500 mt-1">
+                {venmoPayLabel === 'deposit' ? 'Deposit' : venmoPayLabel === 'balance' ? 'Balance' : 'Invoice total'}
+                {' · '}{invoiceNumber}
+              </p>
+            </div>
+
+            <div className="rounded-xl border bg-blue-50 p-4 text-center">
+              <div className="text-xs uppercase tracking-wide text-[#005fa3] font-semibold">Pay this Venmo</div>
+              <div className="text-2xl font-bold text-[#008cff] break-all mt-1">
+                @{cleanVenmoHandle(getVenmoSettings()?.handle || '')}
+              </div>
+              <p className="text-xs text-gray-600 mt-2">
+                Username is set by the contractor in Profile → Payments and can be edited anytime.
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+              <p className="font-semibold mb-1">Payment note (for tracking)</p>
+              <p>
+                This note is filled into Venmo so the contractor can match the payment to this invoice:
+              </p>
+              <p className="mt-2 font-mono text-sm font-bold break-all bg-white/80 rounded-lg px-2 py-1.5 border">
+                {getVenmoTrackingNote(venmoPayLabel)}
+              </p>
+              <button
+                type="button"
+                className="mt-2 text-xs font-semibold text-[#008cff] underline"
+                onClick={async () => {
+                  const note = getVenmoTrackingNote(venmoPayLabel);
+                  try {
+                    await navigator.clipboard.writeText(note);
+                    showMessage('Note copied — it is also passed into the Venmo link.');
+                  } catch {
+                    showMessage(`Note: ${note}`);
+                  }
+                }}
+              >
+                Copy note
+              </button>
+            </div>
+
+            <Button
+              type="button"
+              className="w-full bg-[#008cff] hover:bg-[#0070cc] text-white font-semibold py-6 text-base"
+              onClick={() => launchVenmoAppWithNote(venmoPayAmount, venmoPayLabel)}
+            >
+              Open Venmo to pay ${venmoPayAmount.toFixed(2)}
+            </Button>
+
+            <p className="text-xs text-gray-500 text-center">
+              Venmo does not notify EstimateAce automatically. After you send payment in Venmo, tap below to mark this invoice paid.
+            </p>
+          </div>
+          <DialogFooter className="flex flex-col sm:flex-row gap-2">
+            <Button variant="outline" onClick={() => setIsVenmoPayOpen(false)} className="flex-1">
+              Close
+            </Button>
+            <Button
+              className="flex-1 bg-[#008cff] hover:bg-[#0070cc]"
+              onClick={() => void confirmClientVenmoPayment()}
+            >
+              I paid with Venmo — mark paid
             </Button>
           </DialogFooter>
         </DialogContent>

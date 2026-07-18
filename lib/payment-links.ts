@@ -7,9 +7,20 @@ export type PaymentMethodSettings = {
   qrUrl?: string;
 };
 
-export const cleanVenmoHandle = (value: string): string => value.trim().replace(/^@+/, '').trim();
+/** Strip @ and spaces from a Venmo username (clients always see @handle). */
+export const cleanVenmoHandle = (value: string): string =>
+  value
+    .trim()
+    .replace(/^@+/g, '')
+    .replace(/\s+/g, '')
+    .replace(/[^a-zA-Z0-9_-]/g, '');
 
 export const hasVenmoHandle = (value?: string): boolean => cleanVenmoHandle(value || '').length > 0;
+
+export const hasVenmoSetup = (settings?: PaymentMethodSettings | null): boolean => {
+  if (!settings?.enabled) return false;
+  return hasVenmoHandle(settings.handle);
+};
 
 export const cleanZelleHandle = (value: string): string => value.trim();
 
@@ -20,12 +31,29 @@ export const hasZelleSetup = (settings?: PaymentMethodSettings | null): boolean 
   return hasZelleHandle(settings.handle) || !!String(settings.qrUrl || '').trim();
 };
 
-/** Memo/note for clients to include so the contractor can match the payment. */
-export const buildZellePaymentMemo = (invoiceNumber: string, label: string, company?: string): string => {
-  const parts = [company, invoiceNumber, label].map((p) => String(p || '').trim()).filter(Boolean);
-  return parts.join(' · ').slice(0, 140);
+/**
+ * Shared payment note / memo so the contractor can match client payments
+ * to a specific estimate or invoice (Venmo note or Zelle memo).
+ * Venmo notes support up to ~280 characters.
+ */
+export const buildPaymentTrackingNote = (
+  invoiceNumber: string,
+  label: string,
+  company?: string
+): string => {
+  const parts = [company, invoiceNumber, label]
+    .map((p) => String(p || '').trim())
+    .filter(Boolean);
+  return parts.join(' · ').slice(0, 200);
 };
 
+/** @deprecated use buildPaymentTrackingNote */
+export const buildZellePaymentMemo = buildPaymentTrackingNote;
+
+/**
+ * Official-style Venmo web pay link:
+ * https://venmo.com/{username}?txn=pay&amount=10.00&note=Invoice+123
+ */
 export const buildVenmoPayUrl = (handle: string, amount: number, note: string): string => {
   const cleaned = cleanVenmoHandle(handle);
   if (!cleaned) return '';
@@ -39,6 +67,7 @@ export const buildVenmoPayUrl = (handle: string, amount: number, note: string): 
   return `https://venmo.com/${encodeURIComponent(cleaned)}?${params.toString()}`;
 };
 
+/** Deep link for the Venmo mobile app */
 export const buildVenmoAppUrl = (handle: string, amount: number, note: string): string => {
   const cleaned = cleanVenmoHandle(handle);
   if (!cleaned) return '';
@@ -53,7 +82,17 @@ export const buildVenmoAppUrl = (handle: string, amount: number, note: string): 
   return `venmo://paycharge?${params.toString()}`;
 };
 
-export const openVenmoPaymentPage = (handle: string, amount: number, note: string): boolean => {
+/**
+ * Open Venmo with amount + tracking note pre-filled.
+ * Mobile: try app deep link, fall back to web.
+ * Desktop: open web pay link in a new tab.
+ */
+export const openVenmoPaymentPage = (
+  handle: string,
+  amount: number,
+  note: string,
+  options?: { newTab?: boolean }
+): boolean => {
   const cleaned = cleanVenmoHandle(handle);
   if (!cleaned) return false;
 
@@ -65,10 +104,16 @@ export const openVenmoPaymentPage = (handle: string, amount: number, note: strin
     typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
   if (isMobile && appUrl) {
+    // Prefer native app; fall back to web if the app isn't installed
     window.location.href = appUrl;
     window.setTimeout(() => {
       window.location.href = webUrl;
     }, 900);
+    return true;
+  }
+
+  if (options?.newTab !== false && typeof window !== 'undefined') {
+    window.open(webUrl, '_blank', 'noopener,noreferrer');
     return true;
   }
 
