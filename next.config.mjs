@@ -20,17 +20,17 @@ const nextConfig = {
     // Strong security headers + Content Security Policy (tightened for production)
     const cspHeader = `
       default-src 'self';
-      script-src 'self' 'unsafe-eval' 'unsafe-inline' https://*.supabase.co;
-      style-src 'self' 'unsafe-inline';
-      img-src 'self' blob: data: https://*.supabase.co https://*.supabase.in;
-      font-src 'self';
-      connect-src 'self' https://*.supabase.co https://*.supabase.in https://libretranslate.com https://api.x.ai wss://*.supabase.co;
+      script-src 'self' 'unsafe-eval' 'unsafe-inline' https://*.supabase.co https://www.paypal.com https://www.sandbox.paypal.com;
+      style-src 'self' 'unsafe-inline' https://www.paypal.com https://www.sandbox.paypal.com;
+      img-src 'self' blob: data: https://*.supabase.co https://*.supabase.in https://www.paypal.com https://www.sandbox.paypal.com https://*.paypalobjects.com;
+      font-src 'self' data:;
+      connect-src 'self' https://*.supabase.co https://*.supabase.in https://libretranslate.com https://api.x.ai wss://*.supabase.co https://www.paypal.com https://www.sandbox.paypal.com https://*.paypal.com;
       media-src 'self' blob: https://*.supabase.co;
       object-src 'none';
-      frame-src 'none';
+      frame-src 'self' https://www.paypal.com https://www.sandbox.paypal.com https://*.paypal.com;
       frame-ancestors 'none';
       base-uri 'self';
-      form-action 'self';
+      form-action 'self' https://www.paypal.com https://www.sandbox.paypal.com;
       worker-src 'self' blob:;
       upgrade-insecure-requests;
     `.replace(/\s{2,}/g, ' ').trim();
