@@ -15,13 +15,19 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { getLineItemUnitOptions, LINE_ITEM_UNITS } from '@/lib/quote-units';
 import {
   buildPaymentTrackingNote,
+  buildPayPalPayUrl,
   buildZellePaymentMemo,
+  cleanPayPalHandle,
   cleanVenmoHandle,
   cleanZelleHandle,
+  hasPayPalHandle,
+  hasPayPalSetup,
   hasVenmoHandle,
   hasVenmoSetup,
   hasZelleHandle,
   hasZelleSetup,
+  isPayPalEmail,
+  openPayPalPaymentPage,
   openVenmoPaymentPage,
   type PaymentMethodSettings,
 } from '@/lib/payment-links';
@@ -49,7 +55,7 @@ const getPaymentMethodMeta = (method: string) => {
   const meta: Record<string, { icon: string; label: string; description: string; category: 'traditional' | 'crypto' }> = {
     stripe: { icon: '💳', label: 'Stripe', description: 'Cards, Apple Pay, Google Pay', category: 'traditional' },
     echeck: { icon: '🏦', label: 'eCheck / ACH', description: 'Bank account (ACH)', category: 'traditional' },
-    paypal: { icon: '💰', label: 'PayPal', description: 'PayPal balance or card', category: 'traditional' },
+    paypal: { icon: '💰', label: 'PayPal', description: 'PayPal.Me link or business email — accept real payments', category: 'traditional' },
     venmo: { icon: '📱', label: 'Venmo', description: 'Mobile app payment', category: 'traditional' },
     zelle: { icon: '🏦', label: 'Zelle', description: 'QR code or unique name/email/phone for client payments', category: 'traditional' },
     nowpayments: { icon: '₿', label: 'NOWPayments', description: 'Bitcoin, Ethereum, and 300+ cryptocurrencies', category: 'crypto' },
@@ -64,8 +70,11 @@ const mergePaymentSettings = (settings?: Record<string, PaymentMethodSettings>) 
     const saved = settings?.[key];
     merged[key] = {
       enabled: saved?.enabled ?? defaults.enabled,
-      // Venmo/Zelle use handle/QR setup instead of fake "connected" from external links
-      connected: key === 'venmo' || key === 'zelle' ? false : (saved?.connected ?? defaults.connected),
+      // Venmo/Zelle/PayPal use handle setup instead of fake "connected" from external links
+      connected:
+        key === 'venmo' || key === 'zelle' || key === 'paypal'
+          ? false
+          : (saved?.connected ?? defaults.connected),
       handle: saved?.handle,
       qrUrl: saved?.qrUrl,
     };
@@ -607,6 +616,9 @@ export default function Home() {
   const [isVenmoPayOpen, setIsVenmoPayOpen] = useState(false);
   const [venmoPayAmount, setVenmoPayAmount] = useState(0);
   const [venmoPayLabel, setVenmoPayLabel] = useState<'deposit' | 'balance' | 'invoice'>('invoice');
+  const [isPayPalPayOpen, setIsPayPalPayOpen] = useState(false);
+  const [paypalPayAmount, setPaypalPayAmount] = useState(0);
+  const [paypalPayLabel, setPaypalPayLabel] = useState<'deposit' | 'balance' | 'invoice'>('invoice');
   const [receiptDetails, setReceiptDetails] = useState<any[]>([]);
 
   // For Grok AI description improvement loading state (per item)
@@ -3822,10 +3834,13 @@ export default function Home() {
 
   const getVenmoSettings = () => mergePaymentSettings(profile.paymentSettings).venmo;
   const getZelleSettings = () => mergePaymentSettings(profile.paymentSettings).zelle;
+  const getPayPalSettings = () => mergePaymentSettings(profile.paymentSettings).paypal;
 
   const isVenmoPaymentReady = () => hasVenmoSetup(getVenmoSettings());
 
   const isZellePaymentReady = () => hasZelleSetup(getZelleSettings());
+
+  const isPayPalPaymentReady = () => hasPayPalSetup(getPayPalSettings());
 
   const getVenmoTrackingNote = (label: string) =>
     buildPaymentTrackingNote(invoiceNumber, label, profile.company || 'EstimateAce');
@@ -3864,6 +3879,104 @@ export default function Home() {
 
   /** @deprecated use openVenmoPayment */
   const startVenmoPayment = (amount: number, label: string) => openVenmoPayment(amount, label);
+
+  const getPayPalTrackingNote = (label: string) =>
+    buildPaymentTrackingNote(invoiceNumber, label, profile.company || 'EstimateAce');
+
+  const openPayPalPayment = (amount: number, label: 'deposit' | 'balance' | 'invoice' | string = 'invoice') => {
+    if (!isPayPalPaymentReady()) {
+      showMessage('Add your PayPal.Me username or PayPal email in Profile → Payments.');
+      return false;
+    }
+    setPaypalPayAmount(amount);
+    setPaypalPayLabel(
+      label === 'deposit' || label === 'balance' || label === 'invoice' ? label : 'invoice'
+    );
+    setIsPayPalPayOpen(true);
+    return true;
+  };
+
+  const launchPayPalCheckout = (amount: number, label: string) => {
+    const handle = cleanPayPalHandle(getPayPalSettings()?.handle || '');
+    if (!handle) {
+      showMessage('Add your PayPal.Me username or business email in Profile → Payments.');
+      return false;
+    }
+    const note = getPayPalTrackingNote(label);
+    const opened = openPayPalPaymentPage(handle, amount, note, { newTab: true, currency: 'USD' });
+    if (!opened) {
+      showMessage('Could not open PayPal. Check your PayPal username/email in Profile → Payments.');
+      return false;
+    }
+    showMessage(
+      `Opening PayPal to pay $${amount.toFixed(2)}. Complete checkout, then tap “I paid with PayPal — mark paid”.`
+    );
+    return true;
+  };
+
+  const confirmClientPayPalPayment = async () => {
+    if (documentType === 'invoice') {
+      await markInvoicePaid('PayPal');
+      setIsPayPalPayOpen(false);
+      return;
+    }
+    if (!user || !supabase) return;
+    const payAmt = paypalPayAmount > 0 ? paypalPayAmount : getDepositDueAmount();
+    const nextPaid = Math.min(grandTotal, Math.max(0, Number(amountPaid) || 0) + payAmt);
+    const fullyPaid = nextPaid >= grandTotal - 0.009;
+    await supabase.from('estimates').upsert({
+      id: invoiceNumber,
+      user_id: user.id,
+      jobName, address, city, state, zipCode, phones, emails, date, invoiceNumber,
+      items, terms, profile: getDocumentProfileSnapshot(),
+      documentType, dueDate,
+      paymentStatus: fullyPaid ? 'paid' : 'pending',
+      amountPaid: nextPaid,
+      paymentMethod: 'PayPal',
+      photoUrls, videoUrls, receiptUrls, receiptDetails,
+      laborHours, laborRate, laborFixedAmount, useHourlyLabor, laborAmount,
+      taxRate: baseTaxRate,
+      taxAmount,
+      isTaxExempt,
+      taxLabor,
+      updated_at: new Date().toISOString(),
+    });
+    setAmountPaid(nextPaid);
+    setPaymentMethod('PayPal');
+    setPaymentStatus(fullyPaid ? 'paid' : 'pending');
+    setIsPayPalPayOpen(false);
+    showMessage(
+      fullyPaid
+        ? '✅ PayPal payment recorded — document marked paid.'
+        : `✅ PayPal deposit of $${payAmt.toFixed(2)} recorded.`
+    );
+    await refreshSavedList();
+  };
+
+  const updatePayPalHandle = (value: string) => {
+    const handle = cleanPayPalHandle(value);
+    const nextProfile = {
+      ...profile,
+      paymentSettings: {
+        ...mergePaymentSettings(profile.paymentSettings),
+        paypal: {
+          ...mergePaymentSettings(profile.paymentSettings).paypal,
+          enabled: mergePaymentSettings(profile.paymentSettings).paypal?.enabled ?? true,
+          handle,
+          connected: hasPayPalHandle(handle),
+        },
+      },
+    };
+    setProfile(nextProfile);
+    void saveProfileSettings(nextProfile);
+    if (handle) {
+      showMessage(
+        isPayPalEmail(handle)
+          ? `✅ PayPal business email saved: ${handle}`
+          : `✅ PayPal.Me link saved: paypal.me/${handle}`
+      );
+    }
+  };
 
   const confirmClientVenmoPayment = async () => {
     if (documentType === 'invoice') {
@@ -3990,6 +4103,18 @@ export default function Home() {
                     </span>
                   </Button>
                 )}
+                {isPayPalPaymentReady() && (
+                  <Button
+                    type="button"
+                    onClick={() => openPayPalPayment(depositDue, 'deposit')}
+                    className="flex-1 text-xl py-6 bg-[#0070ba] hover:bg-[#005ea6] text-white font-semibold rounded-2xl shadow-lg"
+                  >
+                    <span className="inline-flex flex-col items-center">
+                      <span>💰 Pay ${depositDue.toFixed(2)} with PayPal</span>
+                      <span className="text-sm font-normal opacity-90">Opens real PayPal checkout</span>
+                    </span>
+                  </Button>
+                )}
               </div>
             )}
             {shouldShowEscrowOnEstimate() && (
@@ -4037,10 +4162,16 @@ export default function Home() {
       return;
     }
 
+    if (selectedPaymentMethod === 'paypal') {
+      closePaymentModal();
+      openPayPalPayment(paymentAmount, paymentType === 'deposit' ? 'deposit' : 'balance');
+      return;
+    }
+
     closePaymentModal();
     const meta = getPaymentMethodMeta(selectedPaymentMethod);
     showMessage(
-      `${meta.label} is not connected for automatic checkout. Use Venmo, Zelle, or pay ${profile.company || 'the contractor'} directly.`
+      `${meta.label} is not connected for automatic checkout. Use Venmo, Zelle, PayPal, or pay ${profile.company || 'the contractor'} directly.`
     );
   };
 
@@ -4218,6 +4349,7 @@ export default function Home() {
       setPaymentMethod(methodLabel);
       setIsZellePayOpen(false);
       setIsVenmoPayOpen(false);
+      setIsPayPalPayOpen(false);
       setView('invoicesList');
       await refreshSavedList();
       await refreshArchivesList();
@@ -4226,6 +4358,8 @@ export default function Home() {
       showMessage('Failed to mark invoice paid.');
     }
   };
+
+  // Keep payment dialogs closed together when marking paid from any method
 
   const confirmClientZellePayment = async () => {
     // Client (or contractor) confirms Zelle was sent — marks invoice/estimate paid
@@ -4367,6 +4501,111 @@ export default function Home() {
       );
     }
 
+    if (method === 'paypal') {
+      const paypalHandle = cleanPayPalHandle(settings.handle || '');
+      const paypalReady = hasPayPalHandle(paypalHandle);
+      const asEmail = isPayPalEmail(paypalHandle);
+      return (
+        <div
+          key={method}
+          className="border rounded-2xl p-4 sm:p-6 hover:shadow-sm transition-all w-full max-w-full min-w-0 overflow-hidden box-border"
+        >
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 min-w-0">
+            <div className="flex items-start sm:items-center gap-3 min-w-0 flex-1">
+              <div className="text-3xl sm:text-4xl shrink-0">{meta.icon}</div>
+              <div className="min-w-0 flex-1">
+                <div className="font-semibold text-base sm:text-lg break-words">{meta.label}</div>
+                <div className="text-sm text-gray-500 break-words">
+                  Accept real payments via PayPal.Me or business email (not just a link to PayPal.com)
+                </div>
+                <div className="text-sm text-gray-500 mt-1">
+                  {paypalReady ? (
+                    <><span className="text-green-500">✓</span> Ready — clients pay through PayPal checkout</>
+                  ) : (
+                    'Add your PayPal.Me username or PayPal email below'
+                  )}
+                </div>
+              </div>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer shrink-0 self-end sm:self-center">
+              <input
+                type="checkbox"
+                checked={!!settings.enabled}
+                onChange={(e) => togglePaymentMethod(method, e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]"></div>
+            </label>
+          </div>
+          <div className="mt-4 w-full min-w-0 space-y-3 sm:pl-12">
+            <label className="block text-sm font-medium text-gray-700">
+              PayPal.Me username or PayPal email
+            </label>
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full min-w-0">
+              <Input
+                value={settings.handle || ''}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  setProfile((prev) => ({
+                    ...prev,
+                    paymentSettings: {
+                      ...mergePaymentSettings(prev.paymentSettings),
+                      paypal: {
+                        ...mergePaymentSettings(prev.paymentSettings).paypal,
+                        handle: raw,
+                        connected: hasPayPalHandle(raw),
+                      },
+                    },
+                  }));
+                }}
+                onBlur={(e) => updatePayPalHandle(e.target.value)}
+                placeholder="YourBusiness or you@business.com"
+                autoComplete="off"
+                spellCheck={false}
+                className="min-w-0 flex-1 w-full max-w-full"
+              />
+              <Button
+                type="button"
+                size="sm"
+                className="shrink-0 bg-[#0070ba] hover:bg-[#005ea6] text-white"
+                onClick={() => updatePayPalHandle(settings.handle || '')}
+              >
+                Save
+              </Button>
+            </div>
+            <div className="rounded-xl border border-sky-100 bg-sky-50 px-3 py-2 text-sm text-sky-950">
+              {paypalReady ? (
+                asEmail ? (
+                  <>
+                    <span className="font-medium">Clients check out to:</span>{' '}
+                    <span className="font-bold break-all">{paypalHandle}</span>
+                    <p className="text-xs mt-1 text-sky-900/80">
+                      Uses PayPal payment form with amount + invoice note (item name) for tracking.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <span className="font-medium">PayPal.Me link:</span>{' '}
+                    <span className="font-bold break-all text-[#0070ba]">
+                      paypal.me/{paypalHandle}
+                    </span>
+                    <p className="text-xs mt-1 text-sky-900/80">
+                      Clients open a real pay page with the invoice amount filled in (e.g. paypal.me/{paypalHandle}/125.00USD).
+                    </p>
+                  </>
+                )
+              ) : (
+                <p className="text-xs">
+                  Create a free PayPal.Me at paypal.me, then paste your username (not the full website home page).
+                  Or enter the email on your PayPal business account.
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     if (method === 'venmo') {
       const venmoHandle = cleanVenmoHandle(settings.handle || '');
       const venmoReady = hasVenmoHandle(venmoHandle);
@@ -4485,7 +4724,7 @@ export default function Home() {
             />
             <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]"></div>
           </label>
-          {method !== 'venmo' && method !== 'zelle' && (
+          {method !== 'venmo' && method !== 'zelle' && method !== 'paypal' && (
             <Button
               onClick={() => linkPaymentAccount(method)}
               variant={connected ? 'outline' : 'default'}
@@ -4514,13 +4753,12 @@ export default function Home() {
   };
 
   const linkPaymentAccount = (method: string) => {
-    if (method === 'venmo' || method === 'zelle') return;
+    if (method === 'venmo' || method === 'zelle' || method === 'paypal') return;
 
     const meta = getPaymentMethodMeta(method);
     const providerUrls: { [key: string]: string } = {
       stripe: 'https://dashboard.stripe.com/connect',
       echeck: 'https://dashboard.stripe.com/connect',
-      paypal: 'https://www.paypal.com/businessmanage/credentials',
       nowpayments: 'https://account.nowpayments.io/create-account',
       coinbase_commerce: 'https://commerce.coinbase.com/signup',
     };
@@ -5856,6 +6094,23 @@ export default function Home() {
                       onClick={() => void markInvoicePaid('Zelle')}
                     >
                       Mark Paid (Zelle received)
+                    </Button>
+                  )}
+                  {isPayPalPaymentReady() && (
+                    <Button
+                      onClick={() => openPayPalPayment(Math.max(0, grandTotal - (Number(amountPaid) || 0)), 'invoice')}
+                      className="bg-[#0070ba] hover:bg-[#005ea6]"
+                    >
+                      Pay / Confirm PayPal
+                    </Button>
+                  )}
+                  {isPayPalPaymentReady() && paymentStatus !== 'paid' && (
+                    <Button
+                      variant="outline"
+                      className="border-sky-300 text-sky-900"
+                      onClick={() => void markInvoicePaid('PayPal')}
+                    >
+                      Mark Paid (PayPal received)
                     </Button>
                   )}
                 </div>
@@ -7934,9 +8189,11 @@ export default function Home() {
                 if (!settings.enabled) return null;
                 if (method === 'venmo' && !hasVenmoHandle(settings.handle)) return null;
                 if (method === 'zelle' && !hasZelleSetup(settings)) return null;
+                if (method === 'paypal' && !hasPayPalSetup(settings)) return null;
                 const meta = getPaymentMethodMeta(method);
                 const venmoHandle = method === 'venmo' ? cleanVenmoHandle(settings.handle || '') : '';
                 const zelleHandle = method === 'zelle' ? cleanZelleHandle(settings.handle || '') : '';
+                const paypalHandle = method === 'paypal' ? cleanPayPalHandle(settings.handle || '') : '';
 
                 if (method === 'venmo') {
                   return (
@@ -7986,6 +8243,31 @@ export default function Home() {
                   );
                 }
 
+                if (method === 'paypal') {
+                  return (
+                    <button
+                      key={method}
+                      type="button"
+                      onClick={() => {
+                        closePaymentModal();
+                        openPayPalPayment(paymentAmount, paymentType === 'deposit' ? 'deposit' : 'balance');
+                      }}
+                      className="w-full flex items-center gap-4 p-4 border-2 rounded-2xl border-[#0070ba] bg-sky-50 hover:bg-sky-100 transition-all"
+                    >
+                      <span className="text-3xl flex-shrink-0">{meta.icon}</span>
+                      <div className="flex-1 text-left min-w-0">
+                        <div className="font-semibold text-[#003087]">{meta.label}</div>
+                        <div className="text-xs text-gray-600 break-words">
+                          {isPayPalEmail(paypalHandle)
+                            ? `Pay ${paypalHandle} · amount + invoice note`
+                            : `paypal.me/${paypalHandle} · amount pre-filled`}
+                        </div>
+                      </div>
+                      <span className="text-xs font-semibold text-[#0070ba] shrink-0">Pay →</span>
+                    </button>
+                  );
+                }
+
                 return (
                   <button
                     key={method}
@@ -8009,10 +8291,17 @@ export default function Home() {
             </Button>
             <Button
               onClick={proceedWithPayment}
-              disabled={!selectedPaymentMethod || selectedPaymentMethod === 'venmo' || selectedPaymentMethod === 'zelle'}
+              disabled={
+                !selectedPaymentMethod ||
+                selectedPaymentMethod === 'venmo' ||
+                selectedPaymentMethod === 'zelle' ||
+                selectedPaymentMethod === 'paypal'
+              }
               className="flex-1 bg-[#10b981]"
             >
-              {selectedPaymentMethod === 'venmo' || selectedPaymentMethod === 'zelle'
+              {selectedPaymentMethod === 'venmo' ||
+              selectedPaymentMethod === 'zelle' ||
+              selectedPaymentMethod === 'paypal'
                 ? 'Tap method above'
                 : 'Continue to Pay'}
             </Button>
@@ -8093,6 +8382,79 @@ export default function Home() {
               onClick={() => void confirmClientVenmoPayment()}
             >
               I paid with Venmo — mark paid
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* PayPal real checkout — PayPal.Me amount link or business email pay */}
+      <Dialog open={isPayPalPayOpen} onOpenChange={setIsPayPalPayOpen}>
+        <DialogContent className="max-w-md max-h-[90dvh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Pay with PayPal</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="text-center">
+              <div className="text-4xl font-bold text-[#0070ba]">
+                ${paypalPayAmount.toFixed(2)}
+              </div>
+              <p className="text-sm text-gray-500 mt-1">
+                {paypalPayLabel === 'deposit' ? 'Deposit' : paypalPayLabel === 'balance' ? 'Balance' : 'Invoice total'}
+                {' · '}{invoiceNumber}
+              </p>
+            </div>
+
+            <div className="rounded-xl border bg-sky-50 p-4 text-center">
+              <div className="text-xs uppercase tracking-wide text-[#003087] font-semibold">
+                {isPayPalEmail(getPayPalSettings()?.handle || '')
+                  ? 'PayPal checkout email'
+                  : 'PayPal.Me'}
+              </div>
+              <div className="text-lg font-bold text-[#0070ba] break-all mt-1">
+                {isPayPalEmail(getPayPalSettings()?.handle || '')
+                  ? cleanPayPalHandle(getPayPalSettings()?.handle || '')
+                  : `paypal.me/${cleanPayPalHandle(getPayPalSettings()?.handle || '')}`}
+              </div>
+              <p className="text-xs text-gray-600 mt-2 break-all">
+                {buildPayPalPayUrl(
+                  getPayPalSettings()?.handle || '',
+                  paypalPayAmount,
+                  getPayPalTrackingNote(paypalPayLabel)
+                )}
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+              <p className="font-semibold mb-1">Tracking note / item name</p>
+              <p className="font-mono text-sm font-bold break-all bg-white/80 rounded-lg px-2 py-1.5 border mt-1">
+                {getPayPalTrackingNote(paypalPayLabel)}
+              </p>
+              <p className="text-xs mt-2">
+                Included on the PayPal payment page so you can match the payment to this invoice.
+              </p>
+            </div>
+
+            <Button
+              type="button"
+              className="w-full bg-[#0070ba] hover:bg-[#005ea6] text-white font-semibold py-6 text-base"
+              onClick={() => launchPayPalCheckout(paypalPayAmount, paypalPayLabel)}
+            >
+              Open PayPal to pay ${paypalPayAmount.toFixed(2)}
+            </Button>
+
+            <p className="text-xs text-gray-500 text-center">
+              This opens a real PayPal payment page for the amount due — not just paypal.com. After you finish paying, tap below to mark this invoice paid (PayPal does not auto-notify this app).
+            </p>
+          </div>
+          <DialogFooter className="flex flex-col sm:flex-row gap-2">
+            <Button variant="outline" onClick={() => setIsPayPalPayOpen(false)} className="flex-1">
+              Close
+            </Button>
+            <Button
+              className="flex-1 bg-[#0070ba] hover:bg-[#005ea6]"
+              onClick={() => void confirmClientPayPalPayment()}
+            >
+              I paid with PayPal — mark paid
             </Button>
           </DialogFooter>
         </DialogContent>

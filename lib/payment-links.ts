@@ -120,3 +120,83 @@ export const openVenmoPaymentPage = (
   window.location.href = webUrl;
   return true;
 };
+
+// ——— PayPal ———
+
+/** Strip paypal.me/ URL prefixes and @ so we store a clean handle or email. */
+export const cleanPayPalHandle = (value: string): string => {
+  let v = value.trim();
+  v = v.replace(/^https?:\/\//i, '');
+  v = v.replace(/^(www\.)?paypal\.me\//i, '');
+  v = v.replace(/^paypal\.me\//i, '');
+  v = v.replace(/^@+/, '');
+  // Drop trailing amount path if someone pastes a full pay link
+  v = v.split(/[/?#]/)[0] || '';
+  return v.trim();
+};
+
+export const hasPayPalHandle = (value?: string): boolean => cleanPayPalHandle(value || '').length > 0;
+
+export const hasPayPalSetup = (settings?: PaymentMethodSettings | null): boolean => {
+  if (!settings?.enabled) return false;
+  return hasPayPalHandle(settings.handle);
+};
+
+export const isPayPalEmail = (handle: string): boolean =>
+  /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanPayPalHandle(handle));
+
+/**
+ * Real PayPal payment URL (not just paypal.com home):
+ * - PayPal.Me: https://www.paypal.me/{username}/{amount}USD  (opens pay form for that amount)
+ * - Business email: classic _xclick checkout with item_name = tracking note
+ */
+export const buildPayPalPayUrl = (
+  handle: string,
+  amount: number,
+  note: string,
+  currency: string = 'USD'
+): string => {
+  const cleaned = cleanPayPalHandle(handle);
+  if (!cleaned) return '';
+
+  const amt = Math.max(0, amount);
+  const amtFixed = amt.toFixed(2);
+  const cur = (currency || 'USD').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3) || 'USD';
+
+  if (isPayPalEmail(cleaned)) {
+    // Business / email checkout — includes invoice note as item name for tracking
+    const params = new URLSearchParams({
+      cmd: '_xclick',
+      business: cleaned,
+      item_name: note.slice(0, 127) || 'Invoice payment',
+      amount: amtFixed,
+      currency_code: cur,
+      no_shipping: '1',
+      no_note: '0',
+      // Pre-fill buyer note when PayPal shows the form
+      cn: 'Invoice / estimate reference',
+    });
+    return `https://www.paypal.com/cgi-bin/webscr?${params.toString()}`;
+  }
+
+  // PayPal.Me username — amount + currency in path (documented PayPal.Me format)
+  // Example: https://www.paypal.me/YourBusiness/125.00USD
+  return `https://www.paypal.me/${encodeURIComponent(cleaned)}/${amtFixed}${cur}`;
+};
+
+export const openPayPalPaymentPage = (
+  handle: string,
+  amount: number,
+  note: string,
+  options?: { newTab?: boolean; currency?: string }
+): boolean => {
+  const url = buildPayPalPayUrl(handle, amount, note, options?.currency);
+  if (!url || typeof window === 'undefined') return false;
+
+  if (options?.newTab !== false) {
+    window.open(url, '_blank', 'noopener,noreferrer');
+    return true;
+  }
+  window.location.href = url;
+  return true;
+};
