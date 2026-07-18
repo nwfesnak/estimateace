@@ -4359,8 +4359,6 @@ export default function Home() {
     }
   };
 
-  // Keep payment dialogs closed together when marking paid from any method
-
   const confirmClientZellePayment = async () => {
     // Client (or contractor) confirms Zelle was sent — marks invoice/estimate paid
     if (documentType === 'invoice') {
