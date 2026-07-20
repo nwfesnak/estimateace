@@ -16,7 +16,7 @@
     "test:google-places": "node scripts/test-google-places.mjs"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.106.2",
+    "@supabase/supabase-js": "^2.110.7",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "html2pdf.js": "^0.14.0",
