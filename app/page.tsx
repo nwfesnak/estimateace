@@ -1951,16 +1951,29 @@ export default function Home() {
   const saveToDB = async (options?: {
     profile?: typeof profile;
     breakdown?: typeof estimateBreakdownSettings;
+    /** Pass explicit media lists so uploads aren't lost to stale React state */
+    photoUrls?: string[];
+    videoUrls?: string[];
+    receiptUrls?: string[];
+    receiptDetails?: any[];
   }) => {
     if (!user || !supabase) return;
     const profileToSave = options?.profile ?? profile;
     const breakdownToSave = options?.breakdown ?? estimateBreakdownSettings;
+    const photosToSave = options?.photoUrls ?? photoUrls;
+    const videosToSave = options?.videoUrls ?? videoUrls;
+    const receiptsToSave = options?.receiptUrls ?? receiptUrls;
+    const receiptDetailsToSave = options?.receiptDetails ?? receiptDetails;
     const data = {
       user_id: user.id,
       jobName, address, city, state, zipCode, phones, emails, date, invoiceNumber,
       items, terms, profile: getDocumentProfileSnapshot(profileToSave, breakdownToSave),
       documentType, dueDate, paymentStatus, amountPaid,
-      paymentMethod, photoUrls, videoUrls, receiptUrls, receiptDetails,
+      paymentMethod,
+      photoUrls: photosToSave,
+      videoUrls: videosToSave,
+      receiptUrls: receiptsToSave,
+      receiptDetails: receiptDetailsToSave,
       laborHours, laborRate, laborFixedAmount, useHourlyLabor, laborAmount,
       taxRate: baseTaxRate,
       taxAmount,
@@ -1978,38 +1991,176 @@ export default function Home() {
     }
   };
 
+  /**
+   * Normalize mobile photos (iOS HEIC, huge camera files, missing names) so Supabase Storage accepts them.
+   */
+  const prepareFileForMediaUpload = async (
+    file: File,
+    type: 'photo' | 'video' | 'receipt'
+  ): Promise<{ blob: Blob; ext: string; contentType: string; displayName: string } | null> => {
+    if (!file || file.size === 0) return null;
+
+    if (type === 'video') {
+      const rawExt = (file.name.split('.').pop() || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const ext = rawExt || (file.type.includes('webm') ? 'webm' : 'mp4');
+      const contentType = file.type || (ext === 'webm' ? 'video/webm' : 'video/mp4');
+      return { blob: file, ext, contentType, displayName: file.name || `video.${ext}` };
+    }
+
+    // Images / receipts — handle HEIC and large mobile photos
+    const nameLower = (file.name || '').toLowerCase();
+    const typeLower = (file.type || '').toLowerCase();
+    const isHeic =
+      typeLower.includes('heic') ||
+      typeLower.includes('heif') ||
+      nameLower.endsWith('.heic') ||
+      nameLower.endsWith('.heif');
+
+    const tryCanvasJpeg = async (): Promise<{ blob: Blob; ext: string; contentType: string; displayName: string } | null> => {
+      try {
+        // createImageBitmap works for JPEG/PNG/WebP; HEIC only on some browsers
+        const bitmap = await createImageBitmap(file);
+        const maxEdge = 2400;
+        let { width, height } = bitmap;
+        if (width > maxEdge || height > maxEdge) {
+          const scale = maxEdge / Math.max(width, height);
+          width = Math.round(width * scale);
+          height = Math.round(height * scale);
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          bitmap.close();
+          return null;
+        }
+        ctx.drawImage(bitmap, 0, 0, width, height);
+        bitmap.close();
+        const blob = await new Promise<Blob | null>((resolve) =>
+          canvas.toBlob(resolve, 'image/jpeg', 0.85)
+        );
+        if (!blob || blob.size === 0) return null;
+        return {
+          blob,
+          ext: 'jpg',
+          contentType: 'image/jpeg',
+          displayName: (file.name || 'photo').replace(/\.[^.]+$/, '') + '.jpg',
+        };
+      } catch {
+        return null;
+      }
+    };
+
+    // Always prefer JPEG for photos/receipts when we can re-encode (reliable on mobile + storage)
+    if (isHeic || file.size > 2.5 * 1024 * 1024 || typeLower === 'image/jpeg' || typeLower === 'image/png' || typeLower === 'image/webp' || typeLower.startsWith('image/')) {
+      const converted = await tryCanvasJpeg();
+      if (converted) return converted;
+    }
+
+    if (isHeic) {
+      // Fallback: upload original HEIC if browser can't decode (storage must allow it)
+      return {
+        blob: file,
+        ext: 'heic',
+        contentType: file.type || 'image/heic',
+        displayName: file.name || 'photo.heic',
+      };
+    }
+
+    const rawExt = (file.name.split('.').pop() || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const ext = rawExt || (typeLower.includes('png') ? 'png' : 'jpg');
+    const contentType = file.type || (ext === 'png' ? 'image/png' : 'image/jpeg');
+    return {
+      blob: file,
+      ext,
+      contentType,
+      displayName: file.name || `photo.${ext}`,
+    };
+  };
+
   const handleMediaUpload = async (files: FileList | null, type: 'photo' | 'video' | 'receipt') => {
-    if (!files || !user || !supabase) return 0;
+    if (!files?.length) {
+      showMessage('No file selected.');
+      return 0;
+    }
+    if (!user) {
+      showMessage('Please log in before uploading photos.');
+      return 0;
+    }
+    if (!supabase) {
+      showMessage(getSupabaseConfigHelpMessage());
+      return 0;
+    }
+
+    showMessage(type === 'photo' ? 'Uploading photo…' : type === 'video' ? 'Uploading video…' : 'Uploading…');
+
     const newUrls: string[] = [];
     const list = Array.from(files);
+
     for (let i = 0; i < list.length; i++) {
-      const file = list[i];
-      const fileExt = file.name.split('.').pop() || (type === 'video' ? 'mp4' : 'jpg');
-      const filePath = `${user.id}/${type}/${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}.${fileExt}`;
-      const { error } = await supabase.storage.from('media').upload(filePath, file, { upsert: true });
-      if (!error) {
-        // Store the permanent storage path (not the temporary signed URL)
+      const original = list[i];
+      try {
+        const prepared = await prepareFileForMediaUpload(original, type);
+        if (!prepared) {
+          showMessage(`Could not read ${type} from device. Try another photo or use the in-app camera.`);
+          continue;
+        }
+
+        const { blob, ext, contentType } = prepared;
+        const filePath = `${user.id}/${type}/${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+
+        const { error } = await supabase.storage.from('media').upload(filePath, blob, {
+          upsert: true,
+          contentType,
+          cacheControl: '3600',
+        });
+
+        if (error) {
+          console.error('Media upload failed:', error, { filePath, contentType, size: blob.size, name: original.name, type: original.type });
+          const msg = (error as { message?: string }).message || 'Upload failed';
+          if (/policy|row-level|security|jwt|auth/i.test(msg)) {
+            showMessage('Upload blocked by storage permissions. Confirm you are logged in and the media bucket policies allow your user folder.');
+          } else if (/payload|too large|size|413/i.test(msg)) {
+            showMessage('Photo is too large. Try a smaller image or use the in-app camera.');
+          } else if (/mime|type|not allowed|invalid/i.test(msg)) {
+            showMessage('This image format is not allowed. Try JPG from the camera roll or the in-app camera.');
+          } else {
+            showMessage(`Failed to upload ${type}: ${msg}`);
+          }
+          continue;
+        }
+
         newUrls.push(filePath);
-      } else {
-        console.error('Media upload failed:', error);
-        showMessage(`Failed to upload ${type}. Check your connection and try again.`);
+      } catch (err) {
+        console.error('Media upload exception:', err);
+        showMessage(`Failed to upload ${type}. Try again or use the in-app camera.`);
       }
     }
-    if (type === 'photo') setPhotoUrls(prev => [...prev, ...newUrls]);
-    else if (type === 'video') setVideoUrls(prev => [...prev, ...newUrls]);
+
+    if (newUrls.length === 0) return 0;
+
+    // Build next media lists synchronously so saveToDB does not write stale empty photoUrls
+    const nextPhotos = type === 'photo' ? [...photoUrls, ...newUrls] : photoUrls;
+    const nextVideos = type === 'video' ? [...videoUrls, ...newUrls] : videoUrls;
+    const nextReceipts = type === 'receipt' ? [...receiptUrls, ...newUrls] : receiptUrls;
+
+    if (type === 'photo') setPhotoUrls(nextPhotos);
+    else if (type === 'video') setVideoUrls(nextVideos);
     else if (type === 'receipt') {
-      setReceiptUrls(prev => [...prev, ...newUrls]);
-      if (newUrls.length > 0) {
-        // For receipt extract, we still need a display URL right away
-        const firstUrl = await getMediaUrl(newUrls[0]);
-        if (firstUrl) setCurrentReceiptUrl(firstUrl);
-      }
+      setReceiptUrls(nextReceipts);
+      const firstUrl = await getMediaUrl(newUrls[0]);
+      if (firstUrl) setCurrentReceiptUrl(firstUrl);
       setTempReceiptData({ date: new Date().toISOString().split('T')[0], vendor: '', amount: 0, notes: '' });
       setIsReceiptExtractModalOpen(true);
     }
-    if (newUrls.length > 0) {
-      await saveToDB();
-    }
+
+    await saveToDB({
+      photoUrls: nextPhotos,
+      videoUrls: nextVideos,
+      receiptUrls: nextReceipts,
+    });
+
     return newUrls.length;
   };
 
@@ -2151,31 +2302,51 @@ export default function Home() {
   };
 
   const handlePhotoGalleryChange = async (files: FileList | null) => {
-    const saved = await handleMediaUpload(files, 'photo');
-    if (saved > 0) {
-      showMessage(`${saved} photo${saved === 1 ? '' : 's'} added to this estimate.`);
+    try {
+      const saved = await handleMediaUpload(files, 'photo');
+      if (saved > 0) {
+        showMessage(`✅ ${saved} photo${saved === 1 ? '' : 's'} saved to this estimate.`);
+      } else if (files?.length) {
+        // handleMediaUpload already showed a specific error
+      }
+    } catch (err) {
+      console.error(err);
+      showMessage('Photo upload failed on this device. Try the in-app camera instead.');
+    } finally {
+      if (photoGalleryInputRef.current) photoGalleryInputRef.current.value = '';
     }
-    if (photoGalleryInputRef.current) photoGalleryInputRef.current.value = '';
   };
 
   const handleVideoGalleryChange = async (files: FileList | null) => {
-    const saved = await handleMediaUpload(files, 'video');
-    if (saved > 0) {
-      showMessage(`${saved} video${saved === 1 ? '' : 's'} added to this estimate.`);
+    try {
+      const saved = await handleMediaUpload(files, 'video');
+      if (saved > 0) {
+        showMessage(`✅ ${saved} video${saved === 1 ? '' : 's'} saved to this estimate.`);
+      }
+    } catch (err) {
+      console.error(err);
+      showMessage('Video upload failed. Try a shorter clip or the in-app camera.');
+    } finally {
+      if (videoGalleryInputRef.current) videoGalleryInputRef.current.value = '';
     }
-    if (videoGalleryInputRef.current) videoGalleryInputRef.current.value = '';
   };
 
   const handleDeviceCameraPhoto = async (file: File) => {
     const dt = new DataTransfer();
     dt.items.add(file);
-    await handleMediaUpload(dt.files, 'photo');
+    const saved = await handleMediaUpload(dt.files, 'photo');
+    if (saved > 0) {
+      showMessage('✅ Photo saved to this estimate.');
+    }
   };
 
   const handleDeviceCameraVideo = async (file: File) => {
     const dt = new DataTransfer();
     dt.items.add(file);
-    await handleMediaUpload(dt.files, 'video');
+    const saved = await handleMediaUpload(dt.files, 'video');
+    if (saved > 0) {
+      showMessage('✅ Video saved to this estimate.');
+    }
   };
 
   const handleDeviceCameraClose = (count: number) => {
@@ -6121,11 +6292,11 @@ export default function Home() {
                 </div>
               )}
 
-              {/* Gallery pickers only — live camera uses DeviceCamera (fixed border + shutter) */}
+              {/* Gallery pickers — include HEIC for iPhone camera roll; live camera uses DeviceCamera */}
               <input
                 ref={photoGalleryInputRef}
                 type="file"
-                accept="image/*"
+                accept="image/*,image/heic,image/heif,.heic,.heif,.jpg,.jpeg,.png,.webp"
                 multiple
                 className="hidden"
                 onChange={e => void handlePhotoGalleryChange(e.target.files)}
@@ -6133,7 +6304,7 @@ export default function Home() {
               <input
                 ref={videoGalleryInputRef}
                 type="file"
-                accept="video/*"
+                accept="video/*,video/mp4,video/quicktime,.mp4,.mov"
                 multiple
                 className="hidden"
                 onChange={e => void handleVideoGalleryChange(e.target.files)}
