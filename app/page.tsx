@@ -6439,6 +6439,15 @@ export default function Home() {
                       Mark Paid (PayPal received)
                     </Button>
                   )}
+                  {hasMailCheckSetup(getMailCheckSettings()) && paymentStatus !== 'paid' && (
+                    <Button
+                      variant="outline"
+                      className="border-stone-300 text-stone-800"
+                      onClick={() => void markInvoicePaid('Check')}
+                    >
+                      Mark Paid (Check received)
+                    </Button>
+                  )}
                 </div>
               ) : (
                 <div className="flex flex-wrap gap-3 mb-8">
@@ -8516,10 +8525,36 @@ export default function Home() {
                 if (method === 'venmo' && !hasVenmoHandle(settings.handle)) return null;
                 if (method === 'zelle' && !hasZelleSetup(settings)) return null;
                 if (method === 'paypal' && !hasPayPalSetup(settings)) return null;
+                if (method === 'mailcheck' && !hasMailCheckSetup(settings)) return null;
                 const meta = getPaymentMethodMeta(method);
                 const venmoHandle = method === 'venmo' ? cleanVenmoHandle(settings.handle || '') : '';
                 const zelleHandle = method === 'zelle' ? cleanZelleHandle(settings.handle || '') : '';
                 const paypalHandle = method === 'paypal' ? cleanPayPalHandle(settings.handle || '') : '';
+                const mailTo = method === 'mailcheck' ? (settings.handle || '').trim() : '';
+
+                if (method === 'mailcheck') {
+                  return (
+                    <button
+                      key={method}
+                      type="button"
+                      onClick={() => selectPaymentMethod(method)}
+                      className={`w-full flex items-start gap-4 p-4 border-2 rounded-2xl hover:bg-gray-50 transition-all text-left ${
+                        selectedPaymentMethod === method ? 'border-[#10b981] bg-green-50' : 'border-gray-200'
+                      }`}
+                    >
+                      <span className="text-3xl flex-shrink-0">{meta.icon}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-semibold">{meta.label}</div>
+                        <div className="text-xs text-gray-600 mt-1 whitespace-pre-wrap break-words">
+                          {mailTo}
+                        </div>
+                        <div className="text-[11px] text-gray-500 mt-1">
+                          Write invoice # {invoiceNumber} on the memo line
+                        </div>
+                      </div>
+                    </button>
+                  );
+                }
 
                 if (method === 'venmo') {
                   return (
