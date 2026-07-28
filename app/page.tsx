@@ -45,6 +45,7 @@ const DEFAULT_PAYMENT_SETTINGS = {
   paypal: { enabled: true, connected: false },
   venmo: { enabled: true, connected: false },
   zelle: { enabled: true, connected: false },
+  mailcheck: { enabled: true, connected: false },
   nowpayments: { enabled: false, connected: false },
   coinbase_commerce: { enabled: false, connected: false },
 };
@@ -58,6 +59,12 @@ const getPaymentMethodMeta = (method: string) => {
     paypal: { icon: '💰', label: 'PayPal', description: 'PayPal.Me link or business email — accept real payments', category: 'traditional' },
     venmo: { icon: '📱', label: 'Venmo', description: 'Mobile app payment', category: 'traditional' },
     zelle: { icon: '🏦', label: 'Zelle', description: 'QR code or unique name/email/phone for client payments', category: 'traditional' },
+    mailcheck: {
+      icon: '✉️',
+      label: 'Mail check to',
+      description: 'Mailing address for clients to send paper checks',
+      category: 'traditional',
+    },
     nowpayments: { icon: '₿', label: 'NOWPayments', description: 'Bitcoin, Ethereum, and 300+ cryptocurrencies', category: 'crypto' },
     coinbase_commerce: { icon: '🪙', label: 'Coinbase Commerce', description: 'Crypto checkout via Coinbase Commerce', category: 'crypto' },
   };
@@ -70,10 +77,10 @@ const mergePaymentSettings = (settings?: Record<string, PaymentMethodSettings>) 
     const saved = settings?.[key];
     merged[key] = {
       enabled: saved?.enabled ?? defaults.enabled,
-      // Venmo/Zelle/PayPal use handle setup instead of fake "connected" from external links
+      // Handle-based methods (not external OAuth "connect")
       connected:
-        key === 'venmo' || key === 'zelle' || key === 'paypal'
-          ? false
+        key === 'venmo' || key === 'zelle' || key === 'paypal' || key === 'mailcheck'
+          ? !!(saved?.handle || saved?.qrUrl)
           : (saved?.connected ?? defaults.connected),
       handle: saved?.handle,
       qrUrl: saved?.qrUrl,
@@ -4339,10 +4346,23 @@ export default function Home() {
       return;
     }
 
+    if (selectedPaymentMethod === 'mailcheck') {
+      const addr = (getMailCheckSettings()?.handle || '').trim();
+      closePaymentModal();
+      if (!addr) {
+        showMessage('Mailing address is not set. Add it in Profile → Payments → Mail check to.');
+        return;
+      }
+      showMessage(
+        `Mail a check for $${paymentAmount.toFixed(2)} to the address shown. Put ${invoiceNumber} on the memo line. The contractor will mark the invoice paid when the check clears.`
+      );
+      return;
+    }
+
     closePaymentModal();
     const meta = getPaymentMethodMeta(selectedPaymentMethod);
     showMessage(
-      `${meta.label} is not connected for automatic checkout. Use Venmo, Zelle, PayPal, or pay ${profile.company || 'the contractor'} directly.`
+      `${meta.label} is not connected for automatic checkout. Use Venmo, Zelle, PayPal, mail a check, or pay ${profile.company || 'the contractor'} directly.`
     );
   };
 
@@ -4365,6 +4385,56 @@ export default function Home() {
     if (handle) {
       showMessage(`✅ Venmo username saved as @${handle}`);
     }
+  };
+
+  const getMailCheckSettings = () => mergePaymentSettings(profile.paymentSettings).mailcheck;
+
+  const hasMailCheckSetup = (settings?: { enabled?: boolean; handle?: string } | null) =>
+    !!settings?.enabled && !!(settings.handle || '').trim();
+
+  const mailCheckSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [mailCheckSaveLabel, setMailCheckSaveLabel] = useState('');
+
+  const updateMailCheckAddress = (address: string, options?: { immediate?: boolean }) => {
+    const runSave = () => {
+      const nextProfile = {
+        ...profileRef.current,
+        paymentSettings: {
+          ...mergePaymentSettings(profileRef.current.paymentSettings),
+          mailcheck: {
+            ...mergePaymentSettings(profileRef.current.paymentSettings).mailcheck,
+            enabled: mergePaymentSettings(profileRef.current.paymentSettings).mailcheck?.enabled ?? true,
+            handle: address,
+            connected: address.trim().length > 0,
+          },
+        },
+      };
+      setProfile(nextProfile);
+      setMailCheckSaveLabel('Saving…');
+      void saveProfileSettings(nextProfile, { quiet: true })
+        .then(() => setMailCheckSaveLabel(address.trim() ? 'Saved' : ''))
+        .catch(() => setMailCheckSaveLabel('Save failed'));
+    };
+
+    // Keep UI responsive while typing
+    setProfile((prev) => ({
+      ...prev,
+      paymentSettings: {
+        ...mergePaymentSettings(prev.paymentSettings),
+        mailcheck: {
+          ...mergePaymentSettings(prev.paymentSettings).mailcheck,
+          handle: address,
+          connected: address.trim().length > 0,
+        },
+      },
+    }));
+
+    if (mailCheckSaveTimeoutRef.current) clearTimeout(mailCheckSaveTimeoutRef.current);
+    if (options?.immediate) {
+      runSave();
+      return;
+    }
+    mailCheckSaveTimeoutRef.current = setTimeout(runSave, 600);
   };
 
   const updateZelleSettings = (patch: { handle?: string; qrUrl?: string; enabled?: boolean }) => {
@@ -4572,6 +4642,93 @@ export default function Home() {
 
   const renderPaymentMethodRow = (method: string, settings: { enabled?: boolean; connected?: boolean; handle?: string; qrUrl?: string }) => {
     const meta = getPaymentMethodMeta(method);
+
+    if (method === 'mailcheck') {
+      const addressText = settings.handle || '';
+      const ready = addressText.trim().length > 0;
+      return (
+        <div
+          key={method}
+          className="border rounded-2xl p-4 sm:p-6 hover:shadow-sm transition-all w-full max-w-full min-w-0 overflow-hidden box-border"
+        >
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 min-w-0">
+            <div className="flex items-start sm:items-center gap-3 min-w-0 flex-1">
+              <div className="text-3xl sm:text-4xl shrink-0">{meta.icon}</div>
+              <div className="min-w-0 flex-1">
+                <div className="font-semibold text-base sm:text-lg break-words">{meta.label}</div>
+                <div className="text-sm text-gray-500 break-words">{meta.description}</div>
+                <div className="text-sm text-gray-500 mt-1">
+                  {ready ? (
+                    <><span className="text-green-500">✓</span> Address saved for client invoices</>
+                  ) : (
+                    'Enter the mailing address where clients should send checks'
+                  )}
+                </div>
+              </div>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer shrink-0 self-end sm:self-center">
+              <input
+                type="checkbox"
+                checked={!!settings.enabled}
+                onChange={(e) => togglePaymentMethod(method, e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]"></div>
+            </label>
+          </div>
+
+          <div className="mt-4 w-full min-w-0 space-y-2 sm:pl-12">
+            <div className="flex items-center justify-between gap-2">
+              <label className="block text-sm font-medium text-gray-700">
+                Mail check to (name + full address)
+              </label>
+              {mailCheckSaveLabel && (
+                <span
+                  className={`text-xs font-medium shrink-0 ${
+                    mailCheckSaveLabel === 'Save failed'
+                      ? 'text-red-600'
+                      : mailCheckSaveLabel === 'Saving…'
+                        ? 'text-amber-600'
+                        : 'text-emerald-600'
+                  }`}
+                >
+                  {mailCheckSaveLabel === 'Saved' ? '✓ Saved' : mailCheckSaveLabel}
+                </span>
+              )}
+            </div>
+            <Textarea
+              value={addressText}
+              onChange={(e) => updateMailCheckAddress(e.target.value)}
+              onBlur={(e) => updateMailCheckAddress(e.target.value, { immediate: true })}
+              rows={4}
+              placeholder={'Your Company Name\n123 Main St\nCity, ST 12345'}
+              className="w-full max-w-full min-w-0 resize-y text-sm"
+            />
+            <p className="text-xs text-gray-500">
+              Saves automatically as you type. Clients see this address when they choose mail a check.
+            </p>
+            {!addressText.trim() && (profile.company || profile.address) && (
+              <button
+                type="button"
+                className="text-xs font-semibold text-[#10b981] underline"
+                onClick={() => {
+                  const prefill = [
+                    profile.company,
+                    profile.address,
+                    [profile.city, profile.state, profile.zipCode].filter(Boolean).join(', '),
+                  ]
+                    .filter(Boolean)
+                    .join('\n');
+                  updateMailCheckAddress(prefill, { immediate: true });
+                }}
+              >
+                Use company profile address
+              </button>
+            )}
+          </div>
+        </div>
+      );
+    }
 
     if (method === 'zelle') {
       const zelleReady = hasZelleHandle(settings.handle) || !!settings.qrUrl;
@@ -4893,7 +5050,7 @@ export default function Home() {
             />
             <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]"></div>
           </label>
-          {method !== 'venmo' && method !== 'zelle' && method !== 'paypal' && (
+          {method !== 'venmo' && method !== 'zelle' && method !== 'paypal' && method !== 'mailcheck' && (
             <Button
               onClick={() => linkPaymentAccount(method)}
               variant={connected ? 'outline' : 'default'}
@@ -4922,7 +5079,7 @@ export default function Home() {
   };
 
   const linkPaymentAccount = (method: string) => {
-    if (method === 'venmo' || method === 'zelle' || method === 'paypal') return;
+    if (method === 'venmo' || method === 'zelle' || method === 'paypal' || method === 'mailcheck') return;
 
     const meta = getPaymentMethodMeta(method);
     const providerUrls: { [key: string]: string } = {
