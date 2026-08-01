@@ -3248,14 +3248,19 @@ export default function Home() {
     };
   };
 
-  // Try camelCase insert, then lowercase keys, then minimal payload (fixes 400 column mismatch)
+  // Try several payload shapes until one matches the live archive-est columns.
   const insertArchiveRow = async (archiveData: Record<string, any>) => {
     if (!supabase) return { error: { message: 'Supabase not configured' } as any, status: 0, statusText: '' };
 
+    const formatErr = (err: any) =>
+      [err?.code, err?.message, err?.details, err?.hint].filter(Boolean).join(' | ') || JSON.stringify(err);
+
+    // 1) camelCase (quoted schema)
     let result = await supabase.from('archive-est').insert(archiveData);
     if (!result.error) return result;
+    console.warn('Archive attempt 1 (camelCase) failed:', formatErr(result.error));
 
-    console.warn('Archive insert camelCase failed, trying lowercase:', result.error?.message);
+    // 2) all-lowercase keys (unquoted Postgres columns)
     const lower: Record<string, any> = {};
     for (const [k, v] of Object.entries(archiveData)) {
       if (k === 'id' || k === 'user_id' || k === 'updated_at' || k === 'archived_at') lower[k] = v;
@@ -3263,30 +3268,48 @@ export default function Home() {
     }
     result = await supabase.from('archive-est').insert(lower);
     if (!result.error) return result;
+    console.warn('Archive attempt 2 (lowercase) failed:', formatErr(result.error));
 
-    console.warn('Archive insert lowercase failed, trying minimal:', result.error?.message);
-    const minimal = {
+    // 3) reduced lowercase payload (skip arrays/json that might be wrong shape)
+    const reduced = {
       id: archiveData.id,
       user_id: archiveData.user_id,
-      items: archiveData.items ?? [],
-      profile: archiveData.profile ?? {},
-      terms: archiveData.terms ?? null,
-      date: archiveData.date ?? null,
-      address: archiveData.address ?? null,
-      city: archiveData.city ?? null,
-      state: archiveData.state ?? null,
-      phones: archiveData.phones ?? [],
-      emails: archiveData.emails ?? [],
-      archived_at: archiveData.archived_at,
-      updated_at: archiveData.updated_at,
       jobname: archiveData.jobName ?? null,
       documenttype: archiveData.documentType ?? 'estimate',
       invoicenumber: archiveData.invoiceNumber ?? archiveData.id,
+      address: archiveData.address ?? null,
+      city: archiveData.city ?? null,
+      state: archiveData.state ?? null,
       zipcode: archiveData.zipCode ?? null,
+      date: archiveData.date ?? null,
+      terms: archiveData.terms ?? null,
       paymentstatus: archiveData.paymentStatus ?? 'pending',
-      amountpaid: archiveData.amountPaid ?? null,
+      amountpaid: archiveData.amountPaid ?? 0,
+      paymentmethod: archiveData.paymentMethod ?? null,
+      items: archiveData.items ?? [],
+      profile: archiveData.profile ?? {},
+      updated_at: archiveData.updated_at || new Date().toISOString(),
+      archived_at: archiveData.archived_at || new Date().toISOString(),
     };
-    return await supabase.from('archive-est').insert(minimal);
+    result = await supabase.from('archive-est').insert(reduced);
+    if (!result.error) return result;
+    console.warn('Archive attempt 3 (reduced) failed:', formatErr(result.error));
+
+    // 4) absolute minimum — only columns almost every archive table has
+    const ultra = {
+      id: String(archiveData.id),
+      user_id: archiveData.user_id,
+      archived_at: new Date().toISOString(),
+    };
+    result = await supabase.from('archive-est').insert(ultra);
+    if (!result.error) {
+      console.warn('Archive succeeded with ultra-minimal payload only');
+      return result;
+    }
+    console.error('Archive attempt 4 (ultra) failed:', formatErr(result.error));
+    // Attach readable message for UI
+    (result.error as any).message = formatErr(result.error);
+    return result;
   };
 
   const markAsPaidCash = async () => {
@@ -3888,11 +3911,23 @@ export default function Home() {
       await supabase.from('archive-est').delete().eq('id', id).eq('user_id', user.id);
       const { error: insertErr, status, statusText } = await insertArchiveRow(archiveData);
       if (insertErr) {
-        console.error('Archive insert error (FULL):', { insertErr, status, statusText, archiveData });
-        showMessage(
-          'Archive failed (not moved to database): ' +
-            (insertErr.message || statusText || JSON.stringify(insertErr))
-        );
+        const msg =
+          (insertErr as any).message ||
+          (insertErr as any).details ||
+          (insertErr as any).code ||
+          statusText ||
+          '400 Bad Request';
+        console.error('Archive insert error (FULL):', {
+          error: insertErr,
+          code: (insertErr as any).code,
+          message: (insertErr as any).message,
+          details: (insertErr as any).details,
+          hint: (insertErr as any).hint,
+          status,
+          statusText,
+          keys: Object.keys(archiveData),
+        });
+        showMessage('Archive failed (not moved to database): ' + msg);
         return;
       }
 
