@@ -3179,12 +3179,16 @@ export default function Home() {
     setView('sendPreview');
   };
 
-  // Build a clean archive payload using only columns that exist in the "archive-est" table.
-  // Sanitize values (undefined -> null, ensure correct array/boolean/number shapes) to avoid
-  // obscure server-side insert/upsert errors that sometimes surface as empty {} in the client.
+  // Build archive payload. Reads camelCase or lowercase keys from estimates rows.
   const prepareArchiveData = (estRow: any) => {
     if (!estRow) return null;
 
+    const g = (camel: string, lower?: string) => {
+      const l = lower || camel.toLowerCase();
+      if (estRow[camel] !== undefined && estRow[camel] !== null) return estRow[camel];
+      if (estRow[l] !== undefined && estRow[l] !== null) return estRow[l];
+      return null;
+    };
     const toArray = (v: any): any[] => Array.isArray(v) ? v : (v == null ? [] : [v]);
     const toNum = (v: any): number | null => {
       if (v == null || v === '') return null;
@@ -3197,42 +3201,92 @@ export default function Home() {
       return defaultVal;
     };
 
+    const uid = estRow.user_id || estRow.userId || user?.id;
+    if (!uid) {
+      console.error('prepareArchiveData: missing user_id', estRow);
+      return null;
+    }
+
+    const itemsRaw = g('items') ?? [];
+    const receiptDetailsRaw = g('receiptDetails', 'receiptdetails') ?? [];
+
     return {
       id: estRow.id,
-      user_id: estRow.user_id,
-      documentType: estRow.documentType || 'invoice',
-      jobName: estRow.jobName ?? null,
-      address: estRow.address ?? null,
-      city: estRow.city ?? null,
-      state: estRow.state ?? null,
-      zipCode: estRow.zipCode ?? null,
-      phones: toArray(estRow.phones),
-      emails: toArray(estRow.emails),
-      date: estRow.date ?? null,
-      invoiceNumber: estRow.invoiceNumber,
-      items: Array.isArray(estRow.items) ? estRow.items : [],
-      terms: estRow.terms ?? null,
-      laborHours: toNum(estRow.laborHours),
-      laborRate: toNum(estRow.laborRate),
-      laborFixedAmount: toNum(estRow.laborFixedAmount),
-      useHourlyLabor: toBool(estRow.useHourlyLabor, true),
-      laborAmount: toNum(estRow.laborAmount),
-      taxRate: toNum(estRow.taxRate),
-      taxAmount: toNum(estRow.taxAmount),
-      isTaxExempt: toBool(estRow.isTaxExempt, false),
-      taxLabor: toBool(estRow.taxLabor, true),
-      photoUrls: toArray(estRow.photoUrls),
-      videoUrls: toArray(estRow.videoUrls),
-      receiptUrls: toArray(estRow.receiptUrls),
-      receiptDetails: Array.isArray(estRow.receiptDetails) ? estRow.receiptDetails : [],
-      dueDate: estRow.dueDate ?? null,
-      paymentStatus: estRow.paymentStatus ?? 'pending',
-      amountPaid: toNum(estRow.amountPaid),
-      paymentMethod: estRow.paymentMethod ?? null,
+      user_id: uid,
+      documentType: g('documentType', 'documenttype') || 'estimate',
+      jobName: g('jobName', 'jobname'),
+      address: g('address'),
+      city: g('city'),
+      state: g('state'),
+      zipCode: g('zipCode', 'zipcode'),
+      phones: toArray(g('phones')),
+      emails: toArray(g('emails')),
+      date: g('date'),
+      invoiceNumber: g('invoiceNumber', 'invoicenumber') || estRow.id,
+      items: Array.isArray(itemsRaw) ? itemsRaw : [],
+      terms: g('terms'),
+      laborHours: toNum(g('laborHours', 'laborhours')),
+      laborRate: toNum(g('laborRate', 'laborrate')),
+      laborFixedAmount: toNum(g('laborFixedAmount', 'laborfixedamount')),
+      useHourlyLabor: toBool(g('useHourlyLabor', 'usehourlylabor'), true),
+      laborAmount: toNum(g('laborAmount', 'laboramount')),
+      taxRate: toNum(g('taxRate', 'taxrate')),
+      taxAmount: toNum(g('taxAmount', 'taxamount')),
+      isTaxExempt: toBool(g('isTaxExempt', 'istaxexempt'), false),
+      taxLabor: toBool(g('taxLabor', 'taxlabor'), true),
+      photoUrls: toArray(g('photoUrls', 'photourls')),
+      videoUrls: toArray(g('videoUrls', 'videourls')),
+      receiptUrls: toArray(g('receiptUrls', 'receipturls')),
+      receiptDetails: Array.isArray(receiptDetailsRaw) ? receiptDetailsRaw : [],
+      dueDate: g('dueDate', 'duedate'),
+      paymentStatus: g('paymentStatus', 'paymentstatus') || 'pending',
+      amountPaid: toNum(g('amountPaid', 'amountpaid')),
+      paymentMethod: g('paymentMethod', 'paymentmethod'),
       profile: (estRow.profile && typeof estRow.profile === 'object') ? estRow.profile : {},
-      updated_at: estRow.updated_at ?? new Date().toISOString(),
+      updated_at: g('updated_at') || new Date().toISOString(),
       archived_at: new Date().toISOString(),
     };
+  };
+
+  // Try camelCase insert, then lowercase keys, then minimal payload (fixes 400 column mismatch)
+  const insertArchiveRow = async (archiveData: Record<string, any>) => {
+    if (!supabase) return { error: { message: 'Supabase not configured' } as any, status: 0, statusText: '' };
+
+    let result = await supabase.from('archive-est').insert(archiveData);
+    if (!result.error) return result;
+
+    console.warn('Archive insert camelCase failed, trying lowercase:', result.error?.message);
+    const lower: Record<string, any> = {};
+    for (const [k, v] of Object.entries(archiveData)) {
+      if (k === 'id' || k === 'user_id' || k === 'updated_at' || k === 'archived_at') lower[k] = v;
+      else lower[k.toLowerCase()] = v;
+    }
+    result = await supabase.from('archive-est').insert(lower);
+    if (!result.error) return result;
+
+    console.warn('Archive insert lowercase failed, trying minimal:', result.error?.message);
+    const minimal = {
+      id: archiveData.id,
+      user_id: archiveData.user_id,
+      items: archiveData.items ?? [],
+      profile: archiveData.profile ?? {},
+      terms: archiveData.terms ?? null,
+      date: archiveData.date ?? null,
+      address: archiveData.address ?? null,
+      city: archiveData.city ?? null,
+      state: archiveData.state ?? null,
+      phones: archiveData.phones ?? [],
+      emails: archiveData.emails ?? [],
+      archived_at: archiveData.archived_at,
+      updated_at: archiveData.updated_at,
+      jobname: archiveData.jobName ?? null,
+      documenttype: archiveData.documentType ?? 'estimate',
+      invoicenumber: archiveData.invoiceNumber ?? archiveData.id,
+      zipcode: archiveData.zipCode ?? null,
+      paymentstatus: archiveData.paymentStatus ?? 'pending',
+      amountpaid: archiveData.amountPaid ?? null,
+    };
+    return await supabase.from('archive-est').insert(minimal);
   };
 
   const markAsPaidCash = async () => {
@@ -3293,7 +3347,7 @@ export default function Home() {
       // Pre-clear (best-effort) so we never hit PK violation on the subsequent insert.
       await supabase.from('archive-est').delete().eq('id', id).eq('user_id', user.id);
 
-      const result = await supabase.from('archive-est').insert(archiveData);
+      const result = await insertArchiveRow(archiveData);
       const { data: inserted, error, status, statusText } = result;
 
       if (error) {
@@ -3803,33 +3857,63 @@ export default function Home() {
 
   const archiveEstimate = async (id: string) => {
     if (!confirm('Archive this document?')) return;
-    if (!user || !supabase) return;
+    if (!user || !supabase) {
+      showMessage('Not logged in or Supabase not configured.');
+      return;
+    }
+    if (currentCrew) {
+      showMessage('Crew accounts cannot archive documents.');
+      return;
+    }
 
     try {
-      const { data: est, error: fetchErr } = await supabase.from('estimates').select('*').eq('id', id).single();
+      const { data: est, error: fetchErr } = await supabase
+        .from('estimates')
+        .select('*')
+        .eq('id', id)
+        .eq('user_id', user.id)
+        .single();
       if (fetchErr || !est) {
         console.error('Archive fetch error:', fetchErr);
+        showMessage('Could not load document to archive: ' + (fetchErr?.message || 'not found'));
         return;
       }
 
       const archiveData = prepareArchiveData(est);
-      if (!archiveData) return;
-
-      // Pre-clear then insert (consistent with markAsPaidCash; avoids onConflict/upsert quirks)
-      await supabase.from('archive-est').delete().eq('id', id).eq('user_id', user?.id || '');
-      const result = await supabase.from('archive-est').insert(archiveData);
-      const { error, status, statusText } = result;
-      if (error) {
-        console.error('Archive insert error (FULL):', { error, status, statusText });
+      if (!archiveData) {
+        showMessage('Could not prepare archive data (missing user id or row).');
         return;
       }
 
-      await supabase.from('estimates').delete().eq('id', id);
+      await supabase.from('archive-est').delete().eq('id', id).eq('user_id', user.id);
+      const { error: insertErr, status, statusText } = await insertArchiveRow(archiveData);
+      if (insertErr) {
+        console.error('Archive insert error (FULL):', { insertErr, status, statusText, archiveData });
+        showMessage(
+          'Archive failed (not moved to database): ' +
+            (insertErr.message || statusText || JSON.stringify(insertErr))
+        );
+        return;
+      }
+
+      const { error: delErr } = await supabase
+        .from('estimates')
+        .delete()
+        .eq('id', id)
+        .eq('user_id', user.id);
+      if (delErr) {
+        console.error('Archive delete from estimates failed:', delErr);
+        showMessage('Saved to archives, but could not remove from active list: ' + delErr.message);
+      } else {
+        showMessage('✅ Document archived to database');
+      }
+
       setSelectedIds(prev => prev.filter(sid => sid !== id));
-      showMessage('Document archived successfully');
-      refreshSavedList();
+      await refreshSavedList();
+      await refreshArchivesList();
     } catch (e: any) {
       console.error('Unexpected error archiving', id, e);
+      showMessage('Archive failed: ' + (e?.message || 'unexpected error'));
     }
   };
 
@@ -3849,30 +3933,70 @@ export default function Home() {
   const bulkArchive = async () => {
     if (selectedIds.length === 0) return;
     if (!confirm(`Archive ${selectedIds.length} documents?`)) return;
-    if (!user || !supabase) return;
+    if (!user || !supabase) {
+      showMessage('Not logged in or Supabase not configured.');
+      return;
+    }
+    if (currentCrew) {
+      showMessage('Crew accounts cannot archive documents.');
+      return;
+    }
+
+    let ok = 0;
+    let fail = 0;
+    const failMsgs: string[] = [];
 
     for (const id of selectedIds) {
-      const { data: est, error: fetchErr } = await supabase.from('estimates').select('*').eq('id', id).single();
+      const { data: est, error: fetchErr } = await supabase
+        .from('estimates')
+        .select('*')
+        .eq('id', id)
+        .eq('user_id', user.id)
+        .single();
       if (fetchErr || !est) {
         console.error('Bulk archive fetch error for', id, fetchErr);
+        fail++;
+        failMsgs.push(`${id}: fetch failed`);
         continue;
       }
       const archiveData = prepareArchiveData(est);
-      if (archiveData) {
-        // Pre-clear then insert (consistent behavior)
-        await supabase.from('archive-est').delete().eq('id', id).eq('user_id', user?.id || '');
-        const result = await supabase.from('archive-est').insert(archiveData);
-        const { error, status, statusText } = result;
-        if (error) {
-          console.error('Bulk archive insert error for', id, { error, status, statusText });
-        } else {
-          await supabase.from('estimates').delete().eq('id', id);
-        }
+      if (!archiveData) {
+        fail++;
+        failMsgs.push(`${id}: bad payload`);
+        continue;
+      }
+
+      await supabase.from('archive-est').delete().eq('id', id).eq('user_id', user.id);
+      const { error: insertErr } = await insertArchiveRow(archiveData);
+      if (insertErr) {
+        console.error('Bulk archive insert error for', id, insertErr);
+        fail++;
+        failMsgs.push(`${id}: ${insertErr.message}`);
+        continue;
+      }
+
+      const { error: delErr } = await supabase
+        .from('estimates')
+        .delete()
+        .eq('id', id)
+        .eq('user_id', user.id);
+      if (delErr) {
+        fail++;
+        failMsgs.push(`${id}: archived but still active`);
+      } else {
+        ok++;
       }
     }
-    showMessage(`${selectedIds.length} documents archived`);
+
+    if (fail === 0) {
+      showMessage(`✅ ${ok} document(s) archived to database`);
+    } else {
+      showMessage(`Archived ${ok}, failed ${fail}. ${failMsgs.slice(0, 2).join('; ')}`);
+      console.error('Bulk archive failures:', failMsgs);
+    }
     setSelectedIds([]);
-    refreshSavedList();
+    await refreshSavedList();
+    await refreshArchivesList();
   };
 
   const bulkDelete = async () => {
