@@ -2367,13 +2367,59 @@ export default function Home() {
 
   const refreshSavedList = async () => {
     if (!user || !supabase) return;
-    const { data } = await supabase.from('estimates').select('*').eq('user_id', user.id).order('updated_at', { ascending: false });
-    setSavedEstimatesList(data || []);
+    const { data } = await supabase
+      .from('estimates')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('updated_at', { ascending: false });
+    // Hide rows marked archived=true if that column exists
+    const rows = (data || []).filter((r: any) => r.archived !== true);
+    setSavedEstimatesList(rows);
   };
 
   const refreshArchivesList = async () => {
     if (!user || !supabase) return;
-    const { data } = await supabase.from('archive-est').select('*').eq('user_id', user.id).order('archived_at', { ascending: false });
+
+    // Prefer simple archives table (full document JSON) — most reliable
+    const { data: simple, error: simpleErr } = await supabase
+      .from('archives')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('archived_at', { ascending: false });
+
+    if (!simpleErr && simple) {
+      setArchivesList(
+        simple.map((row: any) => {
+          const payload = row.payload && typeof row.payload === 'object' ? row.payload : {};
+          return {
+            ...payload,
+            id: row.id,
+            user_id: row.user_id,
+            archived_at: row.archived_at,
+          };
+        })
+      );
+      return;
+    }
+
+    // Fallback: old archive-est table
+    const { data, error } = await supabase
+      .from('archive-est')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('archived_at', { ascending: false });
+    if (error) {
+      console.error('refreshArchivesList error:', error);
+      // Last resort: estimates marked archived
+      const { data: flagged } = await supabase
+        .from('estimates')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('archived', true)
+        .order('updated_at', { ascending: false });
+      setArchivesList(flagged || []);
+      return;
+    }
     setArchivesList(data || []);
   };
 
@@ -3248,68 +3294,79 @@ export default function Home() {
     };
   };
 
-  // Try several payload shapes until one matches the live archive-est columns.
-  const insertArchiveRow = async (archiveData: Record<string, any>) => {
-    if (!supabase) return { error: { message: 'Supabase not configured' } as any, status: 0, statusText: '' };
+  const formatArchiveErr = (err: any) =>
+    [err?.code, err?.message, err?.details, err?.hint].filter(Boolean).join(' | ') || JSON.stringify(err);
 
-    const formatErr = (err: any) =>
-      [err?.code, err?.message, err?.details, err?.hint].filter(Boolean).join(' | ') || JSON.stringify(err);
-
-    // 1) camelCase (quoted schema)
-    let result = await supabase.from('archive-est').insert(archiveData);
-    if (!result.error) return result;
-    console.warn('Archive attempt 1 (camelCase) failed:', formatErr(result.error));
-
-    // 2) all-lowercase keys (unquoted Postgres columns)
-    const lower: Record<string, any> = {};
-    for (const [k, v] of Object.entries(archiveData)) {
-      if (k === 'id' || k === 'user_id' || k === 'updated_at' || k === 'archived_at') lower[k] = v;
-      else lower[k.toLowerCase()] = v;
+  /**
+   * Persist a document to the archive.
+   * Primary: simple `archives` table (id, user_id, payload jsonb) — avoids column mismatches.
+   * Fallbacks: archive-est multi-shape inserts, then estimates.archived flag.
+   */
+  const persistArchive = async (estRow: any) => {
+    if (!supabase || !user) {
+      return { error: { message: 'Not logged in or Supabase not configured' } as any };
     }
-    result = await supabase.from('archive-est').insert(lower);
-    if (!result.error) return result;
-    console.warn('Archive attempt 2 (lowercase) failed:', formatErr(result.error));
+    const id = String(estRow.id);
+    const uid = estRow.user_id || estRow.userId || user.id;
+    const now = new Date().toISOString();
 
-    // 3) reduced lowercase payload (skip arrays/json that might be wrong shape)
-    const reduced = {
-      id: archiveData.id,
-      user_id: archiveData.user_id,
-      jobname: archiveData.jobName ?? null,
-      documenttype: archiveData.documentType ?? 'estimate',
-      invoicenumber: archiveData.invoiceNumber ?? archiveData.id,
-      address: archiveData.address ?? null,
-      city: archiveData.city ?? null,
-      state: archiveData.state ?? null,
-      zipcode: archiveData.zipCode ?? null,
-      date: archiveData.date ?? null,
-      terms: archiveData.terms ?? null,
-      paymentstatus: archiveData.paymentStatus ?? 'pending',
-      amountpaid: archiveData.amountPaid ?? 0,
-      paymentmethod: archiveData.paymentMethod ?? null,
-      items: archiveData.items ?? [],
-      profile: archiveData.profile ?? {},
-      updated_at: archiveData.updated_at || new Date().toISOString(),
-      archived_at: archiveData.archived_at || new Date().toISOString(),
-    };
-    result = await supabase.from('archive-est').insert(reduced);
-    if (!result.error) return result;
-    console.warn('Archive attempt 3 (reduced) failed:', formatErr(result.error));
-
-    // 4) absolute minimum — only columns almost every archive table has
-    const ultra = {
-      id: String(archiveData.id),
-      user_id: archiveData.user_id,
-      archived_at: new Date().toISOString(),
-    };
-    result = await supabase.from('archive-est').insert(ultra);
+    // --- 1) Preferred: simple JSON archives table ---
+    // Clear any prior row then insert full document as payload
+    await supabase.from('archives').delete().eq('id', id).eq('user_id', uid);
+    let result = await supabase.from('archives').insert({
+      id,
+      user_id: uid,
+      payload: estRow,
+      archived_at: now,
+    });
     if (!result.error) {
-      console.warn('Archive succeeded with ultra-minimal payload only');
-      return result;
+      // Remove from active estimates only after archive write succeeds
+      const del = await supabase.from('estimates').delete().eq('id', id).eq('user_id', uid);
+      if (del.error) {
+        console.warn('Archived to archives table but delete from estimates failed:', del.error);
+        return { error: null, warning: del.error.message };
+      }
+      return { error: null };
     }
-    console.error('Archive attempt 4 (ultra) failed:', formatErr(result.error));
-    // Attach readable message for UI
-    (result.error as any).message = formatErr(result.error);
-    return result;
+    console.warn('archives table insert failed, trying archive-est:', formatArchiveErr(result.error));
+
+    // --- 2) Fallback: legacy archive-est column shapes ---
+    const archiveData = prepareArchiveData(estRow);
+    if (archiveData) {
+      await supabase.from('archive-est').delete().eq('id', id).eq('user_id', uid);
+
+      result = await supabase.from('archive-est').insert(archiveData);
+      if (result.error) {
+        const lower: Record<string, any> = {};
+        for (const [k, v] of Object.entries(archiveData)) {
+          if (k === 'id' || k === 'user_id' || k === 'updated_at' || k === 'archived_at') lower[k] = v;
+          else lower[k.toLowerCase()] = v;
+        }
+        result = await supabase.from('archive-est').insert(lower);
+      }
+      if (!result.error) {
+        await supabase.from('estimates').delete().eq('id', id).eq('user_id', uid);
+        return { error: null };
+      }
+      console.warn('archive-est insert failed:', formatArchiveErr(result.error));
+    }
+
+    // --- 3) Last resort: flag row on estimates (needs archived column) ---
+    const flag = await supabase
+      .from('estimates')
+      .update({ archived: true, archived_at: now, updated_at: now } as any)
+      .eq('id', id)
+      .eq('user_id', uid);
+    if (!flag.error) {
+      console.warn('Archived via estimates.archived flag (create archives table for full archive storage)');
+      return { error: null, usedFlag: true };
+    }
+
+    const msg =
+      formatArchiveErr(result?.error) ||
+      formatArchiveErr(flag.error) ||
+      'Archive failed. Run ensure_archives_table.sql in Supabase.';
+    return { error: { message: msg } as any };
   };
 
   const markAsPaidCash = async () => {
@@ -3358,48 +3415,15 @@ export default function Home() {
         return;
       }
 
-      // Archive using clean column list.
-      // To avoid any upsert/onConflict quirks + duplicate key issues, first remove any prior
-      // archive copy of this id, then INSERT. This mirrors the original "close out" move intent.
-      const archiveData = prepareArchiveData(est);
-      if (!archiveData) {
-        showMessage('✅ Invoice marked as Paid (Cash), but archiving failed (no data).');
-        return;
-      }
-
-      // Pre-clear (best-effort) so we never hit PK violation on the subsequent insert.
-      await supabase.from('archive-est').delete().eq('id', id).eq('user_id', user.id);
-
-      const result = await insertArchiveRow(archiveData);
-      const { data: inserted, error, status, statusText } = result;
-
-      if (error) {
-        // Log EVERYTHING we can get — the previous {} was unhelpful.
-        console.error('Archive insert error (FULL RESULT):', {
-          error,
-          status,
-          statusText,
-          inserted,
-          archiveDataKeys: Object.keys(archiveData),
-          hasUserId: !!archiveData.user_id,
-          id: archiveData.id,
-        });
-        // Try to surface something useful even when the error object itself looks empty.
-        const errDetail =
-          (error as any)?.message ||
-          (error as any)?.error ||
-          (error as any)?.hint ||
-          (error as any)?.code ||
-          JSON.stringify(error) ||
-          statusText ||
-          'unknown error (see console for status)';
-        console.error('Archive insert raw error object:', error);
-        showMessage(`✅ Invoice marked as Paid (Cash), but archiving failed: ${errDetail} (status ${status ?? '??'})`);
+      const { error: archiveErr } = await persistArchive(est);
+      if (archiveErr) {
+        console.error('Archive insert error after mark paid:', archiveErr);
+        showMessage(
+          `✅ Invoice marked as Paid (Cash), but archiving failed: ${(archiveErr as any).message || 'unknown'} — Run ensure_archives_table.sql`
+        );
         await refreshSavedList();
         return;
       }
-
-      await supabase.from('estimates').delete().eq('id', id);
 
       showMessage('✅ Invoice marked as Paid (Cash) and closed to archives');
       setView('invoicesList');
@@ -3902,47 +3926,22 @@ export default function Home() {
         return;
       }
 
-      const archiveData = prepareArchiveData(est);
-      if (!archiveData) {
-        showMessage('Could not prepare archive data (missing user id or row).');
+      const { error, warning } = await persistArchive(est);
+      if (error) {
+        console.error('Archive insert error (FULL):', error);
+        showMessage(
+          'Archive failed (not moved to database): ' +
+            ((error as any).message || JSON.stringify(error)) +
+            ' — Run ensure_archives_table.sql in Supabase.'
+        );
         return;
       }
 
-      await supabase.from('archive-est').delete().eq('id', id).eq('user_id', user.id);
-      const { error: insertErr, status, statusText } = await insertArchiveRow(archiveData);
-      if (insertErr) {
-        const msg =
-          (insertErr as any).message ||
-          (insertErr as any).details ||
-          (insertErr as any).code ||
-          statusText ||
-          '400 Bad Request';
-        console.error('Archive insert error (FULL):', {
-          error: insertErr,
-          code: (insertErr as any).code,
-          message: (insertErr as any).message,
-          details: (insertErr as any).details,
-          hint: (insertErr as any).hint,
-          status,
-          statusText,
-          keys: Object.keys(archiveData),
-        });
-        showMessage('Archive failed (not moved to database): ' + msg);
-        return;
-      }
-
-      const { error: delErr } = await supabase
-        .from('estimates')
-        .delete()
-        .eq('id', id)
-        .eq('user_id', user.id);
-      if (delErr) {
-        console.error('Archive delete from estimates failed:', delErr);
-        showMessage('Saved to archives, but could not remove from active list: ' + delErr.message);
-      } else {
-        showMessage('✅ Document archived to database');
-      }
-
+      showMessage(
+        warning
+          ? '✅ Archived (with warning): ' + warning
+          : '✅ Document archived to database'
+      );
       setSelectedIds(prev => prev.filter(sid => sid !== id));
       await refreshSavedList();
       await refreshArchivesList();
@@ -3994,33 +3993,14 @@ export default function Home() {
         failMsgs.push(`${id}: fetch failed`);
         continue;
       }
-      const archiveData = prepareArchiveData(est);
-      if (!archiveData) {
+      const { error: archiveErr } = await persistArchive(est);
+      if (archiveErr) {
+        console.error('Bulk archive insert error for', id, archiveErr);
         fail++;
-        failMsgs.push(`${id}: bad payload`);
+        failMsgs.push(`${id}: ${(archiveErr as any).message || 'failed'}`);
         continue;
       }
-
-      await supabase.from('archive-est').delete().eq('id', id).eq('user_id', user.id);
-      const { error: insertErr } = await insertArchiveRow(archiveData);
-      if (insertErr) {
-        console.error('Bulk archive insert error for', id, insertErr);
-        fail++;
-        failMsgs.push(`${id}: ${insertErr.message}`);
-        continue;
-      }
-
-      const { error: delErr } = await supabase
-        .from('estimates')
-        .delete()
-        .eq('id', id)
-        .eq('user_id', user.id);
-      if (delErr) {
-        fail++;
-        failMsgs.push(`${id}: archived but still active`);
-      } else {
-        ok++;
-      }
+      ok++;
     }
 
     if (fail === 0) {
