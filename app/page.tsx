@@ -2367,42 +2367,20 @@ export default function Home() {
 
   const refreshSavedList = async () => {
     if (!user || !supabase) return;
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('estimates')
       .select('*')
       .eq('user_id', user.id)
       .order('updated_at', { ascending: false });
-    // Hide rows marked archived=true if that column exists
-    const rows = (data || []).filter((r: any) => r.archived !== true);
-    setSavedEstimatesList(rows);
+    if (error) {
+      console.error('refreshSavedList error:', error);
+      return;
+    }
+    setSavedEstimatesList(data || []);
   };
 
   const refreshArchivesList = async () => {
     if (!user || !supabase) return;
-
-    // Prefer simple archives table (full document JSON) — most reliable
-    const { data: simple, error: simpleErr } = await supabase
-      .from('archives')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('archived_at', { ascending: false });
-
-    if (!simpleErr && simple) {
-      setArchivesList(
-        simple.map((row: any) => {
-          const payload = row.payload && typeof row.payload === 'object' ? row.payload : {};
-          return {
-            ...payload,
-            id: row.id,
-            user_id: row.user_id,
-            archived_at: row.archived_at,
-          };
-        })
-      );
-      return;
-    }
-
-    // Fallback: old archive-est table
     const { data, error } = await supabase
       .from('archive-est')
       .select('*')
@@ -2410,17 +2388,36 @@ export default function Home() {
       .order('archived_at', { ascending: false });
     if (error) {
       console.error('refreshArchivesList error:', error);
-      // Last resort: estimates marked archived
-      const { data: flagged } = await supabase
-        .from('estimates')
-        .select('*')
-        .eq('user_id', user.id)
-        .eq('archived', true)
-        .order('updated_at', { ascending: false });
-      setArchivesList(flagged || []);
+      showMessage('Could not load archives: ' + error.message);
       return;
     }
-    setArchivesList(data || []);
+    // Normalize lowercase keys from DB to camelCase for the UI
+    setArchivesList(
+      (data || []).map((row: any) => ({
+        ...row,
+        jobName: row.jobName ?? row.jobname ?? '',
+        documentType: row.documentType ?? row.documenttype ?? 'estimate',
+        invoiceNumber: row.invoiceNumber ?? row.invoicenumber ?? row.id,
+        zipCode: row.zipCode ?? row.zipcode ?? '',
+        dueDate: row.dueDate ?? row.duedate ?? '',
+        paymentStatus: row.paymentStatus ?? row.paymentstatus ?? 'pending',
+        amountPaid: row.amountPaid ?? row.amountpaid ?? 0,
+        paymentMethod: row.paymentMethod ?? row.paymentmethod ?? '',
+        photoUrls: row.photoUrls ?? row.photourls ?? [],
+        videoUrls: row.videoUrls ?? row.videourls ?? [],
+        receiptUrls: row.receiptUrls ?? row.receipturls ?? [],
+        receiptDetails: row.receiptDetails ?? row.receiptdetails ?? [],
+        laborHours: row.laborHours ?? row.laborhours ?? 0,
+        laborRate: row.laborRate ?? row.laborrate ?? 0,
+        laborFixedAmount: row.laborFixedAmount ?? row.laborfixedamount ?? 0,
+        useHourlyLabor: row.useHourlyLabor ?? row.usehourlylabor ?? true,
+        laborAmount: row.laborAmount ?? row.laboramount ?? 0,
+        taxRate: row.taxRate ?? row.taxrate ?? 0,
+        taxAmount: row.taxAmount ?? row.taxamount ?? 0,
+        isTaxExempt: row.isTaxExempt ?? row.istaxexempt ?? false,
+        taxLabor: row.taxLabor ?? row.taxlabor ?? true,
+      }))
+    );
   };
 
   const loadSelectedEstimate = async (est: any) => {
@@ -3298,9 +3295,8 @@ export default function Home() {
     [err?.code, err?.message, err?.details, err?.hint].filter(Boolean).join(' | ') || JSON.stringify(err);
 
   /**
-   * Persist a document to the archive.
-   * Primary: simple `archives` table (id, user_id, payload jsonb) — avoids column mismatches.
-   * Fallbacks: archive-est multi-shape inserts, then estimates.archived flag.
+   * Move document into archive-est, then delete from estimates.
+   * Tries camelCase column names first (quoted schema), then lowercase (unquoted Postgres).
    */
   const persistArchive = async (estRow: any) => {
     if (!supabase || !user) {
@@ -3308,65 +3304,47 @@ export default function Home() {
     }
     const id = String(estRow.id);
     const uid = estRow.user_id || estRow.userId || user.id;
-    const now = new Date().toISOString();
 
-    // --- 1) Preferred: simple JSON archives table ---
-    // Clear any prior row then insert full document as payload
-    await supabase.from('archives').delete().eq('id', id).eq('user_id', uid);
-    let result = await supabase.from('archives').insert({
-      id,
-      user_id: uid,
-      payload: estRow,
-      archived_at: now,
-    });
-    if (!result.error) {
-      // Remove from active estimates only after archive write succeeds
-      const del = await supabase.from('estimates').delete().eq('id', id).eq('user_id', uid);
-      if (del.error) {
-        console.warn('Archived to archives table but delete from estimates failed:', del.error);
-        return { error: null, warning: del.error.message };
-      }
-      return { error: null };
-    }
-    console.warn('archives table insert failed, trying archive-est:', formatArchiveErr(result.error));
-
-    // --- 2) Fallback: legacy archive-est column shapes ---
     const archiveData = prepareArchiveData(estRow);
-    if (archiveData) {
-      await supabase.from('archive-est').delete().eq('id', id).eq('user_id', uid);
-
-      result = await supabase.from('archive-est').insert(archiveData);
-      if (result.error) {
-        const lower: Record<string, any> = {};
-        for (const [k, v] of Object.entries(archiveData)) {
-          if (k === 'id' || k === 'user_id' || k === 'updated_at' || k === 'archived_at') lower[k] = v;
-          else lower[k.toLowerCase()] = v;
-        }
-        result = await supabase.from('archive-est').insert(lower);
-      }
-      if (!result.error) {
-        await supabase.from('estimates').delete().eq('id', id).eq('user_id', uid);
-        return { error: null };
-      }
-      console.warn('archive-est insert failed:', formatArchiveErr(result.error));
+    if (!archiveData) {
+      return { error: { message: 'Could not prepare archive payload (missing user_id?)' } as any };
     }
 
-    // --- 3) Last resort: flag row on estimates (needs archived column) ---
-    const flag = await supabase
-      .from('estimates')
-      .update({ archived: true, archived_at: now, updated_at: now } as any)
-      .eq('id', id)
-      .eq('user_id', uid);
-    if (!flag.error) {
-      console.warn('Archived via estimates.archived flag (create archives table for full archive storage)');
-      return { error: null, usedFlag: true };
+    // Clear any previous archive row for this id
+    await supabase.from('archive-est').delete().eq('id', id).eq('user_id', uid);
+
+    // 1) camelCase keys → columns like "documentType", "jobName" (quoted schema)
+    let result = await supabase.from('archive-est').insert(archiveData);
+    if (result.error) {
+      console.warn('archive-est camelCase insert failed:', formatArchiveErr(result.error));
+
+      // 2) lowercase keys → columns like documenttype, jobname (unquoted schema)
+      const lower: Record<string, any> = {};
+      for (const [k, v] of Object.entries(archiveData)) {
+        if (k === 'id' || k === 'user_id' || k === 'updated_at' || k === 'archived_at') lower[k] = v;
+        else lower[k.toLowerCase()] = v;
+      }
+      result = await supabase.from('archive-est').insert(lower);
     }
 
-    const msg =
-      formatArchiveErr(result?.error) ||
-      formatArchiveErr(flag.error) ||
-      'Archive failed. Run ensure_archives_table.sql in Supabase.';
-    return { error: { message: msg } as any };
+    if (result.error) {
+      console.error('archive-est insert failed (both shapes):', formatArchiveErr(result.error));
+      return {
+        error: {
+          message:
+            formatArchiveErr(result.error) +
+            ' — Run fix_archive_est_table.sql in Supabase SQL Editor, then NOTIFY pgrst reload.',
+        } as any,
+      };
+    }
+
+    // Only remove from active list after archive insert succeeds
+    const del = await supabase.from('estimates').delete().eq('id', id).eq('user_id', uid);
+    if (del.error) {
+      console.warn('Archived to archive-est but delete from estimates failed:', del.error);
+      return { error: null, warning: del.error.message };
+    }
+    return { error: null };
   };
 
   const markAsPaidCash = async () => {
