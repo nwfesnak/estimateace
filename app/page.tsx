@@ -1232,6 +1232,11 @@ export default function Home() {
   const [billingBusy, setBillingBusy] = useState(false);
   const [billingLoaded, setBillingLoaded] = useState(false);
   const [billingCheckoutError, setBillingCheckoutError] = useState<string | null>(null);
+  /** overview = plan status; manage = crew + payment portal + delete account */
+  const [billingPanel, setBillingPanel] = useState<'overview' | 'manage'>('overview');
+  const [crewEmailInput, setCrewEmailInput] = useState('');
+  const [deleteAccountBusy, setDeleteAccountBusy] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const SUPPORT_EMAIL =
     (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_SUPPORT_EMAIL) ||
     'support@estimateace.com';
@@ -4511,6 +4516,76 @@ export default function Home() {
       showMessage('Billing portal failed.');
     } finally {
       setBillingBusy(false);
+    }
+  };
+
+  const addCrewMember = () => {
+    const email = crewEmailInput.trim().toLowerCase();
+    if (!email) return showMessage('Enter email for the crew account');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return showMessage('Enter a valid email address');
+    }
+    if ((profile.teammates || []).some((t) => t.email.toLowerCase() === email)) {
+      return showMessage('That email is already on your crew list');
+    }
+    const newCrew = {
+      email,
+      role: 'limited' as 'full' | 'limited',
+      canSeePricing: false,
+      canSeeEstimatesAndFinancials: false,
+    };
+    setProfile((prev) => ({
+      ...prev,
+      teammates: [...(prev.teammates || []), newCrew],
+    }));
+    setCrewEmailInput('');
+    showMessage('✅ Crew member added. They can log in with that email on the crew login form.');
+    setTimeout(() => saveToDB(), 100);
+  };
+
+  const deleteOwnAccount = async () => {
+    if (!supabase || !user) return;
+    if (deleteConfirmText.trim().toUpperCase() !== 'DELETE') {
+      showMessage('Type DELETE in the box to confirm.');
+      return;
+    }
+    if (
+      !confirm(
+        'This permanently deletes your EstimateAce account, estimates, invoices, archives, and crew list. This cannot be undone. Continue?'
+      )
+    ) {
+      return;
+    }
+    setDeleteAccountBusy(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) {
+        showMessage('Please log in again.');
+        return;
+      }
+      const res = await fetch('/api/account/delete', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ confirm: 'DELETE' }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showMessage(data.error || 'Could not delete account');
+        return;
+      }
+      await supabase.auth.signOut();
+      setUser(null);
+      setCurrentCrew(null);
+      showMessage('Your account has been deleted.');
+    } catch (e) {
+      console.error(e);
+      showMessage('Account deletion failed. Contact support.');
+    } finally {
+      setDeleteAccountBusy(false);
     }
   };
 
@@ -8382,6 +8457,7 @@ export default function Home() {
                 <button
                   onClick={() => {
                     setProfileTab('billing');
+                    setBillingPanel('overview');
                     void refreshBillingStatus();
                   }}
                   className={`flex-1 min-w-[7rem] py-4 text-center font-semibold ${profileTab === 'billing' ? 'border-b-4 border-[#10b981] text-[#10b981]' : 'text-gray-500'}`}
@@ -8411,14 +8487,14 @@ export default function Home() {
                 </button>
               </div>
 
-              {profileTab === 'billing' && (
+              {profileTab === 'billing' && billingPanel === 'overview' && (
                 <Card className="mb-8 border-emerald-200">
                   <CardContent className="p-8 space-y-5">
                     <div>
                       <h3 className="text-2xl font-semibold text-[#1e293b]">💳 Account billing (EstimateAce plan)</h3>
                       <p className="text-sm text-gray-500 mt-1">
-                        This is <strong>your</strong> subscription to use EstimateAce — not how clients pay you for jobs.
-                        Client payment links are under the <strong>Client Payments</strong> tab.
+                        Your subscription, crew seats, and account controls. Client payment links are under{' '}
+                        <strong>Client Payments</strong>.
                       </p>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
@@ -8441,53 +8517,20 @@ export default function Home() {
                         disabled={billingBusy}
                         onClick={() => void startSubscriptionCheckout()}
                       >
-                        {billingBusy ? 'Opening Stripe…' : 'Subscribe'}
+                        {billingBusy ? 'Opening Stripe…' : 'Subscribe / Pay'}
                       </Button>
                       <Button
                         variant="outline"
-                        disabled={billingBusy || !billing.stripeCustomerId}
-                        onClick={() => void openBillingPortal()}
+                        disabled={billingBusy}
+                        onClick={() => {
+                          setBillingPanel('manage');
+                          setDeleteConfirmText('');
+                        }}
                       >
                         Manage billing
                       </Button>
                       <Button variant="outline" disabled={billingBusy} onClick={() => void refreshBillingStatus()}>
                         Refresh status
-                      </Button>
-                      <Button
-                        variant="outline"
-                        disabled={billingBusy}
-                        onClick={async () => {
-                          if (!supabase) return;
-                          setBillingBusy(true);
-                          setBillingCheckoutError(null);
-                          try {
-                            const { data: sessionData } = await supabase.auth.getSession();
-                            const token = sessionData.session?.access_token;
-                            if (!token) {
-                              showMessage('Please log in again.');
-                              return;
-                            }
-                            const res = await fetch('/api/billing/sync', {
-                              method: 'POST',
-                              headers: { Authorization: `Bearer ${token}` },
-                            });
-                            const data = await res.json().catch(() => ({}));
-                            if (!res.ok) {
-                              setBillingCheckoutError(data.error || 'Could not sync from Stripe');
-                              showMessage(data.error || 'Could not sync from Stripe');
-                            } else {
-                              showMessage(`✅ Synced from Stripe — status: ${data.status || data.billing?.status || 'updated'}`);
-                            }
-                            await refreshBillingStatus();
-                          } catch (e) {
-                            console.error(e);
-                            showMessage('Sync failed');
-                          } finally {
-                            setBillingBusy(false);
-                          }
-                        }}
-                      >
-                        Sync from Stripe
                       </Button>
                     </div>
                     {billingCheckoutError && (
@@ -8495,47 +8538,239 @@ export default function Home() {
                         {billingCheckoutError}
                       </p>
                     )}
-                    {/* Setup diagnostics: only when Stripe is incomplete (owner setup), not for normal customers */}
                     {!billingStripeOk && (
                       <div className="text-xs text-gray-600 rounded-lg border bg-slate-50 p-3 space-y-1">
-                        <div className="font-semibold text-gray-700">Setup incomplete (only you see this)</div>
+                        <div className="font-semibold text-gray-700">Setup incomplete (owner only)</div>
                         <div>{billingStripeDiag.hasSecretKey ? '✅' : '❌'} STRIPE_SECRET_KEY</div>
                         <div>{billingStripeDiag.hasPriceId ? '✅' : '❌'} STRIPE_PRICE_ID</div>
-                        <div>
-                          {billingStripeDiag.hasWebhookSecret ? '✅' : '⚠️'} STRIPE_WEBHOOK_SECRET
-                        </div>
-                        <div>
-                          {billingStripeDiag.hasServiceRole ? '✅' : '⚠️'} SUPABASE_SERVICE_ROLE_KEY
-                        </div>
-                        <p className="text-amber-800 pt-1">
-                          Add missing keys in Vercel, then Redeploy. Customers never see secret values—only
-                          these labels when setup is incomplete.
-                        </p>
+                        <div>{billingStripeDiag.hasWebhookSecret ? '✅' : '⚠️'} STRIPE_WEBHOOK_SECRET</div>
+                        <div>{billingStripeDiag.hasServiceRole ? '✅' : '⚠️'} SUPABASE_SERVICE_ROLE_KEY</div>
                       </div>
                     )}
-                    {billingStripeOk && (
-                      <p className="text-sm text-gray-600">
-                        Click <strong>Subscribe</strong> to pay with card. After payment you return here with
-                        status <strong>active</strong> automatically (webhook). If status looks wrong, use{' '}
-                        <strong>Sync from Stripe</strong>.
-                      </p>
-                    )}
                     <p className="text-xs text-gray-500">
-                      Support:{' '}
-                      <a className="text-emerald-700 underline" href={`mailto:${SUPPORT_EMAIL}`}>
-                        {SUPPORT_EMAIL}
-                      </a>
-                      {' · '}
-                      <a className="underline" href="/terms">
-                        Terms
-                      </a>
-                      {' · '}
-                      <a className="underline" href="/privacy">
-                        Privacy
-                      </a>
+                      <strong>Manage billing</strong> opens crew members, payment method (Stripe), and account deletion.
                     </p>
                   </CardContent>
                 </Card>
+              )}
+
+              {profileTab === 'billing' && billingPanel === 'manage' && (
+                <div className="space-y-6 mb-8">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setBillingPanel('overview')}
+                  >
+                    ← Back to plan status
+                  </Button>
+
+                  <Card className="border-emerald-200">
+                    <CardContent className="p-6 space-y-4">
+                      <h3 className="text-xl font-semibold text-[#1e293b]">Manage plan &amp; payment</h3>
+                      <p className="text-sm text-gray-500">
+                        Status: <strong className="capitalize">{billing.status}</strong>
+                        {billing.currentPeriodEnd
+                          ? ` · Period ends ${formatPeriodEnd(billing.currentPeriodEnd)}`
+                          : ''}
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          className="bg-[#10b981] text-white"
+                          disabled={billingBusy}
+                          onClick={() => void startSubscriptionCheckout()}
+                        >
+                          Subscribe / Pay
+                        </Button>
+                        <Button
+                          variant="outline"
+                          disabled={billingBusy || !billing.stripeCustomerId}
+                          onClick={() => void openBillingPortal()}
+                        >
+                          Update card / cancel in Stripe
+                        </Button>
+                        <Button
+                          variant="outline"
+                          disabled={billingBusy}
+                          onClick={async () => {
+                            if (!supabase) return;
+                            setBillingBusy(true);
+                            try {
+                              const { data: sessionData } = await supabase.auth.getSession();
+                              const token = sessionData.session?.access_token;
+                              if (!token) return showMessage('Please log in again.');
+                              const res = await fetch('/api/billing/sync', {
+                                method: 'POST',
+                                headers: { Authorization: `Bearer ${token}` },
+                              });
+                              const data = await res.json().catch(() => ({}));
+                              if (!res.ok) showMessage(data.error || 'Sync failed');
+                              else showMessage(`✅ Synced — ${data.status || 'updated'}`);
+                              await refreshBillingStatus();
+                            } finally {
+                              setBillingBusy(false);
+                            }
+                          }}
+                        >
+                          Sync from Stripe
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardContent className="p-6 space-y-4">
+                      <h3 className="text-xl font-semibold text-[#1e293b]">👥 Crew / sub-contractors</h3>
+                      <p className="text-sm text-gray-500">
+                        Add or remove crew logins for this account. Main owner pays for EstimateAce above;
+                        crew list is managed here.
+                      </p>
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 text-amber-900 text-xs p-3">
+                        <strong>Beta:</strong> Crew log in with email only on the crew login form (not full secure
+                        invites yet). Do not share with untrusted people.
+                      </div>
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <Input
+                          placeholder="crew@email.com"
+                          value={crewEmailInput}
+                          onChange={(e) => setCrewEmailInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              addCrewMember();
+                            }
+                          }}
+                          className="flex-1"
+                        />
+                        <Button type="button" onClick={addCrewMember} className="bg-[#10b981] text-white">
+                          Add crew
+                        </Button>
+                      </div>
+                      <div className="space-y-3">
+                        {(profile.teammates || []).length === 0 ? (
+                          <p className="text-sm text-gray-500">No crew members yet.</p>
+                        ) : (
+                          (profile.teammates || []).map((crew, index) => (
+                            <div
+                              key={`${crew.email}-${index}`}
+                              className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border p-4 rounded-lg"
+                            >
+                              <div className="font-medium break-all">{crew.email}</div>
+                              <div className="flex flex-wrap items-center gap-4">
+                                <div className="flex items-center gap-2 text-sm">
+                                  <span>Full</span>
+                                  <label className="relative inline-flex items-center cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={crew.role === 'full'}
+                                      onChange={() => {
+                                        const updated = [...profile.teammates];
+                                        updated[index] = {
+                                          ...updated[index],
+                                          role: updated[index].role === 'full' ? 'limited' : 'full',
+                                        };
+                                        setProfile((prev) => ({ ...prev, teammates: updated }));
+                                        setTimeout(() => saveToDB(), 100);
+                                      }}
+                                      className="sr-only peer"
+                                    />
+                                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]" />
+                                  </label>
+                                  <span>Limited</span>
+                                </div>
+                                <label className="flex items-center gap-1 cursor-pointer text-xs">
+                                  <input
+                                    type="checkbox"
+                                    checked={crew.canSeePricing ?? false}
+                                    onChange={() => {
+                                      const updated = [...profile.teammates];
+                                      updated[index] = {
+                                        ...updated[index],
+                                        canSeePricing: !updated[index].canSeePricing,
+                                      };
+                                      setProfile((prev) => ({ ...prev, teammates: updated }));
+                                      setTimeout(() => saveToDB(), 100);
+                                    }}
+                                    className="w-3 h-3 accent-[#10b981]"
+                                  />
+                                  See pricing
+                                </label>
+                                <label className="flex items-center gap-1 cursor-pointer text-xs">
+                                  <input
+                                    type="checkbox"
+                                    checked={crew.canSeeEstimatesAndFinancials ?? false}
+                                    onChange={() => {
+                                      const updated = [...profile.teammates];
+                                      updated[index] = {
+                                        ...updated[index],
+                                        canSeeEstimatesAndFinancials:
+                                          !updated[index].canSeeEstimatesAndFinancials,
+                                      };
+                                      setProfile((prev) => ({ ...prev, teammates: updated }));
+                                      setTimeout(() => saveToDB(), 100);
+                                    }}
+                                    className="w-3 h-3 accent-[#10b981]"
+                                  />
+                                  See estimates &amp; financials
+                                </label>
+                                <Button
+                                  variant="destructive"
+                                  size="sm"
+                                  onClick={() => {
+                                    if (!confirm(`Remove crew member ${crew.email}?`)) return;
+                                    const updated = profile.teammates.filter((_, i) => i !== index);
+                                    setProfile((prev) => ({ ...prev, teammates: updated }));
+                                    setTimeout(() => saveToDB(), 100);
+                                    showMessage('Crew member removed');
+                                  }}
+                                >
+                                  Delete
+                                </Button>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="border-red-200">
+                    <CardContent className="p-6 space-y-4">
+                      <h3 className="text-xl font-semibold text-red-700">Delete account</h3>
+                      <p className="text-sm text-gray-600">
+                        Permanently deletes your login, estimates, invoices, archives, crew list, and
+                        subscription record. This cannot be undone. Cancel your Stripe plan first if you
+                        want (or use &quot;Update card / cancel in Stripe&quot; above).
+                      </p>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">
+                          Type <strong>DELETE</strong> to confirm
+                        </label>
+                        <Input
+                          value={deleteConfirmText}
+                          onChange={(e) => setDeleteConfirmText(e.target.value)}
+                          placeholder="DELETE"
+                          className="max-w-xs"
+                          autoComplete="off"
+                        />
+                      </div>
+                      <Button
+                        variant="destructive"
+                        disabled={
+                          deleteAccountBusy || deleteConfirmText.trim().toUpperCase() !== 'DELETE'
+                        }
+                        onClick={() => void deleteOwnAccount()}
+                      >
+                        {deleteAccountBusy ? 'Deleting…' : 'Delete my account permanently'}
+                      </Button>
+                      <p className="text-xs text-gray-500">
+                        Need help?{' '}
+                        <a className="text-emerald-700 underline" href={`mailto:${SUPPORT_EMAIL}`}>
+                          {SUPPORT_EMAIL}
+                        </a>
+                      </p>
+                    </CardContent>
+                  </Card>
+                </div>
               )}
 
               {profileTab === 'info' && (
@@ -8981,98 +9216,21 @@ export default function Home() {
                     </div>
 
                     <div className="border-t pt-8">
-                      <h3 className="font-semibold mb-4">{t('crew')}</h3>
-                      <div className="rounded-lg border border-amber-200 bg-amber-50 text-amber-900 text-xs p-3 mb-3">
-                        <strong>Phase A (beta):</strong> Crew seats are free to list for now. Login is email-match only
-                        (not full security). Phase B will add real invites + optional seat billing. Do not rely on this
-                        for untrusted workers yet.
-                      </div>
-                      <div className="flex flex-col gap-2 mb-6">
-                        <Input placeholder="crew@email.com" id="crew-email" className="flex-1" />
-                        <Button onClick={() => {
-                          const emailInput = document.getElementById('crew-email') as HTMLInputElement;
-                          const email = emailInput.value.trim();
-                          if (!email) return showMessage('Enter email for the additional account');
-
-                          const newCrew = {
-                            email,
-                            role: 'limited' as 'full' | 'limited',
-                            canSeePricing: false,
-                            canSeeEstimatesAndFinancials: false,
-                          };
-                          setProfile(prev => ({
-                            ...prev,
-                            teammates: [...(prev.teammates || []), newCrew],
-                          }));
-                          emailInput.value = '';
-                          showMessage('✅ Crew email added (beta). They log in with that email on the crew login form.');
-                          setTimeout(() => saveToDB(), 100);
-                        }}>Add crew email (beta)</Button>
-                      </div>
-                      <div className="space-y-3">
-                        {profile.teammates && profile.teammates.map((crew, index) => (
-                          <div key={index} className="flex items-center justify-between border p-4 rounded-lg">
-                            <div className="font-medium">{crew.email}</div>
-                            <div className="flex items-center gap-6">
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm">Full</span>
-                                <label className="relative inline-flex items-center cursor-pointer">
-                                  <input type="checkbox" checked={crew.role === 'full'} onChange={() => {
-                                    const updated = [...profile.teammates];
-                                    updated[index].role = updated[index].role === 'full' ? 'limited' : 'full';
-                                    setProfile(prev => ({ ...prev, teammates: updated }));
-                                    saveToDB();
-                                  }} className="sr-only peer" />
-                                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]"></div>
-                                </label>
-                                <span className="text-sm">Limited</span>
-                              </div>
-
-                              {/* Visibility permissions for this crew member (controlled by main account holder) */}
-                              <div className="flex items-center gap-4 text-xs">
-                                <label className="flex items-center gap-1 cursor-pointer">
-                                  <input
-                                    type="checkbox"
-                                    checked={crew.canSeePricing ?? false}
-                                    onChange={() => {
-                                      const updated = [...profile.teammates];
-                                      updated[index].canSeePricing = !updated[index].canSeePricing;
-                                      setProfile(prev => ({ ...prev, teammates: updated }));
-                                      saveToDB();
-                                    }}
-                                    className="w-3 h-3 accent-[#10b981]"
-                                  />
-                                  <span>See pricing</span>
-                                </label>
-                                <label className="flex items-center gap-1 cursor-pointer">
-                                  <input
-                                    type="checkbox"
-                                    checked={crew.canSeeEstimatesAndFinancials ?? false}
-                                    onChange={() => {
-                                      const updated = [...profile.teammates];
-                                      updated[index].canSeeEstimatesAndFinancials = !updated[index].canSeeEstimatesAndFinancials;
-                                      setProfile(prev => ({ ...prev, teammates: updated }));
-                                      saveToDB();
-                                    }}
-                                    className="w-3 h-3 accent-[#10b981]"
-                                  />
-                                  <span>See estimates & financials</span>
-                                </label>
-                              </div>
-
-                              <Button variant="destructive" size="sm" onClick={() => {
-                                if (!confirm('Delete this crew/sub-contractor member?')) return;
-                                const updated = profile.teammates.filter((_, i) => i !== index);
-                                setProfile(prev => ({ ...prev, teammates: updated }));
-                                saveToDB();
-                              }}>Delete</Button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-
-                      <p className="mt-4 pt-4 border-t text-[11px] text-gray-500">
-                        Fake $20/mo crew billing was removed for Phase A. Product subscription (EstimateAce plan) is under Profile → Account billing.
+                      <h3 className="font-semibold mb-2">{t('crew')}</h3>
+                      <p className="text-sm text-gray-500 mb-3">
+                        Add, pay for your plan, and manage crew under{' '}
+                        <button
+                          type="button"
+                          className="text-emerald-700 font-semibold underline"
+                          onClick={() => {
+                            setProfileTab('billing');
+                            setBillingPanel('manage');
+                            void refreshBillingStatus();
+                          }}
+                        >
+                          Plan / Billing → Manage billing
+                        </button>
+                        .
                       </p>
                     </div>
 
