@@ -1223,8 +1223,15 @@ export default function Home() {
   const [billing, setBilling] = useState<BillingSnapshot>(DEFAULT_BILLING_SNAPSHOT);
   const [billingEnforced, setBillingEnforced] = useState(false);
   const [billingStripeOk, setBillingStripeOk] = useState(false);
+  const [billingStripeDiag, setBillingStripeDiag] = useState<{
+    hasSecretKey?: boolean;
+    hasPriceId?: boolean;
+    hasWebhookSecret?: boolean;
+    hasServiceRole?: boolean;
+  }>({});
   const [billingBusy, setBillingBusy] = useState(false);
   const [billingLoaded, setBillingLoaded] = useState(false);
+  const [billingCheckoutError, setBillingCheckoutError] = useState<string | null>(null);
   const SUPPORT_EMAIL =
     (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_SUPPORT_EMAIL) ||
     'support@estimateace.com';
@@ -4405,7 +4412,8 @@ export default function Home() {
           ...data.billing,
         });
         setBillingEnforced(!!data.enforced);
-        setBillingStripeOk(!!data.stripeConfigured);
+        setBillingStripeOk(!!data.stripeConfigured || !!data.stripe?.configured);
+        setBillingStripeDiag(data.stripe || {});
       }
     } catch (e) {
       console.warn('refreshBillingStatus', e);
@@ -4415,13 +4423,21 @@ export default function Home() {
   };
 
   const startSubscriptionCheckout = async () => {
-    if (!supabase) return showMessage('Not configured');
+    if (!supabase) {
+      const msg = 'Supabase is not configured.';
+      setBillingCheckoutError(msg);
+      showMessage(msg);
+      return;
+    }
+    setBillingCheckoutError(null);
     setBillingBusy(true);
     try {
       const { data: sessionData } = await supabase.auth.getSession();
       const token = sessionData.session?.access_token;
       if (!token) {
-        showMessage('Please log in again.');
+        const msg = 'Please log in again.';
+        setBillingCheckoutError(msg);
+        showMessage(msg);
         return;
       }
       const res = await fetch('/api/billing/checkout', {
@@ -4430,13 +4446,22 @@ export default function Home() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.url) {
-        showMessage(data.error || 'Could not start checkout');
+        const msg =
+          data.error ||
+          (!billingStripeOk
+            ? 'Stripe is not configured on the server. Add STRIPE_SECRET_KEY + STRIPE_PRICE_ID in Vercel, then Redeploy.'
+            : 'Could not start checkout. Check Stripe keys/price id and redeploy.');
+        setBillingCheckoutError(msg);
+        showMessage(msg);
         return;
       }
-      window.location.href = data.url;
+      // Full redirect to Stripe Checkout (not a popup on this page)
+      window.location.assign(data.url);
     } catch (e) {
       console.error(e);
-      showMessage('Checkout failed. Try again.');
+      const msg = 'Checkout failed. Check your connection and try again.';
+      setBillingCheckoutError(msg);
+      showMessage(msg);
     } finally {
       setBillingBusy(false);
     }
@@ -8394,10 +8419,10 @@ export default function Home() {
                     <div className="flex flex-wrap gap-2">
                       <Button
                         className="bg-[#10b981] hover:bg-[#059669] text-white"
-                        disabled={billingBusy || !billingStripeOk}
+                        disabled={billingBusy}
                         onClick={() => void startSubscriptionCheckout()}
                       >
-                        {billingBusy ? 'Please wait…' : 'Subscribe'}
+                        {billingBusy ? 'Opening Stripe…' : 'Subscribe'}
                       </Button>
                       <Button
                         variant="outline"
@@ -8410,16 +8435,30 @@ export default function Home() {
                         Refresh status
                       </Button>
                     </div>
-                    {!billingStripeOk && (
-                      <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-3">
-                        Stripe is not fully configured on the server yet. Need <code className="text-xs">STRIPE_SECRET_KEY</code> +{' '}
-                        <code className="text-xs">STRIPE_PRICE_ID</code> in Vercel, then redeploy. Subscribe stays disabled until then.
+                    {billingCheckoutError && (
+                      <p className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-lg p-3">
+                        {billingCheckoutError}
                       </p>
                     )}
+                    <div className="text-xs text-gray-600 rounded-lg border bg-slate-50 p-3 space-y-1">
+                      <div className="font-semibold text-gray-700">Server Stripe check</div>
+                      <div>{billingStripeDiag.hasSecretKey ? '✅' : '❌'} STRIPE_SECRET_KEY</div>
+                      <div>{billingStripeDiag.hasPriceId ? '✅' : '❌'} STRIPE_PRICE_ID</div>
+                      <div>{billingStripeDiag.hasWebhookSecret ? '✅' : '⚠️'} STRIPE_WEBHOOK_SECRET (needed after pay)</div>
+                      <div>{billingStripeDiag.hasServiceRole ? '✅' : '⚠️'} SUPABASE_SERVICE_ROLE_KEY</div>
+                      {!billingStripeOk && (
+                        <p className="text-amber-800 pt-1">
+                          Add missing keys in Vercel → Environment Variables, then <strong>Redeploy</strong>.
+                          After that, Subscribe should open Stripe Checkout (new page), not stay on this screen.
+                        </p>
+                      )}
+                    </div>
                     {billingStripeOk && (
                       <p className="text-sm text-gray-600">
-                        Click <strong>Subscribe</strong> to open Stripe Checkout. Use test card{' '}
-                        <code className="text-xs bg-slate-100 px-1 rounded">4242 4242 4242 4242</code> if your Stripe key is test mode.
+                        Click <strong>Subscribe</strong> — the browser should go to a <strong>Stripe Checkout</strong> page
+                        (stripe.com). Use test card{' '}
+                        <code className="text-xs bg-slate-100 px-1 rounded">4242 4242 4242 4242</code> if your key is{' '}
+                        <code className="text-xs">sk_test_</code>.
                       </p>
                     )}
                     <p className="text-xs text-gray-500">

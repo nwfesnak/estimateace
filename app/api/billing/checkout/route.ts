@@ -43,10 +43,17 @@ export async function POST(request: NextRequest) {
       });
       customerId = customer.id;
       if (admin) {
+        // Preserve trial/status — only attach customer id
+        const { data: existing } = await admin
+          .from('subscriptions')
+          .select('status, trial_ends_at')
+          .eq('user_id', user.id)
+          .maybeSingle();
         await admin.from('subscriptions').upsert({
           user_id: user.id,
           stripe_customer_id: customerId,
-          status: 'none',
+          status: existing?.status || 'trialing',
+          trial_ends_at: existing?.trial_ends_at || null,
           updated_at: new Date().toISOString(),
         });
       }

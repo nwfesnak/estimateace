@@ -49,6 +49,21 @@ export function isStripeConfigured(): boolean {
   );
 }
 
+/** Server diagnostics for Profile billing UI */
+export function getStripeConfigDiagnostics() {
+  const hasSecretKey = Boolean((process.env.STRIPE_SECRET_KEY || '').trim());
+  const hasPriceId = Boolean((process.env.STRIPE_PRICE_ID || '').trim());
+  const hasWebhookSecret = Boolean((process.env.STRIPE_WEBHOOK_SECRET || '').trim());
+  const hasServiceRole = Boolean((process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim());
+  return {
+    hasSecretKey,
+    hasPriceId,
+    hasWebhookSecret,
+    hasServiceRole,
+    configured: hasSecretKey && hasPriceId,
+  };
+}
+
 export function getTrialDays(): number {
   const n = Number(process.env.NEXT_PUBLIC_TRIAL_DAYS || DEFAULT_TRIAL_DAYS);
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_TRIAL_DAYS;

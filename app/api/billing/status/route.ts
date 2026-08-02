@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   DEFAULT_BILLING_SNAPSHOT,
   ensureTrialEndsAt,
+  getStripeConfigDiagnostics,
   hasAppAccess,
   isBillingEnforced,
   isStripeConfigured,
@@ -68,11 +69,13 @@ export async function GET(request: NextRequest) {
       snapshot = ensureTrialEndsAt(snapshot);
     }
 
+    const stripeDiag = getStripeConfigDiagnostics();
     return NextResponse.json({
       billing: snapshot,
       access: hasAppAccess(snapshot),
       enforced: isBillingEnforced(),
       stripeConfigured: isStripeConfigured(),
+      stripe: stripeDiag,
     });
   } catch (e) {
     console.error('billing/status:', e);
