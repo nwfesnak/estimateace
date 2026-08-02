@@ -57,7 +57,8 @@ const nextConfig = {
           },
           {
             key: 'Permissions-Policy',
-            value: "camera=(self), microphone=(self), geolocation=()",
+            // camera for measure/photo; xr-spatial-tracking for WebXR AR measure on supported phones
+            value: "camera=(self), microphone=(self), xr-spatial-tracking=(self), geolocation=()",
           },
           {
             key: 'Strict-Transport-Security',
