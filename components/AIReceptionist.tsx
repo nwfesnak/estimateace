@@ -259,11 +259,16 @@ export function AIReceptionist({
 
       <div className="flex flex-wrap items-start justify-between gap-3 mb-6">
         <div>
-          <h2 className="text-3xl font-semibold text-[#1e293b]">📞 AI Receptionist</h2>
+          <h2 className="text-3xl font-semibold text-[#1e293b]">
+            📞 AI Receptionist{' '}
+            <span className="text-xs align-middle font-bold uppercase bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
+              Beta
+            </span>
+          </h2>
           <p className="text-sm text-gray-500 mt-1 max-w-xl">
-            24/7 virtual front desk for contractors — answers calls when you can&apos;t, takes messages,
-            flags urgents, answers service questions from your knowledge base, and helps book
-            appointments. Use call forwarding from your existing number (no porting required).
+            Knowledge base, test call, and message inbox work now. Live phone answering and carrier
+            call forwarding are <strong>not available yet</strong> — do not market as a live phone
+            line until Phase C.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -450,21 +455,18 @@ export function AIReceptionist({
         <div className="space-y-6">
           <Card>
             <CardContent className="p-6 space-y-3">
-              <h3 className="font-semibold text-lg">Call forwarding (use your existing number)</h3>
-              <p className="text-sm text-gray-600">
-                No need to port your number or buy a second line. On your phone carrier, forward
-                <strong> unanswered / busy / after-hours</strong> calls to your EstimateAce receptionist
-                line when phone carrier integration is provisioned for your account.
+              <h3 className="font-semibold text-lg">Call forwarding (coming Phase C)</h3>
+              <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                There is <strong>no live forward-to number</strong> in Phase A. Use <strong>Test call</strong>{' '}
+                to practice. When voice is shipped, you will forward unanswered calls from your existing
+                number to a Twilio line shown here (no porting).
               </p>
               <ol className="text-sm text-gray-700 list-decimal pl-5 space-y-1">
                 <li>Turn AI Receptionist <strong>On</strong> and save settings.</li>
                 <li>Fill your knowledge base (services, pricing ranges, service area, hours).</li>
-                <li>Set notify phone/email for push-style alerts (SMS/email when configured).</li>
-                <li>
-                  Carrier: set conditional call forwarding (missed/no answer) to the number we provide
-                  in your workspace (Twilio-backed line — contact support if not assigned yet).
-                </li>
-                <li>Test with <strong>Test call</strong> in this app anytime.</li>
+                <li>Set notify phone/email for alerts (SMS/email when Twilio/Resend configured).</li>
+                <li>Practice with <strong>Test call</strong> and review the Inbox summary.</li>
+                <li>Live carrier forwarding will be enabled in a later release.</li>
               </ol>
               <div className="rounded-xl bg-slate-50 border p-3 text-sm">
                 <div className="font-medium text-gray-700">Your business line</div>

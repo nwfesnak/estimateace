@@ -16,6 +16,7 @@ import {
   type MileageLog,
 } from '@/components/MileageTracker';
 import { AIReceptionist } from '@/components/AIReceptionist';
+import { SubscriptionGate } from '@/components/SubscriptionGate';
 import {
   DEFAULT_RECEPTIONIST_SETTINGS,
   normalizeReceptionistMessages,
@@ -23,6 +24,12 @@ import {
   type ReceptionistMessage,
   type ReceptionistSettings,
 } from '@/lib/ai-receptionist';
+import {
+  DEFAULT_BILLING_SNAPSHOT,
+  formatPeriodEnd,
+  hasAppAccess,
+  type BillingSnapshot,
+} from '@/lib/billing';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { getSupabaseClient, getSupabaseConfigHelpMessage } from '@/lib/supabase/client';
@@ -1212,6 +1219,15 @@ export default function Home() {
   );
   const [receptionistMessages, setReceptionistMessages] = useState<ReceptionistMessage[]>([]);
   const [receptionistSaving, setReceptionistSaving] = useState(false);
+  /** SaaS product subscription (Phase A) */
+  const [billing, setBilling] = useState<BillingSnapshot>(DEFAULT_BILLING_SNAPSHOT);
+  const [billingEnforced, setBillingEnforced] = useState(false);
+  const [billingStripeOk, setBillingStripeOk] = useState(false);
+  const [billingBusy, setBillingBusy] = useState(false);
+  const [billingLoaded, setBillingLoaded] = useState(false);
+  const SUPPORT_EMAIL =
+    (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_SUPPORT_EMAIL) ||
+    'support@estimateace.com';
 
   // Photo / video media picker + device-style in-app camera (fixed chrome)
   const [isPhotoPickerOpen, setIsPhotoPickerOpen] = useState(false);
@@ -1761,6 +1777,24 @@ export default function Home() {
     return () => listener.subscription.unsubscribe();
   }, [supabase]);
 
+  // Stripe return deep-links
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const billing = params.get('billing');
+    if (!billing) return;
+    if (billing === 'success') {
+      showMessage('✅ Subscription updated. Refreshing billing status…');
+      void refreshBillingStatus();
+    } else if (billing === 'cancel') {
+      showMessage('Checkout canceled — you can subscribe anytime.');
+    }
+    // Clean query without full reload
+    const url = new URL(window.location.href);
+    url.searchParams.delete('billing');
+    window.history.replaceState({}, '', url.pathname + url.search);
+  }, [user?.id]);
+
   useEffect(() => {
     resolveMediaDisplayUrl(profile.logoUrl, getMediaUrl).then(setLogoDisplayUrl);
   }, [profile.logoUrl, supabase]);
@@ -1828,6 +1862,10 @@ export default function Home() {
       refreshArchivesList();
       void loadMileageRateFromSettings();
       void loadReceptionistFromSettings();
+      void refreshBillingStatus();
+    } else {
+      setBilling(DEFAULT_BILLING_SNAPSHOT);
+      setBillingLoaded(false);
     }
   }, [user?.id]);
 
@@ -4344,6 +4382,94 @@ export default function Home() {
     }
   };
 
+  const refreshBillingStatus = async () => {
+    if (!user || !supabase) {
+      setBillingLoaded(false);
+      return;
+    }
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) {
+        setBillingLoaded(true);
+        return;
+      }
+      const res = await fetch('/api/billing/status', {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.billing) {
+        setBilling({
+          ...DEFAULT_BILLING_SNAPSHOT,
+          ...data.billing,
+        });
+        setBillingEnforced(!!data.enforced);
+        setBillingStripeOk(!!data.stripeConfigured);
+      }
+    } catch (e) {
+      console.warn('refreshBillingStatus', e);
+    } finally {
+      setBillingLoaded(true);
+    }
+  };
+
+  const startSubscriptionCheckout = async () => {
+    if (!supabase) return showMessage('Not configured');
+    setBillingBusy(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) {
+        showMessage('Please log in again.');
+        return;
+      }
+      const res = await fetch('/api/billing/checkout', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.url) {
+        showMessage(data.error || 'Could not start checkout');
+        return;
+      }
+      window.location.href = data.url;
+    } catch (e) {
+      console.error(e);
+      showMessage('Checkout failed. Try again.');
+    } finally {
+      setBillingBusy(false);
+    }
+  };
+
+  const openBillingPortal = async () => {
+    if (!supabase) return showMessage('Not configured');
+    setBillingBusy(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) {
+        showMessage('Please log in again.');
+        return;
+      }
+      const res = await fetch('/api/billing/portal', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.url) {
+        showMessage(data.error || 'Could not open billing portal');
+        return;
+      }
+      window.location.href = data.url;
+    } catch (e) {
+      console.error(e);
+      showMessage('Billing portal failed.');
+    } finally {
+      setBillingBusy(false);
+    }
+  };
+
   const saveReceptionistData = async (
     settings: ReceptionistSettings,
     messages: ReceptionistMessage[]
@@ -6623,6 +6749,9 @@ export default function Home() {
         <Card className="w-full max-w-md p-8">
           <div>
             <h1 className="text-4xl font-bold text-center text-[#1e293b]">EstimateAce</h1>
+            <p className="text-center text-sm text-gray-500 mt-2">
+              Professional estimating for contractors
+            </p>
           </div>
 
           {!showMainForgot ? (
@@ -6651,8 +6780,19 @@ export default function Home() {
               >
                 Clear saved login (fix stuck login)
               </button>
-              <p className="text-[10px] text-gray-400 mt-4 leading-relaxed">
-                Console errors about autofill/chrome-extension are from a browser add-on, not this app. Use Sign Up if you have not created an account on localhost yet.
+              <p className="text-[10px] text-gray-400 mt-4 leading-relaxed text-center">
+                By continuing you agree to our{' '}
+                <a href="/terms" className="underline text-emerald-700">
+                  Terms
+                </a>{' '}
+                and{' '}
+                <a href="/privacy" className="underline text-emerald-700">
+                  Privacy Policy
+                </a>
+                . Support:{' '}
+                <a href={`mailto:${SUPPORT_EMAIL}`} className="underline">
+                  {SUPPORT_EMAIL}
+                </a>
               </p>
             </>
           ) : (
@@ -6724,7 +6864,8 @@ export default function Home() {
 
   // Two-Factor Authentication screen - DISABLED for production (was 100% simulated/fake)
   // Real 2FA should use Supabase Auth Phone, authenticator apps, or SMS provider.
-  if (false && requires2FA) {  // permanently disabled
+  // Phase A: real MFA not shipped — keep 2FA UI permanently disabled
+  if (false && requires2FA) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#f4f4f4]">
         <Card className="w-full max-w-md p-8">
@@ -6761,6 +6902,31 @@ export default function Home() {
 
         </Card>
       </div>
+    );
+  }
+
+  // Phase A paywall (only when NEXT_PUBLIC_BILLING_ENFORCE=true). Crew beta logins skip owner gate.
+  if (
+    user &&
+    !currentCrew &&
+    billingLoaded &&
+    billingEnforced &&
+    !hasAppAccess(billing)
+  ) {
+    return (
+      <>
+        <ToastContainer />
+        <SubscriptionGate
+          billing={billing}
+          enforced={billingEnforced}
+          stripeConfigured={billingStripeOk}
+          busy={billingBusy}
+          supportEmail={SUPPORT_EMAIL}
+          onCheckout={startSubscriptionCheckout}
+          onPortal={openBillingPortal}
+          onRefresh={refreshBillingStatus}
+        />
+      </>
     );
   }
 
@@ -6882,6 +7048,9 @@ export default function Home() {
                     <div className="min-w-0">
                       <h3 className="font-semibold text-lg flex items-center gap-2">
                         📞 AI Receptionist
+                        <span className="text-[10px] font-bold uppercase bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
+                          Beta
+                        </span>
                         {receptionistSettings.enabled ? (
                           <span className="text-[10px] font-bold uppercase bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
                             On
@@ -6893,8 +7062,8 @@ export default function Home() {
                         )}
                       </h3>
                       <p className="text-sm text-gray-600 mt-1 max-w-lg">
-                        24/7 virtual front desk — answers missed &amp; after-hours calls, takes messages,
-                        flags urgents, books appointments, and answers service questions from your knowledge base.
+                        Knowledge base + <strong>Test call</strong> + message inbox work now. Live phone
+                        forwarding is <strong>not</strong> available yet (Phase C).
                       </p>
                       {receptionistMessages.filter((m) => m.status === 'new' && !m.spam).length > 0 && (
                         <p className="text-xs font-semibold text-sky-700 mt-2">
@@ -8247,6 +8416,69 @@ export default function Home() {
                       </div>
                     </div>
 
+                    {/* Account billing (Phase A SaaS) */}
+                    <div className="pt-6 border-t border-slate-200 space-y-3">
+                      <h3 className="text-xl font-semibold text-[#1e293b]">💳 Account billing</h3>
+                      <p className="text-sm text-gray-500">
+                        Your EstimateAce plan (separate from client payment links). Trial and subscription
+                        status for this login.
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+                        <div className="rounded-xl border bg-white p-3">
+                          <div className="text-xs text-gray-500 uppercase">Status</div>
+                          <div className="font-semibold capitalize">{billing.status}</div>
+                        </div>
+                        <div className="rounded-xl border bg-white p-3">
+                          <div className="text-xs text-gray-500 uppercase">Trial ends</div>
+                          <div className="font-semibold">{formatPeriodEnd(billing.trialEndsAt)}</div>
+                        </div>
+                        <div className="rounded-xl border bg-white p-3">
+                          <div className="text-xs text-gray-500 uppercase">Period ends</div>
+                          <div className="font-semibold">{formatPeriodEnd(billing.currentPeriodEnd)}</div>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          className="bg-[#10b981] text-white"
+                          disabled={billingBusy || !billingStripeOk}
+                          onClick={() => void startSubscriptionCheckout()}
+                        >
+                          {billingBusy ? '…' : 'Subscribe'}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={billingBusy || !billing.stripeCustomerId}
+                          onClick={() => void openBillingPortal()}
+                        >
+                          Manage billing
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => void refreshBillingStatus()}>
+                          Refresh
+                        </Button>
+                      </div>
+                      {!billingStripeOk && (
+                        <p className="text-xs text-amber-700">
+                          Stripe not configured on server yet — subscribe button activates after env vars are set.
+                        </p>
+                      )}
+                      <p className="text-xs text-gray-500">
+                        Support:{' '}
+                        <a className="text-emerald-700 underline" href={`mailto:${SUPPORT_EMAIL}`}>
+                          {SUPPORT_EMAIL}
+                        </a>
+                        {' · '}
+                        <a className="underline" href="/terms">
+                          Terms
+                        </a>
+                        {' · '}
+                        <a className="underline" href="/privacy">
+                          Privacy
+                        </a>
+                      </p>
+                    </div>
+
                     {/* Total miles across all jobs */}
                     <div className="pt-6 border-t border-slate-200">
                       <MileageTracker
@@ -8622,7 +8854,11 @@ export default function Home() {
 
                     <div className="border-t pt-8">
                       <h3 className="font-semibold mb-4">{t('crew')}</h3>
-                      <p className="text-xs text-gray-500 -mt-2 mb-3">$20/month per additional account (set by Estimate Ace — charged when you add team/sub accounts).</p>
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 text-amber-900 text-xs p-3 mb-3">
+                        <strong>Phase A (beta):</strong> Crew seats are free to list for now. Login is email-match only
+                        (not full security). Phase B will add real invites + optional seat billing. Do not rely on this
+                        for untrusted workers yet.
+                      </div>
                       <div className="flex flex-col gap-2 mb-6">
                         <Input placeholder="crew@email.com" id="crew-email" className="flex-1" />
                         <Button onClick={() => {
@@ -8630,29 +8866,20 @@ export default function Home() {
                           const email = emailInput.value.trim();
                           if (!email) return showMessage('Enter email for the additional account');
 
-                          if (profile.crewSubscriptionActive) {
-                            // Already subscribed, just add the account
-                            const newCrew = { 
-                              email, 
-                              role: 'limited' as 'full' | 'limited', 
-                              canSeePricing: false, 
-                              canSeeEstimatesAndFinancials: false 
-                            };
-                            setProfile(prev => ({
-                              ...prev,
-                              teammates: [...(prev.teammates || []), newCrew]
-                            }));
-                            emailInput.value = '';
-                            showMessage('✅ Additional account added! They can log in using just their email.');
-                            setTimeout(() => saveToDB(), 100);
-                          } else {
-                            // Need to activate the monthly charge for extra accounts
-                            setPendingCrewEmail(email);
-                            setSelectedCrewPaymentMethod(null);
-                            setIsCrewPayModalOpen(true);
-                            emailInput.value = '';
-                          }
-                        }}>Add Account (charges $20/mo)</Button>
+                          const newCrew = {
+                            email,
+                            role: 'limited' as 'full' | 'limited',
+                            canSeePricing: false,
+                            canSeeEstimatesAndFinancials: false,
+                          };
+                          setProfile(prev => ({
+                            ...prev,
+                            teammates: [...(prev.teammates || []), newCrew],
+                          }));
+                          emailInput.value = '';
+                          showMessage('✅ Crew email added (beta). They log in with that email on the crew login form.');
+                          setTimeout(() => saveToDB(), 100);
+                        }}>Add crew email (beta)</Button>
                       </div>
                       <div className="space-y-3">
                         {profile.teammates && profile.teammates.map((crew, index) => (
@@ -8716,35 +8943,9 @@ export default function Home() {
                         ))}
                       </div>
 
-                      {/* Subscription status and cancel option */}
-                      <div className="mt-4 pt-4 border-t flex flex-col gap-3">
-                        {profile.crewSubscriptionActive ? (
-                          <>
-                            <div className="flex items-center justify-between text-sm">
-                              <span className="text-green-600 font-medium">✓ Crew subscription active — $20/month</span>
-                              <Button 
-                                variant="outline" 
-                                size="sm" 
-                                onClick={() => {
-                                  if (!confirm('Cancel the $20/month Crew/Sub-contractors subscription?\n\nExisting members will remain but you will need to resubscribe to add new ones.')) return;
-                                  setProfile(prev => ({ ...prev, crewSubscriptionActive: false }));
-                                  showMessage('✅ Subscription canceled. $20/month billing stopped.');
-                                  saveToDB();
-                                }}
-                              >
-                                Cancel Subscription
-                              </Button>
-                            </div>
-                            <p className="text-[10px] text-gray-500">Canceling stops future billing. You can resubscribe anytime by adding another crew member.</p>
-                          </>
-                        ) : (
-                          profile.teammates && profile.teammates.length > 0 && (
-                            <div className="text-sm text-amber-600">
-                              Subscription inactive. Add a new crew member to reactivate at $20/month.
-                            </div>
-                          )
-                        )}
-                      </div>
+                      <p className="mt-4 pt-4 border-t text-[11px] text-gray-500">
+                        Fake $20/mo crew billing was removed for Phase A. Product subscription (EstimateAce plan) is under Profile → Account billing.
+                      </p>
                     </div>
 
                     <div className="border-t pt-8">
@@ -10723,94 +10924,13 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* PAYMENT MODAL FOR ADDING EXTRA ACCOUNTS ($20/mo) */}
-      <Dialog open={isCrewPayModalOpen} onOpenChange={setIsCrewPayModalOpen}>
+      {/* Crew pay modal retired (Phase A) — kept closed */}
+      <Dialog open={false} onOpenChange={() => setIsCrewPayModalOpen(false)}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>💳 Add Additional Account — $20/mo</DialogTitle>
+            <DialogTitle>Crew billing</DialogTitle>
           </DialogHeader>
-          <div className="py-4">
-            <div className="text-center mb-4">
-              <p>Charge <strong>$20/month</strong> to add another user account.</p>
-              <div className="mt-2">
-                Adding account for: <span className="font-semibold">{pendingCrewEmail}</span>
-              </div>
-            </div>
-
-            <div className="text-center mb-6">
-              <div className="text-4xl font-bold text-[#10b981]">$20</div>
-              <p className="text-xs text-gray-500">per month</p>
-            </div>
-
-            <div className="space-y-3">
-              {Object.entries(mergePaymentSettings(profile.paymentSettings)).map(([method, settings]) => {
-                if (!settings?.enabled) return null;
-                if (method === 'venmo' && !hasVenmoHandle(settings.handle)) return null;
-                const meta = getPaymentMethodMeta(method);
-                const venmoHandle = method === 'venmo' ? cleanVenmoHandle(settings.handle || '') : '';
-                return (
-                  <button
-                    key={method}
-                    onClick={() => setSelectedCrewPaymentMethod(method)}
-                    className={`w-full flex items-center gap-4 p-4 border-2 rounded-2xl hover:bg-gray-50 transition-all ${selectedCrewPaymentMethod === method ? 'border-[#10b981] bg-green-50' : 'border-gray-200'}`}
-                  >
-                    <span className="text-3xl flex-shrink-0">{meta.icon}</span>
-                    <div className="flex-1 text-left">
-                      <div className="font-semibold">{meta.label}</div>
-                      <div className="text-xs text-gray-500">
-                        {venmoHandle ? `@${venmoHandle}` : meta.description}
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-
-            {Object.values(mergePaymentSettings(profile.paymentSettings)).every(s => !s?.enabled) && (
-              <p className="text-xs text-red-500 mt-2 text-center">No payment methods enabled. Enable one in the Payments tab.</p>
-            )}
-          </div>
-          <DialogFooter className="flex gap-3">
-            <Button variant="outline" onClick={() => setIsCrewPayModalOpen(false)} className="flex-1">
-              Cancel
-            </Button>
-            <Button 
-              onClick={() => {
-                if (!selectedCrewPaymentMethod) {
-                  showMessage('Please select a payment method');
-                  return;
-                }
-                const method = selectedCrewPaymentMethod;
-                setIsCrewPayModalOpen(false);
-
-                // Add the additional account now that "payment" succeeded
-                const newCrew = { 
-                  email: pendingCrewEmail, 
-                  role: 'limited' as 'full' | 'limited', 
-                  canSeePricing: false, 
-                  canSeeEstimatesAndFinancials: false 
-                };
-                setProfile(prev => ({
-                  ...prev,
-                  teammates: [...(prev.teammates || []), newCrew],
-                  crewSubscriptionActive: true
-                }));
-
-                showMessage(`✅ Extra account added for ${pendingCrewEmail}. $20/month subscription activated.`);
-
-                // Persist
-                setTimeout(() => saveToDB(), 150);
-
-                // Clean up
-                setPendingCrewEmail('');
-                setSelectedCrewPaymentMethod(null);
-              }}
-              disabled={!selectedCrewPaymentMethod}
-              className="flex-1 bg-[#10b981]"
-            >
-              Pay $20/mo &amp; Activate Account
-            </Button>
-          </DialogFooter>
+          <p className="text-sm text-gray-600">Crew seat billing moves to Phase B.</p>
         </DialogContent>
       </Dialog>
 

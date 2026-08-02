@@ -11,7 +11,7 @@ Professional contractor estimating & invoicing tool with AI assistance.
 - Reports, exports, archiving
 - Basic profile + payment method settings (demo)
 
-**Note**: Payments and crew subscriptions are fully simulated (demo mode). No real charges occur.
+**Phase A**: Product subscription via Stripe (optional enforce). Client payment *links* (PayPal/Venmo/Zelle) are BYO. Crew seats are free beta (not secure multi-user). AI Receptionist is test-call only (no live phone). See `GO_LIVE_PHASE_A.md`.
 
 ## Setup
 
