@@ -10379,6 +10379,45 @@ export default function Home() {
                   {renderDocumentTotals()}
                 </div>
 
+                {/* Pay buttons above Terms so clients see them first on preview/PDF */}
+                {renderApprovedPaymentSection({ interactive: true })}
+
+                {documentType === 'invoice' && (
+                  <div className="mt-10 p-8 border-4 border-dashed border-[#f59e0b] rounded-3xl bg-amber-50">
+                    <h3 className="text-3xl font-bold text-center text-[#f59e0b]">💰 Invoice Payment Section</h3>
+                    <p className="text-center text-xl mt-3">
+                      Deposit paid on estimate: <strong>{profile.depositPercentage}%</strong><br />
+                      Remainder due: <strong>{100 - (profile.depositPercentage || 0)}%</strong> = <span className="font-bold text-2xl"> ${(grandTotal * (100 - (profile.depositPercentage || 0)) / 100).toFixed(2)}</span>
+                      {profile.chargeCCFee && (
+                        <span className="block text-sm mt-1 text-amber-700">
+                          + {profile.ccFeePercentage || 3}% CC processing fee applied at checkout
+                        </span>
+                      )}
+                    </p>
+                    {(() => {
+                      let remainder = grandTotal * (100 - (profile.depositPercentage || 0)) / 100;
+                      if (profile.chargeCCFee) {
+                        remainder = remainder * (1 + (profile.ccFeePercentage || 3) / 100);
+                      }
+                      return (
+                        <div className="mt-6 space-y-4">
+                          <Button
+                            onClick={() => openPaymentModal('balance', remainder)}
+                            className="w-full py-8 text-2xl font-bold bg-[#f59e0b] hover:bg-orange-600 text-white rounded-3xl"
+                          >
+                            Pay the Balance Now (${remainder.toFixed(2)})
+                            {profile.chargeCCFee && <span className="text-xs block mt-1 font-normal opacity-90">(includes CC fee)</span>}
+                          </Button>
+                          {isVenmoPaymentReady() && renderVenmoPayButton(remainder, 'balance', {
+                            className: 'w-full py-8 text-2xl font-bold bg-[#008cff] hover:bg-[#0070cc] text-white rounded-3xl',
+                          })}
+                        </div>
+                      );
+                    })()}
+                    <p className="text-center text-xs text-gray-500 mt-3">Choose a payment option above to pay the remaining balance</p>
+                  </div>
+                )}
+
                 {terms && (
                   <div className="mt-12">
                     <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Terms & Conditions</h3>
@@ -10419,44 +10458,6 @@ export default function Home() {
                         </a>
                       </div>
                     )}
-                  </div>
-                )}
-
-                {renderApprovedPaymentSection({ interactive: true })}
-
-                {documentType === 'invoice' && (
-                  <div className="mt-12 p-8 border-4 border-dashed border-[#f59e0b] rounded-3xl bg-amber-50">
-                    <h3 className="text-3xl font-bold text-center text-[#f59e0b]">💰 Invoice Payment Section</h3>
-                    <p className="text-center text-xl mt-3">
-                      Deposit paid on estimate: <strong>{profile.depositPercentage}%</strong><br />
-                      Remainder due: <strong>{100 - (profile.depositPercentage || 0)}%</strong> = <span className="font-bold text-2xl"> ${(grandTotal * (100 - (profile.depositPercentage || 0)) / 100).toFixed(2)}</span>
-                      {profile.chargeCCFee && (
-                        <span className="block text-sm mt-1 text-amber-700">
-                          + {profile.ccFeePercentage || 3}% CC processing fee applied at checkout
-                        </span>
-                      )}
-                    </p>
-                    {(() => {
-                      let remainder = grandTotal * (100 - (profile.depositPercentage || 0)) / 100;
-                      if (profile.chargeCCFee) {
-                        remainder = remainder * (1 + (profile.ccFeePercentage || 3) / 100);
-                      }
-                      return (
-                        <div className="mt-6 space-y-4">
-                          <Button
-                            onClick={() => openPaymentModal('balance', remainder)}
-                            className="w-full py-8 text-2xl font-bold bg-[#f59e0b] hover:bg-orange-600 text-white rounded-3xl"
-                          >
-                            Pay the Balance Now (${remainder.toFixed(2)})
-                            {profile.chargeCCFee && <span className="text-xs block mt-1 font-normal opacity-90">(includes CC fee)</span>}
-                          </Button>
-                          {isVenmoPaymentReady() && renderVenmoPayButton(remainder, 'balance', {
-                            className: 'w-full py-8 text-2xl font-bold bg-[#008cff] hover:bg-[#0070cc] text-white rounded-3xl',
-                          })}
-                        </div>
-                      );
-                    })()}
-                    <p className="text-center text-xs text-gray-500 mt-3">Choose a payment option above to pay the remaining balance</p>
                   </div>
                 )}
 
