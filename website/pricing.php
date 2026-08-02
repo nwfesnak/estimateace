@@ -1,10 +1,10 @@
 <?php
-$page_title = 'Pricing | EstimateAce — $39.99/mo or $430/yr';
-$page_description = 'Simple contractor software pricing. Full platform access for $39.99/month or $430/year.';
+$page_title = 'Pricing | EstimateAce — $29.99/mo or $249/yr';
+$page_description = 'Simple contractor software pricing. Full platform access for $29.99/month or $249/year.';
 include __DIR__ . '/includes/header.php';
 $app_url = 'https://app.estimateace.com';
-$monthly = 39.99;
-$annual = 430;
+$monthly = 29.99;
+$annual = 249;
 $savings = round($monthly * 12 - $annual, 2);
 ?>
 

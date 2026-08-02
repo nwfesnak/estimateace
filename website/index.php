@@ -237,14 +237,14 @@ $app_url = 'https://app.estimateace.com';
     <div class="pricing-grid" style="max-width:760px;">
       <article class="price-card">
         <h3>Monthly</h3>
-        <div class="price">$39.99 <small>/mo</small></div>
+        <div class="price">$29.99 <small>/mo</small></div>
         <p class="price-note">Full platform access. Cancel anytime.</p>
         <a class="btn btn-outline btn-lg" href="<?= $app_url ?>" style="width:100%;">Start trial</a>
       </article>
       <article class="price-card featured">
-        <span class="badge">Save 10%</span>
+        <span class="badge">Best value</span>
         <h3>Annual</h3>
-        <div class="price">$430 <small>/yr</small></div>
+        <div class="price">$249 <small>/yr</small></div>
         <p class="price-note">Best value for established shops.</p>
         <a class="btn btn-primary btn-lg" href="/pricing.php" style="width:100%;">See full pricing</a>
       </article>

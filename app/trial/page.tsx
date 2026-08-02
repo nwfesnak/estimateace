@@ -28,7 +28,7 @@ function TrialForm() {
   const [info, setInfo] = useState<string | null>(null);
 
   const planLabel = plan === 'yearly' ? 'Yearly' : 'Monthly';
-  const planPrice = plan === 'yearly' ? '$430/year' : '$39.99/month';
+  const planPrice = plan === 'yearly' ? '$249/year' : '$29.99/month';
 
   const billingNote = useMemo(
     () =>
@@ -180,7 +180,7 @@ function TrialForm() {
                 }`}
               >
                 <div className="font-semibold">Monthly</div>
-                <div className="text-2xl font-bold tracking-tight mt-1">$39.99</div>
+                <div className="text-2xl font-bold tracking-tight mt-1">$29.99</div>
                 <div className="text-xs text-slate-500">per month after trial</div>
               </button>
               <button
@@ -193,10 +193,10 @@ function TrialForm() {
                 }`}
               >
                 <span className="absolute -top-2 right-3 text-[10px] font-bold bg-emerald-600 text-white px-2 py-0.5 rounded-full">
-                  Save 10%
+                  Best value
                 </span>
                 <div className="font-semibold">Yearly</div>
-                <div className="text-2xl font-bold tracking-tight mt-1">$430</div>
+                <div className="text-2xl font-bold tracking-tight mt-1">$249</div>
                 <div className="text-xs text-slate-500">per year after trial</div>
               </button>
             </div>

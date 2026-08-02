@@ -1808,7 +1808,7 @@ export default function Home() {
     };
 
     if (trialParam === 'started') {
-      const planLabel = planParam === 'yearly' ? 'yearly ($430/yr after trial)' : 'monthly ($39.99/mo after trial)';
+      const planLabel = planParam === 'yearly' ? 'yearly ($249/yr after trial)' : 'monthly ($29.99/mo after trial)';
       showMessage(
         `✅ 14-day free trial started! After the trial you will be billed ${planLabel} unless you cancel in Plan / Billing.`
       );
