@@ -2201,9 +2201,10 @@ export default function Home() {
         const code = (error as { code?: string }).code;
         let msg = error.message;
         if (code === 'email_not_confirmed') {
-          msg = 'Email not confirmed yet. Check your inbox for the confirmation link, or sign up again.';
+          msg = 'Email not confirmed yet. Check your inbox for the confirmation link.';
         } else if (code === 'invalid_credentials') {
-          msg = 'Invalid email or password. Click Sign Up to create a new account, or Forgot your password? to reset.';
+          msg =
+            'Invalid email or password. New accounts start from the free trial / pricing page (not Sign Up here). Use Forgot password? if you already have an account.';
         }
         setLoginError(msg);
         showMessage(msg);
@@ -2240,39 +2241,10 @@ export default function Home() {
     }
   };
 
-  const signup = async () => {
-    setLoginError('');
-    if (!supabase) {
-      const msg = getSupabaseConfigHelpMessage();
-      setLoginError(msg);
-      showMessage(msg);
-      return;
-    }
-    const trimmedEmail = email.trim();
-    if (!trimmedEmail || !password) {
-      const msg = 'Enter an email and password to sign up.';
-      setLoginError(msg);
-      showMessage(msg);
-      return;
-    }
-    const { data, error } = await supabase.auth.signUp({ email: trimmedEmail, password });
-    if (error) {
-      setLoginError(error.message);
-      showMessage(error.message);
-      return;
-    }
-    if (data.session?.user) {
-      setUser(data.session.user);
-      setShowLogin(false);
-      showMessage('Account created — you are logged in!');
-      return;
-    }
-    if (data.user && !data.session) {
-      const msg = 'Account created! Check your email for a confirmation link, then log in.';
-      setLoginError(msg);
-      showMessage(msg);
-    } else {
-      showMessage('Account created! You can log in now.');
+  /** New accounts are only created via marketing HTML → /trial (pay + plan). Not on this login form. */
+  const goToSignupPayScreen = () => {
+    if (typeof window !== 'undefined') {
+      window.location.href = '/trial';
     }
   };
 
@@ -7108,7 +7080,7 @@ export default function Home() {
               Professional estimating for contractors
             </p>
             <p className="text-center text-xs text-gray-400 mt-1">
-              Owners and crew use the same login
+              Existing accounts &amp; crew log in here
             </p>
           </div>
 
@@ -7122,9 +7094,23 @@ export default function Home() {
                 </div>
               )}
               <div className="flex gap-3 mb-2">
-                <Button onClick={login} className="flex-1" disabled={loginLoading}>{loginLoading ? 'Logging in...' : t('loginMain')}</Button>
-                <Button onClick={signup} variant="outline" className="flex-1" disabled={loginLoading}>{t('signUp')}</Button>
+                <Button onClick={login} className="flex-1" disabled={loginLoading}>
+                  {loginLoading ? 'Logging in...' : t('loginMain')}
+                </Button>
+                <Button
+                  type="button"
+                  onClick={goToSignupPayScreen}
+                  variant="outline"
+                  className="flex-1"
+                  disabled={loginLoading}
+                >
+                  {t('signUp')}
+                </Button>
               </div>
+              <p className="text-[11px] text-gray-500 mb-3 text-center leading-relaxed">
+                New customers: <strong>Sign Up</strong> opens the free trial &amp; plan page. Accounts are
+                not created on this screen — only through the trial / pricing signup.
+              </p>
               <button 
                 onClick={() => setShowMainForgot(true)} 
                 className="text-sm text-blue-600 hover:underline w-full text-left"

@@ -158,11 +158,13 @@ function TrialForm() {
               {TRIAL_DAYS}-day free trial
             </p>
             <h1 className="text-2xl sm:text-3xl font-bold tracking-tight mt-1">
-              Create your account
+              Start free trial &amp; choose your plan
             </h1>
             <p className="text-sm text-slate-600 mt-2">
-              Enter your details to start using EstimateAce free for {TRIAL_DAYS} days. After the
-              trial, you will be billed for the plan you choose below unless you cancel.
+              This is the only place to create a new EstimateAce account (from the website or Sign
+              Up). Enter your details for a {TRIAL_DAYS}-day free trial. After the trial you will be
+              billed for the plan you choose below unless you cancel. Then use the same email and
+              password to log in at app.estimateace.com.
             </p>
           </div>
 
