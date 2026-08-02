@@ -110,10 +110,23 @@ export async function POST(request: NextRequest) {
         }
         break;
       }
+      // Classic event names (legacy UI / some accounts)
       case 'customer.subscription.created':
       case 'customer.subscription.updated':
       case 'customer.subscription.deleted': {
         const sub = event.data.object as Stripe.Subscription;
+        await upsertFromSubscription(sub);
+        break;
+      }
+      // Workbench "Subscriptions" pack often exposes invoice.* instead of customer.subscription.*
+      case 'invoice.paid':
+      case 'invoice.payment_failed':
+      case 'invoice.finalized': {
+        const invoice = event.data.object as Stripe.Invoice;
+        const subRef = (invoice as any).subscription;
+        if (!subRef) break;
+        const subId = typeof subRef === 'string' ? subRef : subRef.id;
+        const sub = await stripe.subscriptions.retrieve(subId);
         await upsertFromSubscription(sub);
         break;
       }
