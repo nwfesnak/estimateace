@@ -1,7 +1,8 @@
 /**
  * EstimateAce SaaS billing (Phase A) — subscription for access to the product.
  * When Stripe is not configured or NEXT_PUBLIC_BILLING_ENFORCE is not "true",
- * all authenticated users keep full access (dev / soft launch).
+ * all authenticated users keep full access (dev / soft launch) UNLESS account
+ * was scheduled for deletion and the close date has passed.
  */
 
 export type SubscriptionStatus =
@@ -23,6 +24,9 @@ export type BillingSnapshot = {
   currentPeriodEnd: string | null;
   trialEndsAt: string | null;
   cancelAtPeriodEnd: boolean;
+  /** When set, account is closing; access until this date, then blocked + data purge */
+  accountClosesAt: string | null;
+  deletionRequestedAt: string | null;
 };
 
 export const DEFAULT_TRIAL_DAYS = 14;
@@ -35,6 +39,8 @@ export const DEFAULT_BILLING_SNAPSHOT: BillingSnapshot = {
   currentPeriodEnd: null,
   trialEndsAt: null,
   cancelAtPeriodEnd: false,
+  accountClosesAt: null,
+  deletionRequestedAt: null,
 };
 
 /** Client + server: only enforce paywall when explicitly enabled. */
@@ -91,6 +97,8 @@ export function normalizeBillingSnapshot(raw: unknown): BillingSnapshot {
     currentPeriodEnd: r.currentPeriodEnd ? String(r.currentPeriodEnd) : null,
     trialEndsAt: r.trialEndsAt ? String(r.trialEndsAt) : null,
     cancelAtPeriodEnd: r.cancelAtPeriodEnd === true,
+    accountClosesAt: r.accountClosesAt ? String(r.accountClosesAt) : null,
+    deletionRequestedAt: r.deletionRequestedAt ? String(r.deletionRequestedAt) : null,
   };
 }
 
@@ -112,6 +120,8 @@ export function ensureTrialEndsAt(
     return snapshot;
   }
   if (snapshot.status === 'active' || snapshot.status === 'trialing') return snapshot;
+  // Don't start a new trial if account is scheduled to close or already canceled period
+  if (snapshot.accountClosesAt) return snapshot;
   const end = new Date(now);
   end.setDate(end.getDate() + getTrialDays());
   return {
@@ -121,12 +131,58 @@ export function ensureTrialEndsAt(
   };
 }
 
+/** Account scheduled to close and the close date has passed. */
+export function isAccountClosed(snapshot: BillingSnapshot, now = new Date()): boolean {
+  if (!snapshot.accountClosesAt) return false;
+  const t = new Date(snapshot.accountClosesAt).getTime();
+  return !isNaN(t) && t <= now.getTime();
+}
+
+/** Still has access after delete request until close date. */
+export function isAccountClosing(snapshot: BillingSnapshot, now = new Date()): boolean {
+  if (!snapshot.accountClosesAt) return false;
+  const t = new Date(snapshot.accountClosesAt).getTime();
+  return !isNaN(t) && t > now.getTime();
+}
+
+/**
+ * Pick end of paid access for scheduled deletion:
+ * period end > trial end > end of today (UTC day) if free/none.
+ */
+export function resolveAccountCloseDate(snapshot: BillingSnapshot, now = new Date()): Date {
+  const candidates: number[] = [];
+  if (snapshot.currentPeriodEnd) {
+    const t = new Date(snapshot.currentPeriodEnd).getTime();
+    if (!isNaN(t)) candidates.push(t);
+  }
+  if (snapshot.trialEndsAt) {
+    const t = new Date(snapshot.trialEndsAt).getTime();
+    if (!isNaN(t)) candidates.push(t);
+  }
+  const future = candidates.filter((t) => t > now.getTime());
+  if (future.length) {
+    return new Date(Math.max(...future));
+  }
+  if (candidates.length) {
+    // Period already ended — close end of today
+    const end = new Date(now);
+    end.setHours(23, 59, 59, 999);
+    return end;
+  }
+  // No paid period: grant rest of calendar day then close
+  const end = new Date(now);
+  end.setHours(23, 59, 59, 999);
+  return end;
+}
+
 export function hasAppAccess(snapshot: BillingSnapshot, now = new Date()): boolean {
+  // Scheduled deletion past close date always blocks (even if billing not enforced)
+  if (isAccountClosed(snapshot, now)) return false;
+
   if (!isBillingEnforced()) return true;
 
   const status = snapshot.status;
   if (status === 'active' || status === 'trialing') return true;
-  // Grace for past_due a short period is optional; Phase A blocks past_due when enforcing
   if (status === 'past_due') return false;
 
   if (snapshot.trialEndsAt) {
@@ -134,17 +190,26 @@ export function hasAppAccess(snapshot: BillingSnapshot, now = new Date()): boole
     if (!isNaN(end) && end > now.getTime()) return true;
   }
 
-  // Canceled but still inside paid period
-  if (snapshot.currentPeriodEnd && status === 'canceled') {
+  // Canceled / closing but still inside paid period
+  if (snapshot.currentPeriodEnd) {
     const end = new Date(snapshot.currentPeriodEnd).getTime();
-    if (!isNaN(end) && end > now.getTime()) return true;
+    if (!isNaN(end) && end > now.getTime()) {
+      if (status === 'canceled' || snapshot.cancelAtPeriodEnd || snapshot.accountClosesAt) {
+        return true;
+      }
+    }
   }
+
+  if (isAccountClosing(snapshot, now)) return true;
 
   return false;
 }
 
 export function accessBlockedReason(snapshot: BillingSnapshot, now = new Date()): string | null {
   if (hasAppAccess(snapshot, now)) return null;
+  if (isAccountClosed(snapshot, now)) {
+    return `Your account closed on ${formatPeriodEnd(snapshot.accountClosesAt)}. Contact support if you need help.`;
+  }
   if (snapshot.status === 'past_due') {
     return 'Your payment is past due. Update billing to keep using EstimateAce.';
   }

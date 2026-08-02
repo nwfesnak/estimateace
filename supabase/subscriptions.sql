@@ -35,4 +35,7 @@ CREATE POLICY "Users can view own subscription"
 -- Inserts/updates from the app go through server routes with service role
 -- (no client write policies on purpose).
 
-COMMENT ON TABLE public.subscriptions IS 'Stripe subscription snapshot for EstimateAce product access.';
+-- Scheduled account closure (delete request → access until this date)
+ALTER TABLE public.subscriptions
+  ADD COLUMN IF NOT EXISTS account_closes_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS deletion_requested_at TIMESTAMPTZ;

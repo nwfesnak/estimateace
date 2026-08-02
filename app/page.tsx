@@ -4549,13 +4549,6 @@ export default function Home() {
       showMessage('Type DELETE in the box to confirm.');
       return;
     }
-    if (
-      !confirm(
-        'This permanently deletes your EstimateAce account, estimates, invoices, archives, and crew list. This cannot be undone. Continue?'
-      )
-    ) {
-      return;
-    }
     setDeleteAccountBusy(true);
     try {
       const { data: sessionData } = await supabase.auth.getSession();
@@ -4574,16 +4567,26 @@ export default function Home() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        showMessage(data.error || 'Could not delete account');
+        showMessage(data.error || 'Could not schedule account deletion');
         return;
       }
-      await supabase.auth.signOut();
-      setUser(null);
-      setCurrentCrew(null);
-      showMessage('Your account has been deleted.');
+      const closeLabel = data.accountClosesAt
+        ? formatPeriodEnd(data.accountClosesAt)
+        : 'the end of your paid period';
+      // Popup message: access until end of paid period
+      window.alert(
+        data.message ||
+          `Your account is scheduled to close on ${closeLabel}.\n\nYou will keep full access until that date.\nOn that date, access stops and your data is removed.`
+      );
+      showMessage(
+        `✅ Account closing ${closeLabel} — you keep access until then.`
+      );
+      setDeleteConfirmText('');
+      setBillingPanel('overview');
+      await refreshBillingStatus();
     } catch (e) {
       console.error(e);
-      showMessage('Account deletion failed. Contact support.');
+      showMessage('Could not schedule deletion. Contact support.');
     } finally {
       setDeleteAccountBusy(false);
     }
@@ -7024,20 +7027,20 @@ export default function Home() {
     );
   }
 
-  // Phase A paywall (only when NEXT_PUBLIC_BILLING_ENFORCE=true). Crew beta logins skip owner gate.
+  // Paywall: billing enforced OR scheduled account close date has passed
   if (
     user &&
     !currentCrew &&
     billingLoaded &&
-    billingEnforced &&
-    !hasAppAccess(billing)
+    !hasAppAccess(billing) &&
+    (billingEnforced || !!billing.accountClosesAt)
   ) {
     return (
       <>
         <ToastContainer />
         <SubscriptionGate
           billing={billing}
-          enforced={billingEnforced}
+          enforced={billingEnforced || !!billing.accountClosesAt}
           stripeConfigured={billingStripeOk}
           busy={billingBusy}
           supportEmail={SUPPORT_EMAIL}
@@ -8511,6 +8514,13 @@ export default function Home() {
                         <div className="text-lg font-semibold">{formatPeriodEnd(billing.currentPeriodEnd)}</div>
                       </div>
                     </div>
+                    {billing.accountClosesAt && (
+                      <div className="rounded-xl border border-amber-300 bg-amber-50 text-amber-950 p-4 text-sm">
+                        <strong>Account closing:</strong> You keep access until{' '}
+                        <strong>{formatPeriodEnd(billing.accountClosesAt)}</strong>. After that date
+                        the app will stop access and remove your data.
+                      </div>
+                    )}
                     <div className="flex flex-wrap gap-2">
                       <Button
                         className="bg-[#10b981] hover:bg-[#059669] text-white"
@@ -8736,32 +8746,48 @@ export default function Home() {
                   <Card className="border-red-200">
                     <CardContent className="p-6 space-y-4">
                       <h3 className="text-xl font-semibold text-red-700">Delete account</h3>
-                      <p className="text-sm text-gray-600">
-                        Permanently deletes your login, estimates, invoices, archives, crew list, and
-                        subscription record. This cannot be undone. Cancel your Stripe plan first if you
-                        want (or use &quot;Update card / cancel in Stripe&quot; above).
-                      </p>
-                      <div>
-                        <label className="block text-xs font-medium text-gray-500 mb-1">
-                          Type <strong>DELETE</strong> to confirm
-                        </label>
-                        <Input
-                          value={deleteConfirmText}
-                          onChange={(e) => setDeleteConfirmText(e.target.value)}
-                          placeholder="DELETE"
-                          className="max-w-xs"
-                          autoComplete="off"
-                        />
-                      </div>
-                      <Button
-                        variant="destructive"
-                        disabled={
-                          deleteAccountBusy || deleteConfirmText.trim().toUpperCase() !== 'DELETE'
-                        }
-                        onClick={() => void deleteOwnAccount()}
-                      >
-                        {deleteAccountBusy ? 'Deleting…' : 'Delete my account permanently'}
-                      </Button>
+                      {billing.accountClosesAt ? (
+                        <div className="rounded-lg border border-amber-300 bg-amber-50 text-amber-950 p-4 text-sm space-y-2">
+                          <p className="font-semibold">Account scheduled to close</p>
+                          <p>
+                            You keep full access until{' '}
+                            <strong>{formatPeriodEnd(billing.accountClosesAt)}</strong>.
+                            On that date access stops and your data is removed.
+                          </p>
+                        </div>
+                      ) : (
+                        <>
+                          <p className="text-sm text-gray-600">
+                            Schedule account deletion. You will <strong>keep access until the end of
+                            what you already paid for</strong> (or until your trial ends). After that
+                            date the app will stop access and delete your data.
+                          </p>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-500 mb-1">
+                              Type <strong>DELETE</strong> to confirm
+                            </label>
+                            <Input
+                              value={deleteConfirmText}
+                              onChange={(e) => setDeleteConfirmText(e.target.value)}
+                              placeholder="DELETE"
+                              className="max-w-xs"
+                              autoComplete="off"
+                            />
+                          </div>
+                          <Button
+                            variant="destructive"
+                            disabled={
+                              deleteAccountBusy ||
+                              deleteConfirmText.trim().toUpperCase() !== 'DELETE'
+                            }
+                            onClick={() => void deleteOwnAccount()}
+                          >
+                            {deleteAccountBusy
+                              ? 'Scheduling…'
+                              : 'Schedule account deletion'}
+                          </Button>
+                        </>
+                      )}
                       <p className="text-xs text-gray-500">
                         Need help?{' '}
                         <a className="text-emerald-700 underline" href={`mailto:${SUPPORT_EMAIL}`}>

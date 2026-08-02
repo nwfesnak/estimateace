@@ -4,6 +4,7 @@ import {
   ensureTrialEndsAt,
   getStripeConfigDiagnostics,
   hasAppAccess,
+  isAccountClosed,
   isBillingEnforced,
   isStripeConfigured,
   normalizeBillingSnapshot,
@@ -11,6 +12,7 @@ import {
 } from '@/lib/billing';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
+import { purgeIfAccountClosed } from '@/lib/account-purge';
 
 function rowToSnapshot(row: any): BillingSnapshot {
   if (!row) return { ...DEFAULT_BILLING_SNAPSHOT };
@@ -22,6 +24,8 @@ function rowToSnapshot(row: any): BillingSnapshot {
     currentPeriodEnd: row.current_period_end,
     trialEndsAt: row.trial_ends_at,
     cancelAtPeriodEnd: row.cancel_at_period_end,
+    accountClosesAt: row.account_closes_at,
+    deletionRequestedAt: row.deletion_requested_at,
   });
 }
 
@@ -36,6 +40,20 @@ export async function GET(request: NextRequest) {
     let snapshot = { ...DEFAULT_BILLING_SNAPSHOT };
 
     if (admin) {
+      // If close date passed, purge and force re-login
+      const purged = await purgeIfAccountClosed(user.id);
+      if (purged) {
+        return NextResponse.json({
+          billing: { ...DEFAULT_BILLING_SNAPSHOT, accountClosesAt: new Date(0).toISOString() },
+          access: false,
+          accountClosed: true,
+          enforced: true,
+          stripeConfigured: isStripeConfigured(),
+          stripe: getStripeConfigDiagnostics(),
+          error: 'Account closed and data removed.',
+        });
+      }
+
       const { data } = await admin
         .from('subscriptions')
         .select('*')
@@ -44,36 +62,57 @@ export async function GET(request: NextRequest) {
 
       snapshot = rowToSnapshot(data);
 
-      // First-time trial seed when enforcing (or always track trial for UI)
-      const withTrial = ensureTrialEndsAt(snapshot);
-      if (
-        !data ||
-        (!data.trial_ends_at && withTrial.trialEndsAt) ||
-        (data.status === 'none' && withTrial.status === 'trialing')
-      ) {
-        snapshot = withTrial;
-        await admin.from('subscriptions').upsert({
-          user_id: user.id,
-          status: snapshot.status,
-          trial_ends_at: snapshot.trialEndsAt,
-          stripe_customer_id: snapshot.stripeCustomerId,
-          stripe_subscription_id: snapshot.stripeSubscriptionId,
-          price_id: snapshot.priceId,
-          current_period_end: snapshot.currentPeriodEnd,
-          cancel_at_period_end: snapshot.cancelAtPeriodEnd,
-          updated_at: new Date().toISOString(),
-        });
+      // Fallback close date from SETTINGS profile
+      if (!snapshot.accountClosesAt) {
+        const { data: settings } = await admin
+          .from('estimates')
+          .select('profile')
+          .eq('id', `SETTINGS-${user.id}`)
+          .maybeSingle();
+        if (settings?.profile?.accountClosesAt) {
+          snapshot = {
+            ...snapshot,
+            accountClosesAt: String(settings.profile.accountClosesAt),
+            deletionRequestedAt: settings.profile.deletionRequestedAt
+              ? String(settings.profile.deletionRequestedAt)
+              : snapshot.deletionRequestedAt,
+          };
+        }
+      }
+
+      // Don't re-seed trial if closing
+      if (!snapshot.accountClosesAt) {
+        const withTrial = ensureTrialEndsAt(snapshot);
+        if (
+          !data ||
+          (!data.trial_ends_at && withTrial.trialEndsAt) ||
+          (data.status === 'none' && withTrial.status === 'trialing')
+        ) {
+          snapshot = withTrial;
+          await admin.from('subscriptions').upsert({
+            user_id: user.id,
+            status: snapshot.status,
+            trial_ends_at: snapshot.trialEndsAt,
+            stripe_customer_id: snapshot.stripeCustomerId,
+            stripe_subscription_id: snapshot.stripeSubscriptionId,
+            price_id: snapshot.priceId,
+            current_period_end: snapshot.currentPeriodEnd,
+            cancel_at_period_end: snapshot.cancelAtPeriodEnd,
+            updated_at: new Date().toISOString(),
+          });
+        }
       }
     } else {
-      // No service role — client-only trial fallback (not multi-device durable)
       snapshot = ensureTrialEndsAt(snapshot);
     }
 
+    const closed = isAccountClosed(snapshot);
     const stripeDiag = getStripeConfigDiagnostics();
     return NextResponse.json({
       billing: snapshot,
       access: hasAppAccess(snapshot),
-      enforced: isBillingEnforced(),
+      accountClosed: closed,
+      enforced: isBillingEnforced() || closed,
       stripeConfigured: isStripeConfigured(),
       stripe: stripeDiag,
     });
