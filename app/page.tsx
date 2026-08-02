@@ -1179,6 +1179,9 @@ export default function Home() {
 
   const [selectedReportJob, setSelectedReportJob] = useState<any>(null);
   const [reportsSubTab, setReportsSubTab] = useState<'profit' | 'tax'>('profit');
+  /** Profit report: which year/month sections are expanded for archived invoices */
+  const [profitArchiveYearFilter, setProfitArchiveYearFilter] = useState<string>('all');
+  const [profitArchiveExpandedMonths, setProfitArchiveExpandedMonths] = useState<Record<string, boolean>>({});
 
   // Photo / video media picker + device-style in-app camera (fixed chrome)
   const [isPhotoPickerOpen, setIsPhotoPickerOpen] = useState(false);
@@ -6224,6 +6227,149 @@ export default function Home() {
     showMessage('✅ Tax report exported as CSV');
   };
 
+  /** Invoice date used for month/year grouping (job invoiced date). */
+  const getArchivedInvoiceDate = (doc: any): Date | null => {
+    const raw = doc?.date || doc?.dueDate || doc?.duedate || doc?.archived_at || doc?.updated_at;
+    if (!raw) return null;
+    // Prefer YYYY-MM-DD without timezone shift
+    if (typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}/.test(raw)) {
+      const [y, m, d] = raw.slice(0, 10).split('-').map(Number);
+      const dt = new Date(y, m - 1, d);
+      return isNaN(dt.getTime()) ? null : dt;
+    }
+    const dt = new Date(raw);
+    return isNaN(dt.getTime()) ? null : dt;
+  };
+
+  /**
+   * Archived invoices for Profit Reports, grouped by month & year of invoice date.
+   * Source: archive-est rows that are invoices (INV- / documentType invoice).
+   */
+  const archivedInvoicesByMonth = useMemo(() => {
+    type MonthGroup = {
+      key: string;
+      year: number;
+      month: number;
+      label: string;
+      invoices: any[];
+      total: number;
+      amountPaid: number;
+      count: number;
+    };
+
+    const isArchivedInvoice = (row: any) => {
+      if (!row || isSettingsDocRow(row)) return false;
+      // Invoices only (INV- / documentType invoice) from archive-est
+      return isInvoiceDocRow(row);
+    };
+
+    const list = (archivesList || []).filter(isArchivedInvoice);
+    const map = new Map<string, MonthGroup>();
+
+    for (const inv of list) {
+      const dt = getArchivedInvoiceDate(inv);
+      const year = dt ? dt.getFullYear() : 0;
+      const month = dt ? dt.getMonth() : -1;
+      const key =
+        year > 0
+          ? `${year}-${String(month + 1).padStart(2, '0')}`
+          : 'unknown';
+      const label =
+        year > 0
+          ? dt!.toLocaleString('en-US', { month: 'long', year: 'numeric' })
+          : 'Unknown invoice date';
+
+      if (!map.has(key)) {
+        map.set(key, {
+          key,
+          year,
+          month,
+          label,
+          invoices: [],
+          total: 0,
+          amountPaid: 0,
+          count: 0,
+        });
+      }
+      const g = map.get(key)!;
+      const grand = calculateGrandTotal(inv);
+      const paid = Number(inv.amountPaid ?? inv.amountpaid ?? 0) || 0;
+      g.invoices.push(inv);
+      g.total += grand;
+      g.amountPaid += paid;
+      g.count += 1;
+    }
+
+    // Sort invoices inside each month (newest first)
+    for (const g of map.values()) {
+      g.invoices.sort((a, b) => {
+        const da = getArchivedInvoiceDate(a)?.getTime() || 0;
+        const db = getArchivedInvoiceDate(b)?.getTime() || 0;
+        return db - da;
+      });
+    }
+
+    const months = Array.from(map.values()).sort((a, b) => {
+      if (a.key === 'unknown') return 1;
+      if (b.key === 'unknown') return -1;
+      return b.key.localeCompare(a.key);
+    });
+
+    const years = Array.from(
+      new Set(months.filter((m) => m.year > 0).map((m) => m.year))
+    ).sort((a, b) => b - a);
+
+    const grandTotal = months.reduce((s, m) => s + m.total, 0);
+    const grandPaid = months.reduce((s, m) => s + m.amountPaid, 0);
+    const grandCount = months.reduce((s, m) => s + m.count, 0);
+
+    return { months, years, grandTotal, grandPaid, grandCount };
+  }, [archivesList]);
+
+  const filteredArchivedInvoiceMonths = useMemo(() => {
+    if (profitArchiveYearFilter === 'all') return archivedInvoicesByMonth.months;
+    const y = Number(profitArchiveYearFilter);
+    return archivedInvoicesByMonth.months.filter((m) => m.year === y || (y === 0 && m.key === 'unknown'));
+  }, [archivedInvoicesByMonth.months, profitArchiveYearFilter]);
+
+  const exportArchivedInvoicesByMonth = () => {
+    const rows = filteredArchivedInvoiceMonths;
+    let csv =
+      'Month,Year,Invoice Number,Job Name,Invoice Date,Payment Status,Payment Method,Grand Total,Amount Paid,Archived At\n';
+    for (const month of rows) {
+      for (const inv of month.invoices) {
+        const invDate = getArchivedInvoiceDate(inv);
+        const dateStr = invDate
+          ? `${invDate.getFullYear()}-${String(invDate.getMonth() + 1).padStart(2, '0')}-${String(invDate.getDate()).padStart(2, '0')}`
+          : '';
+        const grand = calculateGrandTotal(inv);
+        const paid = Number(inv.amountPaid ?? inv.amountpaid ?? 0) || 0;
+        const job = String(inv.jobName || inv.jobname || '').replace(/"/g, '""');
+        const num = String(inv.invoiceNumber || inv.invoicenumber || inv.id || '');
+        const status = String(inv.paymentStatus || inv.paymentstatus || '');
+        const method = String(inv.paymentMethod || inv.paymentmethod || '');
+        const archivedAt = String(inv.archived_at || '');
+        csv += `"${month.label}",${month.year || ''},"${num}","${job}",${dateStr},${status},"${method}",${grand.toFixed(2)},${paid.toFixed(2)},"${archivedAt}"\n`;
+      }
+    }
+    csv += `\nTotal Invoices,${archivedInvoicesByMonth.grandCount}\n`;
+    csv += `Grand Total,${archivedInvoicesByMonth.grandTotal.toFixed(2)}\n`;
+    csv += `Total Amount Paid,${archivedInvoicesByMonth.grandPaid.toFixed(2)}\n`;
+
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Archived_Invoices_By_Month_${profitArchiveYearFilter === 'all' ? 'All' : profitArchiveYearFilter}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showMessage('✅ Archived invoices export saved');
+  };
+
+  const toggleProfitArchiveMonth = (key: string) => {
+    setProfitArchiveExpandedMonths((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
   if (!user) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#f4f4f4]">
@@ -8558,6 +8704,191 @@ export default function Home() {
 
               {reportsSubTab === 'profit' && (
                 <>
+                  {(currentCrew && !canSeeFinancials) ? (
+                    <p className="text-sm text-gray-500">Profit details are restricted for your crew access level.</p>
+                  ) : (
+                    <>
+                  {/* Archived invoices by month / year of invoice date */}
+                  <section className="mb-12">
+                    <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+                      <div>
+                        <h3 className="text-xl font-semibold text-[#1e293b]">📁 Archived Invoices</h3>
+                        <p className="text-sm text-gray-500 mt-1">
+                          All closed invoices from archives, grouped by month and year of the job invoice date.
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2 items-center">
+                        <label className="text-xs font-medium text-gray-500">Year</label>
+                        <select
+                          value={profitArchiveYearFilter}
+                          onChange={(e) => setProfitArchiveYearFilter(e.target.value)}
+                          className="border rounded-lg px-3 py-2 text-sm bg-white"
+                        >
+                          <option value="all">All years</option>
+                          {archivedInvoicesByMonth.years.map((y) => (
+                            <option key={y} value={String(y)}>{y}</option>
+                          ))}
+                        </select>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => void refreshArchivesList()}
+                        >
+                          Refresh
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          className="bg-[#10b981] hover:bg-[#059669] text-white"
+                          onClick={exportArchivedInvoicesByMonth}
+                          disabled={archivedInvoicesByMonth.grandCount === 0}
+                        >
+                          Export CSV
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+                      <div className="bg-white border rounded-2xl p-4 text-center">
+                        <div className="text-xs uppercase tracking-wide text-gray-500">Invoices</div>
+                        <div className="text-3xl font-bold text-[#1e293b] mt-1">
+                          {archivedInvoicesByMonth.grandCount}
+                        </div>
+                      </div>
+                      <div className="bg-white border rounded-2xl p-4 text-center">
+                        <div className="text-xs uppercase tracking-wide text-gray-500">Invoiced total</div>
+                        <div className="text-3xl font-bold text-[#10b981] mt-1">
+                          ${archivedInvoicesByMonth.grandTotal.toFixed(2)}
+                        </div>
+                      </div>
+                      <div className="bg-white border rounded-2xl p-4 text-center">
+                        <div className="text-xs uppercase tracking-wide text-gray-500">Amount paid</div>
+                        <div className="text-3xl font-bold text-[#14b8a6] mt-1">
+                          ${archivedInvoicesByMonth.grandPaid.toFixed(2)}
+                        </div>
+                      </div>
+                    </div>
+
+                    {filteredArchivedInvoiceMonths.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-8 text-center text-gray-500">
+                        No archived invoices yet. When you mark invoices paid / archive them, they appear here by month and year.
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {filteredArchivedInvoiceMonths.map((month) => {
+                          const open = !!profitArchiveExpandedMonths[month.key];
+                          return (
+                            <div
+                              key={month.key}
+                              className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm"
+                            >
+                              <button
+                                type="button"
+                                onClick={() => toggleProfitArchiveMonth(month.key)}
+                                className="w-full flex flex-wrap items-center justify-between gap-2 px-4 py-4 text-left hover:bg-slate-50 transition"
+                              >
+                                <div className="flex items-center gap-3 min-w-0">
+                                  <span className="text-lg text-gray-400 w-5 shrink-0">{open ? '▼' : '▶'}</span>
+                                  <div className="min-w-0">
+                                    <div className="font-semibold text-[#1e293b] text-lg">{month.label}</div>
+                                    <div className="text-xs text-gray-500">
+                                      {month.count} invoice{month.count === 1 ? '' : 's'}
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="text-right shrink-0 pl-2">
+                                  <div className="font-bold text-[#10b981] text-lg">
+                                    ${month.total.toFixed(2)}
+                                  </div>
+                                  <div className="text-xs text-gray-500">
+                                    Paid ${month.amountPaid.toFixed(2)}
+                                  </div>
+                                </div>
+                              </button>
+
+                              {open && (
+                                <div className="border-t border-slate-100 overflow-x-auto">
+                                  <Table>
+                                    <TableHeader>
+                                      <TableRow>
+                                        <TableHead>Invoice #</TableHead>
+                                        <TableHead>Job</TableHead>
+                                        <TableHead>Invoice date</TableHead>
+                                        <TableHead>Status</TableHead>
+                                        <TableHead className="text-right">Total</TableHead>
+                                        <TableHead className="text-right">Paid</TableHead>
+                                        <TableHead className="text-right">Action</TableHead>
+                                      </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                      {month.invoices.map((inv: any) => {
+                                        const invDate = getArchivedInvoiceDate(inv);
+                                        const dateLabel = invDate
+                                          ? invDate.toLocaleDateString('en-US', {
+                                              year: 'numeric',
+                                              month: 'short',
+                                              day: 'numeric',
+                                            })
+                                          : '—';
+                                        const grand = calculateGrandTotal(inv);
+                                        const paid = Number(inv.amountPaid ?? inv.amountpaid ?? 0) || 0;
+                                        return (
+                                          <TableRow key={inv.id || inv.invoiceNumber}>
+                                            <TableCell className="font-medium whitespace-nowrap">
+                                              {inv.invoiceNumber || inv.id}
+                                            </TableCell>
+                                            <TableCell className="max-w-[12rem] truncate" title={inv.jobName || ''}>
+                                              {inv.jobName || 'Untitled'}
+                                            </TableCell>
+                                            <TableCell className="whitespace-nowrap text-sm text-gray-600">
+                                              {dateLabel}
+                                            </TableCell>
+                                            <TableCell className="capitalize text-sm">
+                                              {inv.paymentStatus || '—'}
+                                              {inv.paymentMethod ? (
+                                                <span className="block text-xs text-gray-400 normal-case">
+                                                  {inv.paymentMethod}
+                                                </span>
+                                              ) : null}
+                                            </TableCell>
+                                            <TableCell className="text-right font-semibold whitespace-nowrap">
+                                              ${grand.toFixed(2)}
+                                            </TableCell>
+                                            <TableCell className="text-right whitespace-nowrap">
+                                              ${paid.toFixed(2)}
+                                            </TableCell>
+                                            <TableCell className="text-right">
+                                              <Button
+                                                type="button"
+                                                size="sm"
+                                                variant="outline"
+                                                className="text-xs"
+                                                onClick={() => {
+                                                  void loadSelectedEstimate(inv);
+                                                  setView('editor');
+                                                }}
+                                              >
+                                                Open
+                                              </Button>
+                                            </TableCell>
+                                          </TableRow>
+                                        );
+                                      })}
+                                    </TableBody>
+                                  </Table>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </section>
+
+                  <hr className="my-10 border-slate-200" />
+
+                  <h3 className="text-xl font-semibold mb-4 text-[#1e293b]">💵 Job profit (deposit paid)</h3>
                   <label className="block text-sm font-semibold mb-3">Select Job / Estimate with Deposit Paid</label>
                   <select 
                     className="w-full border rounded-xl p-4 text-lg mb-8"
@@ -8612,6 +8943,8 @@ export default function Home() {
                         ).toFixed(2)}
                       </div>
                     </div>
+                  )}
+                    </>
                   )}
                 </>
               )}
@@ -8970,7 +9303,13 @@ export default function Home() {
             <span className="text-3xl mb-0.5">📄</span>
             <span>{t('newEstimate')}</span>
           </button>
-          <button onClick={() => setView('reportsView')} className="flex flex-col items-center flex-1 py-1 text-gray-500">
+          <button
+            onClick={() => {
+              setView('reportsView');
+              void refreshArchivesList();
+            }}
+            className="flex flex-col items-center flex-1 py-1 text-gray-500"
+          >
             <span className="text-3xl mb-0.5">📊</span>
             <span>{t('reports')}</span>
           </button>
