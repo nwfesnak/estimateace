@@ -7,6 +7,12 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { TouchDoubleTapTextarea } from '@/components/TouchDoubleTapTextarea';
 import { DeviceCamera, type DeviceCameraMode } from '@/components/DeviceCamera';
+import {
+  MileageTracker,
+  normalizeMileageLogs,
+  DEFAULT_MILEAGE_RATE,
+  type MileageLog,
+} from '@/components/MileageTracker';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { getSupabaseClient, getSupabaseConfigHelpMessage } from '@/lib/supabase/client';
@@ -1178,10 +1184,14 @@ export default function Home() {
   });
 
   const [selectedReportJob, setSelectedReportJob] = useState<any>(null);
-  const [reportsSubTab, setReportsSubTab] = useState<'profit' | 'tax'>('profit');
+  const [reportsSubTab, setReportsSubTab] = useState<'profit' | 'tax' | 'mileage'>('profit');
   /** Profit report: which year/month sections are expanded for archived invoices */
   const [profitArchiveYearFilter, setProfitArchiveYearFilter] = useState<string>('all');
   const [profitArchiveExpandedMonths, setProfitArchiveExpandedMonths] = useState<Record<string, boolean>>({});
+  /** Business mileage log for gas write-offs (stored in SETTINGS profile) */
+  const [mileageLogs, setMileageLogs] = useState<MileageLog[]>([]);
+  const [mileageRatePerMile, setMileageRatePerMile] = useState(DEFAULT_MILEAGE_RATE);
+  const [mileageSaving, setMileageSaving] = useState(false);
 
   // Photo / video media picker + device-style in-app camera (fixed chrome)
   const [isPhotoPickerOpen, setIsPhotoPickerOpen] = useState(false);
@@ -1796,6 +1806,7 @@ export default function Home() {
     if (user?.id && supabase) {
       refreshSavedList();
       refreshArchivesList();
+      void loadMileageFromSettings();
     }
   }, [user?.id]);
 
@@ -4201,6 +4212,91 @@ export default function Home() {
     setView('sendPreview');
   };
 
+  const mileageLocalKey = (uid: string) => `estimateace_mileage_${uid}`;
+
+  const loadMileageFromSettings = async () => {
+    if (!user?.id) return;
+    // Local cache first (fast)
+    try {
+      const raw = localStorage.getItem(mileageLocalKey(user.id));
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed?.logs)) {
+          setMileageLogs(normalizeMileageLogs(parsed.logs));
+        }
+        if (parsed?.rate != null && Number.isFinite(Number(parsed.rate))) {
+          setMileageRatePerMile(Number(parsed.rate));
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    if (!supabase) return;
+    const serverProfile = await fetchServerProfileSettings();
+    if (!serverProfile) return;
+    if (serverProfile.mileageLogs != null) {
+      setMileageLogs(normalizeMileageLogs(serverProfile.mileageLogs));
+    }
+    if (serverProfile.mileageRatePerMile != null && Number.isFinite(Number(serverProfile.mileageRatePerMile))) {
+      setMileageRatePerMile(Number(serverProfile.mileageRatePerMile));
+    }
+    try {
+      localStorage.setItem(
+        mileageLocalKey(user.id),
+        JSON.stringify({
+          logs: serverProfile.mileageLogs || [],
+          rate: serverProfile.mileageRatePerMile ?? DEFAULT_MILEAGE_RATE,
+        })
+      );
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const saveMileageData = async (logs: MileageLog[], rate: number) => {
+    if (!user?.id) {
+      showMessage('Please log in to save mileage.');
+      return;
+    }
+    setMileageSaving(true);
+    try {
+      try {
+        localStorage.setItem(
+          mileageLocalKey(user.id),
+          JSON.stringify({ logs, rate })
+        );
+      } catch {
+        /* ignore */
+      }
+      if (!supabase) {
+        showMessage('✅ Mileage saved on this device (cloud not configured).');
+        return;
+      }
+      const existing = (await fetchServerProfileSettings()) || {};
+      const { error } = await supabase.from('estimates').upsert({
+        id: `SETTINGS-${user.id}`,
+        user_id: user.id,
+        jobName: '__settings__',
+        documentType: 'settings',
+        items: [],
+        profile: {
+          ...existing,
+          mileageLogs: logs,
+          mileageRatePerMile: rate,
+        },
+        updated_at: new Date().toISOString(),
+      });
+      if (error) {
+        console.error('saveMileageData:', error);
+        showMessage('Mileage saved locally, but cloud save failed: ' + error.message);
+        return;
+      }
+      showMessage('✅ Mileage log saved');
+    } finally {
+      setMileageSaving(false);
+    }
+  };
+
   const syncAppointmentsToServer = async (
     nextAppointments: typeof appointments,
     nextProfile = profile
@@ -4255,13 +4351,22 @@ export default function Home() {
       logoSize: pickFilled(snapshot.logoSize, existing?.logoSize, 'medium'),
       appointmentReminderEnabled: !!nextProfile.appointmentReminderEnabled,
     };
+    // Never wipe mileage log when saving company profile
+    const profileWithMileage = {
+      ...mergedProfile,
+      mileageLogs: (mergedProfile as any).mileageLogs ?? (existing as any)?.mileageLogs ?? mileageLogs,
+      mileageRatePerMile:
+        (mergedProfile as any).mileageRatePerMile ??
+        (existing as any)?.mileageRatePerMile ??
+        mileageRatePerMile,
+    };
     await supabase.from('estimates').upsert({
       id: `SETTINGS-${user.id}`,
       user_id: user.id,
       jobName: '__settings__',
       documentType: 'settings',
       items: [],
-      profile: mergedProfile,
+      profile: profileWithMileage,
       updated_at: new Date().toISOString(),
     });
     // Durable local backup of company identity (survives reloads)
@@ -8700,6 +8805,15 @@ export default function Home() {
                 >
                   Tax Reports
                 </button>
+                <button
+                  onClick={() => {
+                    setReportsSubTab('mileage');
+                    void loadMileageFromSettings();
+                  }}
+                  className={`flex-1 py-3 text-center font-medium ${reportsSubTab === 'mileage' ? 'border-b-2 border-[#10b981] text-[#10b981]' : 'text-gray-500'}`}
+                >
+                  Mileage
+                </button>
               </div>
 
               {reportsSubTab === 'profit' && (
@@ -8947,6 +9061,23 @@ export default function Home() {
                     </>
                   )}
                 </>
+              )}
+
+              {reportsSubTab === 'mileage' && (
+                <div>
+                  {currentCrew && !canSeeFinancials ? (
+                    <p className="text-sm text-gray-500">Mileage / gas write-off logs are restricted for your crew access level.</p>
+                  ) : (
+                    <MileageTracker
+                      logs={mileageLogs}
+                      ratePerMile={mileageRatePerMile}
+                      onChangeLogs={setMileageLogs}
+                      onChangeRate={setMileageRatePerMile}
+                      onSave={saveMileageData}
+                      saving={mileageSaving}
+                    />
+                  )}
+                </div>
               )}
 
               {reportsSubTab === 'tax' && (
