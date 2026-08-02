@@ -99,7 +99,18 @@ export function ensureTrialEndsAt(
   snapshot: BillingSnapshot,
   now = new Date()
 ): BillingSnapshot {
-  if (snapshot.trialEndsAt) return snapshot;
+  // Status stuck as "none" but trial date still in the future → show trialing
+  if (snapshot.trialEndsAt) {
+    const end = new Date(snapshot.trialEndsAt).getTime();
+    if (
+      !isNaN(end) &&
+      end > now.getTime() &&
+      (snapshot.status === 'none' || !snapshot.status)
+    ) {
+      return { ...snapshot, status: 'trialing' };
+    }
+    return snapshot;
+  }
   if (snapshot.status === 'active' || snapshot.status === 'trialing') return snapshot;
   const end = new Date(now);
   end.setDate(end.getDate() + getTrialDays());

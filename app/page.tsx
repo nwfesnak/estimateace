@@ -1784,22 +1784,41 @@ export default function Home() {
     return () => listener.subscription.unsubscribe();
   }, [supabase]);
 
-  // Stripe return deep-links
+  // Stripe return deep-links — sync from Stripe if webhook was slow/missed
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === 'undefined' || !user?.id || !supabase) return;
     const params = new URLSearchParams(window.location.search);
-    const billing = params.get('billing');
-    if (!billing) return;
-    if (billing === 'success') {
-      showMessage('✅ Subscription updated. Refreshing billing status…');
-      void refreshBillingStatus();
-    } else if (billing === 'cancel') {
+    const billingParam = params.get('billing');
+    if (!billingParam) return;
+
+    const cleanUrl = () => {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('billing');
+      window.history.replaceState({}, '', url.pathname + url.search);
+    };
+
+    if (billingParam === 'success') {
+      showMessage('✅ Payment received — syncing subscription…');
+      void (async () => {
+        try {
+          const { data: sessionData } = await supabase.auth.getSession();
+          const token = sessionData.session?.access_token;
+          if (token) {
+            await fetch('/api/billing/sync', {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${token}` },
+            });
+          }
+        } catch (e) {
+          console.warn(e);
+        }
+        await refreshBillingStatus();
+        showMessage('✅ Billing status refreshed. Open Profile → Plan / Billing if needed.');
+      })();
+    } else if (billingParam === 'cancel') {
       showMessage('Checkout canceled — you can subscribe anytime.');
     }
-    // Clean query without full reload
-    const url = new URL(window.location.href);
-    url.searchParams.delete('billing');
-    window.history.replaceState({}, '', url.pathname + url.search);
+    cleanUrl();
   }, [user?.id]);
 
   useEffect(() => {
@@ -8433,6 +8452,42 @@ export default function Home() {
                       </Button>
                       <Button variant="outline" disabled={billingBusy} onClick={() => void refreshBillingStatus()}>
                         Refresh status
+                      </Button>
+                      <Button
+                        variant="outline"
+                        disabled={billingBusy}
+                        onClick={async () => {
+                          if (!supabase) return;
+                          setBillingBusy(true);
+                          setBillingCheckoutError(null);
+                          try {
+                            const { data: sessionData } = await supabase.auth.getSession();
+                            const token = sessionData.session?.access_token;
+                            if (!token) {
+                              showMessage('Please log in again.');
+                              return;
+                            }
+                            const res = await fetch('/api/billing/sync', {
+                              method: 'POST',
+                              headers: { Authorization: `Bearer ${token}` },
+                            });
+                            const data = await res.json().catch(() => ({}));
+                            if (!res.ok) {
+                              setBillingCheckoutError(data.error || 'Could not sync from Stripe');
+                              showMessage(data.error || 'Could not sync from Stripe');
+                            } else {
+                              showMessage(`✅ Synced from Stripe — status: ${data.status || data.billing?.status || 'updated'}`);
+                            }
+                            await refreshBillingStatus();
+                          } catch (e) {
+                            console.error(e);
+                            showMessage('Sync failed');
+                          } finally {
+                            setBillingBusy(false);
+                          }
+                        }}
+                      >
+                        Sync from Stripe
                       </Button>
                     </div>
                     {billingCheckoutError && (
