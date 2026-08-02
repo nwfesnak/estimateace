@@ -15,6 +15,14 @@ import {
   DEFAULT_MILEAGE_RATE,
   type MileageLog,
 } from '@/components/MileageTracker';
+import { AIReceptionist } from '@/components/AIReceptionist';
+import {
+  DEFAULT_RECEPTIONIST_SETTINGS,
+  normalizeReceptionistMessages,
+  normalizeReceptionistSettings,
+  type ReceptionistMessage,
+  type ReceptionistSettings,
+} from '@/lib/ai-receptionist';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { getSupabaseClient, getSupabaseConfigHelpMessage } from '@/lib/supabase/client';
@@ -217,7 +225,7 @@ export default function Home() {
   };
 
   const [user, setUser] = useState<any>(null);
-  const [view, setView] = useState<'dashboard' | 'editor' | 'estimatesList' | 'invoicesList' | 'profileView' | 'archivesView' | 'sendPreview' | 'reportsView'>('dashboard');
+  const [view, setView] = useState<'dashboard' | 'editor' | 'estimatesList' | 'invoicesList' | 'profileView' | 'archivesView' | 'sendPreview' | 'reportsView' | 'receptionistView'>('dashboard');
 
   // Login
   const [email, setEmail] = useState('');
@@ -1198,6 +1206,12 @@ export default function Home() {
   /** Global $/mile rate for write-off totals (SETTINGS profile) */
   const [mileageRatePerMile, setMileageRatePerMile] = useState(DEFAULT_MILEAGE_RATE);
   const [mileageSaving, setMileageSaving] = useState(false);
+  /** AI Receptionist (24/7 virtual front desk) */
+  const [receptionistSettings, setReceptionistSettings] = useState<ReceptionistSettings>(
+    DEFAULT_RECEPTIONIST_SETTINGS
+  );
+  const [receptionistMessages, setReceptionistMessages] = useState<ReceptionistMessage[]>([]);
+  const [receptionistSaving, setReceptionistSaving] = useState(false);
 
   // Photo / video media picker + device-style in-app camera (fixed chrome)
   const [isPhotoPickerOpen, setIsPhotoPickerOpen] = useState(false);
@@ -1813,6 +1827,7 @@ export default function Home() {
       refreshSavedList();
       refreshArchivesList();
       void loadMileageRateFromSettings();
+      void loadReceptionistFromSettings();
     }
   }, [user?.id]);
 
@@ -4306,6 +4321,76 @@ export default function Home() {
     }
   };
 
+  const loadReceptionistFromSettings = async () => {
+    if (!user?.id) return;
+    try {
+      const raw = localStorage.getItem(`estimateace_receptionist_${user.id}`);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        setReceptionistSettings(normalizeReceptionistSettings(parsed?.settings));
+        setReceptionistMessages(normalizeReceptionistMessages(parsed?.messages));
+      }
+    } catch {
+      /* ignore */
+    }
+    if (!supabase) return;
+    const serverProfile = await fetchServerProfileSettings();
+    if (!serverProfile) return;
+    if (serverProfile.aiReceptionist) {
+      setReceptionistSettings(normalizeReceptionistSettings(serverProfile.aiReceptionist));
+    }
+    if (serverProfile.aiReceptionistMessages) {
+      setReceptionistMessages(normalizeReceptionistMessages(serverProfile.aiReceptionistMessages));
+    }
+  };
+
+  const saveReceptionistData = async (
+    settings: ReceptionistSettings,
+    messages: ReceptionistMessage[]
+  ) => {
+    if (!user?.id) {
+      showMessage('Please log in to save AI Receptionist.');
+      return;
+    }
+    setReceptionistSaving(true);
+    try {
+      try {
+        localStorage.setItem(
+          `estimateace_receptionist_${user.id}`,
+          JSON.stringify({ settings, messages })
+        );
+      } catch {
+        /* ignore */
+      }
+      if (!supabase) {
+        showMessage('✅ Receptionist saved on this device.');
+        return;
+      }
+      const existing = (await fetchServerProfileSettings()) || {};
+      const { error } = await supabase.from('estimates').upsert({
+        id: `SETTINGS-${user.id}`,
+        user_id: user.id,
+        jobName: '__settings__',
+        documentType: 'settings',
+        items: [],
+        profile: {
+          ...existing,
+          aiReceptionist: settings,
+          aiReceptionistMessages: messages.slice(0, 200),
+        },
+        updated_at: new Date().toISOString(),
+      });
+      if (error) {
+        console.error('saveReceptionistData:', error);
+        showMessage('Saved locally; cloud failed: ' + error.message);
+        return;
+      }
+      showMessage('✅ AI Receptionist saved');
+    } finally {
+      setReceptionistSaving(false);
+    }
+  };
+
   const syncAppointmentsToServer = async (
     nextAppointments: typeof appointments,
     nextProfile = profile
@@ -4360,13 +4445,21 @@ export default function Home() {
       logoSize: pickFilled(snapshot.logoSize, existing?.logoSize, 'medium'),
       appointmentReminderEnabled: !!nextProfile.appointmentReminderEnabled,
     };
-    // Never wipe global mileage rate when saving company profile
+    // Never wipe global mileage rate / receptionist when saving company profile
     const profileWithMileage = {
       ...mergedProfile,
       mileageRatePerMile:
         (mergedProfile as any).mileageRatePerMile ??
         (existing as any)?.mileageRatePerMile ??
         mileageRatePerMile,
+      aiReceptionist:
+        (mergedProfile as any).aiReceptionist ??
+        (existing as any)?.aiReceptionist ??
+        receptionistSettings,
+      aiReceptionistMessages:
+        (mergedProfile as any).aiReceptionistMessages ??
+        (existing as any)?.aiReceptionistMessages ??
+        receptionistMessages,
     };
     await supabase.from('estimates').upsert({
       id: `SETTINGS-${user.id}`,
@@ -6783,6 +6876,46 @@ export default function Home() {
                 </CardContent>
               </Card>
 
+              <Card className="mb-8 border-emerald-200 bg-gradient-to-br from-white to-emerald-50/40">
+                <CardContent className="p-6">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <h3 className="font-semibold text-lg flex items-center gap-2">
+                        📞 AI Receptionist
+                        {receptionistSettings.enabled ? (
+                          <span className="text-[10px] font-bold uppercase bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
+                            On
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-bold uppercase bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
+                            Off
+                          </span>
+                        )}
+                      </h3>
+                      <p className="text-sm text-gray-600 mt-1 max-w-lg">
+                        24/7 virtual front desk — answers missed &amp; after-hours calls, takes messages,
+                        flags urgents, books appointments, and answers service questions from your knowledge base.
+                      </p>
+                      {receptionistMessages.filter((m) => m.status === 'new' && !m.spam).length > 0 && (
+                        <p className="text-xs font-semibold text-sky-700 mt-2">
+                          {receptionistMessages.filter((m) => m.status === 'new' && !m.spam).length} new message
+                          {receptionistMessages.filter((m) => m.status === 'new' && !m.spam).length === 1 ? '' : 's'}
+                        </p>
+                      )}
+                    </div>
+                    <Button
+                      className="bg-[#10b981] hover:bg-[#059669] text-white shrink-0"
+                      onClick={() => {
+                        void loadReceptionistFromSettings();
+                        setView('receptionistView');
+                      }}
+                    >
+                      Open receptionist
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
               {canSeeFinancials && (
                 <Card>
                   <CardContent className="p-6">
@@ -9193,6 +9326,73 @@ export default function Home() {
                 </div>
               )}
             </div>
+          )}
+
+          {view === 'receptionistView' && (
+            <AIReceptionist
+              companyName={profile.company || 'Your Company'}
+              companyPhone={profile.phone || ''}
+              companyEmail={profile.email || ''}
+              settings={receptionistSettings}
+              messages={receptionistMessages}
+              onChangeSettings={setReceptionistSettings}
+              onChangeMessages={setReceptionistMessages}
+              onSave={saveReceptionistData}
+              saving={receptionistSaving}
+              onBack={goToDashboard}
+              getAccessToken={async () => {
+                if (!supabase) return null;
+                const { data } = await supabase.auth.getSession();
+                return data.session?.access_token || null;
+              }}
+              onBookAppointment={({ summary, callerName, callerPhone, whenLabel }) => {
+                // Calendar entry when AI suggests a time
+                const id = `appt-ai-${Date.now()}`;
+                let dateStr = '';
+                let timeStr = '09:00';
+                const m = String(whenLabel || '').match(
+                  /(\d{4}-\d{2}-\d{2})(?:[ T](\d{1,2}:\d{2}))?/
+                );
+                if (m) {
+                  dateStr = m[1];
+                  if (m[2]) {
+                    const t = m[2];
+                    timeStr = t.length === 4 ? `0${t}` : t;
+                  }
+                } else {
+                  const d = new Date();
+                  d.setDate(d.getDate() + 1);
+                  dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                }
+                const datetime = new Date(`${dateStr}T${timeStr}:00`);
+                const jobName = `AI: ${callerName}${callerPhone ? ` ${callerPhone}` : ''} — ${summary.slice(0, 60)}`;
+                const next = [
+                  ...appointments,
+                  {
+                    id,
+                    estimateId: '',
+                    jobName,
+                    invoiceNumber: '',
+                    datetime: isNaN(datetime.getTime())
+                      ? new Date().toISOString()
+                      : datetime.toISOString(),
+                  },
+                ];
+                setAppointments(next);
+                try {
+                  if (user?.id) {
+                    localStorage.setItem(
+                      `estimateace_appointments_${user.id}`,
+                      JSON.stringify(next)
+                    );
+                  }
+                } catch {
+                  /* ignore */
+                }
+                void syncAppointmentsToServer(next);
+                showMessage('📅 Suggested appointment added to your calendar');
+              }}
+            />
           )}
 
           {view === 'archivesView' && (

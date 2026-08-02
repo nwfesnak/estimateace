@@ -26,6 +26,7 @@ $app_url = 'https://app.estimateace.com';
     <nav class="nav-links">
       <a href="/index.php" class="<?= $current_page === 'index' ? 'active' : '' ?>">Home</a>
       <a href="/solutions.php" class="<?= $current_page === 'solutions' ? 'active' : '' ?>">Solutions</a>
+      <a href="/receptionist.php" class="<?= $current_page === 'receptionist' ? 'active' : '' ?>">AI Receptionist</a>
       <a href="/pricing.php" class="<?= $current_page === 'pricing' ? 'active' : '' ?>">Pricing</a>
       <a href="/resources.php" class="<?= $current_page === 'resources' ? 'active' : '' ?>">Resources</a>
     </nav>

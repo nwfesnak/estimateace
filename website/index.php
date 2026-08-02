@@ -147,9 +147,10 @@ $app_url = 'https://app.estimateace.com';
             <li>Labor hours and rate breakdown</li>
             <li>Toggle client visibility for materials & labor</li>
             <li>Smart address autocomplete while typing job sites</li>
+            <li>AI Receptionist — 24/7 missed-call coverage for contractors</li>
           </ul>
           <div class="stat-callout"><strong>Price with confidence</strong> instead of guessing after a long day in the field.</div>
-          <a class="btn btn-dark" href="<?= $app_url ?>">Try AI pricing →</a>
+          <a class="btn btn-dark" href="/receptionist.php">Meet AI Receptionist →</a>
         </div>
         <div class="pillar-img">
           <img src="https://images.unsplash.com/photo-1486406146926-c627a92fd1ab?auto=format&fit=crop&w=1100&q=80" alt="Modern business technology" />

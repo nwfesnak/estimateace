@@ -45,6 +45,12 @@ $app_url = 'https://app.estimateace.com';
       <h3>Field documentation</h3>
       <p>Photos, video, receipts, crew logins, Quick Lines, and secure cloud storage per job.</p>
     </article>
+    <article class="card icon-card" id="receptionist">
+      <div class="icon">📞</div>
+      <h3>AI Receptionist</h3>
+      <p>24/7 virtual front desk: answers missed and after-hours calls, summarizes messages, flags urgents, books appointments, and answers FAQs from your knowledge base.</p>
+      <p style="margin-top:0.75rem;"><a href="/receptionist.php">Learn more →</a></p>
+    </article>
   </div>
 </section>
 
