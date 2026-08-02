@@ -7,7 +7,6 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { TouchDoubleTapTextarea } from '@/components/TouchDoubleTapTextarea';
 import { DeviceCamera, type DeviceCameraMode } from '@/components/DeviceCamera';
-import { LidarMeasure, type LidarMeasureResult } from '@/components/LidarMeasure';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { getSupabaseClient, getSupabaseConfigHelpMessage } from '@/lib/supabase/client';
@@ -1185,11 +1184,6 @@ export default function Home() {
   const [isPhotoPickerOpen, setIsPhotoPickerOpen] = useState(false);
   const [isDeviceCameraOpen, setIsDeviceCameraOpen] = useState(false);
   const [deviceCameraMode, setDeviceCameraMode] = useState<DeviceCameraMode>('photo');
-  // LiDAR / AR measure → fills line-item qty + unit
-  const [isLidarMeasureOpen, setIsLidarMeasureOpen] = useState(false);
-  const [lidarMeasureItemId, setLidarMeasureItemId] = useState<number | null>(null);
-  const [lidarInitialStream, setLidarInitialStream] = useState<MediaStream | null>(null);
-  const lidarStreamRef = useRef<MediaStream | null>(null);
   /** When more than 6 photos, collapse into a click-to-open folder */
   const PHOTO_FOLDER_THRESHOLD = 6;
   const [photosFolderOpen, setPhotosFolderOpen] = useState(false);
@@ -2487,46 +2481,6 @@ export default function Home() {
       return;
     }
     setIsPhotoPickerOpen(true);
-  };
-
-  /** Open measure UI; grab camera during the tap (iOS requires user gesture). */
-  const openLidarMeasure = async (itemId: number) => {
-    setLidarMeasureItemId(itemId);
-    // Stop any previous handoff stream we never attached
-    if (lidarStreamRef.current) {
-      try {
-        lidarStreamRef.current.getTracks().forEach((t) => t.stop());
-      } catch {
-        /* ignore */
-      }
-      lidarStreamRef.current = null;
-    }
-    setLidarInitialStream(null);
-
-    let stream: MediaStream | null = null;
-    try {
-      if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
-        const attempts: MediaStreamConstraints[] = [
-          { video: { facingMode: { ideal: 'environment' } }, audio: false },
-          { video: { facingMode: 'environment' }, audio: false },
-          { video: true, audio: false },
-        ];
-        for (const c of attempts) {
-          try {
-            stream = await navigator.mediaDevices.getUserMedia(c);
-            break;
-          } catch {
-            /* try next */
-          }
-        }
-      }
-    } catch (e) {
-      console.warn('Measure camera at click failed', e);
-    }
-
-    lidarStreamRef.current = stream;
-    setLidarInitialStream(stream);
-    setIsLidarMeasureOpen(true);
   };
 
   /** Opens device-style camera UI (fixed border + shutter; zoom only the preview). */
@@ -7201,17 +7155,7 @@ export default function Home() {
                             </div>
                             <div className="grid grid-cols-2 gap-3">
                               <div className="space-y-1">
-                                <div className="flex items-center justify-between gap-1">
-                                  <label className="block text-[11px] font-medium text-gray-600">Qty</label>
-                                  <button
-                                    type="button"
-                                    onClick={() => void openLidarMeasure(item.id)}
-                                    className="text-[10px] font-semibold text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-full px-2 py-0.5 whitespace-nowrap"
-                                    title="Measure with camera / AR — apply to qty"
-                                  >
-                                    📡 Measure
-                                  </button>
-                                </div>
+                                <label className="block text-[11px] font-medium text-gray-600">Qty</label>
                                 <Input
                                   type="number"
                                   value={item.qty}
@@ -10161,55 +10105,6 @@ export default function Home() {
         onClose={handleDeviceCameraClose}
         onPhoto={handleDeviceCameraPhoto}
         onVideo={handleDeviceCameraVideo}
-      />
-
-      <LidarMeasure
-        open={isLidarMeasureOpen}
-        initialStream={lidarInitialStream}
-        preferArea={(() => {
-          const it = items.find((i) => i.id === lidarMeasureItemId);
-          const u = String(it?.unit || '').toLowerCase();
-          return u === 'sf' || u === 'sqft' || u.includes('sq');
-        })()}
-        onClose={() => {
-          try {
-            lidarStreamRef.current?.getTracks().forEach((t) => t.stop());
-          } catch {
-            /* ignore */
-          }
-          lidarStreamRef.current = null;
-          setLidarInitialStream(null);
-          setIsLidarMeasureOpen(false);
-          setLidarMeasureItemId(null);
-        }}
-        onApply={(result: LidarMeasureResult) => {
-          if (lidarMeasureItemId == null) return;
-          const targetId = lidarMeasureItemId;
-          setItems((prev) =>
-            prev.map((item) => {
-              if (item.id !== targetId) return item;
-              const qty = Number(result.qty) || 0;
-              const unit = result.unit || item.unit || '';
-              const price = Number(item.price) || 0;
-              return {
-                ...item,
-                qty,
-                unit,
-                total: roundMoney(qty * price),
-              };
-            })
-          );
-          showMessage(`Measured: ${result.label} → qty ${result.qty} ${result.unit}`);
-          try {
-            lidarStreamRef.current?.getTracks().forEach((t) => t.stop());
-          } catch {
-            /* ignore */
-          }
-          lidarStreamRef.current = null;
-          setLidarInitialStream(null);
-          setIsLidarMeasureOpen(false);
-          setLidarMeasureItemId(null);
-        }}
       />
 
       {/* Media picker — device-style camera or gallery upload */}

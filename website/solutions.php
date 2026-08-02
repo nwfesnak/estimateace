@@ -45,11 +45,6 @@ $app_url = 'https://app.estimateace.com';
       <h3>Field documentation</h3>
       <p>Photos, video, receipts, crew logins, Quick Lines, and secure cloud storage per job.</p>
     </article>
-    <article class="card icon-card" id="lidar">
-      <div class="icon">LID</div>
-      <h3>LiDAR / AR measure</h3>
-      <p>Measure length, area (sqft), and height on the job—then apply straight to estimate line qty. AR when the phone supports it; guided camera + ft/in everywhere else.</p>
-    </article>
   </div>
 </section>
 

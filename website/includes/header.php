@@ -15,7 +15,7 @@ $app_url = 'https://app.estimateace.com';
   <link rel="stylesheet" href="/css/style.css" />
 </head>
 <body>
-<div class="announce">New — LiDAR / AR measure on every line item · <a href="<?= $app_url ?>">Open the app</a></div>
+<div class="announce">Now live — Run your business at <a href="<?= $app_url ?>">app.estimateace.com</a></div>
 <header class="site-header">
   <div class="container nav-wrap" id="top-nav">
     <a href="/index.php" class="logo">
