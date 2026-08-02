@@ -4,6 +4,31 @@ import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { getAppUrl, getStripe, getStripePriceId } from '@/lib/stripe-server';
 import { isStripeConfigured } from '@/lib/billing';
 
+async function ensureStripeCustomer(
+  stripe: NonNullable<ReturnType<typeof getStripe>>,
+  userId: string,
+  email: string | undefined,
+  existingCustomerId: string | null | undefined
+): Promise<string> {
+  // Reuse only if customer still exists in Stripe
+  if (existingCustomerId) {
+    try {
+      const c = await stripe.customers.retrieve(existingCustomerId);
+      if (c && !('deleted' in c && c.deleted)) {
+        return existingCustomerId;
+      }
+    } catch {
+      // deleted or invalid — create a new one below
+    }
+  }
+
+  const customer = await stripe.customers.create({
+    email: email || undefined,
+    metadata: { supabase_user_id: userId },
+  });
+  return customer.id;
+}
+
 export async function POST(request: NextRequest) {
   try {
     if (!isStripeConfigured()) {
@@ -26,52 +51,102 @@ export async function POST(request: NextRequest) {
     const admin = getSupabaseAdmin();
     const appUrl = getAppUrl(request.url);
 
-    let customerId: string | undefined;
+    let storedCustomerId: string | null = null;
+    let storedStatus = 'trialing';
+    let storedTrial: string | null = null;
+
     if (admin) {
       const { data } = await admin
         .from('subscriptions')
-        .select('stripe_customer_id')
+        .select('stripe_customer_id, status, trial_ends_at')
         .eq('user_id', user.id)
         .maybeSingle();
-      customerId = data?.stripe_customer_id || undefined;
+      storedCustomerId = data?.stripe_customer_id || null;
+      storedStatus = data?.status || 'trialing';
+      storedTrial = data?.trial_ends_at || null;
     }
 
-    if (!customerId) {
-      const customer = await stripe.customers.create({
-        email: user.email || undefined,
-        metadata: { supabase_user_id: user.id },
+    const customerId = await ensureStripeCustomer(
+      stripe,
+      user.id,
+      user.email,
+      storedCustomerId
+    );
+
+    // Persist valid customer; clear stale subscription id if customer was recreated
+    if (admin) {
+      const customerChanged = customerId !== storedCustomerId;
+      await admin.from('subscriptions').upsert({
+        user_id: user.id,
+        stripe_customer_id: customerId,
+        stripe_subscription_id: customerChanged ? null : undefined,
+        status:
+          customerChanged && storedStatus === 'active' ? 'canceled' : storedStatus || 'trialing',
+        trial_ends_at: storedTrial,
+        updated_at: new Date().toISOString(),
       });
-      customerId = customer.id;
-      if (admin) {
-        // Preserve trial/status — only attach customer id
-        const { data: existing } = await admin
+      if (customerChanged) {
+        await admin
           .from('subscriptions')
-          .select('status, trial_ends_at')
-          .eq('user_id', user.id)
-          .maybeSingle();
-        await admin.from('subscriptions').upsert({
-          user_id: user.id,
-          stripe_customer_id: customerId,
-          status: existing?.status || 'trialing',
-          trial_ends_at: existing?.trial_ends_at || null,
-          updated_at: new Date().toISOString(),
-        });
+          .update({
+            stripe_customer_id: customerId,
+            stripe_subscription_id: null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('user_id', user.id);
       }
     }
 
-    const session = await stripe.checkout.sessions.create({
-      mode: 'subscription',
-      customer: customerId,
-      client_reference_id: user.id,
-      line_items: [{ price: priceId, quantity: 1 }],
-      success_url: `${appUrl}/?billing=success`,
-      cancel_url: `${appUrl}/?billing=cancel`,
-      allow_promotion_codes: true,
-      subscription_data: {
+    let session;
+    try {
+      session = await stripe.checkout.sessions.create({
+        mode: 'subscription',
+        customer: customerId,
+        client_reference_id: user.id,
+        line_items: [{ price: priceId, quantity: 1 }],
+        success_url: `${appUrl}/?billing=success`,
+        cancel_url: `${appUrl}/?billing=cancel`,
+        allow_promotion_codes: true,
+        subscription_data: {
+          metadata: { supabase_user_id: user.id },
+        },
         metadata: { supabase_user_id: user.id },
-      },
-      metadata: { supabase_user_id: user.id },
-    });
+      });
+    } catch (e: any) {
+      // Race: customer deleted between retrieve and session create
+      const msg = String(e?.message || '');
+      if (msg.includes('No such customer') || e?.code === 'resource_missing') {
+        const fresh = await stripe.customers.create({
+          email: user.email || undefined,
+          metadata: { supabase_user_id: user.id },
+        });
+        if (admin) {
+          await admin.from('subscriptions').upsert({
+            user_id: user.id,
+            stripe_customer_id: fresh.id,
+            stripe_subscription_id: null,
+            status: 'trialing',
+            trial_ends_at: storedTrial,
+            updated_at: new Date().toISOString(),
+          });
+        }
+        session = await stripe.checkout.sessions.create({
+          mode: 'subscription',
+          customer: fresh.id,
+          client_reference_id: user.id,
+          line_items: [{ price: priceId, quantity: 1 }],
+          success_url: `${appUrl}/?billing=success`,
+          cancel_url: `${appUrl}/?billing=cancel`,
+          allow_promotion_codes: true,
+          subscription_data: {
+            metadata: { supabase_user_id: user.id },
+          },
+          metadata: { supabase_user_id: user.id },
+        });
+      } else {
+        throw e;
+      }
+    }
 
     if (!session.url) {
       return NextResponse.json({ error: 'Stripe did not return a checkout URL' }, { status: 502 });
