@@ -295,24 +295,29 @@ export function MileageTracker({
           </div>
         )}
         <p className="text-xs text-gray-400">
-          Log miles on each estimate under <strong>Receipts → Mileage</strong>. This total updates from all saved jobs.
+          Log miles on each estimate with the <strong>Mileage</strong> button (next to Labor). This total updates from all saved jobs.
         </p>
       </div>
     );
   }
 
   return (
-    <div className={isJob ? 'space-y-4 mt-8 pt-6 border-t border-slate-200' : 'space-y-8'}>
+    <div className={isJob ? 'space-y-4' : 'space-y-8'}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <h3 className={`${isJob ? 'text-lg' : 'text-xl'} font-semibold text-[#1e293b]`}>
             {title || (isJob ? '🚗 Job mileage (gas write-off)' : '🚗 Mileage log')}
           </h3>
-          <p className="text-sm text-gray-500 mt-1">
-            {isJob
-              ? 'Miles for this job only — saved with the estimate/invoice.'
-              : 'Track business miles for tax deductions.'}
-          </p>
+          {!isJob && (
+            <p className="text-sm text-gray-500 mt-1">
+              Track business miles for tax deductions.
+            </p>
+          )}
+          {isJob && !title && (
+            <p className="text-sm text-gray-500 mt-1">
+              Miles for this job only — saved with the estimate/invoice.
+            </p>
+          )}
         </div>
         <div className="text-right shrink-0">
           <div className="text-xs text-gray-500">This job</div>

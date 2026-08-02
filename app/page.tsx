@@ -720,6 +720,7 @@ export default function Home() {
 
   // Labor states
   const [isLaborModalOpen, setIsLaborModalOpen] = useState(false);
+  const [isMileageModalOpen, setIsMileageModalOpen] = useState(false);
   const [laborHours, setLaborHours] = useState(0);
   const [laborRate, setLaborRate] = useState(0);
   const [laborFixedAmount, setLaborFixedAmount] = useState(0);
@@ -8481,12 +8482,24 @@ export default function Home() {
               <Card className="mb-8">
                 <CardContent className="p-6">
                   <h3 className="text-xl font-semibold mb-4">{t('receiptsSection')} ({receiptUrls.length})</h3>
-                  <Button onClick={() => document.getElementById('receipts-camera')?.click()} className="mb-4">
-                    {t('scanReceipt')}
-                  </Button>
-                  <Button onClick={() => setIsLaborModalOpen(true)} className="mb-4 bg-[#14b8a6]">
-                    {t('laborButton')}
-                  </Button>
+                  <div className="flex flex-wrap gap-2 mb-4">
+                    <Button onClick={() => document.getElementById('receipts-camera')?.click()}>
+                      {t('scanReceipt')}
+                    </Button>
+                    <Button onClick={() => setIsLaborModalOpen(true)} className="bg-[#14b8a6] text-white">
+                      {t('laborButton')}
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={() => setIsMileageModalOpen(true)}
+                      className="bg-[#0ea5e9] text-white"
+                    >
+                      🚗 Mileage
+                      {jobMileageLogs.length > 0
+                        ? ` (${sumMileageLogs(jobMileageLogs).toFixed(1)} mi)`
+                        : ''}
+                    </Button>
+                  </div>
                   <input id="receipts-camera" type="file" accept="image/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'receipt')} className="hidden" />
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     {receiptDisplayUrls.map((url, i) => (
@@ -8496,16 +8509,6 @@ export default function Home() {
                       </div>
                     ))}
                   </div>
-
-                  <MileageTracker
-                    variant="job"
-                    logs={jobMileageLogs}
-                    ratePerMile={mileageRatePerMile}
-                    defaultJobName={jobName}
-                    onChangeLogs={setJobMileageLogs}
-                    onSave={(logs) => void saveJobMileage(logs)}
-                    saving={mileageSaving}
-                  />
                 </CardContent>
               </Card>
 
@@ -10624,6 +10627,39 @@ export default function Home() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsLaborModalOpen(false)}>Cancel</Button>
             <Button onClick={() => { setIsLaborModalOpen(false); showMessage(`✅ Labor of $${laborAmount.toFixed(2)} added`); }} className="bg-[#14b8a6]">Save Labor</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Job Mileage Modal — same row as Labor on estimate editor */}
+      <Dialog open={isMileageModalOpen} onOpenChange={setIsMileageModalOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>🚗 Job mileage</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-gray-500 -mt-2 mb-2">
+            Log miles for this job only (gas write-off). Saved with the estimate/invoice.
+          </p>
+          <MileageTracker
+            variant="job"
+            logs={jobMileageLogs}
+            ratePerMile={mileageRatePerMile}
+            defaultJobName={jobName}
+            onChangeLogs={setJobMileageLogs}
+            onSave={async (logs) => {
+              await saveJobMileage(logs);
+            }}
+            saving={mileageSaving}
+            title="Trips for this job"
+          />
+          <DialogFooter className="mt-2">
+            <Button
+              type="button"
+              className="bg-[#0ea5e9] text-white"
+              onClick={() => setIsMileageModalOpen(false)}
+            >
+              Done
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
