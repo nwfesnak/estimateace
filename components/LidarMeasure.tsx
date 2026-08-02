@@ -21,13 +21,13 @@ type LidarMeasureProps = {
   onClose: () => void;
   onApply: (result: LidarMeasureResult) => void;
   preferArea?: boolean;
-  /** Stream from Measure button click (iOS needs user gesture). */
   initialStream?: MediaStream | null;
 };
 
-type Point = { x: number; y: number }; // 0–1 normalized in viewfinder
+/** Normalized 0–1 coords inside the measure image/view */
+type Point = { x: number; y: number };
 
-type Phase = 'calibrate' | 'measure';
+type Phase = 'live' | 'calibrate' | 'measure';
 
 function parseDim(feetStr: string, inchesStr: string): number {
   const f = parseFloat(String(feetStr).replace(/,/g, '')) || 0;
@@ -50,21 +50,17 @@ function formatFeet(n: number): string {
   return `${feet}' ${inches}"`;
 }
 
-function pixelDistance(a: Point, b: Point, viewW: number, viewH: number): number {
-  const dx = (b.x - a.x) * viewW;
-  const dy = (b.y - a.y) * viewH;
-  return Math.hypot(dx, dy);
+/** Euclidean distance in image pixel space (normalized × image size). */
+function distPx(a: Point, b: Point, imgW: number, imgH: number): number {
+  return Math.hypot((b.x - a.x) * imgW, (b.y - a.y) * imgH);
 }
 
 /**
- * Measure tool for estimate line qty.
- *
- * How it works (no raw LiDAR in web browsers on iPhone):
- * 1. Calibrate — tap two ends of something you know (door, tape mark), enter that length
- * 2. Measure — tap two ends of what you want; app scales using calibration
- * 3. Or type ft/in manually
- *
- * Stay the same distance from the surface for best accuracy.
+ * Job-site measure (web-safe):
+ * 1. Aim camera → Freeze frame (photo locks so points never drift)
+ * 2. Tap Point A — stays fixed on the photo
+ * 3. Tap Point B — stays fixed; enter known length → Set scale
+ * 4. Tap new A/B to measure; Apply to line
  */
 export function LidarMeasure({
   open,
@@ -75,59 +71,94 @@ export function LidarMeasure({
 }: LidarMeasureProps) {
   const [mounted, setMounted] = React.useState(false);
   const [mode, setMode] = React.useState<LidarMeasureMode>(preferArea ? 'area' : 'length');
-  const [phase, setPhase] = React.useState<Phase>('calibrate');
+  const [phase, setPhase] = React.useState<Phase>('live');
   const [error, setError] = React.useState<string | null>(null);
-  const [status, setStatus] = React.useState('');
+  const [status, setStatus] = React.useState('Aim at the job, then Freeze frame');
   const [cameraReady, setCameraReady] = React.useState(false);
   const [cameraBusy, setCameraBusy] = React.useState(false);
 
-  // Screen points for current segment (0–1)
-  const [points, setPoints] = React.useState<Point[]>([]);
-  // feet of real world per pixel (after calibration)
+  // Frozen still (data URL) — measuring only happens on this
+  const [freezeUrl, setFreezeUrl] = React.useState<string | null>(null);
+  const [imgSize, setImgSize] = React.useState({ w: 1, h: 1 });
+
+  // Anchors — always stored in ref + state so they never jump
+  const [anchors, setAnchors] = React.useState<Point[]>([]);
+  const anchorsRef = React.useRef<Point[]>([]);
+
   const [feetPerPx, setFeetPerPx] = React.useState<number | null>(null);
   const [calibPx, setCalibPx] = React.useState<number | null>(null);
-
-  // Calibration known length inputs
   const [calFt, setCalFt] = React.useState('3');
   const [calIn, setCalIn] = React.useState('0');
 
-  // Results
   const [lengthFt, setLengthFt] = React.useState(0);
   const [widthFt, setWidthFt] = React.useState(0);
   const [measuringWhich, setMeasuringWhich] = React.useState<'length' | 'width'>('length');
 
-  // Manual override fields (always available)
   const [manLenFt, setManLenFt] = React.useState('');
   const [manLenIn, setManLenIn] = React.useState('');
   const [manWidFt, setManWidFt] = React.useState('');
   const [manWidIn, setManWidIn] = React.useState('');
   const [showManual, setShowManual] = React.useState(false);
 
+  // Live preview crosshair while aiming second point (does not move anchor 1)
+  const [hover, setHover] = React.useState<Point | null>(null);
+  /** Stage pixel size for letterbox overlay (matches object-fit: contain). */
+  const [stagePx, setStagePx] = React.useState({ w: 1, h: 1 });
+
   const videoRef = React.useRef<HTMLVideoElement>(null);
-  const viewRef = React.useRef<HTMLDivElement>(null);
+  const canvasRef = React.useRef<HTMLCanvasElement>(null);
+  const stageRef = React.useRef<HTMLDivElement>(null);
   const streamRef = React.useRef<MediaStream | null>(null);
   const viewportMetaPrev = React.useRef<string | null>(null);
   const openGenRef = React.useRef(0);
+  const lastTapMs = React.useRef(0);
+  const pointerDownId = React.useRef<number | null>(null);
 
   React.useEffect(() => setMounted(true), []);
 
-  const knownCalFeet = parseDim(calFt, calIn);
+  // Keep stage size in sync so anchors sit on the photo, not the black bars
+  React.useEffect(() => {
+    if (!open) return;
+    const el = stageRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const cr = entries[0]?.contentRect;
+      if (cr) setStagePx({ w: Math.max(1, cr.width), h: Math.max(1, cr.height) });
+    });
+    ro.observe(el);
+    setStagePx({ w: Math.max(1, el.clientWidth), h: Math.max(1, el.clientHeight) });
+    return () => ro.disconnect();
+  }, [open, freezeUrl]);
 
+  const letterbox = React.useMemo(() => {
+    const scale = Math.min(stagePx.w / imgSize.w, stagePx.h / imgSize.h);
+    const drawW = imgSize.w * scale;
+    const drawH = imgSize.h * scale;
+    return {
+      left: (stagePx.w - drawW) / 2,
+      top: (stagePx.h - drawH) / 2,
+      width: drawW,
+      height: drawH,
+    };
+  }, [stagePx.w, stagePx.h, imgSize.w, imgSize.h]);
+
+  const knownCalFeet = parseDim(calFt, calIn);
   const manualLen = parseDim(manLenFt, manLenIn);
   const manualWid = parseDim(manWidFt, manWidIn);
-
-  // Prefer manual if user typed; else camera measure results
-  const effectiveLen = showManual && manualLen > 0 ? manualLen : lengthFt;
-  const effectiveWid = showManual && manualWid > 0 ? manualWid : widthFt;
-
+  const effectiveLen = manualLen > 0 ? manualLen : lengthFt;
+  const effectiveWid = manualWid > 0 ? manualWid : widthFt;
   const previewQty =
     mode === 'area'
       ? effectiveLen > 0 && effectiveWid > 0
         ? Math.round(effectiveLen * effectiveWid * 100) / 100
         : 0
       : Math.round(effectiveLen * 1000) / 1000;
-
   const previewUnit = mode === 'area' ? 'SF' : mode === 'height' ? 'ft' : 'lf';
+
+  const setAnchorsSafe = React.useCallback((next: Point[]) => {
+    anchorsRef.current = next;
+    setAnchors(next);
+  }, []);
 
   const stopCamera = React.useCallback(() => {
     if (streamRef.current) {
@@ -164,12 +195,12 @@ export function LidarMeasure({
           if (gen === openGenRef.current) {
             setCameraReady(true);
             setError(null);
+            setStatus('Aim camera, then tap Freeze frame');
           }
           return;
-        } catch (e) {
-          console.warn(e);
+        } catch {
           if (gen === openGenRef.current) {
-            setError('Camera preview blocked. Use Manual ft/in below.');
+            setError('Camera blocked. Use Manual ft/in.');
             setShowManual(true);
           }
           return;
@@ -184,7 +215,7 @@ export function LidarMeasure({
       setCameraBusy(true);
       try {
         if (!navigator.mediaDevices?.getUserMedia) {
-          setError('No camera — open Manual and type ft/in.');
+          setError('No camera. Use Manual ft/in.');
           setShowManual(true);
           return;
         }
@@ -203,7 +234,7 @@ export function LidarMeasure({
           }
         }
         if (!stream) {
-          setError('Camera blocked. Use Manual ft/in — still applies to your line.');
+          setError('Camera unavailable. Use Manual ft/in.');
           setShowManual(true);
           return;
         }
@@ -222,25 +253,24 @@ export function LidarMeasure({
     [attachStream]
   );
 
-  const resetSession = React.useCallback((nextMode: LidarMeasureMode, preferAreaMode: boolean) => {
-    const m = nextMode || (preferAreaMode ? 'area' : 'length');
-    setMode(m);
-    setPhase('calibrate');
-    setPoints([]);
+  const resetMeasureState = React.useCallback((area: boolean) => {
+    setMode(area ? 'area' : 'length');
+    setPhase('live');
+    setFreezeUrl(null);
+    setAnchorsSafe([]);
     setFeetPerPx(null);
     setCalibPx(null);
     setLengthFt(0);
     setWidthFt(0);
     setMeasuringWhich('length');
+    setHover(null);
     setManLenFt('');
     setManLenIn('');
     setManWidFt('');
     setManWidIn('');
     setError(null);
-    setStatus(
-      'STEP 1 — Calibrate: tap TWO ends of something you know the size of (door, 3ft tape mark). Then enter that size and tap Set scale.'
-    );
-  }, []);
+    setStatus('Aim camera, then tap Freeze frame');
+  }, [setAnchorsSafe]);
 
   React.useEffect(() => {
     if (!open) {
@@ -250,7 +280,7 @@ export function LidarMeasure({
     }
 
     const gen = ++openGenRef.current;
-    resetSession(preferArea ? 'area' : 'length', preferArea);
+    resetMeasureState(preferArea);
 
     document.documentElement.classList.add('device-camera-lock');
     const meta = document.querySelector('meta[name="viewport"]');
@@ -262,26 +292,7 @@ export function LidarMeasure({
       );
     }
 
-    if (initialStream && initialStream.getTracks().some((t) => t.readyState === 'live')) {
-      void attachStream(initialStream, gen);
-    } else {
-      const t = window.setTimeout(() => {
-        if (gen === openGenRef.current) void requestCamera(gen);
-      }, 60);
-      return () => {
-        window.clearTimeout(t);
-        openGenRef.current += 1;
-        stopCamera();
-        document.documentElement.classList.remove('device-camera-lock');
-        const m = document.querySelector('meta[name="viewport"]');
-        if (m && viewportMetaPrev.current != null) {
-          m.setAttribute('content', viewportMetaPrev.current);
-          viewportMetaPrev.current = null;
-        }
-      };
-    }
-
-    return () => {
+    const cleanup = () => {
       openGenRef.current += 1;
       stopCamera();
       document.documentElement.classList.remove('device-camera-lock');
@@ -291,41 +302,165 @@ export function LidarMeasure({
         viewportMetaPrev.current = null;
       }
     };
+
+    if (initialStream && initialStream.getTracks().some((t) => t.readyState === 'live')) {
+      void attachStream(initialStream, gen);
+      return cleanup;
+    }
+
+    const t = window.setTimeout(() => {
+      if (gen === openGenRef.current) void requestCamera(gen);
+    }, 60);
+    return () => {
+      window.clearTimeout(t);
+      cleanup();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, preferArea]);
 
-  const viewSize = () => {
-    const el = viewRef.current;
+  /** Grab a still from the live video — all anchors stick to this photo. */
+  const freezeFrame = () => {
+    setError(null);
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas || !cameraReady || !video.videoWidth) {
+      setError('Camera not ready yet.');
+      return;
+    }
+    const w = video.videoWidth;
+    const h = video.videoHeight;
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      setError('Could not capture frame.');
+      return;
+    }
+    ctx.drawImage(video, 0, 0, w, h);
+    let url: string;
+    try {
+      url = canvas.toDataURL('image/jpeg', 0.92);
+    } catch {
+      setError('Could not freeze frame.');
+      return;
+    }
+    setImgSize({ w, h });
+    setFreezeUrl(url);
+    setAnchorsSafe([]);
+    setCalibPx(null);
+    setHover(null);
+    // Keep scale if already set so user can re-measure on a new frame after recalibrate only
+    if (feetPerPx && feetPerPx > 0) {
+      setPhase('measure');
+      setStatus('Frame locked. Tap Point A, then Point B to measure. Anchors stay fixed.');
+    } else {
+      setPhase('calibrate');
+      setStatus('Frame locked. Tap Point A on one end of a KNOWN length (door, tape mark).');
+    }
+    try {
+      navigator.vibrate?.(20);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const unfreeze = () => {
+    setFreezeUrl(null);
+    setPhase('live');
+    setAnchorsSafe([]);
+    setCalibPx(null);
+    setHover(null);
+    setStatus('Live camera. Aim again, then Freeze frame.');
+    // Video remounts after freeze — reattach live stream
+    const gen = openGenRef.current;
+    const stream = streamRef.current;
+    window.setTimeout(() => {
+      if (gen !== openGenRef.current) return;
+      if (stream && stream.getTracks().some((t) => t.readyState === 'live')) {
+        void attachStream(stream, gen);
+      } else {
+        void requestCamera(gen);
+      }
+    }, 50);
+  };
+
+  const eventToPoint = (e: React.PointerEvent<HTMLElement>): Point | null => {
+    const el = stageRef.current;
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    if (rect.width < 2 || rect.height < 2) return null;
+    // Map click into the letterboxed image (object-fit: contain)
+    const stageW = rect.width;
+    const stageH = rect.height;
+    const iw = imgSize.w;
+    const ih = imgSize.h;
+    const scale = Math.min(stageW / iw, stageH / ih);
+    const drawW = iw * scale;
+    const drawH = ih * scale;
+    const offX = (stageW - drawW) / 2;
+    const offY = (stageH - drawH) / 2;
+    const localX = e.clientX - rect.left - offX;
+    const localY = e.clientY - rect.top - offY;
+    if (localX < 0 || localY < 0 || localX > drawW || localY > drawH) {
+      return null; // outside image letterbox
+    }
     return {
-      w: Math.max(1, el?.clientWidth || 1),
-      h: Math.max(1, el?.clientHeight || 1),
+      x: Math.min(1, Math.max(0, localX / drawW)),
+      y: Math.min(1, Math.max(0, localY / drawH)),
     };
   };
 
-  const handleViewTap = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!cameraReady) {
-      setError('Wait for camera, or use Manual ft/in.');
+  const finishSegment = (a: Point, b: Point) => {
+    const px = distPx(a, b, imgSize.w, imgSize.h);
+    if (px < 4) {
+      setError('Points are too close. Place them farther apart.');
+      setAnchorsSafe([a]);
       return;
     }
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / Math.max(1, rect.width);
-    const y = (e.clientY - rect.top) / Math.max(1, rect.height);
-    const p: Point = {
-      x: Math.min(1, Math.max(0, x)),
-      y: Math.min(1, Math.max(0, y)),
-    };
 
-    setError(null);
-
-    if (points.length === 0) {
-      setPoints([p]);
+    if (phase === 'calibrate' || !feetPerPx) {
+      setCalibPx(px);
+      setPhase('calibrate');
       setStatus(
-        phase === 'calibrate'
-          ? 'Point 1 set — tap the OTHER end of your known length'
-          : measuringWhich === 'width'
-            ? 'Point 1 set — tap the other end of the WIDTH'
-            : 'Point 1 set — tap the other end of the LENGTH'
+        `Both anchors locked (${Math.round(px)} px apart). Enter the REAL length of that span, then Set scale.`
       );
+      return;
+    }
+
+    const feet = px * feetPerPx;
+    if (mode === 'area' && measuringWhich === 'width') {
+      setWidthFt(feet);
+      const parts = feetToParts(feet);
+      setManWidFt(String(parts.feet));
+      setManWidIn(String(parts.inches));
+      setStatus(`Width locked: ${formatFeet(feet)}. Apply to line or measure again.`);
+    } else {
+      setLengthFt(feet);
+      const parts = feetToParts(feet);
+      setManLenFt(String(parts.feet));
+      setManLenIn(String(parts.inches));
+      if (mode === 'area') {
+        setMeasuringWhich('width');
+        setAnchorsSafe([]);
+        setStatus(`Length locked: ${formatFeet(feet)}. Now tap width Point A, then Point B.`);
+      } else {
+        setStatus(`Measured ${formatFeet(feet)}. Tap Apply to line (or place new A/B).`);
+      }
+    }
+  };
+
+  const placePoint = (p: Point) => {
+    const now = Date.now();
+    if (now - lastTapMs.current < 280) return; // debounce double-fire
+    lastTapMs.current = now;
+    setError(null);
+    setHover(null);
+
+    const current = anchorsRef.current;
+
+    if (current.length === 0) {
+      setAnchorsSafe([p]);
+      setStatus('Point A locked. Tap Point B — Point A will not move.');
       try {
         navigator.vibrate?.(12);
       } catch {
@@ -334,125 +469,150 @@ export function LidarMeasure({
       return;
     }
 
-    if (points.length >= 1) {
-      const a = points[0];
+    if (current.length === 1) {
+      const a = current[0];
       const b = p;
-      const { w, h } = viewSize();
-      const px = pixelDistance(a, b, w, h);
-      setPoints([a, b]);
-
-      if (phase === 'calibrate') {
-        setCalibPx(px);
-        setStatus(
-          `Line set (${Math.round(px)} px). Enter the real length below and tap “Set scale”.`
-        );
-        try {
-          navigator.vibrate?.([10, 20, 10]);
-        } catch {
-          /* ignore */
-        }
-        return;
-      }
-
-      // Measure phase
-      if (!feetPerPx || feetPerPx <= 0) {
-        setError('Calibrate first: set scale with a known length.');
-        setPhase('calibrate');
-        setPoints([]);
-        return;
-      }
-
-      const feet = px * feetPerPx;
-      if (mode === 'area' && measuringWhich === 'width') {
-        setWidthFt(feet);
-        if (!showManual) {
-          const parts = feetToParts(feet);
-          setManWidFt(String(parts.feet));
-          setManWidIn(String(parts.inches));
-        }
-        setStatus(`Width = ${formatFeet(feet)}. Adjust if needed, then Apply to line.`);
-      } else {
-        setLengthFt(feet);
-        if (!showManual) {
-          const parts = feetToParts(feet);
-          setManLenFt(String(parts.feet));
-          setManLenIn(String(parts.inches));
-        }
-        if (mode === 'area') {
-          setMeasuringWhich('width');
-          setPoints([]);
-          setStatus(`Length = ${formatFeet(feet)}. Now tap TWO ends of the WIDTH.`);
-        } else {
-          setStatus(`Measured ${formatFeet(feet)}. Tap Apply to line.`);
-        }
-      }
+      setAnchorsSafe([a, b]);
+      finishSegment(a, b);
       try {
-        navigator.vibrate?.([15, 25, 15]);
+        navigator.vibrate?.([12, 30, 12]);
       } catch {
         /* ignore */
       }
+      return;
     }
+
+    // Already have 2 anchors — start a fresh segment, keep first new tap
+    setAnchorsSafe([p]);
+    setCalibPx(null);
+    setStatus('New Point A locked. Tap Point B.');
+  };
+
+  const onStagePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!freezeUrl) return;
+    // Only primary button / touch
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    pointerDownId.current = e.pointerId;
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+    // Do not place on down — place on up so finger slip doesn't drag anchor
+  };
+
+  const onStagePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!freezeUrl) return;
+    if (anchorsRef.current.length !== 1) return;
+    const p = eventToPoint(e);
+    if (p) setHover(p);
+  };
+
+  const onStagePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!freezeUrl) return;
+    if (pointerDownId.current != null && e.pointerId !== pointerDownId.current) return;
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+    pointerDownId.current = null;
+    const p = eventToPoint(e);
+    if (!p) {
+      setError('Tap on the photo (inside the image).');
+      return;
+    }
+    placePoint(p);
+  };
+
+  const onStagePointerCancel = (e: React.PointerEvent<HTMLDivElement>) => {
+    pointerDownId.current = null;
+    setHover(null);
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  /** Place at exact center of frozen image (reticle) — most reliable. */
+  const placeAtCenter = () => {
+    if (!freezeUrl) {
+      setError('Freeze the frame first.');
+      return;
+    }
+    placePoint({ x: 0.5, y: 0.5 });
   };
 
   const setScale = () => {
     if (knownCalFeet <= 0) {
-      setError('Enter the known length in feet / inches (e.g. door 3 ft 0 in).');
+      setError('Enter the known real length (ft / in).');
       return;
     }
-    if (!calibPx || calibPx < 8) {
-      setError('Tap two points on the camera first (both ends of the known length).');
+    const a = anchorsRef.current[0];
+    const b = anchorsRef.current[1];
+    let px = calibPx;
+    if ((!px || px < 4) && a && b) {
+      px = distPx(a, b, imgSize.w, imgSize.h);
+    }
+    if (!px || px < 4) {
+      setError('Place Point A and Point B on a known length first.');
       return;
     }
-    const scale = knownCalFeet / calibPx;
+    const scale = knownCalFeet / px;
     setFeetPerPx(scale);
+    setCalibPx(px);
     setPhase('measure');
-    setPoints([]);
+    setAnchorsSafe([]);
     setMeasuringWhich('length');
     setLengthFt(0);
     setWidthFt(0);
     setError(null);
     setStatus(
       mode === 'area'
-        ? 'Scale set ✓ — tap TWO ends of the LENGTH to measure'
-        : mode === 'height'
-          ? 'Scale set ✓ — tap bottom and top of the height'
-          : 'Scale set ✓ — tap TWO ends of what you want to measure'
+        ? `Scale set (${formatFeet(knownCalFeet)}). Tap length Point A, then B.`
+        : `Scale set (${formatFeet(knownCalFeet)}). Tap Point A, then B to measure.`
     );
   };
 
-  const clearPoints = () => {
-    setPoints([]);
+  const clearAnchors = () => {
+    setAnchorsSafe([]);
     setCalibPx(null);
-    if (phase === 'calibrate') {
-      setStatus('Tap TWO ends of a known length on the camera.');
-    } else if (mode === 'area' && measuringWhich === 'width') {
-      setStatus('Tap TWO ends of the WIDTH.');
-    } else {
-      setStatus('Tap TWO ends to measure.');
-    }
+    setHover(null);
+    setStatus(
+      phase === 'calibrate'
+        ? 'Anchors cleared. Tap Point A on known length.'
+        : 'Anchors cleared. Tap Point A, then B.'
+    );
   };
 
-  const recaliibrate = () => {
-    setPhase('calibrate');
-    setPoints([]);
-    setCalibPx(null);
+  const recalibrate = () => {
     setFeetPerPx(null);
+    setCalibPx(null);
+    setAnchorsSafe([]);
     setLengthFt(0);
     setWidthFt(0);
     setMeasuringWhich('length');
-    setStatus('Recalibrate: tap TWO ends of a known length, enter size, Set scale.');
+    setPhase(freezeUrl ? 'calibrate' : 'live');
+    setStatus(
+      freezeUrl
+        ? 'Recalibrate: tap A and B on a known length, enter size, Set scale.'
+        : 'Freeze a frame first, then calibrate.'
+    );
   };
 
   const applyMeasurement = () => {
     setError(null);
-
-    // Pull from manual fields if filled (user may edit after measure)
     const len = parseDim(manLenFt, manLenIn) || effectiveLen;
     const wid = parseDim(manWidFt, manWidIn) || effectiveWid;
 
     if (mode === 'area') {
       if (len <= 0 || wid <= 0) {
-        setError('Need length AND width. Measure both on camera, or type ft/in in Manual.');
+        setError('Need length and width. Measure both or type Manual ft/in.');
         setShowManual(true);
         return;
       }
@@ -467,16 +627,14 @@ export function LidarMeasure({
       });
       return;
     }
-
     if (len <= 0) {
-      setError('Measure on camera (after scale) or type length in Manual.');
+      setError('Measure A→B after scale, or type Manual ft/in.');
       setShowManual(true);
       return;
     }
-    const unit = mode === 'height' ? 'ft' : 'lf';
     onApply({
       qty: Math.round(len * 1000) / 1000,
-      unit,
+      unit: mode === 'height' ? 'ft' : 'lf',
       label: mode === 'height' ? `Height ${formatFeet(len)}` : `Length ${formatFeet(len)}`,
       method: feetPerPx ? 'calibrated' : 'manual',
       ...feetToParts(len),
@@ -488,36 +646,14 @@ export function LidarMeasure({
     onClose();
   };
 
-  if (!mounted || !open) return null;
+  // Live line: A → hover or A → B
+  const lineEndpoints: [Point, Point] | null = (() => {
+    if (anchors.length === 2) return [anchors[0], anchors[1]];
+    if (anchors.length === 1 && hover) return [anchors[0], hover];
+    return null;
+  })();
 
-  const lineStyle: React.CSSProperties | undefined =
-    points.length === 2
-      ? (() => {
-          const a = points[0];
-          const b = points[1];
-          const x1 = a.x * 100;
-          const y1 = a.y * 100;
-          const x2 = b.x * 100;
-          const y2 = b.y * 100;
-          const dx = x2 - x1;
-          const dy = y2 - y1;
-          const len = Math.hypot(dx, dy);
-          const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
-          return {
-            position: 'absolute' as const,
-            left: `${x1}%`,
-            top: `${y1}%`,
-            width: `${len}%`,
-            height: '3px',
-            background: '#10b981',
-            transformOrigin: '0 50%',
-            transform: `rotate(${angle}deg)`,
-            zIndex: 12,
-            boxShadow: '0 0 0 1px rgba(0,0,0,0.4)',
-            pointerEvents: 'none' as const,
-          };
-        })()
-      : undefined;
+  if (!mounted || !open) return null;
 
   const shell = (
     <div
@@ -528,14 +664,13 @@ export function LidarMeasure({
       aria-label="Measure"
       style={{ zIndex: 500, background: '#0a0a0a' }}
     >
-      {/* Top */}
+      <canvas ref={canvasRef} className="hidden" aria-hidden />
+
       <div className="device-camera-top" style={{ paddingTop: 'max(0.75rem, env(safe-area-inset-top))' }}>
         <div className="device-camera-top-info">
           <div className="device-camera-title">📡 Measure</div>
           <div className="device-camera-subtitle">
-            {phase === 'calibrate'
-              ? 'Calibrate with a known length, then measure'
-              : 'Tap two points on the camera to measure'}
+            Freeze photo → lock Point A → lock Point B (A never moves)
           </div>
         </div>
         <button type="button" className="device-camera-done" onClick={handleClose}>
@@ -543,8 +678,7 @@ export function LidarMeasure({
         </button>
       </div>
 
-      {/* Mode */}
-      <div className="flex gap-2 px-3 pb-2">
+      <div className="flex gap-2 px-3 pb-1.5">
         {(
           [
             ['length', 'Length'],
@@ -557,20 +691,17 @@ export function LidarMeasure({
             type="button"
             onClick={() => {
               setMode(id);
-              setPoints([]);
+              setAnchorsSafe([]);
+              setHover(null);
+              setMeasuringWhich('length');
               setLengthFt(0);
               setWidthFt(0);
-              setMeasuringWhich('length');
-              if (feetPerPx) {
+              if (freezeUrl && feetPerPx) {
                 setPhase('measure');
-                setStatus(
-                  id === 'area'
-                    ? 'Tap TWO ends of the LENGTH first'
-                    : 'Tap TWO ends to measure'
-                );
-              } else {
+                setStatus(id === 'area' ? 'Tap length A, then B' : 'Tap Point A, then B');
+              } else if (freezeUrl) {
                 setPhase('calibrate');
-                setStatus('Calibrate first: tap known length, enter size, Set scale.');
+                setStatus('Calibrate: A and B on known length, then Set scale');
               }
             }}
             className={`flex-1 rounded-full py-2 text-xs font-semibold border ${
@@ -584,61 +715,119 @@ export function LidarMeasure({
         ))}
       </div>
 
-      {/* Steps badge */}
-      <div className="px-3 pb-2 flex gap-2 text-[10px] font-semibold uppercase tracking-wide">
-        <span
-          className={`rounded-full px-2.5 py-1 ${
-            phase === 'calibrate' ? 'bg-amber-500 text-black' : 'bg-white/10 text-white/50'
-          }`}
-        >
-          1. Scale
-        </span>
-        <span
-          className={`rounded-full px-2.5 py-1 ${
-            phase === 'measure' ? 'bg-emerald-500 text-black' : 'bg-white/10 text-white/50'
-          }`}
-        >
-          2. Measure
-        </span>
-        <span
-          className={`rounded-full px-2.5 py-1 ${
-            previewQty > 0 ? 'bg-sky-500 text-black' : 'bg-white/10 text-white/50'
-          }`}
-        >
-          3. Apply
-        </span>
-      </div>
-
-      {/* Camera — tap targets */}
-      <div className="device-camera-frame px-3" style={{ flex: '1 1 40%', minHeight: '200px', maxHeight: '42vh' }}>
+      {/* Stage */}
+      <div className="device-camera-frame px-3" style={{ flex: '1 1 42%', minHeight: '220px', maxHeight: '46vh' }}>
         <div className="device-camera-frame-border relative">
           <div
-            ref={viewRef}
-            className="device-camera-viewfinder touch-none"
-            onPointerDown={handleViewTap}
-            style={{ cursor: 'crosshair' }}
+            ref={stageRef}
+            className="device-camera-viewfinder"
+            style={{
+              touchAction: 'none',
+              cursor: freezeUrl ? 'crosshair' : 'default',
+              userSelect: 'none',
+              WebkitUserSelect: 'none',
+            }}
+            onPointerDown={onStagePointerDown}
+            onPointerMove={onStagePointerMove}
+            onPointerUp={onStagePointerUp}
+            onPointerCancel={onStagePointerCancel}
           >
-            <video ref={videoRef} className="device-camera-video pointer-events-none" playsInline muted autoPlay />
+            {/* Live video only before freeze */}
+            {!freezeUrl && (
+              <video
+                ref={videoRef}
+                className="device-camera-video pointer-events-none"
+                playsInline
+                muted
+                autoPlay
+              />
+            )}
 
-            {/* Points */}
-            {points.map((pt, i) => (
+            {/* Frozen still — object-fit contain so tap math matches letterbox overlay */}
+            {freezeUrl && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={freezeUrl}
+                alt="Frozen measure frame"
+                draggable={false}
+                className="absolute inset-0 w-full h-full object-contain object-center pointer-events-none select-none"
+                style={{ background: '#000' }}
+              />
+            )}
+
+            {/* Overlay box matches the contained photo — anchors never drift with letterbox */}
+            {freezeUrl && (
               <div
-                key={i}
-                className="absolute z-20 w-5 h-5 -ml-2.5 -mt-2.5 rounded-full border-2 border-white bg-[#10b981] shadow-lg pointer-events-none"
-                style={{ left: `${pt.x * 100}%`, top: `${pt.y * 100}%` }}
+                className="absolute z-20 pointer-events-none"
+                style={{
+                  left: letterbox.left,
+                  top: letterbox.top,
+                  width: letterbox.width,
+                  height: letterbox.height,
+                }}
               >
-                <span className="absolute -top-5 left-1/2 -translate-x-1/2 text-[10px] font-bold text-white drop-shadow">
-                  {i + 1}
-                </span>
-              </div>
-            ))}
-            {lineStyle && <div style={lineStyle} />}
+                {anchors.map((pt, i) => (
+                  <div
+                    key={`a-${i}-${pt.x.toFixed(4)}-${pt.y.toFixed(4)}`}
+                    className="absolute"
+                    style={{
+                      left: `${pt.x * 100}%`,
+                      top: `${pt.y * 100}%`,
+                      transform: 'translate(-50%, -50%)',
+                    }}
+                  >
+                    <div
+                      className={`w-7 h-7 rounded-full border-[3px] border-white shadow-lg flex items-center justify-center text-[11px] font-bold text-white ${
+                        i === 0 ? 'bg-sky-500' : 'bg-[#10b981]'
+                      }`}
+                    >
+                      {i === 0 ? 'A' : 'B'}
+                    </div>
+                  </div>
+                ))}
 
-            {!cameraReady && (
+                {lineEndpoints && (
+                  <svg
+                    className="absolute inset-0 w-full h-full"
+                    viewBox="0 0 1 1"
+                    preserveAspectRatio="none"
+                  >
+                    <line
+                      x1={lineEndpoints[0].x}
+                      y1={lineEndpoints[0].y}
+                      x2={lineEndpoints[1].x}
+                      y2={lineEndpoints[1].y}
+                      stroke="#10b981"
+                      strokeWidth={0.01}
+                    />
+                  </svg>
+                )}
+
+                {hover && anchors.length === 1 && (
+                  <div
+                    className="absolute opacity-70"
+                    style={{
+                      left: `${hover.x * 100}%`,
+                      top: `${hover.y * 100}%`,
+                      transform: 'translate(-50%, -50%)',
+                    }}
+                  >
+                    <div className="w-6 h-6 rounded-full border-2 border-dashed border-emerald-300 bg-emerald-500/30" />
+                  </div>
+                )}
+
+                {/* Center reticle inside photo bounds */}
+                <div className="absolute inset-0 z-[8] flex items-center justify-center">
+                  <div className="w-8 h-8 border-2 border-white/85 rounded-full" />
+                  <div className="absolute w-0.5 h-4 bg-white/85" />
+                  <div className="absolute h-0.5 w-4 bg-white/85" />
+                </div>
+              </div>
+            )}
+
+            {!cameraReady && !freezeUrl && (
               <div className="device-camera-loading">
-                <p className="text-sm text-white/85 text-center px-4">
-                  {cameraBusy ? 'Starting camera…' : error || 'Starting camera…'}
-                </p>
+                <p className="text-sm text-white/85">{cameraBusy ? 'Starting camera…' : 'Starting camera…'}</p>
                 <button
                   type="button"
                   className="device-camera-retry mt-3"
@@ -646,34 +835,72 @@ export function LidarMeasure({
                 >
                   Enable camera
                 </button>
-                <button
-                  type="button"
-                  className="device-camera-retry mt-2"
-                  onClick={() => setShowManual(true)}
-                >
-                  Skip — type ft/in
-                </button>
               </div>
             )}
 
-            {cameraReady && (
-              <div className="absolute top-2 left-2 right-2 z-10 rounded-lg bg-black/70 px-3 py-2 text-[11px] text-white leading-snug pointer-events-none">
-                {status}
-              </div>
-            )}
+            <div className="absolute bottom-2 left-2 right-2 z-30 rounded-lg bg-black/75 px-3 py-2 text-[11px] text-white leading-snug pointer-events-none">
+              {status}
+            </div>
           </div>
         </div>
       </div>
 
       {/* Controls */}
       <div
-        className="px-3 pt-2 space-y-2.5 overflow-y-auto"
+        className="px-3 pt-2 space-y-2 overflow-y-auto"
         style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
       >
-        {phase === 'calibrate' && (
+        <div className="flex gap-2">
+          {!freezeUrl ? (
+            <button
+              type="button"
+              onClick={freezeFrame}
+              disabled={!cameraReady}
+              className="flex-1 rounded-xl py-3 text-sm font-bold bg-sky-500 text-white disabled:opacity-40"
+            >
+              1. Freeze frame
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={unfreeze}
+                className="rounded-xl py-3 px-3 text-xs font-semibold bg-white/10 text-white border border-white/20"
+              >
+                New frame
+              </button>
+              <button
+                type="button"
+                onClick={placeAtCenter}
+                className="flex-1 rounded-xl py-3 text-sm font-bold bg-[#10b981] text-white"
+              >
+                {anchors.length === 0
+                  ? '2. Place Point A (center)'
+                  : anchors.length === 1
+                    ? '3. Place Point B (center)'
+                    : 'Place new Point A (center)'}
+              </button>
+              <button
+                type="button"
+                onClick={clearAnchors}
+                className="rounded-xl py-3 px-3 text-xs font-semibold bg-white/10 text-white border border-white/20"
+              >
+                Clear
+              </button>
+            </>
+          )}
+        </div>
+
+        {freezeUrl && (
+          <p className="text-[11px] text-white/60 text-center">
+            Or tap the photo: Point A locks and stays. Then tap Point B.
+          </p>
+        )}
+
+        {(phase === 'calibrate' || (freezeUrl && !feetPerPx)) && anchors.length === 2 && (
           <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 space-y-2">
             <p className="text-xs text-amber-100 font-medium">
-              Known length (what you tapped on camera)
+              Real length of A→B (from your tape)
             </p>
             <div className="flex gap-2 items-center">
               <input
@@ -681,7 +908,6 @@ export function LidarMeasure({
                 value={calFt}
                 onChange={(e) => setCalFt(e.target.value)}
                 className="flex-1 h-11 rounded-lg bg-black/50 border border-white/25 text-white text-center text-lg font-semibold"
-                placeholder="3"
               />
               <span className="text-white/60 text-sm">ft</span>
               <input
@@ -689,16 +915,15 @@ export function LidarMeasure({
                 value={calIn}
                 onChange={(e) => setCalIn(e.target.value)}
                 className="flex-1 h-11 rounded-lg bg-black/50 border border-white/25 text-white text-center text-lg font-semibold"
-                placeholder="0"
               />
               <span className="text-white/60 text-sm">in</span>
             </div>
             <div className="flex flex-wrap gap-1.5">
               {[
-                { l: 'Door 36″', f: '3', i: '0' },
-                { l: '2 ft', f: '2', i: '0' },
-                { l: '4 ft', f: '4', i: '0' },
-                { l: 'Tape 1 ft', f: '1', i: '0' },
+                { l: 'Door 3′', f: '3', i: '0' },
+                { l: '2′', f: '2', i: '0' },
+                { l: '4′', f: '4', i: '0' },
+                { l: '1′', f: '1', i: '0' },
               ].map((c) => (
                 <button
                   key={c.l}
@@ -718,127 +943,93 @@ export function LidarMeasure({
               onClick={setScale}
               className="w-full rounded-xl py-3 text-sm font-bold bg-amber-500 text-black"
             >
-              Set scale {calibPx ? '✓ line ready' : '(tap 2 points first)'}
+              Set scale
             </button>
           </div>
         )}
 
-        {phase === 'measure' && (
-          <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 space-y-2">
-            <div className="flex justify-between text-xs text-emerald-100">
-              <span>
-                {mode === 'area'
-                  ? measuringWhich === 'width'
-                    ? 'Measuring WIDTH'
-                    : 'Measuring LENGTH'
-                  : 'Measuring'}
-              </span>
-              <button type="button" onClick={recaliibrate} className="underline text-white/70">
+        {feetPerPx != null && feetPerPx > 0 && (
+          <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3">
+            <div className="flex justify-between items-start gap-2">
+              <div className="grid grid-cols-2 gap-3 text-white flex-1">
+                <div>
+                  <div className="text-[10px] uppercase text-white/50">
+                    {mode === 'height' ? 'Height' : 'Length'}
+                  </div>
+                  <div className="text-lg font-bold tabular-nums">{formatFeet(lengthFt)}</div>
+                </div>
+                {mode === 'area' && (
+                  <div>
+                    <div className="text-[10px] uppercase text-white/50">Width</div>
+                    <div className="text-lg font-bold tabular-nums">{formatFeet(widthFt)}</div>
+                  </div>
+                )}
+              </div>
+              <button type="button" onClick={recalibrate} className="text-[11px] text-white/60 underline shrink-0">
                 Recalibrate
               </button>
-            </div>
-            <div className="grid grid-cols-2 gap-2 text-white">
-              <div>
-                <div className="text-[10px] uppercase text-white/50">
-                  {mode === 'height' ? 'Height' : 'Length'}
-                </div>
-                <div className="text-lg font-bold tabular-nums">{formatFeet(lengthFt)}</div>
-              </div>
-              {mode === 'area' && (
-                <div>
-                  <div className="text-[10px] uppercase text-white/50">Width</div>
-                  <div className="text-lg font-bold tabular-nums">{formatFeet(widthFt)}</div>
-                </div>
-              )}
-            </div>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={clearPoints}
-                className="flex-1 rounded-xl py-2.5 text-sm font-semibold bg-white/10 text-white border border-white/20"
-              >
-                Undo points
-              </button>
-              {mode === 'area' && lengthFt > 0 && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMeasuringWhich('width');
-                    setPoints([]);
-                    setStatus('Tap TWO ends of the WIDTH');
-                  }}
-                  className="flex-1 rounded-xl py-2.5 text-sm font-semibold bg-white/10 text-white border border-white/20"
-                >
-                  Measure width
-                </button>
-              )}
             </div>
           </div>
         )}
 
-        {/* Manual always available */}
         <button
           type="button"
           onClick={() => setShowManual((v) => !v)}
-          className="w-full text-left text-xs text-white/60 py-1"
+          className="w-full text-left text-xs text-white/55 py-0.5"
         >
-          {showManual ? '▼ Hide manual entry' : '▶ Type ft/in manually (no camera measure)'}
+          {showManual ? '▼ Hide manual ft/in' : '▶ Type tape reading (manual)'}
         </button>
 
         {showManual && (
           <div className="rounded-xl border border-white/15 bg-white/5 p-3 space-y-2">
-            <div>
-              <label className="text-[10px] uppercase text-white/50">
-                {mode === 'height' ? 'Height' : 'Length'}
-              </label>
-              <div className="flex gap-2 items-center mt-1">
+            <div className="flex gap-2 items-center">
+              <span className="text-[10px] text-white/50 w-12">
+                {mode === 'height' ? 'Ht' : 'Len'}
+              </span>
+              <input
+                inputMode="decimal"
+                value={manLenFt}
+                onChange={(e) => setManLenFt(e.target.value)}
+                className="flex-1 h-10 rounded-lg bg-black/50 border border-white/25 text-white text-center font-semibold"
+                placeholder="ft"
+              />
+              <span className="text-white/50 text-xs">ft</span>
+              <input
+                inputMode="decimal"
+                value={manLenIn}
+                onChange={(e) => setManLenIn(e.target.value)}
+                className="flex-1 h-10 rounded-lg bg-black/50 border border-white/25 text-white text-center font-semibold"
+                placeholder="in"
+              />
+              <span className="text-white/50 text-xs">in</span>
+            </div>
+            {mode === 'area' && (
+              <div className="flex gap-2 items-center">
+                <span className="text-[10px] text-white/50 w-12">Wid</span>
                 <input
                   inputMode="decimal"
-                  value={manLenFt}
-                  onChange={(e) => setManLenFt(e.target.value)}
-                  className="flex-1 h-11 rounded-lg bg-black/50 border border-white/25 text-white text-center font-semibold"
+                  value={manWidFt}
+                  onChange={(e) => setManWidFt(e.target.value)}
+                  className="flex-1 h-10 rounded-lg bg-black/50 border border-white/25 text-white text-center font-semibold"
                   placeholder="ft"
                 />
                 <span className="text-white/50 text-xs">ft</span>
                 <input
                   inputMode="decimal"
-                  value={manLenIn}
-                  onChange={(e) => setManLenIn(e.target.value)}
-                  className="flex-1 h-11 rounded-lg bg-black/50 border border-white/25 text-white text-center font-semibold"
+                  value={manWidIn}
+                  onChange={(e) => setManWidIn(e.target.value)}
+                  className="flex-1 h-10 rounded-lg bg-black/50 border border-white/25 text-white text-center font-semibold"
                   placeholder="in"
                 />
                 <span className="text-white/50 text-xs">in</span>
-              </div>
-            </div>
-            {mode === 'area' && (
-              <div>
-                <label className="text-[10px] uppercase text-white/50">Width</label>
-                <div className="flex gap-2 items-center mt-1">
-                  <input
-                    inputMode="decimal"
-                    value={manWidFt}
-                    onChange={(e) => setManWidFt(e.target.value)}
-                    className="flex-1 h-11 rounded-lg bg-black/50 border border-white/25 text-white text-center font-semibold"
-                    placeholder="ft"
-                  />
-                  <span className="text-white/50 text-xs">ft</span>
-                  <input
-                    inputMode="decimal"
-                    value={manWidIn}
-                    onChange={(e) => setManWidIn(e.target.value)}
-                    className="flex-1 h-11 rounded-lg bg-black/50 border border-white/25 text-white text-center font-semibold"
-                    placeholder="in"
-                  />
-                  <span className="text-white/50 text-xs">in</span>
-                </div>
               </div>
             )}
           </div>
         )}
 
-        <div className="flex items-center justify-between gap-3 pt-1">
+        <div className="flex items-center justify-between gap-3">
           <div className="text-white min-w-0">
-            <div className="text-[10px] uppercase text-white/50">Result → line qty</div>
+            <div className="text-[10px] uppercase text-white/50">Result → qty</div>
             <div className="text-xl font-bold tabular-nums">
               {previewQty > 0 ? (
                 <>
@@ -862,9 +1053,9 @@ export function LidarMeasure({
 
         {error && <p className="text-xs text-amber-300 leading-snug">{error}</p>}
         <p className="text-[10px] text-white/35 leading-snug">
-          Web browsers cannot read iPhone LiDAR. This tool measures by camera scale: calibrate once
-          with a known length (door ≈ 3′), stay the same distance from the wall/floor, then tap to
-          measure. Or type tape readings in Manual.
+          Point A is locked on a frozen photo so it cannot follow your finger. Best accuracy: put a
+          tape or known door in the same photo, calibrate on that, then measure other spans in that
+          photo without moving.
         </p>
       </div>
     </div>
