@@ -1791,18 +1791,33 @@ export default function Home() {
     return () => listener.subscription.unsubscribe();
   }, [supabase]);
 
-  // Stripe return deep-links — sync from Stripe if webhook was slow/missed
+  // Stripe / trial return deep-links
   useEffect(() => {
-    if (typeof window === 'undefined' || !user?.id || !supabase) return;
+    if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
     const billingParam = params.get('billing');
-    if (!billingParam) return;
+    const trialParam = params.get('trial');
+    const planParam = params.get('plan');
 
     const cleanUrl = () => {
       const url = new URL(window.location.href);
       url.searchParams.delete('billing');
+      url.searchParams.delete('trial');
+      url.searchParams.delete('plan');
       window.history.replaceState({}, '', url.pathname + url.search);
     };
+
+    if (trialParam === 'started') {
+      const planLabel = planParam === 'yearly' ? 'yearly ($430/yr after trial)' : 'monthly ($39.99/mo after trial)';
+      showMessage(
+        `✅ 14-day free trial started! After the trial you will be billed ${planLabel} unless you cancel in Plan / Billing.`
+      );
+      if (user?.id && supabase) void refreshBillingStatus();
+      cleanUrl();
+      return;
+    }
+
+    if (!user?.id || !supabase || !billingParam) return;
 
     if (billingParam === 'success') {
       showMessage('✅ Payment received — syncing subscription…');
