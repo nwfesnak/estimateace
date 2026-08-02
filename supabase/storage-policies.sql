@@ -62,9 +62,58 @@ USING (
 );
 
 -- ============================================================================
+-- CREW ACCESS (run after supabase/crew-members.sql)
+-- Crew uploads/reads under the owner's folder: {owner_user_id}/...
+-- ============================================================================
+
+DROP POLICY IF EXISTS "Crew can upload owner media" ON storage.objects;
+CREATE POLICY "Crew can upload owner media"
+ON storage.objects
+FOR INSERT
+TO authenticated
+WITH CHECK (
+  (bucket_id = 'media'::text)
+  AND public.is_crew_of(((storage.foldername(name))[1])::uuid)
+);
+
+DROP POLICY IF EXISTS "Crew can view owner media" ON storage.objects;
+CREATE POLICY "Crew can view owner media"
+ON storage.objects
+FOR SELECT
+TO authenticated
+USING (
+  (bucket_id = 'media'::text)
+  AND public.is_crew_of(((storage.foldername(name))[1])::uuid)
+);
+
+DROP POLICY IF EXISTS "Crew can update owner media" ON storage.objects;
+CREATE POLICY "Crew can update owner media"
+ON storage.objects
+FOR UPDATE
+TO authenticated
+USING (
+  (bucket_id = 'media'::text)
+  AND public.is_crew_of(((storage.foldername(name))[1])::uuid)
+)
+WITH CHECK (
+  (bucket_id = 'media'::text)
+  AND public.is_crew_of(((storage.foldername(name))[1])::uuid)
+);
+
+DROP POLICY IF EXISTS "Crew can delete owner media" ON storage.objects;
+CREATE POLICY "Crew can delete owner media"
+ON storage.objects
+FOR DELETE
+TO authenticated
+USING (
+  (bucket_id = 'media'::text)
+  AND public.is_crew_of(((storage.foldername(name))[1])::uuid)
+);
+
+-- ============================================================================
 -- NOTES:
 -- - These assume files are uploaded to paths like: {user-uuid}/photo/xxx.jpg
---   The app already does this: `${user.id}/${type}/...`
+--   The app already does this: `${workspaceUserId}/${type}/...`
 -- - If you get "policy already exists" error, drop them first or use IF NOT EXISTS (not supported for policies)
 -- - Test by uploading a photo in the app after running this.
 -- ============================================================================

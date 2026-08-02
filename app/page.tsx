@@ -37,6 +37,12 @@ import { isMediaPdfRef, resolveMediaDisplayUrl } from '@/lib/media-url';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { getLineItemUnitOptions, LINE_ITEM_UNITS } from '@/lib/quote-units';
 import {
+  APP_LANGUAGES,
+  hasBuiltinUiPack,
+  isKnownLanguageCode,
+  languageLabel,
+} from '@/lib/languages';
+import {
   buildPaymentTrackingNote,
   buildPayPalPayUrl,
   buildZellePaymentMemo,
@@ -241,16 +247,13 @@ export default function Home() {
   const [loginError, setLoginError] = useState('');
   const [showLogin, setShowLogin] = useState(true);
 
-  // Crew / Sub login
-  const [crewLoginEmail, setCrewLoginEmail] = useState('');
-  const [crewLoginPassword, setCrewLoginPassword] = useState('');
+  // Crew session (same main login as owner; resolved via /api/crew/me)
   const [currentCrew, setCurrentCrew] = useState<any>(null);
+  const [crewResolved, setCrewResolved] = useState(false);
 
   // Forgot password states
   const [showMainForgot, setShowMainForgot] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
-  const [showCrewForgot, setShowCrewForgot] = useState(false);
-  const [crewForgotEmail, setCrewForgotEmail] = useState('');
 
   // 2FA states
   const [requires2FA, setRequires2FA] = useState(false);
@@ -763,15 +766,15 @@ export default function Home() {
 
   const baseTaxRate = getTaxRateFromZip(zipCode, state);
 
-  // Profile (with payment settings)
-  const [profile, setProfile] = useState({
+  // Profile (with payment settings) — blank defaults per account (never share across logins)
+  const blankProfile = () => ({
     name: '', company: '', address: '', phone: '', email: '', slogan: '',
     city: '', state: '', zipCode: '',
     disclosure: '',
     certificateUrl: '',
     logoUrl: '',
     logoSize: 'medium',
-    language: 'en',
+    language: 'en' as string,
     depositPercentage: 10,
     showDepositOnApproval: true,
     thirdPartyEscrowEnabled: false,
@@ -784,23 +787,36 @@ export default function Home() {
     appointmentReminderEnabled: false,
     showDiscountOnEstimate: true,
     taxesEnabled: true,
-    teammates: [] as { email: string; role: 'full' | 'limited'; canSeePricing: boolean; canSeeEstimatesAndFinancials: boolean }[], // NOTE: No password stored for security (was demo-only plaintext)
+    teammates: [] as {
+      email: string;
+      userId?: string;
+      role: 'full' | 'limited';
+      canSeePricing: boolean;
+      canSeeEstimatesAndFinancials: boolean;
+    }[],
     crewSubscriptionActive: false,
     chargeCCFee: false,
     ccFeePercentage: 3,
     paymentSettings: { ...DEFAULT_PAYMENT_SETTINGS } as any
   });
+  const [profile, setProfile] = useState(blankProfile);
+
+  // Dynamic UI pack for languages beyond built-in en/es/fr (AI-translated, cached)
+  const [dynamicUiPack, setDynamicUiPack] = useState<Record<string, string> | null>(null);
+  const [uiLangBusy, setUiLangBusy] = useState(false);
 
   // Language / i18n (must be after profile is declared)
   // Prefer localStorage (user's explicit choice) so language never reverts on load/new/open
   const currentLang = (() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('appLanguage');
-      if (saved && ['en', 'es', 'fr'].includes(saved)) return saved;
+      if (saved && isKnownLanguageCode(saved)) return saved;
     }
-    return ((profile as any).language || 'en');
+    const fromProfile = String((profile as any).language || 'en');
+    return isKnownLanguageCode(fromProfile) ? fromProfile : 'en';
   })();
   const t = (key: string): string => {
+    if (dynamicUiPack && dynamicUiPack[key]) return dynamicUiPack[key];
     return (translations as any)[currentLang]?.[key] || (translations as any)['en']?.[key] || key;
   };
 
@@ -813,22 +829,39 @@ export default function Home() {
   profileRef.current = profile;
   const [profileAutoSaveLabel, setProfileAutoSaveLabel] = useState('');
 
-  const getProfileSettingsCache = (): Record<string, any> => {
+  // Must be defined before profile cache helpers (used during render totals)
+  const workspaceUserId: string =
+    (currentCrew?.ownerUserId as string) || user?.id || '';
+  const canSeePricing = !currentCrew || currentCrew.canSeePricing !== false;
+  const canSeeFinancials = !currentCrew || currentCrew.canSeeEstimatesAndFinancials !== false;
+
+  /** Per-account cache only — never reuse another user's company/settings on this device */
+  const profileSettingsCacheKey = (uid?: string | null) =>
+    uid ? `estimateace_profile_settings_${uid}` : '';
+
+  const getProfileSettingsCache = (uid?: string | null): Record<string, any> => {
     if (typeof window === 'undefined') return {};
+    const id = uid || workspaceUserId;
+    if (!id) return {};
     try {
-      const raw = localStorage.getItem('estimateace_profile_settings');
+      const raw = localStorage.getItem(profileSettingsCacheKey(id));
       return raw ? JSON.parse(raw) : {};
     } catch {
       return {};
     }
   };
 
-  const setProfileSettingsCache = (settings: Record<string, any>) => {
+  const setProfileSettingsCache = (settings: Record<string, any>, uid?: string | null) => {
     if (typeof window === 'undefined') return;
-    localStorage.setItem('estimateace_profile_settings', JSON.stringify({
-      ...getProfileSettingsCache(),
-      ...settings,
-    }));
+    const id = uid || workspaceUserId;
+    if (!id) return;
+    localStorage.setItem(
+      profileSettingsCacheKey(id),
+      JSON.stringify({
+        ...getProfileSettingsCache(id),
+        ...settings,
+      })
+    );
   };
 
   const hasActiveDiscount = () =>
@@ -877,10 +910,6 @@ export default function Home() {
   const ccFeeAmount = grandTotal * (ccFeePercent / 100);
   const totalWithCCFee = grandTotal + ccFeeAmount;
 
-  // Crew visibility restrictions (set when logged in as crew)
-  const canSeePricing = !currentCrew || currentCrew.canSeePricing !== false;
-  const canSeeFinancials = !currentCrew || currentCrew.canSeeEstimatesAndFinancials !== false;
-
   const getLogoClass = (size: string = profile.logoSize || 'medium') => {
     const sizes: { [key: string]: string } = {
       small: 'w-8 h-8',
@@ -903,9 +932,90 @@ export default function Home() {
   const getPreferredLanguage = (): string => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('appLanguage');
-      if (saved && ['en', 'es', 'fr'].includes(saved)) return saved;
+      if (saved && isKnownLanguageCode(saved)) return saved;
     }
-    return ((profile as any).language || 'en');
+    const fromProfile = String((profile as any).language || 'en');
+    return isKnownLanguageCode(fromProfile) ? fromProfile : 'en';
+  };
+
+  const uiPackCacheKey = (code: string) => `estimateace_ui_pack_${code}`;
+
+  const loadDynamicUiPack = async (langCode: string) => {
+    if (hasBuiltinUiPack(langCode)) {
+      setDynamicUiPack(null);
+      return;
+    }
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = localStorage.getItem(uiPackCacheKey(langCode));
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (parsed && typeof parsed === 'object') {
+            setDynamicUiPack(parsed);
+            return;
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    if (!supabase || !user) {
+      setDynamicUiPack(null);
+      return;
+    }
+    setUiLangBusy(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) {
+        setDynamicUiPack(null);
+        return;
+      }
+      const enPack = (translations as any).en || {};
+      const res = await fetch('/api/translate', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          mode: 'dictionary',
+          from: 'en',
+          to: langCode,
+          texts: enPack,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.translations) {
+        showMessage(json.error || 'Could not load interface translation. Using English for labels.');
+        setDynamicUiPack(null);
+        return;
+      }
+      setDynamicUiPack(json.translations);
+      try {
+        localStorage.setItem(uiPackCacheKey(langCode), JSON.stringify(json.translations));
+      } catch {
+        /* ignore */
+      }
+      showMessage(`✅ Interface loaded in ${languageLabel(langCode)}`);
+    } catch {
+      showMessage('Translation service unavailable. Using English labels.');
+      setDynamicUiPack(null);
+    } finally {
+      setUiLangBusy(false);
+    }
+  };
+
+  const applyAppLanguage = async (langCode: string) => {
+    if (!isKnownLanguageCode(langCode)) return;
+    setProfile((prev) => ({ ...prev, language: langCode }));
+    try {
+      localStorage.setItem('appLanguage', langCode);
+    } catch {
+      /* ignore */
+    }
+    await loadDynamicUiPack(langCode);
+    setTimeout(() => saveToDB(), 100);
   };
 
   // Snapshot only safe, non-sensitive fields to avoid duplicating teammates/passwords etc. in every document
@@ -1141,8 +1251,8 @@ export default function Home() {
   }, [address, city, state, zipCode, previousAddresses, profile]);
 
   // === TRANSLATE STATES (added exactly as requested) ===
-  const [translateFrom, setTranslateFrom] = useState<'en' | 'es' | 'fr' | 'de' | 'pt' | 'it'>('en');
-  const [translateTo, setTranslateTo] = useState<'en' | 'es' | 'fr' | 'de' | 'pt' | 'it'>('es');
+  const [translateFrom, setTranslateFrom] = useState('en');
+  const [translateTo, setTranslateTo] = useState('es');
   const [itemTranslations, setItemTranslations] = useState<{ [key: number]: string }>({});
 
   const [isQuickLinesModalOpen, setIsQuickLinesModalOpen] = useState(false);
@@ -1237,6 +1347,8 @@ export default function Home() {
   /** overview = plan status; manage = crew + payment portal + delete account */
   const [billingPanel, setBillingPanel] = useState<'overview' | 'manage'>('overview');
   const [crewEmailInput, setCrewEmailInput] = useState('');
+  const [crewPasswordInput, setCrewPasswordInput] = useState('');
+  const [crewInviteBusy, setCrewInviteBusy] = useState(false);
   const [deleteAccountBusy, setDeleteAccountBusy] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const SUPPORT_EMAIL =
@@ -1510,11 +1622,11 @@ export default function Home() {
   };
 
   const fetchServerProfileSettings = async () => {
-    if (!user?.id || !supabase) return null;
+    if (!workspaceUserId || !supabase) return null;
     const { data } = await supabase
       .from('estimates')
       .select('profile')
-      .eq('id', `SETTINGS-${user.id}`)
+      .eq('id', `SETTINGS-${workspaceUserId}`)
       .maybeSingle();
     return data?.profile || null;
   };
@@ -1791,6 +1903,63 @@ export default function Home() {
     return () => listener.subscription.unsubscribe();
   }, [supabase]);
 
+  // After main login: if this user is crew, load owner workspace + permissions
+  useEffect(() => {
+    if (!user?.id || !supabase) {
+      setCurrentCrew(null);
+      setCrewResolved(false);
+      return;
+    }
+    // Wipe previous account's UI immediately so nothing leaks into the new session
+    resetWorkspaceUi();
+    let cancelled = false;
+    setCrewResolved(false);
+    (async () => {
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const token = sessionData.session?.access_token;
+        if (!token) {
+          if (!cancelled) {
+            setCurrentCrew(null);
+            setCrewResolved(true);
+          }
+          return;
+        }
+        const res = await fetch('/api/crew/me', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const json = await res.json().catch(() => ({}));
+        if (cancelled) return;
+        if (res.ok && json.isCrew && json.ownerUserId) {
+          setCurrentCrew({
+            email: json.email || user.email,
+            ownerUserId: json.ownerUserId,
+            role: json.role === 'full' ? 'full' : 'limited',
+            canSeePricing: json.canSeePricing === true,
+            canSeeEstimatesAndFinancials: json.canSeeEstimatesAndFinancials === true,
+          });
+        } else {
+          setCurrentCrew(null);
+        }
+      } catch {
+        if (!cancelled) setCurrentCrew(null);
+      } finally {
+        if (!cancelled) setCrewResolved(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, supabase]);
+
+  // Load only THIS account's cloud profile after workspace is known
+  useEffect(() => {
+    if (!workspaceUserId || !supabase || !crewResolved) return;
+    profileHydratingRef.current = true;
+    lastSavedCompanyFingerprintRef.current = '';
+    void loadLatestProfile();
+  }, [workspaceUserId, crewResolved, supabase]);
+
   // Stripe / trial return deep-links
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -1860,22 +2029,35 @@ export default function Home() {
     resolveMediaDisplayUrl(qrPath, getMediaUrl).then(setZelleQrDisplayUrl);
   }, [profile.paymentSettings, supabase]);
 
-  // Load language preference from localStorage
+  // Load language preference from localStorage (+ AI UI pack if needed)
   useEffect(() => {
     const savedLang = localStorage.getItem('appLanguage');
-    if (savedLang && ['en', 'es', 'fr'].includes(savedLang)) {
-      setProfile(prev => {
+    if (savedLang && isKnownLanguageCode(savedLang)) {
+      setProfile((prev) => {
         if (prev.language !== savedLang) {
           return { ...prev, language: savedLang };
         }
         return prev;
       });
+      if (!hasBuiltinUiPack(savedLang)) {
+        try {
+          const cached = localStorage.getItem(`estimateace_ui_pack_${savedLang}`);
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            if (parsed && typeof parsed === 'object') setDynamicUiPack(parsed);
+          }
+        } catch {
+          /* ignore */
+        }
+      } else {
+        setDynamicUiPack(null);
+      }
     }
   }, []);
 
   // Restore client breakdown toggles from cache + server settings doc
   useEffect(() => {
-    if (!user?.id || !supabase) return;
+    if (!workspaceUserId || !supabase || !crewResolved) return;
     (async () => {
       const cached = getProfileSettingsCache();
       const serverProfile = await fetchServerProfileSettings();
@@ -1901,43 +2083,43 @@ export default function Home() {
         };
       });
     })();
-  }, [user?.id]);
+  }, [workspaceUserId, crewResolved]);
 
   // Populate saved lists (for dashboard, lists, reports, etc.) as soon as we have a user
   useEffect(() => {
-    if (user?.id && supabase) {
+    if (workspaceUserId && supabase && crewResolved) {
       refreshSavedList();
       refreshArchivesList();
       void loadMileageRateFromSettings();
       void loadReceptionistFromSettings();
-      void refreshBillingStatus();
-    } else {
+      if (!currentCrew) void refreshBillingStatus();
+    } else if (!user?.id) {
       setBilling(DEFAULT_BILLING_SNAPSHOT);
       setBillingLoaded(false);
     }
-  }, [user?.id]);
+  }, [workspaceUserId, crewResolved, currentCrew, user?.id]);
 
   useEffect(() => {
-    if (!user?.id) {
+    if (!workspaceUserId) {
       setAppointments([]);
       return;
     }
     try {
-      const stored = localStorage.getItem(`estimateace_appointments_${user.id}`);
+      const stored = localStorage.getItem(`estimateace_appointments_${workspaceUserId}`);
       const parsed = stored ? JSON.parse(stored) : [];
       setAppointments(parsed);
     } catch {
       setAppointments([]);
     }
-  }, [user?.id]);
+  }, [workspaceUserId]);
 
   useEffect(() => {
-    if (!user?.id || appointments.length === 0) return;
+    if (!workspaceUserId || appointments.length === 0) return;
     void syncAppointmentsToServer(appointments, profile);
-  }, [user?.id, appointments.length, profile.appointmentReminderEnabled, profile.email, profile.phone]);
+  }, [workspaceUserId, appointments.length, profile.appointmentReminderEnabled, profile.email, profile.phone]);
 
   useEffect(() => {
-    if (!user?.id || !profile.appointmentReminderEnabled || !supabase) return;
+    if (!workspaceUserId || !profile.appointmentReminderEnabled || !supabase) return;
 
     const checkMorningReminder = async () => {
       const timeZone = 'America/New_York';
@@ -1946,7 +2128,7 @@ export default function Home() {
       if (hour !== 8) return;
 
       const todayKey = now.toLocaleDateString('en-CA', { timeZone });
-      const lastLocal = localStorage.getItem(`estimateace_last_reminder_${user.id}`);
+      const lastLocal = localStorage.getItem(`estimateace_last_reminder_${workspaceUserId}`);
       if (lastLocal === todayKey) return;
 
       const { data: { session } } = await supabase.auth.getSession();
@@ -1959,7 +2141,7 @@ export default function Home() {
         });
         const data = await response.json();
         if (data.notified) {
-          localStorage.setItem(`estimateace_last_reminder_${user.id}`, todayKey);
+          localStorage.setItem(`estimateace_last_reminder_${workspaceUserId}`, todayKey);
         }
       } catch {
         // Reminder will be retried on next interval or by server cron
@@ -1969,7 +2151,7 @@ export default function Home() {
     void checkMorningReminder();
     const interval = window.setInterval(checkMorningReminder, 5 * 60 * 1000);
     return () => window.clearInterval(interval);
-  }, [user?.id, profile.appointmentReminderEnabled, appointments.length, supabase]);
+  }, [workspaceUserId, profile.appointmentReminderEnabled, appointments.length, supabase]);
 
   const clearStoredAuth = async () => {
     setLoginError('');
@@ -2093,88 +2275,6 @@ export default function Home() {
     }
   };
 
-  const handleCrewLogin = async () => {
-    if (!supabase) return showMessage('Supabase not configured');
-    const email = crewLoginEmail.trim();
-    if (!email) return showMessage('Enter crew email');
-
-    // DEMO: Match by email only. Passwords are no longer stored or required (security fix).
-    // In production: Replace with real Supabase Auth user accounts for crew members + proper RLS.
-    const { data: docs, error } = await supabase
-      .from('estimates')
-      .select('id, user_id, profile')
-      .limit(100);
-
-    if (error || !docs) return showMessage('Error looking up crew account');
-
-    let ownerUserId: string | null = null;
-    let matchedCrew: any = null;
-
-    for (const doc of docs) {
-      const crewList = doc.profile?.teammates || [];
-      const found = crewList.find((c: any) => c.email === email);
-      if (found) {
-        ownerUserId = doc.user_id;
-        matchedCrew = found;
-        break;
-      }
-    }
-
-    if (!ownerUserId || !matchedCrew) {
-      return showMessage('Invalid crew email. Ask the account owner to add you.');
-    }
-
-    // Set as "logged in" using the owner's id for data access
-    setUser({ id: ownerUserId, email: email } as any);
-    setCurrentCrew(matchedCrew);
-
-    // Load the profile from the first matching doc (or latest)
-    const ownerDoc = docs.find((d: any) => d.user_id === ownerUserId);
-    if (ownerDoc?.profile) {
-      const preferredLang = getPreferredLanguage();
-      const displaySettings = getGlobalDisplaySettings(profile);
-      const {
-        showMaterialBreakdownOnEstimate: _sm,
-        showLaborBreakdownOnEstimate: _sl,
-        showCostBreakdownOnEstimate: _sc,
-        showPriceBreakdownByLine: _sp,
-        showDiscountOnEstimate: _sd,
-        ...ownerProfileWithoutBreakdown
-      } = ownerDoc.profile;
-      setProfile({
-        ...profile,
-        ...ownerProfileWithoutBreakdown,
-        crewSubscriptionActive: ownerDoc.profile.crewSubscriptionActive ?? false,
-        chargeCCFee: ownerDoc.profile.chargeCCFee ?? false,
-        ccFeePercentage: ownerDoc.profile.ccFeePercentage ?? 3,
-        autoSaveEnabled: ownerDoc.profile.autoSaveEnabled ?? true,
-        ...displaySettings,
-        appointmentReminderEnabled: ownerDoc.profile.appointmentReminderEnabled ?? false,
-        showDepositOnApproval: ownerDoc.profile.showDepositOnApproval !== false,
-        thirdPartyEscrowEnabled: ownerDoc.profile.thirdPartyEscrowEnabled ?? false,
-        escrowMinimumAmount: ownerDoc.profile.escrowMinimumAmount ?? profile.escrowMinimumAmount ?? 10000,
-        depositPercentage: ownerDoc.profile.depositPercentage ?? profile.depositPercentage ?? 10,
-        paymentSettings: mergePaymentSettings(ownerDoc.profile.paymentSettings),
-        language: preferredLang,
-        teammates: (ownerDoc.profile.teammates || []).map((t: any) => ({
-          ...t,
-          canSeePricing: t.canSeePricing ?? false,
-          canSeeEstimatesAndFinancials: t.canSeeEstimatesAndFinancials ?? false,
-        })),
-      });
-    }
-
-    // Refresh lists using the owner id (the setUser will help trigger effects)
-    setTimeout(() => {
-      refreshSavedList();
-    }, 200);
-
-    showMessage(`✅ Logged in as crew/sub-contractor: ${email}`);
-    setCrewLoginEmail('');
-    setCrewLoginPassword('');
-
-  };
-
   const verify2FA = () => {
     if (twoFactorCode === expected2FACode) {
       setRequires2FA(false);
@@ -2191,12 +2291,44 @@ export default function Home() {
     showMessage(`A new verification code was sent to ${twoFactorPhone}.`);
   };
 
+  const resetWorkspaceUi = () => {
+    setProfile(blankProfile());
+    setSavedEstimatesList([]);
+    setArchivesList([]);
+    setAppointments([]);
+    setJobName('');
+    setAddress('');
+    setCity('');
+    setState('');
+    setZipCode('');
+    setPhones(['']);
+    setEmails(['']);
+    setTerms('');
+    setPhotoUrls([]);
+    setVideoUrls([]);
+    setReceiptUrls([]);
+    setReceiptDetails([]);
+    setJobMileageLogs([]);
+    setItems([{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
+    setInvoiceNumber('');
+    lastSavedCompanyFingerprintRef.current = '';
+    profileHydratingRef.current = true;
+    // Remove legacy shared key that leaked company data across accounts
+    try {
+      localStorage.removeItem('estimateace_profile_settings');
+    } catch {
+      /* ignore */
+    }
+  };
+
   const logout = async () => {
     if (supabase) {
       await supabase.auth.signOut();
     }
     setUser(null);
     setCurrentCrew(null);
+    setCrewResolved(false);
+    resetWorkspaceUi();
     setRequires2FA(false);
     setShowLogin(true);
     setTwoFactorCode('');
@@ -2225,53 +2357,6 @@ export default function Home() {
     }
   };
 
-  // Crew / Sub-contractor forgot password (simulated - finds the owner document and resets the password in it)
-  const requestCrewPasswordReset = async () => {
-    if (!supabase || !crewForgotEmail.trim()) {
-      showMessage('Please enter the crew email');
-      return;
-    }
-    const email = crewForgotEmail.trim();
-
-    try {
-      const { data: docs, error } = await supabase
-        .from('estimates')
-        .select('id, user_id, profile')
-        .limit(100);
-
-      if (error || !docs) {
-        showMessage('Could not look up crew account');
-        return;
-      }
-
-      let foundDoc: any = null;
-      let crewIndex = -1;
-
-      for (const doc of docs) {
-        const crewList = doc.profile?.teammates || [];
-        const idx = crewList.findIndex((c: any) => c.email === email);
-        if (idx !== -1) {
-          foundDoc = doc;
-          crewIndex = idx;
-          break;
-        }
-      }
-
-      if (!foundDoc || crewIndex === -1) {
-        showMessage('No crew account found with that email');
-        return;
-      }
-
-      // Crew password reset disabled for security.
-      // In production: Invite crew as real Supabase users (they set their own password via magic link/email).
-      showMessage('Password reset is not available for crew accounts. Contact your account administrator.');
-      setCrewForgotEmail('');
-      setShowCrewForgot(false);
-    } catch (e: any) {
-      showMessage('Failed to reset crew password. Please try again.');
-    }
-  };
-
   const saveToDB = async (options?: {
     profile?: typeof profile;
     breakdown?: typeof estimateBreakdownSettings;
@@ -2283,7 +2368,7 @@ export default function Home() {
     /** Per-job mileage log (avoids stale state after Add trip) */
     mileageLogs?: MileageLog[];
   }) => {
-    if (!user || !supabase) return;
+    if (!user || !supabase || !workspaceUserId) return;
     const profileToSave = options?.profile ?? profile;
     const breakdownToSave = options?.breakdown ?? estimateBreakdownSettings;
     const photosToSave = options?.photoUrls ?? photoUrls;
@@ -2292,7 +2377,7 @@ export default function Home() {
     const receiptDetailsToSave = options?.receiptDetails ?? receiptDetails;
     const milesToSave = options?.mileageLogs ?? jobMileageLogs;
     const data = {
-      user_id: user.id,
+      user_id: workspaceUserId,
       jobName, address, city, state, zipCode, phones, emails, date, invoiceNumber,
       items, terms, profile: getDocumentProfileSnapshot(profileToSave, breakdownToSave, milesToSave),
       documentType, dueDate, paymentStatus, amountPaid,
@@ -2325,7 +2410,7 @@ export default function Home() {
             zipCode,
             paymentStatus,
           },
-          user.id
+          workspaceUserId
         );
       }
       setLastSaved(new Date().toLocaleTimeString());
@@ -2450,7 +2535,7 @@ export default function Home() {
         }
 
         const { blob, ext, contentType } = prepared;
-        const filePath = `${user.id}/${type}/${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+        const filePath = `${workspaceUserId}/${type}/${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
 
         const { error } = await supabase.storage.from('media').upload(filePath, blob, {
           upsert: true,
@@ -2524,7 +2609,7 @@ export default function Home() {
   const handleCertificateUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !user || !supabase) return;
-    const filePath = `${user.id}/certificate/${Date.now()}-${file.name}`;
+    const filePath = `${workspaceUserId}/certificate/${Date.now()}-${file.name}`;
     const { error } = await supabase.storage.from('media').upload(filePath, file, { upsert: true });
     if (!error) {
       const next = { ...profileRef.current, certificateUrl: filePath };
@@ -2554,7 +2639,7 @@ export default function Home() {
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !user || !supabase) return;
-    const filePath = `${user.id}/logo/${Date.now()}-${file.name}`;
+    const filePath = `${workspaceUserId}/logo/${Date.now()}-${file.name}`;
     const { error } = await supabase.storage.from('media').upload(filePath, file, { upsert: true });
     if (!error) {
       const next = { ...profileRef.current, logoUrl: filePath };
@@ -2841,7 +2926,7 @@ export default function Home() {
     uid?: string
   ): Promise<string[]> => {
     if (!supabase || !user) return [];
-    const userId = uid || user.id;
+    const userId = uid || workspaceUserId;
     const closed = buildClosedWorkIndex(closedDocs);
     if (closed.numberKeys.size === 0 && closed.jobKeys.size === 0) return [];
 
@@ -2889,11 +2974,11 @@ export default function Home() {
   };
 
   const refreshSavedList = async () => {
-    if (!user || !supabase) return;
+    if (!workspaceUserId || !supabase) return;
     const { data, error } = await supabase
       .from('estimates')
       .select('*')
-      .eq('user_id', user.id)
+      .eq('user_id', workspaceUserId)
       .order('updated_at', { ascending: false });
     if (error) {
       console.error('refreshSavedList error:', error);
@@ -2905,7 +2990,7 @@ export default function Home() {
     const { data: archivedRows } = await supabase
       .from('archive-est')
       .select('*')
-      .eq('user_id', user.id);
+      .eq('user_id', workspaceUserId);
     const archives = archivedRows || [];
 
     // Move any paid invoices/docs still sitting in active estimates → paid folder (archive-est)
@@ -2932,7 +3017,7 @@ export default function Home() {
       const { data: archivesAfter } = await supabase
         .from('archive-est')
         .select('*')
-        .eq('user_id', user.id);
+        .eq('user_id', workspaceUserId);
       if (archivesAfter) {
         archives.length = 0;
         archives.push(...archivesAfter);
@@ -2962,7 +3047,7 @@ export default function Home() {
 
     if (purgeIds.length > 0) {
       for (const estId of Array.from(new Set(purgeIds))) {
-        await supabase.from('estimates').delete().eq('id', estId).eq('user_id', user.id);
+        await supabase.from('estimates').delete().eq('id', estId).eq('user_id', workspaceUserId);
       }
     }
 
@@ -2978,11 +3063,11 @@ export default function Home() {
   };
 
   const refreshArchivesList = async () => {
-    if (!user || !supabase) return;
+    if (!workspaceUserId || !supabase) return;
     const { data, error } = await supabase
       .from('archive-est')
       .select('*')
-      .eq('user_id', user.id)
+      .eq('user_id', workspaceUserId)
       .order('archived_at', { ascending: false });
     if (error) {
       console.error('refreshArchivesList error:', error);
@@ -3157,8 +3242,8 @@ export default function Home() {
       const { data } = await supabase
         .from('estimates')
         .select('profile, id, jobName, documentType')
-        .eq('user_id', user.id)
-        .neq('id', `SETTINGS-${user.id}`)
+        .eq('user_id', workspaceUserId)
+        .neq('id', `SETTINGS-${workspaceUserId}`)
         .order('updated_at', { ascending: false })
         .limit(1);
       const loaded = data?.[0]?.profile || null;
@@ -3166,12 +3251,21 @@ export default function Home() {
       const cachedCompany = (cached.companyProfile || {}) as Record<string, any>;
       const preferredLang = getPreferredLanguage();
 
-      // Prefer: SETTINGS → local company cache → latest estimate → current state
+      // Prefer: THIS account's SETTINGS → this account's local cache → latest estimate
+      // Never keep previous React state from another login (start from blank)
       const s = serverProfile || {};
       const l = loaded || {};
+      const hasServerCompany = !!(
+        pickFilled(s.company, s.name, s.email, s.phone, s.address) ||
+        pickFilled(l.company, l.name, l.email, l.phone, l.address)
+      );
+      // Only use device cache if it belongs to this workspace (keyed by id) and
+      // server has no company yet OR cache is a same-user refresh aid
+      const useCache = !hasServerCompany;
 
-      setProfile(prev => {
-        const displaySettings = getGlobalDisplaySettings(prev, serverProfile);
+      setProfile(() => {
+        const base = blankProfile();
+        const displaySettings = getGlobalDisplaySettings(base, serverProfile);
         const {
           showMaterialBreakdownOnEstimate: _sm,
           showLaborBreakdownOnEstimate: _sl,
@@ -3182,54 +3276,64 @@ export default function Home() {
         } = l as any;
 
         return {
-          ...prev,
+          ...base,
           // non-company fields may still come from latest estimate
           ...loadedWithoutBreakdown,
-          // Company identity: never overwrite filled values with empty ones
-          name: pickFilled(s.name, cachedCompany.name, l.name, prev.name),
-          company: pickFilled(s.company, cachedCompany.company, l.company, prev.company),
-          slogan: pickFilled(s.slogan, cachedCompany.slogan, l.slogan, prev.slogan),
-          address: pickFilled(s.address, cachedCompany.address, l.address, prev.address),
-          phone: pickFilled(s.phone, cachedCompany.phone, l.phone, prev.phone),
-          email: pickFilled(s.email, cachedCompany.email, l.email, prev.email),
-          city: pickFilled(s.city, cachedCompany.city, l.city, prev.city),
-          state: pickFilled(s.state, cachedCompany.state, l.state, prev.state),
-          zipCode: pickFilled(s.zipCode, cachedCompany.zipCode, l.zipCode, prev.zipCode),
-          disclosure: pickFilled(s.disclosure, cachedCompany.disclosure, l.disclosure, prev.disclosure),
-          logoUrl: pickFilled(s.logoUrl, cachedCompany.logoUrl, l.logoUrl, prev.logoUrl),
-          certificateUrl: pickFilled(s.certificateUrl, cachedCompany.certificateUrl, l.certificateUrl, prev.certificateUrl),
-          logoSize: pickFilled(s.logoSize, cachedCompany.logoSize, l.logoSize, prev.logoSize, 'medium'),
-          crewSubscriptionActive: s.crewSubscriptionActive ?? l.crewSubscriptionActive ?? prev.crewSubscriptionActive ?? false,
-          chargeCCFee: s.chargeCCFee ?? l.chargeCCFee ?? prev.chargeCCFee ?? false,
-          ccFeePercentage: s.ccFeePercentage ?? l.ccFeePercentage ?? prev.ccFeePercentage ?? 3,
+          // Company identity: server first; cache only for same account when empty cloud
+          name: pickFilled(s.name, useCache ? cachedCompany.name : '', l.name, ''),
+          company: pickFilled(s.company, useCache ? cachedCompany.company : '', l.company, ''),
+          slogan: pickFilled(s.slogan, useCache ? cachedCompany.slogan : '', l.slogan, ''),
+          address: pickFilled(s.address, useCache ? cachedCompany.address : '', l.address, ''),
+          phone: pickFilled(s.phone, useCache ? cachedCompany.phone : '', l.phone, ''),
+          email: pickFilled(s.email, useCache ? cachedCompany.email : '', l.email, ''),
+          city: pickFilled(s.city, useCache ? cachedCompany.city : '', l.city, ''),
+          state: pickFilled(s.state, useCache ? cachedCompany.state : '', l.state, ''),
+          zipCode: pickFilled(s.zipCode, useCache ? cachedCompany.zipCode : '', l.zipCode, ''),
+          disclosure: pickFilled(s.disclosure, useCache ? cachedCompany.disclosure : '', l.disclosure, ''),
+          logoUrl: pickFilled(s.logoUrl, useCache ? cachedCompany.logoUrl : '', l.logoUrl, ''),
+          certificateUrl: pickFilled(
+            s.certificateUrl,
+            useCache ? cachedCompany.certificateUrl : '',
+            l.certificateUrl,
+            ''
+          ),
+          logoSize: pickFilled(
+            s.logoSize,
+            useCache ? cachedCompany.logoSize : '',
+            l.logoSize,
+            'medium'
+          ),
+          crewSubscriptionActive: s.crewSubscriptionActive ?? l.crewSubscriptionActive ?? false,
+          chargeCCFee: s.chargeCCFee ?? l.chargeCCFee ?? false,
+          ccFeePercentage: s.ccFeePercentage ?? l.ccFeePercentage ?? 3,
           autoSaveEnabled: 'autoSaveEnabled' in (s as any)
             ? (s as any).autoSaveEnabled !== false
             : ('autoSaveEnabled' in l
               ? l.autoSaveEnabled !== false
-              : (cached.autoSaveEnabled ?? prev.autoSaveEnabled ?? true)),
+              : (cached.autoSaveEnabled ?? true)),
           taxesEnabled: 'taxesEnabled' in cached
             ? cached.taxesEnabled !== false
             : (serverProfile && 'taxesEnabled' in serverProfile
               ? serverProfile.taxesEnabled !== false
               : ('taxesEnabled' in l
                 ? l.taxesEnabled !== false
-                : prev.taxesEnabled !== false)),
+                : true)),
           ...displaySettings,
           appointmentReminderEnabled: 'appointmentReminderEnabled' in (s as any)
             ? !!(s as any).appointmentReminderEnabled
             : ('appointmentReminderEnabled' in l
               ? !!l.appointmentReminderEnabled
-              : (cached.appointmentReminderEnabled ?? prev.appointmentReminderEnabled ?? false)),
+              : (cached.appointmentReminderEnabled ?? false)),
           showDepositOnApproval: 'showDepositOnApproval' in (s as any)
             ? (s as any).showDepositOnApproval !== false
             : ('showDepositOnApproval' in l
               ? l.showDepositOnApproval !== false
-              : (cached.showDepositOnApproval ?? prev.showDepositOnApproval ?? true)),
+              : (cached.showDepositOnApproval ?? true)),
           thirdPartyEscrowEnabled: 'thirdPartyEscrowEnabled' in (s as any)
             ? !!(s as any).thirdPartyEscrowEnabled
             : ('thirdPartyEscrowEnabled' in l
               ? !!l.thirdPartyEscrowEnabled
-              : (cached.thirdPartyEscrowEnabled ?? prev.thirdPartyEscrowEnabled ?? false)),
+              : (cached.thirdPartyEscrowEnabled ?? false)),
           escrowMinimumAmount:
             'escrowMinimumAmount' in cached
               ? Math.max(0, Number(cached.escrowMinimumAmount) || 0)
@@ -3237,37 +3341,56 @@ export default function Home() {
                 ? Math.max(0, Number(serverProfile.escrowMinimumAmount) || 0)
                 : ('escrowMinimumAmount' in l
                   ? Math.max(0, Number(l.escrowMinimumAmount) || 0)
-                  : Math.max(0, Number(prev.escrowMinimumAmount) || 0))),
-          depositPercentage: s.depositPercentage ?? l.depositPercentage ?? cached.depositPercentage ?? prev.depositPercentage ?? 10,
+                  : 10000)),
+          depositPercentage: s.depositPercentage ?? l.depositPercentage ?? cached.depositPercentage ?? 10,
           paymentSettings: mergePaymentSettings({
-            ...(prev.paymentSettings || {}),
             ...(l.paymentSettings || {}),
             ...(serverProfile?.paymentSettings || {}),
             venmo: {
-              ...mergePaymentSettings(prev.paymentSettings).venmo,
               ...mergePaymentSettings(l.paymentSettings).venmo,
               ...mergePaymentSettings(serverProfile?.paymentSettings).venmo,
               handle: pickFilled(
                 mergePaymentSettings(serverProfile?.paymentSettings).venmo?.handle,
                 mergePaymentSettings(l.paymentSettings).venmo?.handle,
-                mergePaymentSettings(prev.paymentSettings).venmo?.handle
+                ''
               ),
             },
           }),
           language: preferredLang,
-          teammates: ((s.teammates || l.teammates || prev.teammates || []) as any[]).map((t: any) => ({
+          teammates: ((s.teammates || l.teammates || []) as any[]).map((t: any) => ({
             ...t,
             canSeePricing: t.canSeePricing ?? false,
             canSeeEstimatesAndFinancials: t.canSeeEstimatesAndFinancials ?? false,
           })),
         };
       });
+      // Sync fingerprint so auto-save does not re-write hydrate as a "change"
+      lastSavedCompanyFingerprintRef.current = JSON.stringify({
+        name: pickFilled(s.name, useCache ? cachedCompany.name : '', l.name, ''),
+        company: pickFilled(s.company, useCache ? cachedCompany.company : '', l.company, ''),
+        slogan: pickFilled(s.slogan, useCache ? cachedCompany.slogan : '', l.slogan, ''),
+        address: pickFilled(s.address, useCache ? cachedCompany.address : '', l.address, ''),
+        phone: pickFilled(s.phone, useCache ? cachedCompany.phone : '', l.phone, ''),
+        email: pickFilled(s.email, useCache ? cachedCompany.email : '', l.email, ''),
+        city: pickFilled(s.city, useCache ? cachedCompany.city : '', l.city, ''),
+        state: pickFilled(s.state, useCache ? cachedCompany.state : '', l.state, ''),
+        zipCode: pickFilled(s.zipCode, useCache ? cachedCompany.zipCode : '', l.zipCode, ''),
+        disclosure: pickFilled(s.disclosure, useCache ? cachedCompany.disclosure : '', l.disclosure, ''),
+        logoUrl: pickFilled(s.logoUrl, useCache ? cachedCompany.logoUrl : '', l.logoUrl, ''),
+        logoSize: pickFilled(s.logoSize, useCache ? cachedCompany.logoSize : '', l.logoSize, 'medium'),
+        certificateUrl: pickFilled(
+          s.certificateUrl,
+          useCache ? cachedCompany.certificateUrl : '',
+          l.certificateUrl,
+          ''
+        ),
+      });
       return serverProfile || loaded;
     } finally {
       // Allow auto-save only after hydrate settles
       window.setTimeout(() => {
         profileHydratingRef.current = false;
-      }, 400);
+      }, 500);
     }
   };
 
@@ -3836,7 +3959,7 @@ export default function Home() {
     extraContext?: { jobName?: string; address?: string; zipCode?: string }
   ) => {
     if (!supabase || !user) return;
-    const userId = uid || user.id;
+    const userId = uid || workspaceUserId;
     const invoiceRow =
       typeof invoiceRowOrId === 'string'
         ? {
@@ -3889,7 +4012,7 @@ export default function Home() {
     if (user && supabase) {
       try {
         const data = {
-          user_id: user.id,
+          user_id: workspaceUserId,
           jobName,
           address,
           city,
@@ -3929,12 +4052,12 @@ export default function Home() {
         } else {
           // Always remove the original estimate row when the id changed
           if (previousId && previousId !== nextNumber) {
-            await supabase.from('estimates').delete().eq('id', previousId).eq('user_id', user.id);
+            await supabase.from('estimates').delete().eq('id', previousId).eq('user_id', workspaceUserId);
             // Also try lowercase column invoiceNumber variants
             await supabase
               .from('estimates')
               .delete()
-              .eq('user_id', user.id)
+              .eq('user_id', workspaceUserId)
               .eq('invoiceNumber', previousId);
           }
           await removeEstimateWorkOrderForInvoice(
@@ -3947,7 +4070,7 @@ export default function Home() {
               zipCode,
               paymentStatus: paymentStatus || 'pending',
             },
-            user.id
+            workspaceUserId
           );
           // Optimistically drop the old estimate from the list immediately
           setSavedEstimatesList((prev) =>
@@ -3988,7 +4111,7 @@ export default function Home() {
       return defaultVal;
     };
 
-    const uid = estRow.user_id || estRow.userId || user?.id;
+    const uid = estRow.user_id || estRow.userId || workspaceUserId;
     if (!uid) {
       console.error('prepareArchiveData: missing user_id', estRow);
       return null;
@@ -4047,7 +4170,7 @@ export default function Home() {
       return { error: { message: 'Not logged in or Supabase not configured' } as any };
     }
     const id = String(estRow.id);
-    const uid = estRow.user_id || estRow.userId || user.id;
+    const uid = estRow.user_id || estRow.userId || workspaceUserId;
 
     const archiveData = prepareArchiveData(estRow);
     if (!archiveData) {
@@ -4128,7 +4251,7 @@ export default function Home() {
     if (!confirm('Retrieve this document from archives and restore it to your active list?')) return;
 
     const id = String(archRow.id);
-    const uid = archRow.user_id || archRow.userId || user.id;
+    const uid = archRow.user_id || archRow.userId || workspaceUserId;
 
     try {
       // Build estimates payload (no archived_at column on estimates)
@@ -4234,7 +4357,7 @@ export default function Home() {
       showMessage('Crew accounts cannot delete archived documents.');
       return;
     }
-    const { error } = await supabase.from('archive-est').delete().eq('id', id).eq('user_id', user.id);
+    const { error } = await supabase.from('archive-est').delete().eq('id', id).eq('user_id', workspaceUserId);
     if (error) {
       console.error('deleteArchivedDocument error:', error);
       showMessage('Could not delete archive: ' + error.message);
@@ -4258,7 +4381,7 @@ export default function Home() {
     try {
       // Explicitly save the paid/cash status (avoids stale state from setPayment* + immediate await saveToDB)
       const paidData = {
-        user_id: user.id,
+        user_id: workspaceUserId,
         jobName, address, city, state, zipCode, phones, emails, date, invoiceNumber: id,
         items, terms, profile: getDocumentProfileSnapshot(),
         documentType, dueDate,
@@ -4285,7 +4408,7 @@ export default function Home() {
         .from('estimates')
         .select('*')
         .eq('id', id)
-        .eq('user_id', user.id)
+        .eq('user_id', workspaceUserId)
         .single();
       if (fetchErr || !est) {
         console.error('Fetch for archive failed:', fetchErr);
@@ -4326,9 +4449,9 @@ export default function Home() {
   const mileageRateLocalKey = (uid: string) => `estimateace_mileage_rate_${uid}`;
 
   const loadMileageRateFromSettings = async () => {
-    if (!user?.id) return;
+    if (!workspaceUserId) return;
     try {
-      const raw = localStorage.getItem(mileageRateLocalKey(user.id));
+      const raw = localStorage.getItem(mileageRateLocalKey(workspaceUserId));
       if (raw != null && Number.isFinite(Number(raw))) {
         setMileageRatePerMile(Number(raw));
       }
@@ -4341,7 +4464,7 @@ export default function Home() {
       const rate = Number(serverProfile.mileageRatePerMile);
       setMileageRatePerMile(rate);
       try {
-        localStorage.setItem(mileageRateLocalKey(user.id), String(rate));
+        localStorage.setItem(mileageRateLocalKey(workspaceUserId), String(rate));
       } catch {
         /* ignore */
       }
@@ -4350,14 +4473,14 @@ export default function Home() {
 
   /** Persist only the global $/mile rate (used for write-off totals on Profile). */
   const saveMileageRate = async (_logs: MileageLog[], rate: number) => {
-    if (!user?.id) {
+    if (!workspaceUserId) {
       showMessage('Please log in to save mileage rate.');
       return;
     }
     setMileageSaving(true);
     try {
       try {
-        localStorage.setItem(mileageRateLocalKey(user.id), String(rate));
+        localStorage.setItem(mileageRateLocalKey(workspaceUserId), String(rate));
       } catch {
         /* ignore */
       }
@@ -4367,8 +4490,8 @@ export default function Home() {
       }
       const existing = (await fetchServerProfileSettings()) || {};
       const { error } = await supabase.from('estimates').upsert({
-        id: `SETTINGS-${user.id}`,
-        user_id: user.id,
+        id: `SETTINGS-${workspaceUserId}`,
+        user_id: workspaceUserId,
         jobName: '__settings__',
         documentType: 'settings',
         items: [],
@@ -4408,9 +4531,9 @@ export default function Home() {
   };
 
   const loadReceptionistFromSettings = async () => {
-    if (!user?.id) return;
+    if (!workspaceUserId) return;
     try {
-      const raw = localStorage.getItem(`estimateace_receptionist_${user.id}`);
+      const raw = localStorage.getItem(`estimateace_receptionist_${workspaceUserId}`);
       if (raw) {
         const parsed = JSON.parse(raw);
         setReceptionistSettings(normalizeReceptionistSettings(parsed?.settings));
@@ -4539,28 +4662,116 @@ export default function Home() {
     }
   };
 
-  const addCrewMember = () => {
+  const addCrewMember = async () => {
+    if (currentCrew) {
+      return showMessage('Crew accounts cannot invite other crew.');
+    }
     const email = crewEmailInput.trim().toLowerCase();
+    const password = crewPasswordInput;
     if (!email) return showMessage('Enter email for the crew account');
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return showMessage('Enter a valid email address');
     }
+    if (password.length < 6) {
+      return showMessage('Set a password (at least 6 characters) for this crew login');
+    }
     if ((profile.teammates || []).some((t) => t.email.toLowerCase() === email)) {
       return showMessage('That email is already on your crew list');
     }
-    const newCrew = {
-      email,
-      role: 'limited' as 'full' | 'limited',
-      canSeePricing: false,
-      canSeeEstimatesAndFinancials: false,
-    };
-    setProfile((prev) => ({
-      ...prev,
-      teammates: [...(prev.teammates || []), newCrew],
-    }));
-    setCrewEmailInput('');
-    showMessage('✅ Crew member added. They can log in with that email on the crew login form.');
-    setTimeout(() => saveToDB(), 100);
+    if (!supabase || !user) return showMessage('Please log in first');
+
+    setCrewInviteBusy(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) return showMessage('Please log in again.');
+
+      const res = await fetch('/api/crew/invite', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email,
+          password,
+          role: 'limited',
+          canSeePricing: false,
+          canSeeEstimatesAndFinancials: false,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return showMessage(json.error || 'Could not create crew login');
+      }
+
+      const newCrew = {
+        email,
+        userId: json.crew?.userId as string | undefined,
+        role: 'limited' as 'full' | 'limited',
+        canSeePricing: false,
+        canSeeEstimatesAndFinancials: false,
+      };
+      setProfile((prev) => ({
+        ...prev,
+        teammates: [...(prev.teammates || []), newCrew],
+      }));
+      setCrewEmailInput('');
+      setCrewPasswordInput('');
+      showMessage(
+        `✅ Crew login created for ${email}. They sign in on the main login page with that email and password.`
+      );
+      setTimeout(() => saveToDB(), 100);
+    } catch {
+      showMessage('Network error creating crew login.');
+    } finally {
+      setCrewInviteBusy(false);
+    }
+  };
+
+  const updateCrewPermissions = async (
+    email: string,
+    patch: {
+      role?: 'full' | 'limited';
+      canSeePricing?: boolean;
+      canSeeEstimatesAndFinancials?: boolean;
+    }
+  ) => {
+    if (!supabase || currentCrew) return;
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) return;
+      await fetch('/api/crew/update', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, ...patch }),
+      });
+    } catch {
+      /* profile save still has flags for display */
+    }
+  };
+
+  const removeCrewMember = async (email: string, crewUserId?: string) => {
+    if (!supabase || currentCrew) return;
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) return;
+      await fetch('/api/crew/remove', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, crewUserId }),
+      });
+    } catch {
+      /* still remove from local list */
+    }
   };
 
   const deleteOwnAccount = async () => {
@@ -4616,7 +4827,7 @@ export default function Home() {
     settings: ReceptionistSettings,
     messages: ReceptionistMessage[]
   ) => {
-    if (!user?.id) {
+    if (!workspaceUserId) {
       showMessage('Please log in to save AI Receptionist.');
       return;
     }
@@ -4624,7 +4835,7 @@ export default function Home() {
     try {
       try {
         localStorage.setItem(
-          `estimateace_receptionist_${user.id}`,
+          `estimateace_receptionist_${workspaceUserId}`,
           JSON.stringify({ settings, messages })
         );
       } catch {
@@ -4636,8 +4847,8 @@ export default function Home() {
       }
       const existing = (await fetchServerProfileSettings()) || {};
       const { error } = await supabase.from('estimates').upsert({
-        id: `SETTINGS-${user.id}`,
-        user_id: user.id,
+        id: `SETTINGS-${workspaceUserId}`,
+        user_id: workspaceUserId,
         jobName: '__settings__',
         documentType: 'settings',
         items: [],
@@ -4691,7 +4902,7 @@ export default function Home() {
   };
 
   const upsertUserSettingsProfile = async (nextProfile: typeof profile) => {
-    if (!user?.id || !supabase) return;
+    if (!workspaceUserId || !supabase) return;
     const existing = await fetchServerProfileSettings();
     const snapshot = getSafeProfileSnapshot(nextProfile);
     // Merge so we never wipe previously saved company fields with blanks
@@ -4730,8 +4941,8 @@ export default function Home() {
         receptionistMessages,
     };
     await supabase.from('estimates').upsert({
-      id: `SETTINGS-${user.id}`,
-      user_id: user.id,
+      id: `SETTINGS-${workspaceUserId}`,
+      user_id: workspaceUserId,
       jobName: '__settings__',
       documentType: 'settings',
       items: [],
@@ -4938,7 +5149,7 @@ export default function Home() {
   const persistAppointments = (nextAppointments: typeof appointments) => {
     setAppointments(nextAppointments);
     if (user?.id) {
-      localStorage.setItem(`estimateace_appointments_${user.id}`, JSON.stringify(nextAppointments));
+      localStorage.setItem(`estimateace_appointments_${workspaceUserId}`, JSON.stringify(nextAppointments));
       void syncAppointmentsToServer(nextAppointments, profile);
     }
   };
@@ -4969,7 +5180,7 @@ export default function Home() {
     const { data } = await supabase
       .from('estimates')
       .select('*')
-      .eq('user_id', user.id)
+      .eq('user_id', workspaceUserId)
       .order('updated_at', { ascending: false });
     const estimates = data || [];
     setSavedEstimatesList(estimates);
@@ -5130,7 +5341,8 @@ export default function Home() {
   const deleteSelectedEstimate = async (id: string) => {
     if (!confirm('Delete permanently?')) return;
     if (!supabase) return;
-    await supabase.from('estimates').delete().eq('id', id);
+    if (!workspaceUserId) return;
+    await supabase.from('estimates').delete().eq('id', id).eq('user_id', workspaceUserId);
     setSelectedIds(prev => prev.filter(sid => sid !== id));
     await refreshSavedList();
     showMessage('Document deleted');
@@ -5152,7 +5364,7 @@ export default function Home() {
         .from('estimates')
         .select('*')
         .eq('id', id)
-        .eq('user_id', user.id)
+        .eq('user_id', workspaceUserId)
         .single();
       if (fetchErr || !est) {
         console.error('Archive fetch error:', fetchErr);
@@ -5219,7 +5431,7 @@ export default function Home() {
         .from('estimates')
         .select('*')
         .eq('id', id)
-        .eq('user_id', user.id)
+        .eq('user_id', workspaceUserId)
         .single();
       if (fetchErr || !est) {
         console.error('Bulk archive fetch error for', id, fetchErr);
@@ -5267,7 +5479,7 @@ export default function Home() {
     let csv = 'Type,InvoiceNumber,Client,Date,Address,City,ZipCode,GrandTotal,PhotoUrls,VideoUrls\n';
 
     if (exportOptions.estimates || exportOptions.invoices) {
-      const { data: docs } = await supabase.from('estimates').select('*').eq('user_id', user.id);
+      const { data: docs } = await supabase.from('estimates').select('*').eq('user_id', workspaceUserId);
       (docs || []).forEach(doc => {
         if ((exportOptions.estimates && (doc.documentType === 'estimate' || doc.invoiceNumber?.startsWith('EST'))) ||
             (exportOptions.invoices && (doc.documentType === 'invoice' || doc.invoiceNumber?.startsWith('INV')))) {
@@ -5278,7 +5490,7 @@ export default function Home() {
     }
 
     if (exportOptions.archives) {
-      const { data: archives } = await supabase.from('archive-est').select('*').eq('user_id', user.id);
+      const { data: archives } = await supabase.from('archive-est').select('*').eq('user_id', workspaceUserId);
       (archives || []).forEach(arch => {
         const total = arch.items ? arch.items.reduce((sum: number, item: any) => sum + (item.total || 0), 0) : 0;
         csv += `"archive","${arch.invoiceNumber || ''}","${arch.jobName || ''}","${arch.date || ''}","${arch.address || ''}","${arch.city || ''}","${arch.zipCode || ''}",${total},"${(arch.photoUrls || []).join('; ')}","${(arch.videoUrls || []).join('; ')}"\n`;
@@ -5496,7 +5708,7 @@ export default function Home() {
     const fullyPaid = nextPaid >= grandTotal - 0.009;
     await supabase.from('estimates').upsert({
       id: invoiceNumber,
-      user_id: user.id,
+      user_id: workspaceUserId,
       jobName, address, city, state, zipCode, phones, emails, date, invoiceNumber,
       items, terms, profile: getDocumentProfileSnapshot(),
       documentType, dueDate,
@@ -5560,7 +5772,7 @@ export default function Home() {
     const fullyPaid = nextPaid >= grandTotal - 0.009;
     await supabase.from('estimates').upsert({
       id: invoiceNumber,
-      user_id: user.id,
+      user_id: workspaceUserId,
       jobName, address, city, state, zipCode, phones, emails, date, invoiceNumber,
       items, terms, profile: getDocumentProfileSnapshot(),
       documentType, dueDate,
@@ -5858,7 +6070,7 @@ export default function Home() {
       showMessage('Please upload an image of your Zelle QR code (PNG or JPG).');
       return;
     }
-    const filePath = `${user.id}/zelle-qr/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+    const filePath = `${workspaceUserId}/zelle-qr/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
     const { error } = await supabase.storage.from('media').upload(filePath, file, { upsert: true });
     if (error) {
       showMessage('Failed to upload Zelle QR. Try again.');
@@ -5895,7 +6107,7 @@ export default function Home() {
       // saveToDB uses state which may be stale — write explicitly
       await supabase.from('estimates').upsert({
         id: invoiceNumber,
-        user_id: user.id,
+        user_id: workspaceUserId,
         jobName, address, city, state, zipCode, phones, emails, date, invoiceNumber,
         items, terms, profile: getDocumentProfileSnapshot(),
         documentType, dueDate,
@@ -5925,7 +6137,7 @@ export default function Home() {
     const id = invoiceNumber;
     try {
       const paidData = {
-        user_id: user.id,
+        user_id: workspaceUserId,
         jobName, address, city, state, zipCode, phones, emails, date, invoiceNumber: id,
         items, terms, profile: getDocumentProfileSnapshot(),
         documentType, dueDate,
@@ -5950,7 +6162,7 @@ export default function Home() {
         .from('estimates')
         .select('*')
         .eq('id', id)
-        .eq('user_id', user.id)
+        .eq('user_id', workspaceUserId)
         .single();
       if (fetchErr || !est) {
         showMessage(`✅ Marked paid (${methodLabel}), but could not load for archiving.`);
@@ -6007,7 +6219,7 @@ export default function Home() {
       const fullyPaid = nextPaid >= grandTotal - 0.009;
       await supabase.from('estimates').upsert({
         id: invoiceNumber,
-        user_id: user.id,
+        user_id: workspaceUserId,
         jobName, address, city, state, zipCode, phones, emails, date, invoiceNumber,
         items, terms, profile: getDocumentProfileSnapshot(),
         documentType, dueDate,
@@ -6894,6 +7106,9 @@ export default function Home() {
             <p className="text-center text-sm text-gray-500 mt-2">
               Professional estimating for contractors
             </p>
+            <p className="text-center text-xs text-gray-400 mt-1">
+              Owners and crew use the same login
+            </p>
           </div>
 
           {!showMainForgot ? (
@@ -6956,49 +7171,10 @@ export default function Home() {
             </>
           )}
 
-          {/* Crew / Sub-contractor separate login */}
-          <div className="mt-6 pt-4 border-t">
-            <p className="text-sm font-medium text-center mb-3 text-gray-600">Crew / Sub-contractor Login</p>
-
-            {!showCrewForgot ? (
-              <>
-                <Input 
-                  placeholder="Your email (username)" 
-                  value={crewLoginEmail} 
-                  onChange={e => setCrewLoginEmail(e.target.value)} 
-                  className="mb-2" 
-                />
-                {/* Password input removed. Crew login now matches by email only (demo).
-                    Production: Use real Supabase Auth for crew members (no plaintext passwords). */}
-                <Button 
-                  onClick={handleCrewLogin} 
-                  variant="outline" 
-                  className="w-full mb-2"
-                >
-                  {t('logInAsCrew')}
-                </Button>
-                <button 
-                  onClick={() => setShowCrewForgot(true)} 
-                  className="text-sm text-blue-600 hover:underline w-full text-left"
-                >
-                  Forgot password?
-                </button>
-                <p className="text-[10px] text-gray-500 mt-2 text-center">
-                  {t('crewLoginNote')}
-                </p>
-              </>
-            ) : (
-              <>
-                <p className="text-xs text-gray-600 mb-3">Password reset is not needed. Crew accounts log in with email only.</p>
-                <button 
-                  onClick={() => { setShowCrewForgot(false); setCrewForgotEmail(''); }} 
-                  className="text-sm text-gray-600 hover:underline w-full"
-                >
-                  Back to crew login
-                </button>
-              </>
-            )}
-          </div>
+          <p className="text-[10px] text-gray-500 mt-4 text-center leading-relaxed">
+            Crew members use this same login with the email and password set by the account owner
+            under Plan / Billing → Manage account → Crew.
+          </p>
         </Card>
       </div>
     );
@@ -7047,6 +7223,19 @@ export default function Home() {
     );
   }
 
+  // Wait for crew membership resolve so workspace id / paywall are correct
+  if (user && !crewResolved) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#f4f4f4]">
+        <ToastContainer />
+        <Card className="w-full max-w-md p-8 text-center">
+          <h2 className="text-xl font-semibold text-[#1e293b]">Loading your workspace…</h2>
+          <p className="text-sm text-gray-500 mt-2">Checking account access</p>
+        </Card>
+      </div>
+    );
+  }
+
   // Paywall: billing enforced OR scheduled account close date has passed
   if (
     user &&
@@ -7087,7 +7276,8 @@ export default function Home() {
         <div className="flex flex-col h-screen bg-[#f4f4f4]">
         {currentCrew && (
           <div className="bg-blue-100 text-blue-800 text-xs p-2 text-center">
-            Logged in as crew/sub-contractor: {currentCrew.email} (limited access)
+            Logged in as crew: {currentCrew.email}
+            {currentCrew.role === 'limited' ? ' (limited access)' : ''}
           </div>
         )}
         <div className="bg-white border-b px-4 py-2 flex justify-between items-center no-print sticky top-0 z-20 shadow-sm">
@@ -7828,30 +8018,28 @@ export default function Home() {
                           <div className="mt-2 pt-3 border-t flex flex-wrap items-center gap-2 text-xs">
                             <select
                               value={translateFrom}
-                              onChange={e => setTranslateFrom(e.target.value as any)}
-                              className="border rounded px-2 py-1 bg-white"
+                              onChange={(e) => setTranslateFrom(e.target.value)}
+                              className="border rounded px-2 py-1 bg-white max-w-[10rem]"
                             >
-                              <option value="en">English</option>
-                              <option value="es">Spanish</option>
-                              <option value="fr">French</option>
-                              <option value="de">German</option>
-                              <option value="pt">Portuguese</option>
-                              <option value="it">Italian</option>
+                              {APP_LANGUAGES.map((lang) => (
+                                <option key={`from-${lang.code}`} value={lang.code}>
+                                  {lang.name}
+                                </option>
+                              ))}
                             </select>
 
                             <span className="text-gray-400">→</span>
 
                             <select
                               value={translateTo}
-                              onChange={e => setTranslateTo(e.target.value as any)}
-                              className="border rounded px-2 py-1 bg-white"
+                              onChange={(e) => setTranslateTo(e.target.value)}
+                              className="border rounded px-2 py-1 bg-white max-w-[10rem]"
                             >
-                              <option value="es">Spanish</option>
-                              <option value="en">English</option>
-                              <option value="fr">French</option>
-                              <option value="de">German</option>
-                              <option value="pt">Portuguese</option>
-                              <option value="it">Italian</option>
+                              {APP_LANGUAGES.map((lang) => (
+                                <option key={`to-${lang.code}`} value={lang.code}>
+                                  {lang.name}
+                                </option>
+                              ))}
                             </select>
 
                             <Button
@@ -8477,16 +8665,18 @@ export default function Home() {
                 >
                   Company Info
                 </button>
-                <button
-                  onClick={() => {
-                    setProfileTab('billing');
-                    setBillingPanel('overview');
-                    void refreshBillingStatus();
-                  }}
-                  className={`flex-1 min-w-[7rem] py-4 text-center font-semibold ${profileTab === 'billing' ? 'border-b-4 border-[#10b981] text-[#10b981]' : 'text-gray-500'}`}
-                >
-                  💳 Plan / Billing
-                </button>
+                {!currentCrew && (
+                  <button
+                    onClick={() => {
+                      setProfileTab('billing');
+                      setBillingPanel('overview');
+                      void refreshBillingStatus();
+                    }}
+                    className={`flex-1 min-w-[7rem] py-4 text-center font-semibold ${profileTab === 'billing' ? 'border-b-4 border-[#10b981] text-[#10b981]' : 'text-gray-500'}`}
+                  >
+                    💳 Plan / Billing
+                  </button>
+                )}
                 <button 
                   onClick={() => setProfileTab('payments')}
                   className={`flex-1 min-w-[7rem] py-4 text-center font-semibold ${profileTab === 'payments' ? 'border-b-4 border-[#10b981] text-[#10b981]' : 'text-gray-500'}`}
@@ -8692,29 +8882,49 @@ export default function Home() {
                     <CardContent className="p-6 space-y-4">
                       <h3 className="text-xl font-semibold text-[#1e293b]">👥 Crew / sub-contractors</h3>
                       <p className="text-sm text-gray-500">
-                        Add or remove crew logins for this account. Main owner pays for EstimateAce above;
-                        crew list is managed here.
+                        Create a login for each crew member. They use the <strong>same login page</strong> as
+                        you, with the email and password you set here. Share those credentials with them
+                        securely. They can use “Forgot your password?” on the main login if they need a reset.
                       </p>
-                      <div className="rounded-lg border border-amber-200 bg-amber-50 text-amber-900 text-xs p-3">
-                        <strong>Beta:</strong> Crew log in with email only on the crew login form (not full secure
-                        invites yet). Do not share with untrusted people.
+                      <div className="rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-900 text-xs p-3">
+                        Crew logins are real accounts. After you add someone, they sign in at app.estimateace.com
+                        with that email and password (no separate crew login form).
                       </div>
-                      <div className="flex flex-col sm:flex-row gap-2">
-                        <Input
-                          placeholder="crew@email.com"
-                          value={crewEmailInput}
-                          onChange={(e) => setCrewEmailInput(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
-                              addCrewMember();
-                            }
-                          }}
-                          className="flex-1"
-                        />
-                        <Button type="button" onClick={addCrewMember} className="bg-[#10b981] text-white">
-                          Add crew
-                        </Button>
+                      <div className="flex flex-col gap-2">
+                        <div className="flex flex-col sm:flex-row gap-2">
+                          <Input
+                            placeholder="crew@email.com"
+                            type="email"
+                            value={crewEmailInput}
+                            onChange={(e) => setCrewEmailInput(e.target.value)}
+                            className="flex-1"
+                          />
+                          <Input
+                            placeholder="Set their password"
+                            type="password"
+                            autoComplete="new-password"
+                            value={crewPasswordInput}
+                            onChange={(e) => setCrewPasswordInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                void addCrewMember();
+                              }
+                            }}
+                            className="flex-1"
+                          />
+                          <Button
+                            type="button"
+                            onClick={() => void addCrewMember()}
+                            disabled={crewInviteBusy}
+                            className="bg-[#10b981] text-white"
+                          >
+                            {crewInviteBusy ? 'Creating…' : 'Add crew'}
+                          </Button>
+                        </div>
+                        <p className="text-[11px] text-gray-500">
+                          Password must be at least 6 characters. Tell the crew member both email and password.
+                        </p>
                       </div>
                       <div className="space-y-3">
                         {(profile.teammates || []).length === 0 ? (
@@ -8734,12 +8944,15 @@ export default function Home() {
                                       type="checkbox"
                                       checked={crew.role === 'full'}
                                       onChange={() => {
+                                        const nextRole =
+                                          crew.role === 'full' ? 'limited' : 'full';
                                         const updated = [...profile.teammates];
                                         updated[index] = {
                                           ...updated[index],
-                                          role: updated[index].role === 'full' ? 'limited' : 'full',
+                                          role: nextRole,
                                         };
                                         setProfile((prev) => ({ ...prev, teammates: updated }));
+                                        void updateCrewPermissions(crew.email, { role: nextRole });
                                         setTimeout(() => saveToDB(), 100);
                                       }}
                                       className="sr-only peer"
@@ -8753,12 +8966,14 @@ export default function Home() {
                                     type="checkbox"
                                     checked={crew.canSeePricing ?? false}
                                     onChange={() => {
+                                      const next = !(crew.canSeePricing ?? false);
                                       const updated = [...profile.teammates];
                                       updated[index] = {
                                         ...updated[index],
-                                        canSeePricing: !updated[index].canSeePricing,
+                                        canSeePricing: next,
                                       };
                                       setProfile((prev) => ({ ...prev, teammates: updated }));
+                                      void updateCrewPermissions(crew.email, { canSeePricing: next });
                                       setTimeout(() => saveToDB(), 100);
                                     }}
                                     className="w-3 h-3 accent-[#10b981]"
@@ -8770,13 +8985,16 @@ export default function Home() {
                                     type="checkbox"
                                     checked={crew.canSeeEstimatesAndFinancials ?? false}
                                     onChange={() => {
+                                      const next = !(crew.canSeeEstimatesAndFinancials ?? false);
                                       const updated = [...profile.teammates];
                                       updated[index] = {
                                         ...updated[index],
-                                        canSeeEstimatesAndFinancials:
-                                          !updated[index].canSeeEstimatesAndFinancials,
+                                        canSeeEstimatesAndFinancials: next,
                                       };
                                       setProfile((prev) => ({ ...prev, teammates: updated }));
+                                      void updateCrewPermissions(crew.email, {
+                                        canSeeEstimatesAndFinancials: next,
+                                      });
                                       setTimeout(() => saveToDB(), 100);
                                     }}
                                     className="w-3 h-3 accent-[#10b981]"
@@ -8787,7 +9005,12 @@ export default function Home() {
                                   variant="destructive"
                                   size="sm"
                                   onClick={() => {
-                                    if (!confirm(`Remove crew member ${crew.email}?`)) return;
+                                    if (!confirm(`Remove crew member ${crew.email}? They will no longer be able to log in.`))
+                                      return;
+                                    void removeCrewMember(
+                                      crew.email,
+                                      (crew as any).userId as string | undefined
+                                    );
                                     const updated = profile.teammates.filter((_, i) => i !== index);
                                     setProfile((prev) => ({ ...prev, teammates: updated }));
                                     setTimeout(() => saveToDB(), 100);
@@ -8954,31 +9177,39 @@ export default function Home() {
                     </div>
 
                     <div>
-                      <label className="block text-sm font-semibold mb-2">{t('languageLabel') || 'Language / Idioma / Langue'}</label>
-                      <div className="flex gap-3">
-                        {[
-                          { code: 'en', label: 'English' },
-                          { code: 'es', label: 'Español' },
-                          { code: 'fr', label: 'Français' },
-                        ].map((lang) => (
-                          <button
-                            key={lang.code}
-                            onClick={() => {
-                              setProfile(prev => ({ ...prev, language: lang.code }));
-                              localStorage.setItem('appLanguage', lang.code);
-                              saveToDB();
-                            }}
-                            className={`px-4 py-2 text-sm rounded-lg border ${
-                              profile.language === lang.code 
-                                ? 'bg-[#10b981] text-white border-[#10b981]' 
-                                : 'bg-white hover:bg-gray-50 border-gray-300'
-                            }`}
-                          >
-                            {lang.label}
-                          </button>
+                      <label className="block text-sm font-semibold mb-2">
+                        {t('languageLabel') || 'Language'}
+                      </label>
+                      <select
+                        value={
+                          isKnownLanguageCode(String(profile.language || ''))
+                            ? String(profile.language)
+                            : currentLang
+                        }
+                        disabled={uiLangBusy}
+                        onChange={(e) => {
+                          void applyAppLanguage(e.target.value);
+                        }}
+                        className="w-full max-w-md border border-gray-300 rounded-lg px-3 py-2.5 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-[#10b981]"
+                      >
+                        {APP_LANGUAGES.map((lang) => (
+                          <option key={lang.code} value={lang.code}>
+                            {lang.name === lang.nativeName
+                              ? lang.name
+                              : `${lang.name} — ${lang.nativeName}`}
+                          </option>
                         ))}
-                      </div>
-                      <p className="text-xs text-gray-500 mt-1">Changes the interface language for estimates and invoices.</p>
+                      </select>
+                      {uiLangBusy && (
+                        <p className="text-xs text-emerald-700 mt-2">
+                          Translating interface… first time for this language may take a few seconds.
+                        </p>
+                      )}
+                      <p className="text-xs text-gray-500 mt-1">
+                        Choose any language. English, Spanish, and French use built-in labels; other
+                        languages load interface text via AI (needs Grok API key) and are cached on this
+                        device. Line-item and terms translation can also use any language below.
+                      </p>
                     </div>
 
                     <div>
@@ -9956,7 +10187,7 @@ export default function Home() {
                 try {
                   if (user?.id) {
                     localStorage.setItem(
-                      `estimateace_appointments_${user.id}`,
+                      `estimateace_appointments_${workspaceUserId}`,
                       JSON.stringify(next)
                     );
                   }
