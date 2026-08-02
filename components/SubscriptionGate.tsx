@@ -13,7 +13,7 @@ type Props = {
   billing: BillingSnapshot;
   enforced: boolean;
   stripeConfigured: boolean;
-  onCheckout: () => void | Promise<void>;
+  onCheckout: (plan?: 'monthly' | 'yearly') => void | Promise<void>;
   onPortal: () => void | Promise<void>;
   onRefresh: () => void | Promise<void>;
   busy?: boolean;
@@ -76,10 +76,17 @@ export function SubscriptionGate({
           <div className="flex flex-col gap-2">
             <Button
               className="w-full bg-[#10b981] hover:bg-[#059669] text-white h-12 text-base"
-              onClick={() => void onCheckout()}
+              onClick={() => void onCheckout('monthly')}
               disabled={busy || !stripeConfigured}
             >
-              {busy ? 'Please wait…' : 'Subscribe with card'}
+              {busy ? 'Please wait…' : 'Subscribe monthly'}
+            </Button>
+            <Button
+              className="w-full bg-[#0ea5e9] hover:bg-[#0284c7] text-white h-12 text-base"
+              onClick={() => void onCheckout('yearly')}
+              disabled={busy || !stripeConfigured}
+            >
+              {busy ? 'Please wait…' : 'Subscribe yearly'}
             </Button>
             {billing.stripeCustomerId && (
               <Button

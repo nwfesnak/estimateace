@@ -1226,6 +1226,8 @@ export default function Home() {
   const [billingStripeDiag, setBillingStripeDiag] = useState<{
     hasSecretKey?: boolean;
     hasPriceId?: boolean;
+    hasPriceIdMonthly?: boolean;
+    hasPriceIdYearly?: boolean;
     hasWebhookSecret?: boolean;
     hasServiceRole?: boolean;
   }>({});
@@ -4446,7 +4448,7 @@ export default function Home() {
     }
   };
 
-  const startSubscriptionCheckout = async () => {
+  const startSubscriptionCheckout = async (plan: 'monthly' | 'yearly' = 'monthly') => {
     if (!supabase) {
       const msg = 'Supabase is not configured.';
       setBillingCheckoutError(msg);
@@ -4466,20 +4468,23 @@ export default function Home() {
       }
       const res = await fetch('/api/billing/checkout', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ plan }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.url) {
         const msg =
           data.error ||
           (!billingStripeOk
-            ? 'Stripe is not configured on the server. Add STRIPE_SECRET_KEY + STRIPE_PRICE_ID in Vercel, then Redeploy.'
-            : 'Could not start checkout. Check Stripe keys/price id and redeploy.');
+            ? 'Stripe is not configured. Add STRIPE_SECRET_KEY and monthly/yearly price IDs in Vercel, then Redeploy.'
+            : 'Could not start checkout. Check Stripe keys/price ids and redeploy.');
         setBillingCheckoutError(msg);
         showMessage(msg);
         return;
       }
-      // Full redirect to Stripe Checkout (not a popup on this page)
       window.location.assign(data.url);
     } catch (e) {
       console.error(e);
@@ -8524,10 +8529,22 @@ export default function Home() {
                     <div className="flex flex-wrap gap-2">
                       <Button
                         className="bg-[#10b981] hover:bg-[#059669] text-white"
-                        disabled={billingBusy}
-                        onClick={() => void startSubscriptionCheckout()}
+                        disabled={billingBusy || billingStripeDiag.hasPriceIdMonthly === false}
+                        onClick={() => void startSubscriptionCheckout('monthly')}
                       >
-                        {billingBusy ? 'Opening Stripe…' : 'Subscribe / Pay'}
+                        {billingBusy ? 'Opening Stripe…' : 'Subscribe monthly'}
+                      </Button>
+                      <Button
+                        className="bg-[#0ea5e9] hover:bg-[#0284c7] text-white"
+                        disabled={billingBusy || !billingStripeDiag.hasPriceIdYearly}
+                        onClick={() => void startSubscriptionCheckout('yearly')}
+                        title={
+                          !billingStripeDiag.hasPriceIdYearly
+                            ? 'Add STRIPE_PRICE_ID_YEARLY in Vercel'
+                            : undefined
+                        }
+                      >
+                        {billingBusy ? 'Opening Stripe…' : 'Subscribe yearly'}
                       </Button>
                       <Button
                         variant="outline"
@@ -8543,6 +8560,11 @@ export default function Home() {
                         Refresh status
                       </Button>
                     </div>
+                    <p className="text-xs text-gray-500">
+                      Monthly uses <code className="text-[10px]">STRIPE_PRICE_ID_MONTHLY</code> (or legacy{' '}
+                      <code className="text-[10px]">STRIPE_PRICE_ID</code>). Yearly uses{' '}
+                      <code className="text-[10px]">STRIPE_PRICE_ID_YEARLY</code>.
+                    </p>
                     {billingCheckoutError && (
                       <p className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-lg p-3">
                         {billingCheckoutError}
@@ -8552,7 +8574,13 @@ export default function Home() {
                       <div className="text-xs text-gray-600 rounded-lg border bg-slate-50 p-3 space-y-1">
                         <div className="font-semibold text-gray-700">Setup incomplete (owner only)</div>
                         <div>{billingStripeDiag.hasSecretKey ? '✅' : '❌'} STRIPE_SECRET_KEY</div>
-                        <div>{billingStripeDiag.hasPriceId ? '✅' : '❌'} STRIPE_PRICE_ID</div>
+                        <div>
+                          {billingStripeDiag.hasPriceIdMonthly ? '✅' : '❌'} STRIPE_PRICE_ID_MONTHLY
+                          (or STRIPE_PRICE_ID)
+                        </div>
+                        <div>
+                          {billingStripeDiag.hasPriceIdYearly ? '✅' : '⚠️'} STRIPE_PRICE_ID_YEARLY
+                        </div>
                         <div>{billingStripeDiag.hasWebhookSecret ? '✅' : '⚠️'} STRIPE_WEBHOOK_SECRET</div>
                         <div>{billingStripeDiag.hasServiceRole ? '✅' : '⚠️'} SUPABASE_SERVICE_ROLE_KEY</div>
                       </div>
@@ -8586,10 +8614,17 @@ export default function Home() {
                       <div className="flex flex-wrap gap-2">
                         <Button
                           className="bg-[#10b981] text-white"
-                          disabled={billingBusy}
-                          onClick={() => void startSubscriptionCheckout()}
+                          disabled={billingBusy || billingStripeDiag.hasPriceIdMonthly === false}
+                          onClick={() => void startSubscriptionCheckout('monthly')}
                         >
-                          Subscribe / Pay
+                          Subscribe monthly
+                        </Button>
+                        <Button
+                          className="bg-[#0ea5e9] text-white"
+                          disabled={billingBusy || !billingStripeDiag.hasPriceIdYearly}
+                          onClick={() => void startSubscriptionCheckout('yearly')}
+                        >
+                          Subscribe yearly
                         </Button>
                         <Button
                           variant="outline"

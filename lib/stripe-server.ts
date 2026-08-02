@@ -11,8 +11,31 @@ export function getStripe(): Stripe | null {
   return stripe;
 }
 
-export function getStripePriceId(): string {
-  return (process.env.STRIPE_PRICE_ID || '').trim();
+export type BillingPlan = 'monthly' | 'yearly';
+
+/** Prefer plan-specific env vars; fall back to legacy STRIPE_PRICE_ID. */
+export function getStripePriceId(plan: BillingPlan = 'monthly'): string {
+  const monthly =
+    (process.env.STRIPE_PRICE_ID_MONTHLY || '').trim() ||
+    (process.env.STRIPE_PRICE_ID || '').trim();
+  const yearly = (process.env.STRIPE_PRICE_ID_YEARLY || '').trim();
+  if (plan === 'yearly') {
+    return yearly || monthly;
+  }
+  return monthly || yearly;
+}
+
+export function getStripePriceIds() {
+  const monthly =
+    (process.env.STRIPE_PRICE_ID_MONTHLY || '').trim() ||
+    (process.env.STRIPE_PRICE_ID || '').trim();
+  const yearly = (process.env.STRIPE_PRICE_ID_YEARLY || '').trim();
+  return {
+    monthly: monthly || null,
+    yearly: yearly || null,
+    hasMonthly: Boolean(monthly),
+    hasYearly: Boolean(yearly),
+  };
 }
 
 export function getAppUrl(requestUrl?: string): string {

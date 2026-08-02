@@ -49,21 +49,29 @@ export function isBillingEnforced(): boolean {
 }
 
 export function isStripeConfigured(): boolean {
-  return Boolean(
-    (process.env.STRIPE_SECRET_KEY || '').trim() &&
-      (process.env.STRIPE_PRICE_ID || '').trim()
+  const hasSecret = Boolean((process.env.STRIPE_SECRET_KEY || '').trim());
+  const hasMonthly = Boolean(
+    (process.env.STRIPE_PRICE_ID_MONTHLY || process.env.STRIPE_PRICE_ID || '').trim()
   );
+  const hasYearly = Boolean((process.env.STRIPE_PRICE_ID_YEARLY || '').trim());
+  return hasSecret && (hasMonthly || hasYearly);
 }
 
 /** Server diagnostics for Profile billing UI */
 export function getStripeConfigDiagnostics() {
   const hasSecretKey = Boolean((process.env.STRIPE_SECRET_KEY || '').trim());
-  const hasPriceId = Boolean((process.env.STRIPE_PRICE_ID || '').trim());
+  const hasPriceIdMonthly = Boolean(
+    (process.env.STRIPE_PRICE_ID_MONTHLY || process.env.STRIPE_PRICE_ID || '').trim()
+  );
+  const hasPriceIdYearly = Boolean((process.env.STRIPE_PRICE_ID_YEARLY || '').trim());
+  const hasPriceId = hasPriceIdMonthly || hasPriceIdYearly;
   const hasWebhookSecret = Boolean((process.env.STRIPE_WEBHOOK_SECRET || '').trim());
   const hasServiceRole = Boolean((process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim());
   return {
     hasSecretKey,
     hasPriceId,
+    hasPriceIdMonthly,
+    hasPriceIdYearly,
     hasWebhookSecret,
     hasServiceRole,
     configured: hasSecretKey && hasPriceId,

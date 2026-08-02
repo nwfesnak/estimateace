@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
-import { getAppUrl, getStripe, getStripePriceId } from '@/lib/stripe-server';
+import {
+  getAppUrl,
+  getStripe,
+  getStripePriceId,
+  type BillingPlan,
+} from '@/lib/stripe-server';
 import { isStripeConfigured } from '@/lib/billing';
 
 async function ensureStripeCustomer(
@@ -35,7 +40,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           error:
-            'Stripe is not configured. Set STRIPE_SECRET_KEY and STRIPE_PRICE_ID in Vercel, then redeploy.',
+            'Stripe is not configured. Set STRIPE_SECRET_KEY and STRIPE_PRICE_ID_MONTHLY and/or STRIPE_PRICE_ID_YEARLY (or STRIPE_PRICE_ID) in Vercel, then redeploy.',
         },
         { status: 503 }
       );
@@ -46,8 +51,24 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: error || 'Unauthorized' }, { status: 401 });
     }
 
+    const body = await request.json().catch(() => ({}));
+    const planRaw = String(body.plan || 'monthly').toLowerCase();
+    const plan: BillingPlan = planRaw === 'yearly' ? 'yearly' : 'monthly';
+
     const stripe = getStripe()!;
-    const priceId = getStripePriceId();
+    const priceId = getStripePriceId(plan);
+    if (!priceId) {
+      return NextResponse.json(
+        {
+          error:
+            plan === 'yearly'
+              ? 'Yearly plan is not configured. Add STRIPE_PRICE_ID_YEARLY in Vercel.'
+              : 'Monthly plan is not configured. Add STRIPE_PRICE_ID_MONTHLY or STRIPE_PRICE_ID in Vercel.',
+        },
+        { status: 503 }
+      );
+    }
+
     const admin = getSupabaseAdmin();
     const appUrl = getAppUrl(request.url);
 
@@ -108,9 +129,9 @@ export async function POST(request: NextRequest) {
         cancel_url: `${appUrl}/?billing=cancel`,
         allow_promotion_codes: true,
         subscription_data: {
-          metadata: { supabase_user_id: user.id },
+          metadata: { supabase_user_id: user.id, plan },
         },
-        metadata: { supabase_user_id: user.id },
+        metadata: { supabase_user_id: user.id, plan },
       });
     } catch (e: any) {
       // Race: customer deleted between retrieve and session create
@@ -139,9 +160,9 @@ export async function POST(request: NextRequest) {
           cancel_url: `${appUrl}/?billing=cancel`,
           allow_promotion_codes: true,
           subscription_data: {
-            metadata: { supabase_user_id: user.id },
+            metadata: { supabase_user_id: user.id, plan },
           },
-          metadata: { supabase_user_id: user.id },
+          metadata: { supabase_user_id: user.id, plan },
         });
       } else {
         throw e;
