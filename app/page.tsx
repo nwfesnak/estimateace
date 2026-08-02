@@ -8495,25 +8495,29 @@ export default function Home() {
                         {billingCheckoutError}
                       </p>
                     )}
-                    <div className="text-xs text-gray-600 rounded-lg border bg-slate-50 p-3 space-y-1">
-                      <div className="font-semibold text-gray-700">Server Stripe check</div>
-                      <div>{billingStripeDiag.hasSecretKey ? '✅' : '❌'} STRIPE_SECRET_KEY</div>
-                      <div>{billingStripeDiag.hasPriceId ? '✅' : '❌'} STRIPE_PRICE_ID</div>
-                      <div>{billingStripeDiag.hasWebhookSecret ? '✅' : '⚠️'} STRIPE_WEBHOOK_SECRET (needed after pay)</div>
-                      <div>{billingStripeDiag.hasServiceRole ? '✅' : '⚠️'} SUPABASE_SERVICE_ROLE_KEY</div>
-                      {!billingStripeOk && (
+                    {/* Setup diagnostics: only when Stripe is incomplete (owner setup), not for normal customers */}
+                    {!billingStripeOk && (
+                      <div className="text-xs text-gray-600 rounded-lg border bg-slate-50 p-3 space-y-1">
+                        <div className="font-semibold text-gray-700">Setup incomplete (only you see this)</div>
+                        <div>{billingStripeDiag.hasSecretKey ? '✅' : '❌'} STRIPE_SECRET_KEY</div>
+                        <div>{billingStripeDiag.hasPriceId ? '✅' : '❌'} STRIPE_PRICE_ID</div>
+                        <div>
+                          {billingStripeDiag.hasWebhookSecret ? '✅' : '⚠️'} STRIPE_WEBHOOK_SECRET
+                        </div>
+                        <div>
+                          {billingStripeDiag.hasServiceRole ? '✅' : '⚠️'} SUPABASE_SERVICE_ROLE_KEY
+                        </div>
                         <p className="text-amber-800 pt-1">
-                          Add missing keys in Vercel → Environment Variables, then <strong>Redeploy</strong>.
-                          After that, Subscribe should open Stripe Checkout (new page), not stay on this screen.
+                          Add missing keys in Vercel, then Redeploy. Customers never see secret values—only
+                          these labels when setup is incomplete.
                         </p>
-                      )}
-                    </div>
+                      </div>
+                    )}
                     {billingStripeOk && (
                       <p className="text-sm text-gray-600">
-                        Click <strong>Subscribe</strong> — the browser should go to a <strong>Stripe Checkout</strong> page
-                        (stripe.com). Use test card{' '}
-                        <code className="text-xs bg-slate-100 px-1 rounded">4242 4242 4242 4242</code> if your key is{' '}
-                        <code className="text-xs">sk_test_</code>.
+                        Click <strong>Subscribe</strong> to pay with card. After payment you return here with
+                        status <strong>active</strong> automatically (webhook). If status looks wrong, use{' '}
+                        <strong>Sync from Stripe</strong>.
                       </p>
                     )}
                     <p className="text-xs text-gray-500">
