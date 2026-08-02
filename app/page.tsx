@@ -804,7 +804,7 @@ export default function Home() {
     return (translations as any)[currentLang]?.[key] || (translations as any)['en']?.[key] || key;
   };
 
-  const [profileTab, setProfileTab] = useState<'info' | 'payments' | 'paidInvoices'>('info');
+  const [profileTab, setProfileTab] = useState<'info' | 'payments' | 'paidInvoices' | 'billing'>('info');
   /** Skip profile auto-save while hydrating from server/local cache */
   const profileHydratingRef = useRef(false);
   const profileAutoSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -8335,11 +8335,20 @@ export default function Home() {
                 >
                   Company Info
                 </button>
+                <button
+                  onClick={() => {
+                    setProfileTab('billing');
+                    void refreshBillingStatus();
+                  }}
+                  className={`flex-1 min-w-[7rem] py-4 text-center font-semibold ${profileTab === 'billing' ? 'border-b-4 border-[#10b981] text-[#10b981]' : 'text-gray-500'}`}
+                >
+                  💳 Plan / Billing
+                </button>
                 <button 
                   onClick={() => setProfileTab('payments')}
                   className={`flex-1 min-w-[7rem] py-4 text-center font-semibold ${profileTab === 'payments' ? 'border-b-4 border-[#10b981] text-[#10b981]' : 'text-gray-500'}`}
                 >
-                  💳 Payments
+                  Client Payments
                 </button>
                 <button
                   onClick={() => {
@@ -8358,12 +8367,96 @@ export default function Home() {
                 </button>
               </div>
 
+              {profileTab === 'billing' && (
+                <Card className="mb-8 border-emerald-200">
+                  <CardContent className="p-8 space-y-5">
+                    <div>
+                      <h3 className="text-2xl font-semibold text-[#1e293b]">💳 Account billing (EstimateAce plan)</h3>
+                      <p className="text-sm text-gray-500 mt-1">
+                        This is <strong>your</strong> subscription to use EstimateAce — not how clients pay you for jobs.
+                        Client payment links are under the <strong>Client Payments</strong> tab.
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+                      <div className="rounded-xl border bg-slate-50 p-4">
+                        <div className="text-xs text-gray-500 uppercase">Status</div>
+                        <div className="text-lg font-semibold capitalize">{billing.status}</div>
+                      </div>
+                      <div className="rounded-xl border bg-slate-50 p-4">
+                        <div className="text-xs text-gray-500 uppercase">Trial ends</div>
+                        <div className="text-lg font-semibold">{formatPeriodEnd(billing.trialEndsAt)}</div>
+                      </div>
+                      <div className="rounded-xl border bg-slate-50 p-4">
+                        <div className="text-xs text-gray-500 uppercase">Period ends</div>
+                        <div className="text-lg font-semibold">{formatPeriodEnd(billing.currentPeriodEnd)}</div>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        className="bg-[#10b981] hover:bg-[#059669] text-white"
+                        disabled={billingBusy || !billingStripeOk}
+                        onClick={() => void startSubscriptionCheckout()}
+                      >
+                        {billingBusy ? 'Please wait…' : 'Subscribe'}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        disabled={billingBusy || !billing.stripeCustomerId}
+                        onClick={() => void openBillingPortal()}
+                      >
+                        Manage billing
+                      </Button>
+                      <Button variant="outline" disabled={billingBusy} onClick={() => void refreshBillingStatus()}>
+                        Refresh status
+                      </Button>
+                    </div>
+                    {!billingStripeOk && (
+                      <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                        Stripe is not fully configured on the server yet. Need <code className="text-xs">STRIPE_SECRET_KEY</code> +{' '}
+                        <code className="text-xs">STRIPE_PRICE_ID</code> in Vercel, then redeploy. Subscribe stays disabled until then.
+                      </p>
+                    )}
+                    {billingStripeOk && (
+                      <p className="text-sm text-gray-600">
+                        Click <strong>Subscribe</strong> to open Stripe Checkout. Use test card{' '}
+                        <code className="text-xs bg-slate-100 px-1 rounded">4242 4242 4242 4242</code> if your Stripe key is test mode.
+                      </p>
+                    )}
+                    <p className="text-xs text-gray-500">
+                      Support:{' '}
+                      <a className="text-emerald-700 underline" href={`mailto:${SUPPORT_EMAIL}`}>
+                        {SUPPORT_EMAIL}
+                      </a>
+                      {' · '}
+                      <a className="underline" href="/terms">
+                        Terms
+                      </a>
+                      {' · '}
+                      <a className="underline" href="/privacy">
+                        Privacy
+                      </a>
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
+
               {profileTab === 'info' && (
                 <Card className="mb-8">
                   <CardContent className="p-8 space-y-8">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <p className="text-sm text-gray-500">
                         Company info saves automatically as you type. It stays until you edit it.
+                        {' '}
+                        <button
+                          type="button"
+                          className="text-emerald-700 font-semibold underline"
+                          onClick={() => {
+                            setProfileTab('billing');
+                            void refreshBillingStatus();
+                          }}
+                        >
+                          Plan / Billing →
+                        </button>
                       </p>
                       {profileAutoSaveLabel && (
                         <span
@@ -8414,69 +8507,6 @@ export default function Home() {
                           <Input value={profile.zipCode} onChange={e => setProfile(prev => ({...prev, zipCode: e.target.value}))} />
                         </div>
                       </div>
-                    </div>
-
-                    {/* Account billing (Phase A SaaS) */}
-                    <div className="pt-6 border-t border-slate-200 space-y-3">
-                      <h3 className="text-xl font-semibold text-[#1e293b]">💳 Account billing</h3>
-                      <p className="text-sm text-gray-500">
-                        Your EstimateAce plan (separate from client payment links). Trial and subscription
-                        status for this login.
-                      </p>
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
-                        <div className="rounded-xl border bg-white p-3">
-                          <div className="text-xs text-gray-500 uppercase">Status</div>
-                          <div className="font-semibold capitalize">{billing.status}</div>
-                        </div>
-                        <div className="rounded-xl border bg-white p-3">
-                          <div className="text-xs text-gray-500 uppercase">Trial ends</div>
-                          <div className="font-semibold">{formatPeriodEnd(billing.trialEndsAt)}</div>
-                        </div>
-                        <div className="rounded-xl border bg-white p-3">
-                          <div className="text-xs text-gray-500 uppercase">Period ends</div>
-                          <div className="font-semibold">{formatPeriodEnd(billing.currentPeriodEnd)}</div>
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          size="sm"
-                          className="bg-[#10b981] text-white"
-                          disabled={billingBusy || !billingStripeOk}
-                          onClick={() => void startSubscriptionCheckout()}
-                        >
-                          {billingBusy ? '…' : 'Subscribe'}
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={billingBusy || !billing.stripeCustomerId}
-                          onClick={() => void openBillingPortal()}
-                        >
-                          Manage billing
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={() => void refreshBillingStatus()}>
-                          Refresh
-                        </Button>
-                      </div>
-                      {!billingStripeOk && (
-                        <p className="text-xs text-amber-700">
-                          Stripe not configured on server yet — subscribe button activates after env vars are set.
-                        </p>
-                      )}
-                      <p className="text-xs text-gray-500">
-                        Support:{' '}
-                        <a className="text-emerald-700 underline" href={`mailto:${SUPPORT_EMAIL}`}>
-                          {SUPPORT_EMAIL}
-                        </a>
-                        {' · '}
-                        <a className="underline" href="/terms">
-                          Terms
-                        </a>
-                        {' · '}
-                        <a className="underline" href="/privacy">
-                          Privacy
-                        </a>
-                      </p>
                     </div>
 
                     {/* Total miles across all jobs */}
