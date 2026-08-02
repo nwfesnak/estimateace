@@ -42,6 +42,7 @@ import {
   isKnownLanguageCode,
   languageLabel,
 } from '@/lib/languages';
+import { getQuoteOfTheDay } from '@/lib/quote-of-the-day';
 import {
   buildPaymentTrackingNote,
   buildPayPalPayUrl,
@@ -7070,10 +7071,24 @@ export default function Home() {
   };
 
   if (!user) {
+    const quoteOfDay = getQuoteOfTheDay();
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#f4f4f4]">
+      <div className="min-h-screen flex items-center justify-center bg-[#f4f4f4] p-4">
         <ToastContainer />
         <Card className="w-full max-w-md p-8">
+          <div className="mb-5 rounded-xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-teal-50 px-4 py-3.5 text-center shadow-sm">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-700 mb-1.5">
+              Quote of the day
+            </p>
+            <p className="text-sm sm:text-[15px] text-[#1e293b] leading-relaxed font-medium italic">
+              “{quoteOfDay.text}”
+            </p>
+            {quoteOfDay.author ? (
+              <p className="text-xs text-emerald-800/80 mt-2 font-medium">— {quoteOfDay.author}</p>
+            ) : (
+              <p className="text-[10px] text-emerald-700/70 mt-2">New inspiration every day</p>
+            )}
+          </div>
           <div>
             <h1 className="text-4xl font-bold text-center text-[#1e293b]">EstimateAce</h1>
             <p className="text-center text-sm text-gray-500 mt-2">
@@ -7086,7 +7101,7 @@ export default function Home() {
 
           {!showMainForgot ? (
             <>
-              <Input placeholder="Email" value={email} onChange={e => { setEmail(e.target.value); setLoginError(''); }} className="mb-3" autoComplete="email" />
+              <Input placeholder="Email" value={email} onChange={e => { setEmail(e.target.value); setLoginError(''); }} className="mb-3 mt-4" autoComplete="email" />
               <Input type="password" placeholder="Password" value={password} onChange={e => { setPassword(e.target.value); setLoginError(''); }} className="mb-4" autoComplete="current-password" onKeyDown={e => { if (e.key === 'Enter') login(); }} />
               {loginError && (
                 <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">
