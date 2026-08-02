@@ -18,6 +18,63 @@ function mapStatus(status: Stripe.Subscription.Status | string): SubscriptionSta
   return allowed.includes(s) ? s : 'none';
 }
 
+/** Unix seconds → ISO, or null */
+function unixToIso(unix: unknown): string | null {
+  const n = typeof unix === 'number' ? unix : Number(unix);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return new Date(n * 1000).toISOString();
+}
+
+/**
+ * Stripe API 2025-03-31+ removed subscription.current_period_end.
+ * Period now lives on subscription items (and cancel_at as fallback).
+ */
+export function getSubscriptionPeriodEnd(sub: Stripe.Subscription): string | null {
+  const s = sub as any;
+  // Legacy top-level field (older API versions)
+  const top = unixToIso(s.current_period_end);
+  if (top) return top;
+
+  // Current API: items.data[].current_period_end
+  const items = s.items?.data;
+  if (Array.isArray(items) && items.length > 0) {
+    let maxEnd = 0;
+    for (const item of items) {
+      const end = Number(item?.current_period_end) || 0;
+      if (end > maxEnd) maxEnd = end;
+    }
+    if (maxEnd > 0) return unixToIso(maxEnd);
+  }
+
+  // Scheduled cancel date
+  if (s.cancel_at) return unixToIso(s.cancel_at);
+
+  // Estimate from billing_cycle_anchor + price if needed
+  const anchor = Number(s.billing_cycle_anchor || s.start_date) || 0;
+  const interval = s.items?.data?.[0]?.price?.recurring?.interval as string | undefined;
+  const intervalCount = Number(s.items?.data?.[0]?.price?.recurring?.interval_count) || 1;
+  if (anchor > 0 && interval) {
+    const d = new Date(anchor * 1000);
+    if (interval === 'year') d.setFullYear(d.getFullYear() + intervalCount);
+    else if (interval === 'month') d.setMonth(d.getMonth() + intervalCount);
+    else if (interval === 'week') d.setDate(d.getDate() + 7 * intervalCount);
+    else if (interval === 'day') d.setDate(d.getDate() + intervalCount);
+    else return null;
+    // If anchor is in the past, walk forward until next period end
+    const now = Date.now();
+    while (d.getTime() <= now) {
+      if (interval === 'year') d.setFullYear(d.getFullYear() + intervalCount);
+      else if (interval === 'month') d.setMonth(d.getMonth() + intervalCount);
+      else if (interval === 'week') d.setDate(d.getDate() + 7 * intervalCount);
+      else if (interval === 'day') d.setDate(d.getDate() + intervalCount);
+      else break;
+    }
+    return d.toISOString();
+  }
+
+  return null;
+}
+
 export async function upsertSubscriptionFromStripe(
   sub: Stripe.Subscription,
   userIdHint?: string | null
@@ -48,9 +105,7 @@ export async function upsertSubscriptionFromStripe(
 
   const customerId = typeof sub.customer === 'string' ? sub.customer : sub.customer?.id;
   const priceId = sub.items?.data?.[0]?.price?.id || null;
-  const periodEnd = (sub as any).current_period_end
-    ? new Date((sub as any).current_period_end * 1000).toISOString()
-    : null;
+  const periodEnd = getSubscriptionPeriodEnd(sub);
   const trialEnd = sub.trial_end ? new Date(sub.trial_end * 1000).toISOString() : null;
 
   // Keep existing trial_ends_at if Stripe has no trial on the sub

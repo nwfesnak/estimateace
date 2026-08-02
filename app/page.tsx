@@ -8515,8 +8515,19 @@ export default function Home() {
                         <div className="text-lg font-semibold">{formatPeriodEnd(billing.trialEndsAt)}</div>
                       </div>
                       <div className="rounded-xl border bg-slate-50 p-4">
-                        <div className="text-xs text-gray-500 uppercase">Period ends</div>
-                        <div className="text-lg font-semibold">{formatPeriodEnd(billing.currentPeriodEnd)}</div>
+                        <div className="text-xs text-gray-500 uppercase">
+                          {billing.status === 'active' || billing.status === 'trialing'
+                            ? 'Renews / period ends'
+                            : 'Period ends'}
+                        </div>
+                        <div className="text-lg font-semibold">
+                          {formatPeriodEnd(billing.currentPeriodEnd)}
+                        </div>
+                        {!billing.currentPeriodEnd && billing.status === 'active' && (
+                          <p className="text-[10px] text-amber-700 mt-1">
+                            Missing date — click Sync from Stripe (Manage billing)
+                          </p>
+                        )}
                       </div>
                     </div>
                     {billing.accountClosesAt && (
