@@ -32,10 +32,10 @@ $savings = round($monthly * 12 - $annual, 2);
           <li>PWA — install on home screen</li>
           <li>English, Spanish & French</li>
         </ul>
-        <a class="btn btn-outline btn-lg" href="<?= $app_url ?>" style="width:100%;">Start Monthly</a>
+        <a class="btn btn-outline btn-lg" href="<?= $app_url ?>/trial?plan=monthly" style="width:100%;">Start Monthly</a>
       </article>
       <article class="price-card featured">
-        <span class="badge">Save 10%</span>
+        <span class="badge">Best value</span>
         <h3>Annual</h3>
         <div class="price">$<?= number_format($annual, 0) ?> <small>/ year</small></div>
         <p class="price-note">Save $<?= number_format($savings, 2) ?> vs monthly billing</p>
@@ -48,7 +48,7 @@ $savings = round($monthly * 12 - $annual, 2);
           <li>Appointment reminders included</li>
           <li>Export & archive included</li>
         </ul>
-        <a class="btn btn-primary btn-lg" href="<?= $app_url ?>" style="width:100%;">Start Annual</a>
+        <a class="btn btn-primary btn-lg" href="<?= $app_url ?>/trial?plan=yearly" style="width:100%;">Start Annual</a>
       </article>
     </div>
   </div>
