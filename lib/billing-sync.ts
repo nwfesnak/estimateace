@@ -108,23 +108,31 @@ export async function syncUserSubscriptionFromStripe(
     try {
       sub = await stripe.subscriptions.retrieve(row.stripe_subscription_id);
     } catch {
+      // Subscription fully deleted in Stripe
       sub = null;
     }
   }
 
   if (!sub && customerId) {
-    const list = await stripe.subscriptions.list({
-      customer: customerId,
-      status: 'all',
-      limit: 10,
-    });
-    sub =
-      list.data.find((s) => s.status === 'active' || s.status === 'trialing') ||
-      list.data[0] ||
-      null;
+    try {
+      const list = await stripe.subscriptions.list({
+        customer: customerId,
+        status: 'all',
+        limit: 10,
+      });
+      sub =
+        list.data.find((s) => s.status === 'active' || s.status === 'trialing') ||
+        list.data.find((s) => s.status === 'canceled') ||
+        list.data[0] ||
+        null;
+    } catch {
+      // Customer may have been deleted in Stripe
+      customerId = null;
+      sub = null;
+    }
   }
 
-  // Fallback: find Stripe customer by email (if checkout created customer but DB never linked)
+  // Fallback: find Stripe customer by email
   if (!sub && userEmail) {
     const customers = await stripe.customers.list({ email: userEmail, limit: 5 });
     for (const c of customers.data) {
@@ -135,6 +143,7 @@ export async function syncUserSubscriptionFromStripe(
       });
       const found =
         list.data.find((s) => s.status === 'active' || s.status === 'trialing') ||
+        list.data.find((s) => s.status === 'canceled') ||
         list.data[0];
       if (found) {
         sub = found;
@@ -144,11 +153,23 @@ export async function syncUserSubscriptionFromStripe(
     }
   }
 
+  // No subscription in Stripe → clear local "active" so app matches Stripe
   if (!sub) {
+    const { error } = await admin.from('subscriptions').upsert({
+      user_id: userId,
+      stripe_customer_id: customerId,
+      stripe_subscription_id: null,
+      status: 'canceled',
+      price_id: null,
+      current_period_end: null,
+      cancel_at_period_end: false,
+      updated_at: new Date().toISOString(),
+    });
+    if (error) return { ok: false, error: error.message };
     return {
-      ok: false,
-      error:
-        'No Stripe subscription found for this login yet. In Stripe Dashboard → Subscriptions, confirm the payment exists. Then try Sync again. Also confirm STRIPE_WEBHOOK_SECRET and redeploy.',
+      ok: true,
+      status: 'canceled',
+      error: undefined,
     };
   }
 
