@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { TouchDoubleTapTextarea } from '@/components/TouchDoubleTapTextarea';
 import { DeviceCamera, type DeviceCameraMode } from '@/components/DeviceCamera';
+import { LidarMeasure, type LidarMeasureResult } from '@/components/LidarMeasure';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { getSupabaseClient, getSupabaseConfigHelpMessage } from '@/lib/supabase/client';
@@ -294,6 +295,10 @@ export default function Home() {
       loadTemplate: "Load Template...",
       laborButton: "Labor",
       photosSection: "Photos",
+      photoFolderTitle: "Job Photos",
+      photoFolderClosed: "Click to open photo folder",
+      photoFolderOpen: "Close photo folder",
+      photoFolderCount: "{count} photos",
       videosSection: "Videos",
       receiptsSection: "Receipts",
       loginMain: "Log In (Main Account)",
@@ -306,6 +311,13 @@ export default function Home() {
       open: "Open",
       archive: "Archive",
       delete: "Delete",
+      retrieve: "Retrieve",
+      retrieveArchive: "Retrieve Archive",
+      retrieveArchiveHelp: "View archived estimates and invoices, open them, or restore them to your active lists.",
+      viewArchives: "View / Retrieve Archives",
+      paidInvoices: "Paid Invoices",
+      paidInvoicesHelp: "Invoices marked paid are moved here automatically and removed from Estimates and open Invoices.",
+      noPaidInvoices: "No paid invoices yet. When you close out an invoice as paid, it appears in this folder.",
       activeEstimates: "Active Estimates",
       metric: "Metric",
       count: "Count",
@@ -317,6 +329,7 @@ export default function Home() {
       outstandingRestricted: "Outstanding amounts restricted",
       backToEditor: "Back to Editor",
       archivedDocuments: "Archived Documents",
+      noArchivedDocuments: "No archived documents yet.",
       load: "Load",
       savedDocuments: "Saved Documents",
       languageLabel: "Language / Idioma / Langue",
@@ -407,6 +420,10 @@ export default function Home() {
       loadTemplate: "Cargar plantilla...",
       laborButton: "Mano de Obra",
       photosSection: "Fotos",
+      photoFolderTitle: "Fotos del Trabajo",
+      photoFolderClosed: "Clic para abrir la carpeta de fotos",
+      photoFolderOpen: "Cerrar carpeta de fotos",
+      photoFolderCount: "{count} fotos",
       videosSection: "Videos",
       receiptsSection: "Recibos",
       loginMain: "Iniciar Sesión (Cuenta Principal)",
@@ -419,6 +436,13 @@ export default function Home() {
       open: "Abrir",
       archive: "Archivar",
       delete: "Eliminar",
+      retrieve: "Recuperar",
+      retrieveArchive: "Recuperar Archivo",
+      retrieveArchiveHelp: "Vea presupuestos y facturas archivados, ábralos o restáurelos a sus listas activas.",
+      viewArchives: "Ver / Recuperar Archivos",
+      paidInvoices: "Facturas Pagadas",
+      paidInvoicesHelp: "Las facturas marcadas como pagadas se mueven aquí automáticamente y se quitan de Presupuestos y Facturas abiertas.",
+      noPaidInvoices: "Aún no hay facturas pagadas. Al cerrar una factura como pagada, aparece en esta carpeta.",
       activeEstimates: "Presupuestos Activos",
       metric: "Métrica",
       count: "Cantidad",
@@ -430,6 +454,7 @@ export default function Home() {
       outstandingRestricted: "Montos pendientes restringidos",
       backToEditor: "Volver al Editor",
       archivedDocuments: "Documentos Archivados",
+      noArchivedDocuments: "Aún no hay documentos archivados.",
       load: "Cargar",
       savedDocuments: "Documentos Guardados",
       languageLabel: "Idioma / Idioma / Langue",
@@ -520,6 +545,10 @@ export default function Home() {
       loadTemplate: "Charger modèle...",
       laborButton: "Main d'Œuvre",
       photosSection: "Photos",
+      photoFolderTitle: "Photos du Chantier",
+      photoFolderClosed: "Cliquez pour ouvrir le dossier de photos",
+      photoFolderOpen: "Fermer le dossier de photos",
+      photoFolderCount: "{count} photos",
       videosSection: "Vidéos",
       receiptsSection: "Reçus",
       loginMain: "Connexion (Compte Principal)",
@@ -532,6 +561,13 @@ export default function Home() {
       open: "Ouvrir",
       archive: "Archiver",
       delete: "Supprimer",
+      retrieve: "Récupérer",
+      retrieveArchive: "Récupérer les Archives",
+      retrieveArchiveHelp: "Consultez les devis et factures archivés, ouvrez-les ou restaurez-les dans vos listes actives.",
+      viewArchives: "Voir / Récupérer les Archives",
+      paidInvoices: "Factures Payées",
+      paidInvoicesHelp: "Les factures marquées payées sont déplacées ici automatiquement et retirées des Devis et Factures ouvertes.",
+      noPaidInvoices: "Aucune facture payée pour le moment. Lorsqu'une facture est clôturée comme payée, elle apparaît dans ce dossier.",
       activeEstimates: "Devis Actifs",
       metric: "Métrique",
       count: "Nombre",
@@ -543,6 +579,7 @@ export default function Home() {
       outstandingRestricted: "Montants en cours restreints",
       backToEditor: "Retour à l'Éditeur",
       archivedDocuments: "Documents Archivés",
+      noArchivedDocuments: "Aucun document archivé pour le moment.",
       load: "Charger",
       savedDocuments: "Documents Enregistrés",
       languageLabel: "Langue / Idioma / Language",
@@ -745,7 +782,7 @@ export default function Home() {
     return (translations as any)[currentLang]?.[key] || (translations as any)['en']?.[key] || key;
   };
 
-  const [profileTab, setProfileTab] = useState<'info' | 'payments'>('info');
+  const [profileTab, setProfileTab] = useState<'info' | 'payments' | 'paidInvoices'>('info');
   /** Skip profile auto-save while hydrating from server/local cache */
   const profileHydratingRef = useRef(false);
   const profileAutoSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1148,6 +1185,12 @@ export default function Home() {
   const [isPhotoPickerOpen, setIsPhotoPickerOpen] = useState(false);
   const [isDeviceCameraOpen, setIsDeviceCameraOpen] = useState(false);
   const [deviceCameraMode, setDeviceCameraMode] = useState<DeviceCameraMode>('photo');
+  // LiDAR / AR measure → fills line-item qty + unit
+  const [isLidarMeasureOpen, setIsLidarMeasureOpen] = useState(false);
+  const [lidarMeasureItemId, setLidarMeasureItemId] = useState<number | null>(null);
+  /** When more than 6 photos, collapse into a click-to-open folder */
+  const PHOTO_FOLDER_THRESHOLD = 6;
+  const [photosFolderOpen, setPhotosFolderOpen] = useState(false);
 
   // Last saved state (required for existing saveToDB call)
   const [lastSaved, setLastSaved] = useState('');
@@ -1511,6 +1554,163 @@ export default function Home() {
           </div>
         )}
       </>
+    );
+  };
+
+  /**
+   * Photo gallery: 6 or fewer photos show inline.
+   * More than 6 → collapse into a folder the user must click to open.
+   * forceExpanded: print/PDF always shows every photo.
+   */
+  const renderPhotoGallery = (options?: {
+    editable?: boolean;
+    forceExpanded?: boolean;
+    heading?: string;
+    gridClassName?: string;
+    imgClassName?: string;
+  }) => {
+    const editable = !!options?.editable;
+    const forceExpanded = !!options?.forceExpanded;
+    const count = photoDisplayUrls.length;
+    if (count === 0 && !editable) return null;
+
+    const useFolder = count > PHOTO_FOLDER_THRESHOLD && !forceExpanded;
+    const isOpen = !useFolder || photosFolderOpen;
+    const folderCountLabel = (t('photoFolderCount') || '{count} photos').replace(
+      '{count}',
+      String(count)
+    );
+    const gridClass =
+      options?.gridClassName ||
+      (editable ? 'grid grid-cols-2 md:grid-cols-4 gap-4' : 'grid grid-cols-2 gap-6');
+    const imgClass =
+      options?.imgClassName ||
+      (editable
+        ? 'w-full h-40 object-cover rounded-lg border'
+        : 'w-full border rounded-xl shadow-sm max-h-64 object-contain');
+
+    const folderButton = useFolder ? (
+      <button
+        type="button"
+        onClick={() => setPhotosFolderOpen((open) => !open)}
+        className={`w-full text-left border-2 rounded-xl p-4 sm:p-5 transition shadow-sm ${
+          isOpen
+            ? 'border-emerald-400 bg-emerald-50/80 hover:bg-emerald-50'
+            : 'border-amber-300 bg-gradient-to-br from-amber-50 to-orange-50 hover:from-amber-100 hover:to-orange-100'
+        }`}
+        aria-expanded={isOpen}
+      >
+        <div className="flex items-center gap-4 min-w-0">
+          <div className="relative shrink-0 w-16 h-14" aria-hidden>
+            {/* Stacked folder + thumbnail stack */}
+            <div className="absolute left-2 top-0 w-12 h-10 rounded-md bg-amber-200 border border-amber-300 rotate-[-6deg]" />
+            <div className="absolute left-1 top-1 w-12 h-10 rounded-md bg-amber-300 border border-amber-400 rotate-[-2deg]" />
+            <div className="absolute left-0 top-2 w-12 h-10 rounded-md bg-amber-400 border border-amber-500 flex items-center justify-center text-2xl shadow-sm">
+              📁
+            </div>
+            {photoDisplayUrls[0] && (
+              <img
+                src={photoDisplayUrls[0]}
+                alt=""
+                className="absolute -right-1 top-3 w-8 h-8 object-cover rounded border-2 border-white shadow"
+              />
+            )}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="font-semibold text-[#1e293b] flex flex-wrap items-center gap-2">
+              <span>{t('photoFolderTitle')}</span>
+              <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-white/80 border text-gray-700">
+                {folderCountLabel}
+              </span>
+            </div>
+            <p className="text-sm text-gray-600 mt-0.5">
+              {isOpen ? t('photoFolderOpen') : t('photoFolderClosed')}
+            </p>
+            {!isOpen && (
+              <div className="flex gap-1.5 mt-2">
+                {photoDisplayUrls.slice(0, 4).map((url, i) => (
+                  <img
+                    key={i}
+                    src={url}
+                    alt=""
+                    className="w-9 h-9 object-cover rounded border border-white shadow-sm"
+                  />
+                ))}
+                {count > 4 && (
+                  <span className="w-9 h-9 rounded bg-white/90 border text-[10px] font-semibold text-gray-600 flex items-center justify-center">
+                    +{count - 4}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+          <span className="text-2xl text-gray-500 shrink-0" aria-hidden>
+            {isOpen ? '▾' : '▸'}
+          </span>
+        </div>
+      </button>
+    ) : null;
+
+    const photoGrid = isOpen ? (
+      <div className={gridClass}>
+        {photoDisplayUrls.map((url, i) => (
+          <div key={i} className={editable ? 'relative group' : undefined}>
+            <img
+              src={url}
+              alt={`Photo ${i + 1}`}
+              className={imgClass}
+            />
+            {editable && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => openGalleryPhotoQuote(url)}
+                  className="absolute bottom-2 left-2 right-2 bg-violet-600 hover:bg-violet-700 text-white text-xs py-1.5 px-2 rounded-lg shadow-md sm:opacity-0 sm:group-hover:opacity-100 transition"
+                >
+                  📷 AI Quote
+                </button>
+                <button
+                  type="button"
+                  onClick={() => removeMedia('photo', i)}
+                  className="absolute top-2 right-2 bg-red-600 hover:bg-red-700 text-white text-4xl w-10 h-10 flex items-center justify-center rounded-2xl shadow-xl"
+                >
+                  ×
+                </button>
+              </>
+            )}
+          </div>
+        ))}
+        {editable && (
+          <button
+            type="button"
+            onClick={openPhotoPicker}
+            className="flex flex-col items-center justify-center h-40 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition w-full"
+          >
+            <div className="text-4xl mb-1">📷</div>
+            <div className="text-xs text-gray-500">{t('addPhoto')}</div>
+          </button>
+        )}
+      </div>
+    ) : editable ? (
+      // Closed folder: still allow adding photos without opening the whole set
+      <button
+        type="button"
+        onClick={openPhotoPicker}
+        className="flex flex-col items-center justify-center h-24 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition w-full"
+      >
+        <div className="text-3xl mb-1">📷</div>
+        <div className="text-xs text-gray-500">{t('addPhoto')}</div>
+      </button>
+    ) : null;
+
+    return (
+      <div className="space-y-4">
+        {options?.heading && (
+          <h3 className="text-2xl font-semibold mb-2 border-b pb-3">{options.heading}</h3>
+        )}
+        {folderButton}
+        {photoGrid}
+      </div>
     );
   };
 
@@ -1993,6 +2193,21 @@ export default function Home() {
       console.error('Save error:', error);
       showMessage('Failed to save document. Please try again.');
     } else {
+      // Saving an INV- invoice must clear the original EST- work order from the Estimates page
+      if (String(invoiceNumber || '').toUpperCase().startsWith('INV')) {
+        await removeEstimateWorkOrderForInvoice(
+          {
+            id: invoiceNumber,
+            invoiceNumber,
+            documentType: 'invoice',
+            jobName,
+            address,
+            zipCode,
+            paymentStatus,
+          },
+          user.id
+        );
+      }
       setLastSaved(new Date().toLocaleTimeString());
       refreshSavedList();
     }
@@ -2365,6 +2580,194 @@ export default function Home() {
     }
   };
 
+  const isSettingsDocRow = (row: any) =>
+    !row ||
+    row.jobName === '__settings__' ||
+    row.documentType === 'settings' ||
+    row.documenttype === 'settings' ||
+    String(row.id || '').startsWith('SETTINGS-');
+
+  const isInvoiceDocRow = (row: any) => {
+    if (!row || isSettingsDocRow(row)) return false;
+    const num = String(row.invoiceNumber ?? row.invoicenumber ?? row.id ?? '');
+    const id = String(row.id || '');
+    const numU = num.toUpperCase();
+    const idU = id.toUpperCase();
+    return (
+      row.documentType === 'invoice' ||
+      row.documenttype === 'invoice' ||
+      numU.startsWith('INV') ||
+      idU.startsWith('INV')
+    );
+  };
+
+  const isEstimateTypeRow = (row: any) => {
+    if (!row || isSettingsDocRow(row) || isInvoiceDocRow(row)) return false;
+    const num = String(row.invoiceNumber ?? row.invoicenumber ?? row.id ?? '');
+    const id = String(row.id || '');
+    const numU = num.toUpperCase();
+    const idU = id.toUpperCase();
+    return (
+      row.documentType === 'estimate' ||
+      row.documenttype === 'estimate' ||
+      numU.startsWith('EST') ||
+      idU.startsWith('EST') ||
+      // default non-invoice docs are work orders / estimates
+      (!row.documentType && !row.documenttype)
+    );
+  };
+
+  const isPaidDocRow = (row: any) =>
+    String(row?.paymentStatus ?? row?.paymentstatus ?? '').toLowerCase() === 'paid';
+
+  /** Paid invoices (and fully paid work) belong in Profile → Paid Invoices, not active lists. */
+  const shouldMoveToPaidFolder = (row: any) => {
+    if (!row || isSettingsDocRow(row)) return false;
+    if (!isPaidDocRow(row)) return false;
+    return isInvoiceDocRow(row) || isEstimateTypeRow(row);
+  };
+
+  const normText = (v: any) =>
+    String(v ?? '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, ' ');
+
+  const docNumberKeys = (row: any): string[] => {
+    const keys = new Set<string>();
+    for (const raw of [row?.id, row?.invoiceNumber, row?.invoicenumber]) {
+      const s = String(raw ?? '').trim();
+      if (!s || s.startsWith('SETTINGS')) continue;
+      keys.add(s);
+      keys.add(s.toUpperCase());
+      // EST-0001 ↔ INV-0001 twins (any case / with or without dash)
+      const m = s.match(/^(EST|INV)[-_]?(.+)$/i);
+      if (m) {
+        const rest = m[2];
+        keys.add(`EST-${rest}`);
+        keys.add(`INV-${rest}`);
+        keys.add(`EST${rest}`);
+        keys.add(`INV${rest}`);
+        keys.add(`EST-${rest}`.toUpperCase());
+        keys.add(`INV-${rest}`.toUpperCase());
+      }
+    }
+    return Array.from(keys);
+  };
+
+  const jobMatchKeys = (row: any): string[] => {
+    const job = normText(row?.jobName ?? row?.jobname);
+    if (!job) return [];
+    const zip = normText(row?.zipCode ?? row?.zipcode).slice(0, 5);
+    const addr = normText(row?.address);
+    const keys = [`job:${job}`];
+    if (zip) keys.push(`jobzip:${job}|${zip}`);
+    if (addr) keys.push(`jobaddr:${job}|${addr}`);
+    return keys;
+  };
+
+  /**
+   * Build lookup of closed-out work so related estimates leave the Estimates page.
+   * - Number keys: any invoice / paid / archived (EST-0001 ↔ INV-0001)
+   * - Job keys: paid or archived only (avoids hiding other open jobs for same client)
+   */
+  const buildClosedWorkIndex = (closedRows: any[]) => {
+    const numberKeys = new Set<string>();
+    const jobKeys = new Set<string>();
+    for (const row of closedRows || []) {
+      if (!row || isSettingsDocRow(row)) continue;
+      const isPaid = isPaidDocRow(row);
+      const isInv = isInvoiceDocRow(row);
+      const isArchived = !!row.archived_at;
+      if (!isPaid && !isInv && !isArchived) continue;
+
+      // Twin numbers for convert + close-out
+      if (isInv || isPaid || isArchived) {
+        for (const k of docNumberKeys(row)) numberKeys.add(k);
+      }
+      // Job fingerprint only when work is truly closed (paid / in archive)
+      if (isPaid || isArchived) {
+        for (const k of jobMatchKeys(row)) jobKeys.add(k);
+      }
+    }
+    return { numberKeys, jobKeys };
+  };
+
+  /** True if this active estimate belongs to already-closed/paid work. */
+  const estimateBelongsToClosedWork = (est: any, closed: { numberKeys: Set<string>; jobKeys: Set<string> }) => {
+    if (!est || isSettingsDocRow(est)) return false;
+    if (isInvoiceDocRow(est) && !isPaidDocRow(est)) return false;
+    if (isPaidDocRow(est)) return true;
+    if (!isEstimateTypeRow(est) && !isInvoiceDocRow(est)) {
+      // unknown type — still hide if number/job matches closed work
+    }
+    for (const k of docNumberKeys(est)) {
+      if (closed.numberKeys.has(k)) return true;
+    }
+    const estJobKeys = jobMatchKeys(est);
+    // Prefer job+zip or job+address; fall back to job-only
+    if (estJobKeys.some((k) => k.startsWith('jobzip:') && closed.jobKeys.has(k))) return true;
+    if (estJobKeys.some((k) => k.startsWith('jobaddr:') && closed.jobKeys.has(k))) return true;
+    if (estJobKeys.some((k) => k.startsWith('job:') && closed.jobKeys.has(k))) return true;
+    return false;
+  };
+
+  /**
+   * Delete related estimate/work-order rows for a closed invoice (or set of closed docs).
+   * Awaits DB deletes so the Estimates list stays clean after close-out.
+   */
+  const purgeRelatedEstimatesForClosedDocs = async (
+    closedDocs: any[],
+    uid?: string
+  ): Promise<string[]> => {
+    if (!supabase || !user) return [];
+    const userId = uid || user.id;
+    const closed = buildClosedWorkIndex(closedDocs);
+    if (closed.numberKeys.size === 0 && closed.jobKeys.size === 0) return [];
+
+    const { data: activeRows, error } = await supabase
+      .from('estimates')
+      .select('*')
+      .eq('user_id', userId);
+    if (error || !activeRows?.length) {
+      if (error) console.warn('purgeRelatedEstimatesForClosedDocs fetch failed:', error);
+      return [];
+    }
+
+    const closedIds = new Set(
+      (closedDocs || []).map((d) => String(d?.id || '')).filter(Boolean)
+    );
+    const toDelete: string[] = [];
+    for (const row of activeRows) {
+      const rid = String(row.id || '');
+      if (!rid || closedIds.has(rid) || isSettingsDocRow(row)) continue;
+      // Never delete open unpaid invoices
+      if (isInvoiceDocRow(row) && !isPaidDocRow(row)) continue;
+      // Delete paid leftovers and any estimate/work order tied to closed work
+      if (isPaidDocRow(row) || isEstimateTypeRow(row) || estimateBelongsToClosedWork(row, closed)) {
+        toDelete.push(rid);
+      }
+    }
+
+    // Unique ids
+    const unique = Array.from(new Set(toDelete));
+    for (const estId of unique) {
+      const { error: delErr } = await supabase
+        .from('estimates')
+        .delete()
+        .eq('id', estId)
+        .eq('user_id', userId);
+      if (delErr) console.warn('Failed to purge estimate', estId, delErr);
+    }
+
+    if (unique.length > 0) {
+      setSavedEstimatesList((prev) =>
+        (prev || []).filter((r: any) => !unique.includes(String(r.id)))
+      );
+    }
+    return unique;
+  };
+
   const refreshSavedList = async () => {
     if (!user || !supabase) return;
     const { data, error } = await supabase
@@ -2376,7 +2779,82 @@ export default function Home() {
       console.error('refreshSavedList error:', error);
       return;
     }
-    setSavedEstimatesList(data || []);
+    let rows = data || [];
+
+    // Load archives first so we know which work is closed out
+    const { data: archivedRows } = await supabase
+      .from('archive-est')
+      .select('*')
+      .eq('user_id', user.id);
+    const archives = archivedRows || [];
+
+    // Move any paid invoices/docs still sitting in active estimates → paid folder (archive-est)
+    const paidActive = rows.filter(shouldMoveToPaidFolder);
+    if (paidActive.length > 0) {
+      for (const row of paidActive) {
+        try {
+          const result = await persistArchive({
+            ...row,
+            paymentStatus: 'paid',
+            documentType:
+              row.documentType ??
+              row.documenttype ??
+              (isInvoiceDocRow(row) ? 'invoice' : 'estimate'),
+          });
+          if (!result?.error) {
+            rows = rows.filter((r: any) => r.id !== row.id);
+          }
+        } catch (e) {
+          console.warn('Auto-move to paid folder failed for', row.id, e);
+        }
+      }
+      // Re-read archives after moves
+      const { data: archivesAfter } = await supabase
+        .from('archive-est')
+        .select('*')
+        .eq('user_id', user.id);
+      if (archivesAfter) {
+        archives.length = 0;
+        archives.push(...archivesAfter);
+      }
+      void refreshArchivesList();
+    }
+
+    // Purge estimates that belong to closed/paid invoices (await so UI is correct)
+    const closedIndex = buildClosedWorkIndex([
+      ...archives,
+      ...rows.filter((r) => isPaidDocRow(r) || isInvoiceDocRow(r)),
+    ]);
+    const purgeIds: string[] = [];
+    rows = rows.filter((row: any) => {
+      if (isSettingsDocRow(row)) return true;
+      if (isInvoiceDocRow(row) && !isPaidDocRow(row)) return true;
+      if (isPaidDocRow(row)) {
+        purgeIds.push(String(row.id));
+        return false;
+      }
+      if (isEstimateTypeRow(row) && estimateBelongsToClosedWork(row, closedIndex)) {
+        purgeIds.push(String(row.id));
+        return false;
+      }
+      return true;
+    });
+
+    if (purgeIds.length > 0) {
+      for (const estId of Array.from(new Set(purgeIds))) {
+        await supabase.from('estimates').delete().eq('id', estId).eq('user_id', user.id);
+      }
+    }
+
+    // Never show paid invoices in active list UI
+    rows = rows.filter((row: any) => !(isInvoiceDocRow(row) && isPaidDocRow(row)));
+    // Never show estimates for closed work
+    rows = rows.filter(
+      (row: any) =>
+        !isEstimateTypeRow(row) || !estimateBelongsToClosedWork(row, closedIndex)
+    );
+
+    setSavedEstimatesList(rows);
   };
 
   const refreshArchivesList = async () => {
@@ -2527,6 +3005,7 @@ export default function Home() {
     setAmountPaid(est.amountPaid || 0);
     setPaymentMethod(est.paymentMethod || '');
     setPhotoUrls(est.photoUrls || []);
+    setPhotosFolderOpen(false);
     setVideoUrls(est.videoUrls || []);
     setReceiptUrls(est.receiptUrls || []);
     setReceiptDetails(est.receiptDetails || []);
@@ -2675,6 +3154,7 @@ export default function Home() {
     setJobName(''); setAddress(''); setCity(''); setState(''); setZipCode('');
     setPhones(['']); setEmails(['']); setTerms('');
     setPhotoUrls([]); setVideoUrls([]); setReceiptUrls([]); setReceiptDetails([]);
+    setPhotosFolderOpen(false);
     setItems([{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
     setLaborHours(0); setLaborRate(0); setLaborFixedAmount(0); setUseHourlyLabor(true);
     setIsTaxExempt(false);
@@ -3174,6 +3654,13 @@ export default function Home() {
       return;
     }
 
+    // Expand photo folder so PDF includes every image (not just the folder tile)
+    const folderWasOpen = photosFolderOpen;
+    if (photoDisplayUrls.length > PHOTO_FOLDER_THRESHOLD && !photosFolderOpen) {
+      setPhotosFolderOpen(true);
+      await new Promise((r) => setTimeout(r, 120));
+    }
+
     try {
       const html2pdf = (await import('html2pdf.js')).default;
 
@@ -3213,13 +3700,149 @@ export default function Home() {
     } catch (err) {
       console.error('PDF generation error:', err);
       showMessage('❌ Failed to generate PDF. Please try again.');
+    } finally {
+      if (!folderWasOpen) setPhotosFolderOpen(false);
     }
   };
 
-  const convertToInvoice = () => {
+  /**
+   * Remove the original estimate/work-order row once a job has become an invoice
+   * (or is being closed out), so it no longer appears on the Estimates page.
+   */
+  const removeEstimateWorkOrderForInvoice = async (
+    invoiceRowOrId: any,
+    uid?: string,
+    extraContext?: { jobName?: string; address?: string; zipCode?: string }
+  ) => {
+    if (!supabase || !user) return;
+    const userId = uid || user.id;
+    const invoiceRow =
+      typeof invoiceRowOrId === 'string'
+        ? {
+            id: invoiceRowOrId,
+            invoiceNumber: invoiceRowOrId,
+            documentType: 'invoice',
+            paymentStatus: 'paid',
+            jobName: extraContext?.jobName,
+            address: extraContext?.address,
+            zipCode: extraContext?.zipCode,
+          }
+        : invoiceRowOrId;
+
+    // Direct EST twin delete (fast path)
+    for (const key of docNumberKeys(invoiceRow)) {
+      const m = String(key).match(/^INV[-_]?(.*)$/i);
+      if (!m) continue;
+      const rest = m[1];
+      for (const estId of [`EST-${rest}`, `EST${rest}`, `est-${rest}`, `Est-${rest}`]) {
+        await supabase.from('estimates').delete().eq('id', estId).eq('user_id', userId);
+      }
+    }
+
+    // Broad purge by number + job for any leftover work orders
+    await purgeRelatedEstimatesForClosedDocs(
+      [
+        {
+          ...invoiceRow,
+          documentType: invoiceRow.documentType || 'invoice',
+          paymentStatus: invoiceRow.paymentStatus || 'paid',
+          archived_at: invoiceRow.archived_at || new Date().toISOString(),
+        },
+      ],
+      userId
+    );
+  };
+
+  const convertToInvoice = async () => {
+    const previousId = invoiceNumber;
+    const prevUpper = previousId.toUpperCase();
+    const nextNumber = prevUpper.startsWith('EST')
+      ? previousId.replace(/^est/i, 'INV').replace(/^EST/, 'INV')
+      : previousId;
+
     setDocumentType('invoice');
-    if (invoiceNumber.startsWith('EST-')) setInvoiceNumber(invoiceNumber.replace('EST-', 'INV-'));
+    if (prevUpper.startsWith('EST')) setInvoiceNumber(nextNumber);
     setView('sendPreview');
+
+    // Persist as invoice under the new INV- id and drop the EST- work order immediately
+    if (user && supabase) {
+      try {
+        const data = {
+          user_id: user.id,
+          jobName,
+          address,
+          city,
+          state,
+          zipCode,
+          phones,
+          emails,
+          date,
+          invoiceNumber: nextNumber,
+          items,
+          terms,
+          profile: getDocumentProfileSnapshot(),
+          documentType: 'invoice' as const,
+          dueDate,
+          paymentStatus,
+          amountPaid,
+          paymentMethod,
+          photoUrls,
+          videoUrls,
+          receiptUrls,
+          receiptDetails,
+          laborHours,
+          laborRate,
+          laborFixedAmount,
+          useHourlyLabor,
+          laborAmount,
+          taxRate: baseTaxRate,
+          taxAmount,
+          isTaxExempt,
+          taxLabor,
+          updated_at: new Date().toISOString(),
+        };
+        const { error } = await supabase.from('estimates').upsert({ id: nextNumber, ...data });
+        if (error) {
+          console.error('convertToInvoice save failed:', error);
+          showMessage('Converted to invoice in the editor, but save failed. Tap Save on the invoice.');
+        } else {
+          // Always remove the original estimate row when the id changed
+          if (previousId && previousId !== nextNumber) {
+            await supabase.from('estimates').delete().eq('id', previousId).eq('user_id', user.id);
+            // Also try lowercase column invoiceNumber variants
+            await supabase
+              .from('estimates')
+              .delete()
+              .eq('user_id', user.id)
+              .eq('invoiceNumber', previousId);
+          }
+          await removeEstimateWorkOrderForInvoice(
+            {
+              id: nextNumber,
+              invoiceNumber: nextNumber,
+              documentType: 'invoice',
+              jobName,
+              address,
+              zipCode,
+              paymentStatus: paymentStatus || 'pending',
+            },
+            user.id
+          );
+          // Optimistically drop the old estimate from the list immediately
+          setSavedEstimatesList((prev) =>
+            (prev || []).filter(
+              (r: any) =>
+                String(r.id) !== previousId &&
+                String(r.invoiceNumber ?? r.invoicenumber ?? '') !== previousId
+            )
+          );
+          await refreshSavedList();
+          showMessage('✅ Converted to invoice — estimate removed from the Estimates page.');
+        }
+      } catch (e) {
+        console.error('convertToInvoice unexpected error:', e);
+      }
+    }
   };
 
   // Build archive payload. Reads camelCase or lowercase keys from estimates rows.
@@ -3344,7 +3967,165 @@ export default function Home() {
       console.warn('Archived to archive-est but delete from estimates failed:', del.error);
       return { error: null, warning: del.error.message };
     }
+
+    // Immediately drop this id from the in-memory list
+    setSavedEstimatesList((prev) => (prev || []).filter((r: any) => String(r.id) !== id));
+
+    // Closed-out / paid work must not leave the original estimate on the Estimates page
+    const purged = await removeEstimateWorkOrderForInvoice(
+      {
+        ...archiveData,
+        id,
+        paymentStatus: archiveData.paymentStatus || 'paid',
+        documentType: archiveData.documentType || 'invoice',
+        archived_at: archiveData.archived_at || new Date().toISOString(),
+      },
+      uid
+    );
+    void purged;
+
     return { error: null };
+  };
+
+  /**
+   * Restore a document from archive-est back into active estimates.
+   * Reverse of persistArchive: insert into estimates, then remove archive row.
+   */
+  const retrieveArchive = async (archRow: any) => {
+    if (!supabase || !user) {
+      showMessage('Not logged in or Supabase not configured.');
+      return;
+    }
+    if (currentCrew) {
+      showMessage('Crew accounts cannot retrieve archived documents.');
+      return;
+    }
+    if (!archRow?.id) {
+      showMessage('Could not retrieve: missing document id.');
+      return;
+    }
+    if (!confirm('Retrieve this document from archives and restore it to your active list?')) return;
+
+    const id = String(archRow.id);
+    const uid = archRow.user_id || archRow.userId || user.id;
+
+    try {
+      // Build estimates payload (no archived_at column on estimates)
+      const g = (camel: string, lower?: string) => {
+        const l = lower || camel.toLowerCase();
+        if (archRow[camel] !== undefined && archRow[camel] !== null) return archRow[camel];
+        if (archRow[l] !== undefined && archRow[l] !== null) return archRow[l];
+        return null;
+      };
+      const toArray = (v: any): any[] => (Array.isArray(v) ? v : v == null ? [] : [v]);
+      const toNum = (v: any): number | null => {
+        if (v == null || v === '') return null;
+        const n = Number(v);
+        return Number.isFinite(n) ? n : null;
+      };
+      const toBool = (v: any, defaultVal = false): boolean => {
+        if (v === true || v === 1 || v === 'true') return true;
+        if (v === false || v === 0 || v === 'false') return false;
+        return defaultVal;
+      };
+
+      const itemsRaw = g('items') ?? [];
+      const receiptDetailsRaw = g('receiptDetails', 'receiptdetails') ?? [];
+
+      const estimateData: Record<string, any> = {
+        id,
+        user_id: uid,
+        documentType: g('documentType', 'documenttype') || 'estimate',
+        jobName: g('jobName', 'jobname'),
+        address: g('address'),
+        city: g('city'),
+        state: g('state'),
+        zipCode: g('zipCode', 'zipcode'),
+        phones: toArray(g('phones')),
+        emails: toArray(g('emails')),
+        date: g('date'),
+        invoiceNumber: g('invoiceNumber', 'invoicenumber') || id,
+        items: Array.isArray(itemsRaw) ? itemsRaw : [],
+        terms: g('terms'),
+        laborHours: toNum(g('laborHours', 'laborhours')),
+        laborRate: toNum(g('laborRate', 'laborrate')),
+        laborFixedAmount: toNum(g('laborFixedAmount', 'laborfixedamount')),
+        useHourlyLabor: toBool(g('useHourlyLabor', 'usehourlylabor'), true),
+        laborAmount: toNum(g('laborAmount', 'laboramount')),
+        taxRate: toNum(g('taxRate', 'taxrate')),
+        taxAmount: toNum(g('taxAmount', 'taxamount')),
+        isTaxExempt: toBool(g('isTaxExempt', 'istaxexempt'), false),
+        taxLabor: toBool(g('taxLabor', 'taxlabor'), true),
+        photoUrls: toArray(g('photoUrls', 'photourls')),
+        videoUrls: toArray(g('videoUrls', 'videourls')),
+        receiptUrls: toArray(g('receiptUrls', 'receipturls')),
+        receiptDetails: Array.isArray(receiptDetailsRaw) ? receiptDetailsRaw : [],
+        dueDate: g('dueDate', 'duedate'),
+        paymentStatus: g('paymentStatus', 'paymentstatus') || 'pending',
+        amountPaid: toNum(g('amountPaid', 'amountpaid')),
+        paymentMethod: g('paymentMethod', 'paymentmethod'),
+        profile: archRow.profile && typeof archRow.profile === 'object' ? archRow.profile : {},
+        updated_at: new Date().toISOString(),
+      };
+
+      // Upsert into active estimates
+      let result = await supabase.from('estimates').upsert(estimateData);
+      if (result.error) {
+        console.warn('retrieveArchive camelCase upsert failed:', formatArchiveErr(result.error));
+        const lower: Record<string, any> = {};
+        for (const [k, v] of Object.entries(estimateData)) {
+          if (k === 'id' || k === 'user_id' || k === 'updated_at') lower[k] = v;
+          else lower[k.toLowerCase()] = v;
+        }
+        result = await supabase.from('estimates').upsert(lower);
+      }
+      if (result.error) {
+        console.error('retrieveArchive insert failed:', formatArchiveErr(result.error));
+        showMessage(
+          'Retrieve failed: ' +
+            formatArchiveErr(result.error) +
+            ' — Document was left in archives.'
+        );
+        return;
+      }
+
+      // Remove from archive only after successful restore
+      const del = await supabase.from('archive-est').delete().eq('id', id).eq('user_id', uid);
+      if (del.error) {
+        console.warn('Restored to estimates but archive delete failed:', del.error);
+        showMessage('✅ Document restored, but archive cleanup failed: ' + del.error.message);
+      } else {
+        showMessage('✅ Document retrieved from archives and restored to your active list');
+      }
+
+      await refreshArchivesList();
+      await refreshSavedList();
+    } catch (e: any) {
+      console.error('Unexpected error retrieving archive', id, e);
+      showMessage('Retrieve failed: ' + (e?.message || 'unexpected error'));
+    }
+  };
+
+  const deleteArchivedDocument = async (id: string) => {
+    if (!confirm('Delete this archived document permanently? This cannot be undone.')) return;
+    if (!user || !supabase) return;
+    if (currentCrew) {
+      showMessage('Crew accounts cannot delete archived documents.');
+      return;
+    }
+    const { error } = await supabase.from('archive-est').delete().eq('id', id).eq('user_id', user.id);
+    if (error) {
+      console.error('deleteArchivedDocument error:', error);
+      showMessage('Could not delete archive: ' + error.message);
+      return;
+    }
+    await refreshArchivesList();
+    showMessage('Archived document deleted');
+  };
+
+  const openArchivesView = async () => {
+    await refreshArchivesList();
+    setView('archivesView');
   };
 
   const markAsPaidCash = async () => {
@@ -3388,7 +4169,8 @@ export default function Home() {
       if (fetchErr || !est) {
         console.error('Fetch for archive failed:', fetchErr);
         showMessage('✅ Invoice marked as Paid (Cash), but could not load for archiving.');
-        setView('invoicesList');
+        setProfileTab('paidInvoices');
+        setView('profileView');
         await refreshSavedList();
         return;
       }
@@ -3403,8 +4185,9 @@ export default function Home() {
         return;
       }
 
-      showMessage('✅ Invoice marked as Paid (Cash) and closed to archives');
-      setView('invoicesList');
+      showMessage('✅ Invoice marked as Paid (Cash) and moved to Paid Invoices');
+      setProfileTab('paidInvoices');
+      setView('profileView');
       await refreshSavedList();
       await refreshArchivesList();
     } catch (e: any) {
@@ -4075,9 +4858,28 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (view === 'dashboard' || view === 'estimatesList' || view === 'invoicesList' || view === 'editor') refreshSavedList();
-    if (view === 'archivesView' || view === 'editor') refreshArchivesList();
+    if (view === 'dashboard' || view === 'estimatesList' || view === 'invoicesList' || view === 'editor' || view === 'profileView') {
+      refreshSavedList();
+    }
+    // Archives / paid invoices needed so closed-out work leaves Estimates and fills Paid Invoices tab
+    if (
+      view === 'archivesView' ||
+      view === 'editor' ||
+      view === 'estimatesList' ||
+      view === 'dashboard' ||
+      view === 'invoicesList' ||
+      view === 'profileView'
+    ) {
+      refreshArchivesList();
+    }
   }, [view]);
+
+  useEffect(() => {
+    if (view === 'profileView' && profileTab === 'paidInvoices') {
+      void refreshArchivesList();
+      void refreshSavedList();
+    }
+  }, [view, profileTab]);
 
   // Ensure the chosen language from localStorage (user choice) is always applied
   useEffect(() => {
@@ -4683,23 +5485,25 @@ export default function Home() {
         setAmountPaid(grandTotal);
         setPaymentMethod(methodLabel);
         setIsZellePayOpen(false);
-        setView('invoicesList');
+        setProfileTab('paidInvoices');
+        setView('profileView');
         await refreshSavedList();
         return;
       }
 
-      const archiveData = prepareArchiveData({ ...est, paymentStatus: 'paid', amountPaid: grandTotal, paymentMethod: methodLabel });
-      if (archiveData) {
-        await supabase.from('archive-est').delete().eq('id', id).eq('user_id', user.id);
-        const { error } = await supabase.from('archive-est').insert(archiveData);
-        if (!error) {
-          await supabase.from('estimates').delete().eq('id', id);
-          showMessage(`✅ Invoice marked Paid (${methodLabel}) and closed to archives`);
-        } else {
-          showMessage(`✅ Marked paid (${methodLabel}), but archiving failed.`);
-        }
+      // Prefer shared persistArchive so related EST- work order is removed with the invoice
+      const { error: archiveErr } = await persistArchive({
+        ...est,
+        paymentStatus: 'paid',
+        amountPaid: grandTotal,
+        paymentMethod: methodLabel,
+      });
+      if (archiveErr) {
+        showMessage(
+          `✅ Marked paid (${methodLabel}), but moving to Paid Invoices failed: ${(archiveErr as any).message || 'unknown'}`
+        );
       } else {
-        showMessage(`✅ Invoice marked Paid (${methodLabel}).`);
+        showMessage(`✅ Invoice marked Paid (${methodLabel}) and moved to Paid Invoices`);
       }
 
       setPaymentStatus('paid');
@@ -4708,7 +5512,8 @@ export default function Home() {
       setIsZellePayOpen(false);
       setIsVenmoPayOpen(false);
       setIsPayPalPayOpen(false);
-      setView('invoicesList');
+      setProfileTab('paidInvoices');
+      setView('profileView');
       await refreshSavedList();
       await refreshArchivesList();
     } catch (e) {
@@ -5222,8 +6027,51 @@ export default function Home() {
   };
 
   // Dashboard calculations
-  const isEstimateDoc = (est: any) =>
-    est.documentType === 'estimate' || est.invoiceNumber?.startsWith('EST');
+  const closedWorkIndex = useMemo(() => {
+    const closedRows = [
+      ...(archivesList || []),
+      ...(savedEstimatesList || []).filter(
+        (r: any) => isPaidDocRow(r) || isInvoiceDocRow(r)
+      ),
+    ];
+    return buildClosedWorkIndex(closedRows);
+  }, [archivesList, savedEstimatesList]);
+
+  /** Active estimate/work-order only — excludes settings, invoices, paid, and closed-out orphans. */
+  const isEstimateDoc = (est: any) => {
+    if (!est) return false;
+    if (isSettingsDocRow(est)) return false;
+    if (isInvoiceDocRow(est)) return false;
+    if (isPaidDocRow(est)) return false;
+    if (!isEstimateTypeRow(est)) {
+      const num = String(est.invoiceNumber ?? est.invoicenumber ?? est.id ?? '');
+      const id = String(est.id || '');
+      // Fallback: treat EST-prefixed docs as estimates
+      if (!num.toUpperCase().startsWith('EST') && !id.toUpperCase().startsWith('EST')) {
+        return false;
+      }
+    }
+    // Hide any work order tied to a paid/closed invoice
+    if (estimateBelongsToClosedWork(est, closedWorkIndex)) return false;
+    return true;
+  };
+
+  /** Open (unpaid) invoices only — paid ones live under Profile → Paid Invoices. */
+  const isOpenInvoiceDoc = (est: any) => isInvoiceDocRow(est) && !isPaidDocRow(est);
+
+  const paidInvoicesList = useMemo(() => {
+    return (archivesList || [])
+      .filter((row: any) => {
+        if (isSettingsDocRow(row)) return false;
+        // Paid folder: paid status, or archived invoice (closed out)
+        return isPaidDocRow(row) || isInvoiceDocRow(row);
+      })
+      .sort((a: any, b: any) => {
+        const da = new Date(a.archived_at || a.updated_at || a.date || 0).getTime();
+        const db = new Date(b.archived_at || b.updated_at || b.date || 0).getTime();
+        return db - da;
+      });
+  }, [archivesList]);
 
   const estimateMatchesSearch = (est: any, query: string) => {
     const q = query.trim().toLowerCase();
@@ -5253,13 +6101,20 @@ export default function Home() {
     return (savedEstimatesList || [])
       .filter(isEstimateDoc)
       .filter((est) => estimateMatchesSearch(est, estimateListSearch));
-  }, [savedEstimatesList, estimateListSearch]);
+  }, [savedEstimatesList, archivesList, estimateListSearch]);
 
-  const estimatesCount = savedEstimatesList.filter(isEstimateDoc).length;
+  const estimatesCount = useMemo(
+    () => (savedEstimatesList || []).filter(isEstimateDoc).length,
+    [savedEstimatesList, archivesList]
+  );
 
-  const outstandingInvoices = savedEstimatesList.filter(est => 
-    (est.documentType === 'invoice' || est.invoiceNumber?.startsWith('INV')) && 
-    est.paymentStatus === 'pending'
+  const outstandingInvoices = savedEstimatesList.filter(
+    (est) => isOpenInvoiceDoc(est) && (est.paymentStatus === 'pending' || !est.paymentStatus)
+  );
+
+  const openInvoicesList = useMemo(
+    () => (savedEstimatesList || []).filter(isOpenInvoiceDoc),
+    [savedEstimatesList]
   );
 
   const calculateGrandTotal = (doc: any): number => {
@@ -5792,15 +6647,13 @@ export default function Home() {
             <div>
               <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to {t('dashboard')}</Button>
               <div className="flex justify-between items-center mb-4">
-                <h2 className="text-3xl font-semibold">All {t('invoices')}</h2>
-                {savedEstimatesList.filter(est => est.documentType === 'invoice' || est.invoiceNumber?.startsWith('INV')).length > 0 && (
+                <h2 className="text-3xl font-semibold">Open {t('invoices')}</h2>
+                {openInvoicesList.length > 0 && (
                   <Button 
                     size="sm" 
                     variant="outline" 
                     onClick={() => {
-                      const invIds = savedEstimatesList
-                        .filter(est => est.documentType === 'invoice' || est.invoiceNumber?.startsWith('INV'))
-                        .map(est => est.id);
+                      const invIds = openInvoicesList.map(est => est.id);
                       setSelectedIds(selectedIds.length === invIds.length ? [] : invIds);
                     }}
                   >
@@ -5808,6 +6661,9 @@ export default function Home() {
                   </Button>
                 )}
               </div>
+              <p className="text-sm text-gray-500 mb-4">
+                Paid invoices are moved to Profile → {t('paidInvoices')}.
+              </p>
 
               {selectedIds.length > 0 && (
                 <div className="mb-4 flex flex-wrap gap-2 p-3 bg-gray-50 rounded-lg">
@@ -5827,7 +6683,12 @@ export default function Home() {
               )}
 
               <div className="space-y-4">
-                {savedEstimatesList.filter(est => est.documentType === 'invoice' || est.invoiceNumber?.startsWith('INV')).map((est) => (
+                {openInvoicesList.length === 0 && (
+                  <div className="border border-dashed rounded-lg p-8 text-center text-sm text-gray-500 bg-white">
+                    No open invoices. Paid invoices are under Profile → {t('paidInvoices')}.
+                  </div>
+                )}
+                {openInvoicesList.map((est) => (
                   <div key={est.id} className="flex justify-between items-center border p-4 rounded-lg bg-white">
                     <div className="flex items-center gap-3 flex-1">
                       <input 
@@ -5847,7 +6708,6 @@ export default function Home() {
                       </div>
                     </div>
                     <div className="flex items-center gap-4">
-                      {est.paymentStatus === 'paid' && <span className="px-3 py-1 text-xs font-medium bg-green-100 text-green-700 rounded-full">{t('paid')}</span>}
                       <Button size="sm" onClick={async () => { await loadSelectedEstimate(est); setView('editor'); setSelectedIds([]); }}>{t('open')}</Button>
                       <Button size="sm" variant="outline" onClick={() => archiveEstimate(est.id)}>{t('archive')}</Button>
                       <Button size="sm" variant="destructive" onClick={() => deleteSelectedEstimate(est.id)}>{t('delete')}</Button>
@@ -6299,7 +7159,20 @@ export default function Home() {
                             </div>
                             <div className="grid grid-cols-2 gap-3">
                               <div className="space-y-1">
-                                <label className="block text-[11px] font-medium text-gray-600">Qty</label>
+                                <div className="flex items-center justify-between gap-1">
+                                  <label className="block text-[11px] font-medium text-gray-600">Qty</label>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setLidarMeasureItemId(item.id);
+                                      setIsLidarMeasureOpen(true);
+                                    }}
+                                    className="text-[10px] font-semibold text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-full px-2 py-0.5 whitespace-nowrap"
+                                    title="Measure with LiDAR / AR camera"
+                                  >
+                                    📡 Measure
+                                  </button>
+                                </div>
                                 <Input
                                   type="number"
                                   value={item.qty}
@@ -6598,36 +7471,11 @@ export default function Home() {
                   <h3 className="text-xl font-semibold mb-4">{t('photosSection')} ({photoUrls.length})</h3>
                   <p className="text-sm text-gray-500 mb-4">
                     Use your phone camera to capture job photos. Tap 📷 AI Quote on any photo to price a line item.
+                    {photoUrls.length > PHOTO_FOLDER_THRESHOLD
+                      ? ' With more than 6 photos, they are kept in a folder — click the folder to view them.'
+                      : ''}
                   </p>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    {photoDisplayUrls.map((url, i) => (
-                      <div key={i} className="relative group">
-                        <img src={url} alt="" className="w-full h-40 object-cover rounded-lg border" />
-                        <button
-                          type="button"
-                          onClick={() => openGalleryPhotoQuote(url)}
-                          className="absolute bottom-2 left-2 right-2 bg-violet-600 hover:bg-violet-700 text-white text-xs py-1.5 px-2 rounded-lg shadow-md sm:opacity-0 sm:group-hover:opacity-100 transition"
-                        >
-                          📷 AI Quote
-                        </button>
-                        <button 
-                          onClick={() => removeMedia('photo', i)} 
-                          className="absolute top-2 right-2 bg-red-600 hover:bg-red-700 text-white text-4xl w-10 h-10 flex items-center justify-center rounded-2xl shadow-xl"
-                        >
-                          ×
-                        </button>
-                      </div>
-                    ))}
-                    {/* Opens picker: device camera or gallery */}
-                    <button
-                      type="button"
-                      onClick={openPhotoPicker}
-                      className="flex flex-col items-center justify-center h-40 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition w-full"
-                    >
-                      <div className="text-4xl mb-1">📷</div>
-                      <div className="text-xs text-gray-500">{t('addPhoto')}</div>
-                    </button>
-                  </div>
+                  {renderPhotoGallery({ editable: true })}
                 </CardContent>
               </Card>
 
@@ -6868,11 +7716,12 @@ export default function Home() {
 
                 {photoUrls.length > 0 && (
                   <div className="mt-12">
-                    <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Attached Photos</h3>
-                    <div className="grid grid-cols-2 gap-6">
-                      {photoDisplayUrls.map((url, i) => (
-                        <img key={i} src={url} alt={`Photo ${i + 1}`} className="w-full border rounded-xl shadow-sm max-h-64 object-contain" />
-                      ))}
+                    {/* Print always expands; on screen, folder when > 6 */}
+                    <div className="print:hidden">
+                      {renderPhotoGallery({ heading: 'Attached Photos' })}
+                    </div>
+                    <div className="hidden print:block">
+                      {renderPhotoGallery({ heading: 'Attached Photos', forceExpanded: true })}
                     </div>
                   </div>
                 )}
@@ -6885,18 +7734,33 @@ export default function Home() {
               <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to {t('dashboard')}</Button>
               <h2 className="text-3xl font-semibold mb-8">{t('companyProfile')}</h2>
 
-              <div className="flex border-b mb-8">
+              <div className="flex border-b mb-8 overflow-x-auto">
                 <button 
                   onClick={() => setProfileTab('info')}
-                  className={`flex-1 py-4 text-center font-semibold ${profileTab === 'info' ? 'border-b-4 border-[#10b981] text-[#10b981]' : 'text-gray-500'}`}
+                  className={`flex-1 min-w-[7rem] py-4 text-center font-semibold ${profileTab === 'info' ? 'border-b-4 border-[#10b981] text-[#10b981]' : 'text-gray-500'}`}
                 >
                   Company Info
                 </button>
                 <button 
                   onClick={() => setProfileTab('payments')}
-                  className={`flex-1 py-4 text-center font-semibold ${profileTab === 'payments' ? 'border-b-4 border-[#10b981] text-[#10b981]' : 'text-gray-500'}`}
+                  className={`flex-1 min-w-[7rem] py-4 text-center font-semibold ${profileTab === 'payments' ? 'border-b-4 border-[#10b981] text-[#10b981]' : 'text-gray-500'}`}
                 >
                   💳 Payments
+                </button>
+                <button
+                  onClick={() => {
+                    setProfileTab('paidInvoices');
+                    void refreshArchivesList();
+                    void refreshSavedList();
+                  }}
+                  className={`flex-1 min-w-[8rem] py-4 text-center font-semibold ${profileTab === 'paidInvoices' ? 'border-b-4 border-[#10b981] text-[#10b981]' : 'text-gray-500'}`}
+                >
+                  ✅ {t('paidInvoices')}
+                  {paidInvoicesList.length > 0 && (
+                    <span className="ml-1 text-xs font-medium px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                      {paidInvoicesList.length}
+                    </span>
+                  )}
                 </button>
               </div>
 
@@ -7446,6 +8310,30 @@ export default function Home() {
                     </div>
 
                     <div className="border-t pt-8">
+                      <h3 className="font-semibold mb-2">{t('paidInvoices')}</h3>
+                      <p className="text-sm text-gray-500 mb-4">{t('paidInvoicesHelp')}</p>
+                      <Button
+                        variant="outline"
+                        className="w-full mb-2 border-[#10b981] text-[#10b981] hover:bg-emerald-50"
+                        onClick={() => {
+                          setProfileTab('paidInvoices');
+                          void refreshArchivesList();
+                          void refreshSavedList();
+                        }}
+                      >
+                        ✅ {t('paidInvoices')}
+                        {paidInvoicesList.length > 0 ? ` (${paidInvoicesList.length})` : ''}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        className="w-full mb-2"
+                        onClick={openArchivesView}
+                      >
+                        📦 {t('viewArchives')}
+                      </Button>
+                    </div>
+
+                    <div className="border-t pt-8">
                       <h3 className="font-semibold mb-4">Export Data</h3>
                       <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
                         <label className="flex items-center gap-2">
@@ -7551,6 +8439,109 @@ export default function Home() {
                     </div>
 
 
+                  </CardContent>
+                </Card>
+              )}
+
+              {profileTab === 'paidInvoices' && (
+                <Card className="mb-8">
+                  <CardContent className="p-6 sm:p-8 space-y-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <h3 className="text-xl font-semibold flex items-center gap-2">
+                          <span>✅</span>
+                          <span>{t('paidInvoices')}</span>
+                        </h3>
+                        <p className="text-sm text-gray-500 mt-1">{t('paidInvoicesHelp')}</p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          void refreshArchivesList();
+                          void refreshSavedList();
+                        }}
+                      >
+                        Refresh
+                      </Button>
+                    </div>
+
+                    <div className="space-y-3">
+                      {paidInvoicesList.length === 0 && (
+                        <div className="border border-dashed rounded-lg p-8 text-center text-sm text-gray-500 bg-gray-50">
+                          {t('noPaidInvoices')}
+                        </div>
+                      )}
+                      {paidInvoicesList.map((inv) => {
+                        const paidLabel = inv.paymentMethod
+                          ? `${t('paid')} · ${inv.paymentMethod}`
+                          : t('paid');
+                        const archivedDate = inv.archived_at
+                          ? new Date(inv.archived_at).toLocaleDateString()
+                          : inv.date || '';
+                        return (
+                          <div
+                            key={inv.id}
+                            className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 border p-4 rounded-lg bg-white min-w-0"
+                          >
+                            <div className="min-w-0">
+                              <div className="font-medium break-words">{inv.jobName || 'Untitled'}</div>
+                              <div className="text-sm text-gray-500 break-words">
+                                {inv.invoiceNumber || inv.id}
+                                {inv.documentType ? ` · ${String(inv.documentType)}` : ''}
+                                {archivedDate ? ` · ${archivedDate}` : ''}
+                              </div>
+                              <div className="mt-1 flex flex-wrap items-center gap-2">
+                                <span className="px-2 py-0.5 text-xs font-medium bg-green-100 text-green-700 rounded-full">
+                                  {paidLabel}
+                                </span>
+                                {typeof inv.amountPaid === 'number' && inv.amountPaid > 0 && (
+                                  <span className="text-xs text-gray-600">
+                                    ${Number(inv.amountPaid).toFixed(2)}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap gap-2 shrink-0">
+                              <Button
+                                size="sm"
+                                onClick={async () => {
+                                  await loadSelectedEstimate(inv);
+                                  setView('editor');
+                                }}
+                              >
+                                {t('open')}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="border-[#10b981] text-[#10b981] hover:bg-emerald-50"
+                                onClick={() => retrieveArchive(inv)}
+                              >
+                                {t('retrieve')}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                onClick={() => deleteArchivedDocument(inv.id)}
+                              >
+                                {t('delete')}
+                              </Button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <div className="pt-4 border-t">
+                      <Button
+                        variant="outline"
+                        className="w-full"
+                        onClick={openArchivesView}
+                      >
+                        📦 {t('viewArchives')} ({t('archivedDocuments')})
+                      </Button>
+                    </div>
                   </CardContent>
                 </Card>
               )}
@@ -7714,18 +8705,39 @@ export default function Home() {
 
           {view === 'archivesView' && (
             <div>
-              <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to {t('dashboard')}</Button>
-              <h2 className="text-3xl font-semibold mb-6">{t('archivedDocuments')}</h2>
+              <div className="flex flex-wrap gap-2 mb-6">
+                <Button variant="outline" onClick={goToDashboard}>← Back to {t('dashboard')}</Button>
+                <Button variant="outline" onClick={() => setView('profileView')}>← {t('companyProfile')}</Button>
+              </div>
+              <h2 className="text-3xl font-semibold mb-2">{t('archivedDocuments')}</h2>
+              <p className="text-sm text-gray-500 mb-6">{t('retrieveArchiveHelp')}</p>
               <div className="space-y-4">
+                {archivesList.length === 0 && (
+                  <div className="border border-dashed rounded-lg p-8 text-center text-sm text-gray-500 bg-white">
+                    {t('noArchivedDocuments')}
+                  </div>
+                )}
                 {archivesList.map((est) => (
-                  <div key={est.id} className="flex justify-between items-center border p-4 rounded-lg bg-white">
-                    <div>
-                      <div className="font-medium">{est.jobName || 'Untitled'}</div>
-                      <div className="text-sm text-gray-500">{est.invoiceNumber} • Archived: {new Date(est.archived_at).toLocaleDateString()}</div>
+                  <div key={est.id} className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 border p-4 rounded-lg bg-white min-w-0">
+                    <div className="min-w-0">
+                      <div className="font-medium break-words">{est.jobName || 'Untitled'}</div>
+                      <div className="text-sm text-gray-500 break-words">
+                        {est.invoiceNumber}
+                        {est.documentType ? ` • ${String(est.documentType).charAt(0).toUpperCase()}${String(est.documentType).slice(1)}` : ''}
+                        {est.archived_at ? ` • Archived: ${new Date(est.archived_at).toLocaleDateString()}` : ''}
+                      </div>
                     </div>
-                    <div className="flex gap-3">
+                    <div className="flex flex-wrap gap-2 sm:gap-3 shrink-0">
                       <Button size="sm" onClick={async () => { await loadSelectedEstimate(est); setView('editor'); }}>{t('open')}</Button>
-                      <Button size="sm" variant="destructive" onClick={() => deleteSelectedEstimate(est.id)}>{t('delete')}</Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="border-[#10b981] text-[#10b981] hover:bg-emerald-50"
+                        onClick={() => retrieveArchive(est)}
+                      >
+                        {t('retrieve')}
+                      </Button>
+                      <Button size="sm" variant="destructive" onClick={() => deleteArchivedDocument(est.id)}>{t('delete')}</Button>
                     </div>
                   </div>
                 ))}
@@ -7949,12 +8961,7 @@ export default function Home() {
 
                 {photoUrls.length > 0 && (
                   <div className="mt-12">
-                    <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Attached Photos</h3>
-                    <div className="grid grid-cols-2 gap-6">
-                      {photoDisplayUrls.map((url, i) => (
-                        <img key={i} src={url} alt={`Photo ${i + 1}`} className="w-full border rounded-xl shadow-sm max-h-64 object-contain" />
-                      ))}
-                    </div>
+                    {renderPhotoGallery({ heading: 'Attached Photos' })}
                   </div>
                 )}
               </div>
@@ -9115,6 +10122,39 @@ export default function Home() {
         onClose={handleDeviceCameraClose}
         onPhoto={handleDeviceCameraPhoto}
         onVideo={handleDeviceCameraVideo}
+      />
+
+      <LidarMeasure
+        open={isLidarMeasureOpen}
+        preferArea={(() => {
+          const it = items.find((i) => i.id === lidarMeasureItemId);
+          const u = String(it?.unit || '').toLowerCase();
+          return u === 'sf' || u === 'sqft' || u.includes('sq');
+        })()}
+        onClose={() => {
+          setIsLidarMeasureOpen(false);
+          setLidarMeasureItemId(null);
+        }}
+        onApply={(result: LidarMeasureResult) => {
+          if (lidarMeasureItemId == null) return;
+          setItems((prev) =>
+            prev.map((item) => {
+              if (item.id !== lidarMeasureItemId) return item;
+              const qty = result.qty;
+              const unit = result.unit || item.unit || '';
+              const price = Number(item.price) || 0;
+              return {
+                ...item,
+                qty,
+                unit,
+                total: roundMoney(qty * price),
+              };
+            })
+          );
+          showMessage(`Measured: ${result.label} → qty ${result.qty} ${result.unit}`);
+          setIsLidarMeasureOpen(false);
+          setLidarMeasureItemId(null);
+        }}
       />
 
       {/* Media picker — device-style camera or gallery upload */}

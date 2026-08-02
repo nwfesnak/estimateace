@@ -84,6 +84,7 @@ $app_url = 'https://app.estimateace.com';
           <p>Build branded proposals with line items, terms, photos, and deposits. Send a client-ready preview and PDF while you're still in the driveway.</p>
           <ul class="feature-list">
             <li>Professional estimate & invoice PDFs</li>
+            <li>LiDAR / AR measure — fill length, area, and height into line items on site</li>
             <li>Discounts, deposits, and approval flows</li>
             <li>Job photos and video attached to documents</li>
             <li>English, Spanish, and French built in</li>
