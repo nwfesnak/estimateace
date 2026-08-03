@@ -83,17 +83,16 @@ export function formatItemBreakdownText(
     item.laborBreakdown || null
   );
 
+  // Materials / labor toggles: scope only (no $). Prices only under Cost Breakdown.
   if (parts.showMaterials && stored.materials.length > 0) {
     lines.push('   Materials needed:');
     for (const m of stored.materials) {
       const bit = [
         m.description || 'Material',
         m.qty != null ? `${m.qty} ${m.unit || ''}`.trim() : '',
-        Number(m.unitPrice) > 0 ? `× ${money(Number(m.unitPrice))}` : '',
-        Number(m.total) > 0 ? `= ${money(Number(m.total))}` : '',
       ]
         .filter(Boolean)
-        .join(' ');
+        .join(' — ');
       lines.push(`   • ${bit}`);
     }
   }
@@ -103,11 +102,9 @@ export function formatItemBreakdownText(
     const bit = [
       lab.description || 'Installation',
       lab.hours != null ? `${lab.hours} hrs` : '',
-      Number(lab.rate) > 0 ? `× ${money(Number(lab.rate))}/hr` : '',
-      Number(lab.total) > 0 ? `= ${money(Number(lab.total))}` : '',
     ]
       .filter(Boolean)
-      .join(' ');
+      .join(' — ');
     lines.push(`   Labor: ${bit}`);
   }
 
@@ -192,14 +189,15 @@ export function formatItemBreakdownHtml(
     item.laborBreakdown || null
   );
 
+  // Materials / labor toggles: scope only (no $). Prices only under Cost Breakdown.
   if (parts.showMaterials && stored.materials.length > 0) {
     const lis = stored.materials
       .map((m) => {
         const bit = [
           escapeHtml(String(m.description || 'Material')),
-          m.qty != null ? ` — ${escapeHtml(String(m.qty))} ${escapeHtml(String(m.unit || ''))}`.trim() : '',
-          Number(m.unitPrice) > 0 ? ` × ${money(Number(m.unitPrice))}` : '',
-          Number(m.total) > 0 ? ` = ${money(Number(m.total))}` : '',
+          m.qty != null
+            ? ` — ${escapeHtml(String(m.qty))} ${escapeHtml(String(m.unit || ''))}`.trim()
+            : '',
         ].join('');
         return `<li style="margin:2px 0;">${bit}</li>`;
       })
@@ -214,8 +212,6 @@ export function formatItemBreakdownHtml(
     const bit = [
       escapeHtml(String(lab.description || 'Installation')),
       lab.hours != null ? ` — ${lab.hours} hrs` : '',
-      Number(lab.rate) > 0 ? ` × ${money(Number(lab.rate))}/hr` : '',
-      Number(lab.total) > 0 ? ` = ${money(Number(lab.total))}` : '',
     ].join('');
     chunks.push(
       `<div style="margin-top:4px;font-size:12px;color:#475569;"><strong>Labor:</strong> ${bit}</div>`

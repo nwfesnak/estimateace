@@ -1675,14 +1675,15 @@ export default function Home() {
   const renderItemBreakdown = (
     item: any,
     className = '',
-    options?: { showMaterials?: boolean; showLabor?: boolean }
+    options?: { showMaterials?: boolean; showLabor?: boolean; showPrices?: boolean }
   ) => {
-    // Always show recalc'd qty × unitPrice so edits appear immediately
+    // Materials / labor toggles: scope only (no $). Prices only when Cost Breakdown is on.
     const stored = recalcBreakdownAsStored(getItemMaterials(item), item.laborBreakdown || null);
     const materials = stored.materials;
     const labor = stored.labor;
     const showMaterials = options?.showMaterials === true;
     const showLabor = options?.showLabor === true;
+    const showPrices = options?.showPrices === true;
     const visibleMaterials = showMaterials ? materials : [];
     const visibleLabor = showLabor ? labor : null;
 
@@ -1698,8 +1699,12 @@ export default function Home() {
                 <li key={i}>
                   {m.description || 'Material'}
                   {m.qty != null ? ` — ${m.qty} ${m.unit || ''}`.trim() : ''}
-                  {Number(m.unitPrice) > 0 ? ` × $${Number(m.unitPrice).toFixed(2)}` : ''}
-                  {Number(m.total) > 0 ? ` = $${Number(m.total).toFixed(2)}` : ''}
+                  {showPrices && Number(m.unitPrice) > 0
+                    ? ` × $${Number(m.unitPrice).toFixed(2)}`
+                    : ''}
+                  {showPrices && Number(m.total) > 0
+                    ? ` = $${Number(m.total).toFixed(2)}`
+                    : ''}
                 </li>
               ))}
             </ul>
@@ -1710,10 +1715,10 @@ export default function Home() {
             <span className="font-semibold">Labor: </span>
             {visibleLabor.description || 'Installation'}
             {visibleLabor.hours != null ? ` — ${visibleLabor.hours} hrs` : ''}
-            {Number(visibleLabor.rate) > 0
+            {showPrices && Number(visibleLabor.rate) > 0
               ? ` × $${Number(visibleLabor.rate).toFixed(2)}/hr`
               : ''}
-            {Number(visibleLabor.total) > 0
+            {showPrices && Number(visibleLabor.total) > 0
               ? ` = $${Number(visibleLabor.total).toFixed(2)}`
               : ''}
           </div>
@@ -1775,15 +1780,18 @@ export default function Home() {
   const renderClientItemBreakdown = (item: any, className: string) => {
     if (!hasAnyBreakdownToggleOn() || !hasClientVisibleBreakdown(item)) return null;
 
-    const { showMaterials, showLabor, showCosts } = getBreakdownSettings();
     const preview = getVisibleBreakdownParts(item);
 
+    // Each toggle is independent: Materials = qty only, Labor = hours only, Cost = prices.
+    // Do not attach dollar amounts to Materials/Labor unless Cost Breakdown is also on
+    // (and even then prices live only in the Cost section).
     return (
       <div className={className}>
         {preview.showMaterials || preview.showLabor
           ? renderItemBreakdown(item, '', {
               showMaterials: preview.showMaterials,
               showLabor: preview.showLabor,
+              showPrices: false,
             })
           : null}
         {preview.showCosts
@@ -8950,6 +8958,7 @@ export default function Home() {
                                 {(preview.showMaterials || preview.showLabor) && renderItemBreakdown(item, '', {
                                   showMaterials: preview.showMaterials,
                                   showLabor: preview.showLabor,
+                                  showPrices: false,
                                 })}
                                 {preview.showCosts && renderCostBreakdown(item, (preview.showMaterials || preview.showLabor) ? 'mt-2 pt-2 border-t border-gray-200' : '')}
                               </div>
