@@ -5014,6 +5014,11 @@ export default function Home() {
 
   const openSendPreview = () => {
     setView('sendPreview');
+    // Immediate jump (useEffect also runs after paint for mobile)
+    requestAnimationFrame(() => {
+      if (mainScrollRef.current) mainScrollRef.current.scrollTop = 0;
+      window.scrollTo(0, 0);
+    });
   };
 
   const mileageRateLocalKey = (uid: string) => `estimateace_mileage_rate_${uid}`;
@@ -6082,6 +6087,8 @@ export default function Home() {
   /** Gallery pickers (no capture) — camera uses DeviceCamera component instead. */
   const photoGalleryInputRef = useRef<HTMLInputElement>(null);
   const videoGalleryInputRef = useRef<HTMLInputElement>(null);
+  /** Main scrollable app column (editor → preview must reset so docs open at top on mobile). */
+  const mainScrollRef = useRef<HTMLDivElement>(null);
 
   const debouncedSave = () => {
     if (!profile.autoSaveEnabled) return;
@@ -6162,6 +6169,29 @@ export default function Home() {
     ) {
       refreshArchivesList();
     }
+  }, [view]);
+
+  // Always open screens (especially invoice/estimate send preview) at the top — do not keep
+  // the editor's scroll position so mobile users don't land at the bottom of the document.
+  useEffect(() => {
+    const scrollMainToTop = () => {
+      const el = mainScrollRef.current;
+      if (el) el.scrollTop = 0;
+      window.scrollTo(0, 0);
+      if (typeof document !== 'undefined') {
+        document.documentElement.scrollTop = 0;
+        document.body.scrollTop = 0;
+      }
+    };
+    scrollMainToTop();
+    // Mobile browsers often need a frame (or short delay) after the view mounts.
+    requestAnimationFrame(() => {
+      scrollMainToTop();
+      if (view === 'sendPreview') {
+        setTimeout(scrollMainToTop, 50);
+        setTimeout(scrollMainToTop, 200);
+      }
+    });
   }, [view]);
 
   useEffect(() => {
@@ -8197,7 +8227,7 @@ export default function Home() {
           </span>
           <Button onClick={logout} variant="outline" size="sm">{t('logOut')}</Button>
         </div>
-        <div className="flex-1 overflow-auto p-4 md:p-8">
+        <div ref={mainScrollRef} className="flex-1 overflow-auto p-4 md:p-8">
           {view === 'dashboard' && (
             <div>
               <div className="flex items-center gap-4 mb-8">
@@ -11568,9 +11598,19 @@ export default function Home() {
                       zipCode,
                       date,
                       terms,
+                      // Full line items include materialsList / laborBreakdown for email
                       items,
                       grandTotal,
                       amountPaid,
+                      // Same toggles as preview/PDF — only open breakdowns are emailed
+                      breakdownSettings: {
+                        showMaterialBreakdownOnEstimate:
+                          !!estimateBreakdownSettings.showMaterialBreakdownOnEstimate,
+                        showLaborBreakdownOnEstimate:
+                          !!estimateBreakdownSettings.showLaborBreakdownOnEstimate,
+                        showCostBreakdownOnEstimate:
+                          !!estimateBreakdownSettings.showCostBreakdownOnEstimate,
+                      },
                     }),
                   });
                   const json = await res.json().catch(() => ({}));

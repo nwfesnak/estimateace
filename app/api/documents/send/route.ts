@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import { sendEmailNotification, sendSmsNotification } from '@/lib/notifications';
+import {
+  formatItemBreakdownHtml,
+  formatItemBreakdownText,
+  type EmailBreakdownSettings,
+} from '@/lib/email-document-breakdown';
 
 type LineItem = {
   description?: string;
@@ -8,6 +13,12 @@ type LineItem = {
   unit?: string;
   price?: number;
   total?: number;
+  materialsList?: any[];
+  materialBreakdown?: any;
+  laborBreakdown?: any;
+  breakdownUserEdited?: boolean;
+  breakdownLocked?: boolean;
+  [key: string]: any;
 };
 
 function money(n: number) {
@@ -24,7 +35,7 @@ function escapeHtml(s: string) {
 
 /**
  * Send estimate/invoice summary to client emails (and optional SMS).
- * Uses Resend + Twilio env vars on the server.
+ * Includes materials/labor/cost breakdowns when those toggles are on for the document.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -59,6 +70,13 @@ export async function POST(request: NextRequest) {
     const balanceDue = Math.max(0, grandTotal - amountPaid);
     const items: LineItem[] = Array.isArray(body.items) ? body.items : [];
 
+    const rawBreakdown = body.breakdownSettings || body.estimateBreakdownSettings || {};
+    const breakdownSettings: EmailBreakdownSettings = {
+      showMaterialBreakdownOnEstimate: !!rawBreakdown.showMaterialBreakdownOnEstimate,
+      showLaborBreakdownOnEstimate: !!rawBreakdown.showLaborBreakdownOnEstimate,
+      showCostBreakdownOnEstimate: !!rawBreakdown.showCostBreakdownOnEstimate,
+    };
+
     if (emails.length === 0 && phones.length === 0) {
       return NextResponse.json(
         { error: 'Select at least one email or phone number.' },
@@ -72,9 +90,11 @@ export async function POST(request: NextRequest) {
       .map((it, i) => {
         const desc = String(it.description || 'Line item').slice(0, 200);
         const total = money(Number(it.total) || Number(it.qty || 0) * Number(it.price || 0));
-        return `${i + 1}. ${desc} — ${total}`;
+        const header = `${i + 1}. ${desc} — ${total}`;
+        const breakdown = formatItemBreakdownText(it, breakdownSettings);
+        return breakdown ? `${header}\n${breakdown}` : header;
       })
-      .join('\n');
+      .join('\n\n');
 
     const subject = `${docLabel} ${invoiceNumber} from ${company}`;
 
@@ -110,10 +130,14 @@ export async function POST(request: NextRequest) {
         const desc = escapeHtml(String(it.description || 'Line item').slice(0, 200));
         const qty = Number(it.qty) || 0;
         const total = money(Number(it.total) || qty * Number(it.price || 0));
+        const breakdownHtml = formatItemBreakdownHtml(it, breakdownSettings);
         return `<tr>
-          <td style="padding:8px;border-bottom:1px solid #e2e8f0;">${desc}</td>
-          <td style="padding:8px;border-bottom:1px solid #e2e8f0;text-align:right;">${qty}</td>
-          <td style="padding:8px;border-bottom:1px solid #e2e8f0;text-align:right;">${total}</td>
+          <td style="padding:8px;border-bottom:1px solid #e2e8f0;vertical-align:top;">
+            <div>${desc}</div>
+            ${breakdownHtml}
+          </td>
+          <td style="padding:8px;border-bottom:1px solid #e2e8f0;text-align:right;vertical-align:top;">${qty}</td>
+          <td style="padding:8px;border-bottom:1px solid #e2e8f0;text-align:right;vertical-align:top;">${total}</td>
         </tr>`;
       })
       .join('');
