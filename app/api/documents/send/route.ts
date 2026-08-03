@@ -160,9 +160,6 @@ export async function POST(request: NextRequest) {
       `${ctaLabel}:`,
       actionUrl,
       '',
-      'Third-Party Payment Disclosure:',
-      'Payment methods are independent third-party platforms. EstimateAce does not operate or guarantee them.',
-      '',
       terms ? `Terms & Conditions / Disclosures:\n${terms.slice(0, 2500)}` : '',
       '',
       'Questions? Contact:',
@@ -192,16 +189,9 @@ export async function POST(request: NextRequest) {
       })
       .join('');
 
-    const paymentDisclosureHtml = `
-  <div style="margin:0 0 8px;padding:12px 14px;background:#fffbeb;border:1px solid #fcd34d;border-radius:10px;font-size:12px;color:#78350f;line-height:1.45;text-align:left;">
-    <strong style="display:block;margin-bottom:4px;">Third-Party Payment Disclosure</strong>
-    All payment options (cards, banks, mobile wallets, and similar services) are independent third-party platforms.
-    EstimateAce does not operate, control, or guarantee these systems. Resolve payment questions with the payment provider and your contractor.
-  </div>`;
-
     const termsDisclosureHtml = terms
       ? `
-  <div style="margin:12px 0 0;padding:12px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;font-size:12px;color:#334155;line-height:1.5;text-align:left;white-space:pre-wrap;">
+  <div style="margin:18px 0 0;padding:12px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;font-size:12px;color:#334155;line-height:1.5;text-align:left;white-space:pre-wrap;">
     <strong style="display:block;margin-bottom:6px;font-size:13px;color:#0f172a;">Terms &amp; Conditions / Disclosures</strong>
     ${escapeHtml(terms.slice(0, 4000))}
   </div>`
@@ -221,10 +211,7 @@ export async function POST(request: NextRequest) {
       ${escapeHtml(ctaLabel)}
     </a>
     <p style="margin:12px 0 0;font-size:12px;color:#64748b;">Or open this link:<br/><a href="${escapeHtml(actionUrl)}" style="color:#0f766e;word-break:break-all;">${escapeHtml(actionUrl)}</a></p>
-    <div style="margin-top:18px;">
-      ${paymentDisclosureHtml}
-      ${termsDisclosureHtml}
-    </div>
+    ${termsDisclosureHtml}
   </div>`;
 
     const html = `<!DOCTYPE html>

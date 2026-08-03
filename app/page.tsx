@@ -6475,24 +6475,19 @@ export default function Home() {
     );
   };
 
-  /** Terms + third-party payment disclosure shown under pay / approve blocks */
+  /** Company terms / disclosures under pay / approve blocks */
   const renderPaySectionDisclosures = (options?: { className?: string }) => {
     const disclosureText = (terms || profile.disclosure || '').trim();
+    if (!disclosureText) return null;
     return (
-      <div className={`text-left space-y-4 ${options?.className || ''}`}>
-        {disclosureText ? (
-          <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 sm:p-5">
-            <h4 className="text-sm font-semibold text-gray-900 mb-2 border-b pb-2">
-              {t('termsConditions') || 'Terms & Conditions'} / Disclosures
-            </h4>
-            <div className="text-xs sm:text-sm text-gray-700 leading-relaxed whitespace-pre-wrap max-h-64 overflow-y-auto">
-              {disclosureText}
-            </div>
+      <div className={`text-left ${options?.className || ''}`}>
+        <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 sm:p-5">
+          <h4 className="text-sm font-semibold text-gray-900 mb-2 border-b pb-2">
+            {t('termsConditions') || 'Terms & Conditions'} / Disclosures
+          </h4>
+          <div className="text-xs sm:text-sm text-gray-700 leading-relaxed whitespace-pre-wrap max-h-64 overflow-y-auto">
+            {disclosureText}
           </div>
-        ) : null}
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs sm:text-sm text-amber-950 leading-relaxed">
-          <p className="font-semibold mb-1">{t('paymentDisclosureTitle')}</p>
-          <p>{t('paymentDisclosureBody')}</p>
         </div>
       </div>
     );
@@ -10625,11 +10620,6 @@ export default function Home() {
                           .filter(([method]) => CRYPTO_PAYMENT_METHODS.has(method))
                           .map(([method, settings]) => renderPaymentMethodRow(method, settings))}
                       </div>
-                    </div>
-
-                    <div className="mt-8 rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-950 leading-relaxed">
-                      <p className="font-semibold mb-2">{t('paymentDisclosureTitle')}</p>
-                      <p>{t('paymentDisclosureBody')}</p>
                     </div>
 
                     {/* Credit Card Processing Fee Toggle */}
