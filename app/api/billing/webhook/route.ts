@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import type Stripe from 'stripe';
 import { getStripe } from '@/lib/stripe-server';
 import { upsertSubscriptionFromStripe } from '@/lib/billing-sync';
+import { markDocumentPaidFromJobCheckout } from '@/lib/job-payments';
 
 export const runtime = 'nodejs';
 
@@ -30,6 +31,17 @@ export async function POST(request: NextRequest) {
     switch (event.type) {
       case 'checkout.session.completed': {
         const session = event.data.object as Stripe.Checkout.Session;
+
+        // Job / invoice payment (one-time) — does NOT touch SaaS subscriptions
+        if (session.metadata?.purpose === 'job_payment') {
+          const jobResult = await markDocumentPaidFromJobCheckout(session);
+          if (!jobResult.ok) {
+            console.error('webhook job payment:', jobResult.error);
+          }
+          break;
+        }
+
+        // SaaS subscription checkout only
         const userId = (session.client_reference_id ||
           session.metadata?.supabase_user_id) as string | undefined;
         if (session.subscription) {

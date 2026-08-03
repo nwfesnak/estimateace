@@ -133,18 +133,18 @@ const getPaymentMethodMeta = (method: string) => {
     stripe: {
       icon: '💳',
       label: 'Card (Stripe)',
-      description: 'Cards, Apple Pay, Google Pay (when set up)',
+      description: 'Card · Apple Pay · Google Pay (Stripe Checkout)',
       howItWorks:
-        'Not automatic in this app yet. Card / Apple Pay / Google Pay require the contractor’s own Stripe Payment Link or in-person terminal. Turn this on in Profile only if you will send clients a Stripe link yourself.',
+        'Tap Pay to open secure Stripe Checkout. Pay with card; Apple Pay / Google Pay appear when your device and Stripe support them. Money goes to the contractor’s connected Stripe account (or platform if Connect is not finished).',
       category: 'traditional',
-      clickToPay: false,
+      clickToPay: true,
     },
     echeck: {
       icon: '🏦',
       label: 'eCheck / ACH',
-      description: 'Bank account (separate from PayPal)',
+      description: 'Bank debit (enable in Stripe Dashboard)',
       howItWorks:
-        'eCheck/ACH is not PayPal—it is a separate bank draft option. EstimateAce does not run ACH checkout yet. Use this only if you collect ACH another way (your bank, Stripe, etc.) and want clients to see that you accept it.',
+        'Bank debit can appear inside Stripe Checkout when enabled on the contractor’s Stripe account. Use Card (Stripe) Pay — ACH shows there if turned on in Stripe. This row is informational if listed alone.',
       category: 'traditional',
       clickToPay: false,
     },
@@ -1203,6 +1203,16 @@ export default function Home() {
   /** Contractor: mark invoice paid via Cash / Venmo / Zelle (replaces separate Mark Paid buttons) */
   const [isMarkPaidMethodOpen, setIsMarkPaidMethodOpen] = useState(false);
   const [markPaidBusy, setMarkPaidBusy] = useState(false);
+  /** Stripe Connect for job card payments */
+  const [stripeConnectStatus, setStripeConnectStatus] = useState<{
+    connected?: boolean;
+    chargesEnabled?: boolean;
+    connectReady?: boolean;
+    mode?: string;
+    stripeConfigured?: boolean;
+  } | null>(null);
+  const [stripeConnectBusy, setStripeConnectBusy] = useState(false);
+  const [jobCheckoutBusy, setJobCheckoutBusy] = useState(false);
   const [isEscrowModalOpen, setIsEscrowModalOpen] = useState(false);
   const [paymentType, setPaymentType] = useState<'deposit' | 'balance'>('deposit');
   const [paymentAmount, setPaymentAmount] = useState(0);
@@ -2173,21 +2183,50 @@ export default function Home() {
     void loadLatestProfile();
   }, [workspaceUserId, crewResolved, supabase]);
 
-  // Stripe / trial return deep-links
+  // Stripe Connect / job paid / trial return deep-links
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
     const billingParam = params.get('billing');
     const trialParam = params.get('trial');
     const planParam = params.get('plan');
+    const stripeConnect = params.get('stripe_connect');
+    const jobPaid = params.get('job_paid');
 
     const cleanUrl = () => {
       const url = new URL(window.location.href);
       url.searchParams.delete('billing');
       url.searchParams.delete('trial');
       url.searchParams.delete('plan');
+      url.searchParams.delete('stripe_connect');
+      url.searchParams.delete('job_paid');
+      url.searchParams.delete('invoice');
       window.history.replaceState({}, '', url.pathname + url.search);
     };
+
+    if (stripeConnect === 'return' || stripeConnect === 'refresh') {
+      showMessage(
+        stripeConnect === 'return'
+          ? '✅ Stripe Connect finished — checking account status…'
+          : 'Stripe Connect needs to be completed — try Connect again from Profile → Payments.'
+      );
+      void refreshStripeConnectStatus(true);
+      cleanUrl();
+      return;
+    }
+
+    if (jobPaid === '1') {
+      showMessage('✅ Card payment received. If the invoice is not marked paid yet, wait a moment or refresh — webhook will update it.');
+      void refreshSavedList();
+      void refreshArchivesList();
+      cleanUrl();
+      return;
+    }
+    if (jobPaid === '0') {
+      showMessage('Payment canceled — no charge was made.');
+      cleanUrl();
+      return;
+    }
 
     if (trialParam === 'started') {
       const planLabel = planParam === 'yearly' ? 'yearly ($249/yr after trial)' : 'monthly ($29.99/mo after trial)';
@@ -6493,8 +6532,8 @@ export default function Home() {
     const clickToPay: Opt[] = [];
     const other: Opt[] = [];
 
-    const orderClick = ['venmo', 'paypal', 'zelle'];
-    const orderOther = ['mailcheck', 'stripe', 'echeck', 'nowpayments', 'coinbase_commerce'];
+    const orderClick = ['stripe', 'venmo', 'paypal', 'zelle'];
+    const orderOther = ['mailcheck', 'echeck', 'nowpayments', 'coinbase_commerce'];
 
     const pushIfReady = (method: string) => {
       const s = settings[method];
@@ -6503,28 +6542,32 @@ export default function Home() {
       if (method === 'venmo' && !hasVenmoHandle(s.handle)) return;
       if (method === 'zelle' && !hasZelleSetup(s)) return;
       if (method === 'paypal' && !hasPayPalSetup(s)) return;
-      // Mail check: show whenever the toggle is ON (address optional — still listed)
-      // stripe / echeck / crypto: show if enabled
+      // Stripe card checkout: enabled + platform Stripe configured
+      if (method === 'stripe' && stripeConnectStatus?.stripeConfigured === false) return;
+      // Mail check: show whenever the toggle is ON
       const meta = getPaymentMethodMeta(method);
       const isClick =
-        meta.clickToPay &&
-        ((method === 'venmo' && hasVenmoHandle(s.handle)) ||
-          (method === 'paypal' && hasPayPalSetup(s)) ||
-          (method === 'zelle' && hasZelleSetup(s)));
+        (method === 'stripe' && (stripeConnectStatus?.stripeConfigured !== false)) ||
+        (meta.clickToPay &&
+          ((method === 'venmo' && hasVenmoHandle(s.handle)) ||
+            (method === 'paypal' && hasPayPalSetup(s)) ||
+            (method === 'zelle' && hasZelleSetup(s))));
       const ready =
         method === 'mailcheck'
           ? !!(s.handle || '').trim()
-          : method === 'venmo' || method === 'zelle' || method === 'paypal'
-            ? isClick
-            : true;
+          : method === 'stripe'
+            ? stripeConnectStatus?.stripeConfigured !== false
+            : method === 'venmo' || method === 'zelle' || method === 'paypal'
+              ? !!isClick
+              : true;
       const opt: Opt = {
         method,
         settings: s,
         meta,
         ready,
-        clickToPay: isClick,
+        clickToPay: !!isClick,
       };
-      if (isClick) clickToPay.push(opt);
+      if (opt.clickToPay) clickToPay.push(opt);
       else other.push(opt);
     };
 
@@ -6539,6 +6582,10 @@ export default function Home() {
   };
 
   const startClientPayment = (method: string) => {
+    if (method === 'stripe') {
+      void startJobCardCheckout(paymentAmount);
+      return;
+    }
     if (method === 'venmo') {
       closePaymentModal();
       startVenmoPayment(paymentAmount, paymentType);
@@ -7244,6 +7291,71 @@ export default function Home() {
       );
     }
 
+    if (method === 'stripe' || method === 'echeck') {
+      const connectReady = !!stripeConnectStatus?.connectReady;
+      const connected = connectReady || !!settings.connected;
+      return (
+        <div
+          key={method}
+          className="border rounded-2xl p-4 sm:p-6 hover:shadow-sm transition-all w-full max-w-full min-w-0 overflow-hidden box-border space-y-3"
+        >
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 min-w-0">
+            <div className="flex items-start sm:items-center gap-3 min-w-0 flex-1">
+              <div className="text-3xl sm:text-4xl shrink-0">{meta.icon}</div>
+              <div className="min-w-0 flex-1">
+                <div className="font-semibold text-base sm:text-lg break-words">{meta.label}</div>
+                <div className="text-sm text-gray-500 break-words">
+                  {method === 'stripe'
+                    ? 'Clients pay by card (Apple Pay / Google Pay when available) via Stripe Checkout'
+                    : 'Bank debit can appear in Stripe Checkout when enabled in your Stripe account'}
+                </div>
+                <div className="text-sm text-gray-500 mt-1">
+                  {connectReady ? (
+                    <><span className="text-green-500">✓</span> Stripe Connect ready — charges enabled</>
+                  ) : stripeConnectStatus?.connected ? (
+                    <><span className="text-amber-500">…</span> Connected — finish verification in Stripe if needed</>
+                  ) : stripeConnectStatus?.stripeConfigured ? (
+                    'Connect Stripe so job payments can go to your bank (does not change app subscriptions)'
+                  ) : (
+                    'Add STRIPE_SECRET_KEY on Vercel to enable card job payments'
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-3 shrink-0">
+              <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                <input
+                  type="checkbox"
+                  checked={!!settings.enabled}
+                  onChange={(e) => togglePaymentMethod(method, e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]" />
+              </label>
+              {method === 'stripe' && (
+                <Button
+                  type="button"
+                  disabled={stripeConnectBusy}
+                  onClick={() => void startStripeConnectOnboard()}
+                  className="bg-[#635bff] hover:bg-[#5851ea] text-white"
+                >
+                  {stripeConnectBusy
+                    ? 'Opening…'
+                    : connectReady
+                      ? 'Update Stripe'
+                      : 'Connect Stripe'}
+                </Button>
+              )}
+            </div>
+          </div>
+          <p className="text-xs text-gray-500 sm:pl-14">
+            Separate from EstimateAce monthly subscriptions. Job card payments use Stripe Checkout;
+            SaaS billing is unchanged.
+          </p>
+        </div>
+      );
+    }
+
     const connected = !!settings.connected;
 
     return (
@@ -7303,13 +7415,140 @@ export default function Home() {
     void saveProfileSettings(nextProfile);
   };
 
+  const refreshStripeConnectStatus = async (sync = false) => {
+    if (!supabase) return;
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) return;
+      const res = await fetch(`/api/payments/connect/status${sync ? '?sync=1' : ''}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setStripeConnectStatus({
+          connected: !!json.connected,
+          chargesEnabled: !!json.chargesEnabled,
+          connectReady: !!json.connectReady,
+          mode: json.mode,
+          stripeConfigured: !!json.stripeConfigured,
+        });
+        if (json.connectReady || json.connected) {
+          const nextProfile = {
+            ...profileRef.current,
+            paymentSettings: {
+              ...mergePaymentSettings(profileRef.current.paymentSettings),
+              stripe: {
+                ...mergePaymentSettings(profileRef.current.paymentSettings).stripe,
+                enabled: true,
+                connected: !!json.connectReady || !!json.connected,
+              },
+            },
+          };
+          setProfile(nextProfile);
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const startStripeConnectOnboard = async () => {
+    if (!supabase) {
+      showMessage('Please log in first.');
+      return;
+    }
+    setStripeConnectBusy(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) {
+        showMessage('Please log in again.');
+        return;
+      }
+      const res = await fetch('/api/payments/connect/onboard', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.url) {
+        showMessage(
+          json.error ||
+            'Could not start Stripe Connect. Enable Connect in Stripe Dashboard → Settings → Connect settings.'
+        );
+        return;
+      }
+      window.location.href = json.url;
+    } catch {
+      showMessage('Network error starting Stripe Connect.');
+    } finally {
+      setStripeConnectBusy(false);
+    }
+  };
+
+  /** Stripe Checkout for current invoice/estimate amount (job pay — not SaaS) */
+  const startJobCardCheckout = async (amount: number) => {
+    if (!supabase) {
+      showMessage('Please log in first.');
+      return;
+    }
+    if (!Number.isFinite(amount) || amount < 0.5) {
+      showMessage('Amount must be at least $0.50 for card checkout.');
+      return;
+    }
+    setJobCheckoutBusy(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) {
+        showMessage('Please log in again to create a card payment link.');
+        return;
+      }
+      const clientEmail = (emails || []).map((e) => String(e || '').trim()).find(Boolean) || '';
+      const res = await fetch('/api/payments/job-checkout', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          amount,
+          invoiceId: invoiceNumber,
+          invoiceNumber,
+          documentType,
+          jobName,
+          clientEmail,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.url) {
+        showMessage(json.error || 'Could not start Stripe Checkout.');
+        return;
+      }
+      if (json.mode === 'platform') {
+        showMessage(
+          'Opening card checkout (platform Stripe). Connect Stripe in Profile for payouts to your bank.'
+        );
+      }
+      closePaymentModal();
+      window.location.href = json.url;
+    } catch {
+      showMessage('Network error starting card payment.');
+    } finally {
+      setJobCheckoutBusy(false);
+    }
+  };
+
   const linkPaymentAccount = (method: string) => {
     if (method === 'venmo' || method === 'zelle' || method === 'paypal' || method === 'mailcheck') return;
 
+    if (method === 'stripe' || method === 'echeck') {
+      void startStripeConnectOnboard();
+      return;
+    }
+
     const meta = getPaymentMethodMeta(method);
     const providerUrls: { [key: string]: string } = {
-      stripe: 'https://dashboard.stripe.com/connect',
-      echeck: 'https://dashboard.stripe.com/connect',
       nowpayments: 'https://account.nowpayments.io/create-account',
       coinbase_commerce: 'https://commerce.coinbase.com/signup',
     };
@@ -7328,6 +7567,13 @@ export default function Home() {
       showMessage(`${meta.label} account linked successfully.`);
     }, 800);
   };
+
+  // Load Stripe Connect status when viewing profile payments
+  useEffect(() => {
+    if (view === 'profileView' && profileTab === 'payments' && user?.id) {
+      void refreshStripeConnectStatus(true);
+    }
+  }, [view, profileTab, user?.id]);
 
   // Dashboard calculations
   const closedWorkIndex = useMemo(() => {
@@ -12130,7 +12376,9 @@ export default function Home() {
                       </div>
                       {opt.clickToPay ? (
                         <span className="shrink-0 text-sm font-bold text-[#10b981] self-center">
-                          Pay ${paymentAmount.toFixed(2)} →
+                          {method === 'stripe' && jobCheckoutBusy
+                            ? 'Starting…'
+                            : `Pay $${paymentAmount.toFixed(2)} →`}
                         </span>
                       ) : method === 'mailcheck' && mailTo ? (
                         <span className="shrink-0 text-sm font-bold text-stone-700 self-center">
