@@ -115,9 +115,9 @@ const getPaymentMethodMeta = (method: string) => {
     paypal: {
       icon: '💰',
       label: 'PayPal',
-      description: 'Pay with PayPal (card or balance)',
+      description: 'PayPal balance, bank, or card (via PayPal)',
       howItWorks:
-        'Tap Pay to open a real PayPal checkout with the amount ready. Pay with your PayPal balance or linked card. No account setup on this screen.',
+        'Opens PayPal with the amount filled in (PayPal.Me or PayPal checkout). What the buyer sees next depends on their PayPal account and device—balance, bank, or debit/credit card through PayPal. Apple Pay and eCheck are not separate buttons in EstimateAce; they only appear if PayPal itself offers them on that device.',
       category: 'traditional',
       clickToPay: true,
     },
@@ -133,18 +133,18 @@ const getPaymentMethodMeta = (method: string) => {
     stripe: {
       icon: '💳',
       label: 'Card (Stripe)',
-      description: 'Credit / debit card',
+      description: 'Cards, Apple Pay, Google Pay (when set up)',
       howItWorks:
-        'Card checkout is arranged by the contractor (Stripe link or in person). Contact them if you prefer to pay by card.',
+        'Not automatic in this app yet. Card / Apple Pay / Google Pay require the contractor’s own Stripe Payment Link or in-person terminal. Turn this on in Profile only if you will send clients a Stripe link yourself.',
       category: 'traditional',
       clickToPay: false,
     },
     echeck: {
       icon: '🏦',
       label: 'eCheck / ACH',
-      description: 'Pay from your bank account',
+      description: 'Bank account (separate from PayPal)',
       howItWorks:
-        'Bank draft / ACH is set up with the contractor. They will send instructions or a payment link for an electronic bank payment.',
+        'eCheck/ACH is not PayPal—it is a separate bank draft option. EstimateAce does not run ACH checkout yet. Use this only if you collect ACH another way (your bank, Stripe, etc.) and want clients to see that you accept it.',
       category: 'traditional',
       clickToPay: false,
     },
