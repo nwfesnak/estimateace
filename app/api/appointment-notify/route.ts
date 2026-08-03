@@ -110,7 +110,9 @@ export async function POST(request: NextRequest) {
     };
 
     const resendKey = process.env.RESEND_API_KEY;
-    const fromEmail = process.env.NOTIFICATION_FROM_EMAIL || 'EstimateAce <onboarding@resend.dev>';
+    const fromEmail =
+      (process.env.NOTIFICATION_FROM_EMAIL || '').trim() ||
+      'EstimateAce <notifications@estimateace.com>';
 
     if (clientEmails.length === 0) {
       result.errors.push('No client email addresses on file for this estimate.');

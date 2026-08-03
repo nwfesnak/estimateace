@@ -19,7 +19,10 @@ export async function sendEmailNotification(
   options?: { html?: string; replyTo?: string }
 ): Promise<{ ok: boolean; error?: string; id?: string }> {
   const resendKey = process.env.RESEND_API_KEY;
-  const fromEmail = process.env.NOTIFICATION_FROM_EMAIL || 'EstimateAce <onboarding@resend.dev>';
+  // Must be an address on a verified Resend domain (estimateace.com). onboarding@resend.dev only emails your own inbox.
+  const fromEmail =
+    (process.env.NOTIFICATION_FROM_EMAIL || '').trim() ||
+    'EstimateAce <notifications@estimateace.com>';
 
   if (!resendKey) {
     return { ok: false, error: 'Email service not configured. Add RESEND_API_KEY to Vercel (and redeploy).' };
@@ -28,6 +31,15 @@ export async function sendEmailNotification(
   const trimmedTo = String(to || '').trim();
   if (!trimmedTo || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedTo)) {
     return { ok: false, error: `Invalid email address: ${to}` };
+  }
+
+  // Guard: test domain cannot email clients
+  if (/onboarding@resend\.dev/i.test(fromEmail)) {
+    return {
+      ok: false,
+      error:
+        'From address is still Resend test mode (onboarding@resend.dev). In Vercel set NOTIFICATION_FROM_EMAIL to EstimateAce <notifications@estimateace.com>, verify estimateace.com in Resend, then redeploy.',
+    };
   }
 
   try {
@@ -58,9 +70,10 @@ export async function sendEmailNotification(
     }
 
     if (response.ok) return { ok: true, id: parsed?.id };
+    const resendMsg = parsed?.message || bodyText || 'unknown error';
     return {
       ok: false,
-      error: `Email failed (${response.status}): ${parsed?.message || bodyText || 'unknown error'}`,
+      error: `Email failed (${response.status}) from ${fromEmail}: ${resendMsg}`,
     };
   } catch (err: unknown) {
     return { ok: false, error: err instanceof Error ? err.message : 'Unknown email error' };
