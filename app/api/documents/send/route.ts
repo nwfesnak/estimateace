@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
+import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { sendEmailNotification, sendSmsNotification } from '@/lib/notifications';
 import {
   formatItemBreakdownHtml,
   formatItemBreakdownText,
   type EmailBreakdownSettings,
 } from '@/lib/email-document-breakdown';
+import { createClientActionToken } from '@/lib/client-action-token';
+import { getAppUrl } from '@/lib/stripe-server';
 
 type LineItem = {
   description?: string;
@@ -69,6 +72,12 @@ export async function POST(request: NextRequest) {
     const amountPaid = Number(body.amountPaid) || 0;
     const balanceDue = Math.max(0, grandTotal - amountPaid);
     const items: LineItem[] = Array.isArray(body.items) ? body.items : [];
+    const depositPercent = Math.max(0, Number(body.depositPercent) || 0);
+    const showDepositOnApproval = body.showDepositOnApproval !== false;
+    const depositDue =
+      documentType === 'estimate' && showDepositOnApproval && depositPercent > 0
+        ? Math.round(((grandTotal * depositPercent) / 100) * 100) / 100
+        : 0;
 
     const rawBreakdown = body.breakdownSettings || body.estimateBreakdownSettings || {};
     const breakdownSettings: EmailBreakdownSettings = {
@@ -83,6 +92,40 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    // Workspace owner (crew → owner) for client action links
+    let ownerUserId = user.id;
+    const admin = getSupabaseAdmin();
+    if (admin) {
+      try {
+        const { data: crew } = await admin
+          .from('crew_members')
+          .select('owner_user_id')
+          .eq('crew_user_id', user.id)
+          .maybeSingle();
+        if (crew?.owner_user_id) ownerUserId = crew.owner_user_id;
+      } catch {
+        /* optional */
+      }
+    }
+
+    const appUrl = getAppUrl(request.url);
+    const actionToken = createClientActionToken({
+      uid: ownerUserId,
+      inv: invoiceNumber,
+      typ: documentType,
+      expDays: 60,
+    });
+    const actionUrl = `${appUrl}/client/approve?token=${encodeURIComponent(actionToken)}`;
+
+    const ctaLabel =
+      documentType === 'estimate'
+        ? depositDue >= 0.5
+          ? `Approve & pay deposit (${money(depositDue)})`
+          : 'Approve this estimate'
+        : balanceDue >= 0.5
+          ? `Pay balance (${money(balanceDue)})`
+          : 'View invoice & pay';
 
     const location = [address, city, state, zipCode].filter(Boolean).join(', ');
     const lineLines = items
@@ -112,6 +155,10 @@ export async function POST(request: NextRequest) {
       `Grand total: ${money(grandTotal)}`,
       amountPaid > 0 ? `Amount paid: ${money(amountPaid)}` : '',
       `Balance due: ${money(balanceDue)}`,
+      depositDue >= 0.5 ? `Deposit due (${depositPercent}%): ${money(depositDue)}` : '',
+      '',
+      `${ctaLabel}:`,
+      actionUrl,
       '',
       terms ? `Terms:\n${terms.slice(0, 1500)}` : '',
       '',
@@ -142,6 +189,22 @@ export async function POST(request: NextRequest) {
       })
       .join('');
 
+    const ctaHtml = `
+  <div style="margin:28px 0;text-align:center;padding:20px;background:#ecfdf5;border:2px dashed #10b981;border-radius:16px;">
+    ${
+      documentType === 'estimate' && depositDue >= 0.5
+        ? `<p style="margin:0 0 8px;font-size:15px;color:#065f46;">Deposit due to schedule work: <strong>${money(depositDue)}</strong> (${depositPercent}% of total)</p>`
+        : documentType === 'estimate'
+          ? `<p style="margin:0 0 8px;font-size:15px;color:#065f46;">Ready to move forward? Approve this estimate online.</p>`
+          : `<p style="margin:0 0 8px;font-size:15px;color:#065f46;">Balance due: <strong>${money(balanceDue)}</strong></p>`
+    }
+    <a href="${escapeHtml(actionUrl)}"
+       style="display:inline-block;background:#10b981;color:#ffffff;text-decoration:none;font-weight:700;font-size:16px;padding:14px 28px;border-radius:12px;margin-top:8px;">
+      ${escapeHtml(ctaLabel)}
+    </a>
+    <p style="margin:12px 0 0;font-size:12px;color:#64748b;">Or open this link:<br/><a href="${escapeHtml(actionUrl)}" style="color:#0f766e;word-break:break-all;">${escapeHtml(actionUrl)}</a></p>
+  </div>`;
+
     const html = `<!DOCTYPE html>
 <html><body style="font-family:system-ui,Segoe UI,sans-serif;color:#0f172a;line-height:1.5;max-width:640px;margin:0 auto;padding:24px;">
   <h1 style="font-size:22px;margin:0 0 8px;">${escapeHtml(docLabel)} from ${escapeHtml(company)}</h1>
@@ -162,7 +225,9 @@ export async function POST(request: NextRequest) {
   </table>
   <p style="font-size:18px;font-weight:700;margin:16px 0 4px;">Grand total: ${money(grandTotal)}</p>
   ${amountPaid > 0 ? `<p style="margin:0 0 4px;">Amount paid: ${money(amountPaid)}</p>` : ''}
-  <p style="margin:0 0 20px;">Balance due: <strong>${money(balanceDue)}</strong></p>
+  <p style="margin:0 0 8px;">Balance due: <strong>${money(balanceDue)}</strong></p>
+  ${depositDue >= 0.5 ? `<p style="margin:0 0 16px;color:#065f46;">Deposit (${depositPercent}%): <strong>${money(depositDue)}</strong></p>` : ''}
+  ${ctaHtml}
   ${
     terms
       ? `<div style="margin:20px 0;padding:12px;background:#f8fafc;border-radius:8px;font-size:13px;white-space:pre-wrap;">${escapeHtml(terms.slice(0, 2000))}</div>`
@@ -194,7 +259,7 @@ export async function POST(request: NextRequest) {
       else errors.push(`${email}: ${result.error}`);
     }
 
-    const smsBody = `${company}: ${docLabel} ${invoiceNumber} for ${jobName}. Total ${money(grandTotal)}, balance due ${money(balanceDue)}.${companyPhone ? ` Call ${companyPhone}.` : ''}`;
+    const smsBody = `${company}: ${docLabel} ${invoiceNumber} for ${jobName}. Total ${money(grandTotal)}. ${ctaLabel}: ${actionUrl}${companyPhone ? ` Call ${companyPhone}.` : ''}`;
     for (const phone of phones) {
       const result = await sendSmsNotification(phone, smsBody);
       if (result.ok) smsSent.push(phone);
@@ -222,6 +287,7 @@ export async function POST(request: NextRequest) {
       smsSent,
       errors,
       partial: errors.length > 0,
+      actionUrl,
     });
   } catch (e: any) {
     console.error('documents/send:', e);

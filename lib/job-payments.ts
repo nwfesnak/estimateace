@@ -145,6 +145,11 @@ export type JobCheckoutInput = {
   jobName?: string;
   clientEmail?: string;
   requestUrl: string;
+  /** Optional return URLs (e.g. client approve page) */
+  successUrl?: string;
+  cancelUrl?: string;
+  /** deposit | balance | invoice */
+  paymentKind?: string;
 };
 
 /**
@@ -169,8 +174,10 @@ export async function createJobCheckoutSession(
   const connectedId = account?.stripe_account_id || null;
   const canChargeConnected = !!(connectedId && account?.charges_enabled);
 
+  const kind = (input.paymentKind || 'payment').slice(0, 40);
   const metadata: Record<string, string> = {
     purpose: 'job_payment',
+    payment_kind: kind,
     supabase_user_id: input.ownerUserId,
     invoice_id: input.invoiceId,
     invoice_number: input.invoiceNumber,
@@ -178,11 +185,16 @@ export async function createJobCheckoutSession(
     job_name: (input.jobName || '').slice(0, 200),
   };
 
-  const productName = `${input.documentType === 'invoice' ? 'Invoice' : 'Estimate'} ${input.invoiceNumber}`.slice(
+  const kindLabel =
+    kind === 'deposit' ? 'Deposit' : kind === 'balance' ? 'Balance' : 'Payment';
+  const productName = `${kindLabel} — ${input.documentType === 'invoice' ? 'Invoice' : 'Estimate'} ${input.invoiceNumber}`.slice(
     0,
     120
   );
   const description = (input.jobName || productName).slice(0, 200);
+
+  const defaultSuccess = `${appUrl}/?job_paid=1&invoice=${encodeURIComponent(input.invoiceId)}`;
+  const defaultCancel = `${appUrl}/?job_paid=0&invoice=${encodeURIComponent(input.invoiceId)}`;
 
   const sessionParams: Stripe.Checkout.SessionCreateParams = {
     mode: 'payment',
@@ -199,8 +211,8 @@ export async function createJobCheckoutSession(
         },
       },
     ],
-    success_url: `${appUrl}/?job_paid=1&invoice=${encodeURIComponent(input.invoiceId)}`,
-    cancel_url: `${appUrl}/?job_paid=0&invoice=${encodeURIComponent(input.invoiceId)}`,
+    success_url: input.successUrl || defaultSuccess,
+    cancel_url: input.cancelUrl || defaultCancel,
     metadata,
     payment_intent_data: {
       metadata,

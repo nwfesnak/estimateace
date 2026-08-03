@@ -11651,6 +11651,8 @@ export default function Home() {
                       items: emailItems,
                       grandTotal,
                       amountPaid,
+                      depositPercent: Number(profile.depositPercentage) || 0,
+                      showDepositOnApproval: profile.showDepositOnApproval !== false,
                       breakdownSettings: {
                         showMaterialBreakdownOnEstimate:
                           !!estimateBreakdownSettings.showMaterialBreakdownOnEstimate,
