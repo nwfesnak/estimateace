@@ -15,33 +15,53 @@ export type NotificationResult = {
 export async function sendEmailNotification(
   to: string,
   subject: string,
-  text: string
-): Promise<{ ok: boolean; error?: string }> {
+  text: string,
+  options?: { html?: string; replyTo?: string }
+): Promise<{ ok: boolean; error?: string; id?: string }> {
   const resendKey = process.env.RESEND_API_KEY;
   const fromEmail = process.env.NOTIFICATION_FROM_EMAIL || 'EstimateAce <onboarding@resend.dev>';
 
   if (!resendKey) {
-    return { ok: false, error: 'Email service not configured. Add RESEND_API_KEY to .env.local.' };
+    return { ok: false, error: 'Email service not configured. Add RESEND_API_KEY to Vercel (and redeploy).' };
+  }
+
+  const trimmedTo = String(to || '').trim();
+  if (!trimmedTo || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedTo)) {
+    return { ok: false, error: `Invalid email address: ${to}` };
   }
 
   try {
+    const payload: Record<string, unknown> = {
+      from: fromEmail,
+      to: [trimmedTo],
+      subject,
+      text,
+    };
+    if (options?.html) payload.html = options.html;
+    if (options?.replyTo) payload.reply_to = options.replyTo;
+
     const response = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${resendKey}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        from: fromEmail,
-        to: [to],
-        subject,
-        text,
-      }),
+      body: JSON.stringify(payload),
     });
 
-    if (response.ok) return { ok: true };
-    const errBody = await response.text();
-    return { ok: false, error: `Email failed: ${errBody}` };
+    const bodyText = await response.text();
+    let parsed: any = {};
+    try {
+      parsed = JSON.parse(bodyText);
+    } catch {
+      /* ignore */
+    }
+
+    if (response.ok) return { ok: true, id: parsed?.id };
+    return {
+      ok: false,
+      error: `Email failed (${response.status}): ${parsed?.message || bodyText || 'unknown error'}`,
+    };
   } catch (err: unknown) {
     return { ok: false, error: err instanceof Error ? err.message : 'Unknown email error' };
   }

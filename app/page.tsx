@@ -1127,6 +1127,7 @@ export default function Home() {
   const [savedEstimatesList, setSavedEstimatesList] = useState<any[]>([]);
   const [archivesList, setArchivesList] = useState<any[]>([]);
   const [isSendModalOpen, setIsSendModalOpen] = useState(false);
+  const [sendDocBusy, setSendDocBusy] = useState(false);
   const [selectedEmailsForSend, setSelectedEmailsForSend] = useState<string[]>([]);
   const [selectedPhonesForSend, setSelectedPhonesForSend] = useState<string[]>([]);
 
@@ -10823,10 +10824,85 @@ export default function Home() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsSendModalOpen(false)}>Cancel</Button>
-            <Button onClick={() => {
-              showMessage(`✅ ${documentType === 'invoice' ? 'Invoice' : 'Estimate'} sent to selected recipients!\nEmails: ${selectedEmailsForSend.join(', ') || 'none'}\nPhones: ${selectedPhonesForSend.join(', ') || 'none'}`);
-              setIsSendModalOpen(false);
-            }} className="bg-[#10b981]">Send Now</Button>
+            <Button
+              className="bg-[#10b981]"
+              disabled={sendDocBusy}
+              onClick={async () => {
+                const emailList = selectedEmailsForSend.map((e) => e.trim()).filter(Boolean);
+                const phoneList = selectedPhonesForSend.map((p) => p.trim()).filter(Boolean);
+                if (emailList.length === 0 && phoneList.length === 0) {
+                  showMessage('Select at least one email or phone number.');
+                  return;
+                }
+                if (!supabase) {
+                  showMessage('Not connected. Log in again.');
+                  return;
+                }
+                setSendDocBusy(true);
+                try {
+                  const { data: sessionData } = await supabase.auth.getSession();
+                  const token = sessionData.session?.access_token;
+                  if (!token) {
+                    showMessage('Please log in again to send.');
+                    return;
+                  }
+                  const res = await fetch('/api/documents/send', {
+                    method: 'POST',
+                    headers: {
+                      Authorization: `Bearer ${token}`,
+                      'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                      emails: emailList,
+                      phones: phoneList,
+                      documentType,
+                      invoiceNumber,
+                      jobName,
+                      company: profile.company || 'EstimateAce',
+                      companyPhone: profile.phone || '',
+                      companyEmail: profile.email || '',
+                      address,
+                      city,
+                      state,
+                      zipCode,
+                      date,
+                      terms,
+                      items,
+                      grandTotal,
+                      amountPaid,
+                    }),
+                  });
+                  const json = await res.json().catch(() => ({}));
+                  if (!res.ok) {
+                    showMessage(
+                      json.error ||
+                        'Send failed. Add RESEND_API_KEY on Vercel (for email) and redeploy. Check spam folder if using Resend test domain.'
+                    );
+                    return;
+                  }
+                  const parts: string[] = [];
+                  if (json.emailsSent?.length) {
+                    parts.push(`Email sent to: ${json.emailsSent.join(', ')}`);
+                  }
+                  if (json.smsSent?.length) {
+                    parts.push(`SMS sent to: ${json.smsSent.join(', ')}`);
+                  }
+                  if (json.errors?.length) {
+                    parts.push(`Some failed: ${json.errors.join('; ')}`);
+                  }
+                  showMessage(
+                    `✅ ${documentType === 'invoice' ? 'Invoice' : 'Estimate'} sent!\n${parts.join('\n')}`
+                  );
+                  setIsSendModalOpen(false);
+                } catch {
+                  showMessage('Network error — could not send. Try again.');
+                } finally {
+                  setSendDocBusy(false);
+                }
+              }}
+            >
+              {sendDocBusy ? 'Sending…' : 'Send Now'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
