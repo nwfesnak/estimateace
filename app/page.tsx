@@ -8961,30 +8961,6 @@ export default function Home() {
                   >
                     📧 Send Invoice
                   </Button>
-                  {isVenmoPaymentReady() && paymentStatus !== 'paid' && (
-                    <Button
-                      onClick={() => openVenmoPayment(Math.max(0, grandTotal - (Number(amountPaid) || 0)), 'invoice')}
-                      className="bg-[#008cff] hover:bg-[#0070cc]"
-                    >
-                      Pay / Confirm Venmo
-                    </Button>
-                  )}
-                  {isZellePaymentReady() && paymentStatus !== 'paid' && (
-                    <Button
-                      onClick={() => openZellePayment(Math.max(0, grandTotal - (Number(amountPaid) || 0)), 'invoice')}
-                      className="bg-[#6d28d9] hover:bg-[#5b21b6]"
-                    >
-                      Pay / Confirm Zelle
-                    </Button>
-                  )}
-                  {isPayPalPaymentReady() && paymentStatus !== 'paid' && (
-                    <Button
-                      onClick={() => openPayPalPayment(Math.max(0, grandTotal - (Number(amountPaid) || 0)), 'invoice')}
-                      className="bg-[#0070ba] hover:bg-[#005ea6]"
-                    >
-                      Pay / Confirm PayPal
-                    </Button>
-                  )}
                 </div>
               ) : (
                 <div className="flex flex-wrap items-center gap-3 mb-8">
