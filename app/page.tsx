@@ -6499,22 +6499,29 @@ export default function Home() {
     const pushIfReady = (method: string) => {
       const s = settings[method];
       if (!s?.enabled) return;
+      // Click-to-pay: only list when fully set up (handle/QR)
       if (method === 'venmo' && !hasVenmoHandle(s.handle)) return;
       if (method === 'zelle' && !hasZelleSetup(s)) return;
       if (method === 'paypal' && !hasPayPalSetup(s)) return;
-      if (method === 'mailcheck' && !hasMailCheckSetup(s)) return;
-      // stripe / echeck / crypto: show if enabled (even without deep link)
+      // Mail check: show whenever the toggle is ON (address optional — still listed)
+      // stripe / echeck / crypto: show if enabled
       const meta = getPaymentMethodMeta(method);
       const isClick =
         meta.clickToPay &&
         ((method === 'venmo' && hasVenmoHandle(s.handle)) ||
           (method === 'paypal' && hasPayPalSetup(s)) ||
           (method === 'zelle' && hasZelleSetup(s)));
+      const ready =
+        method === 'mailcheck'
+          ? !!(s.handle || '').trim()
+          : method === 'venmo' || method === 'zelle' || method === 'paypal'
+            ? isClick
+            : true;
       const opt: Opt = {
         method,
         settings: s,
         meta,
-        ready: true,
+        ready,
         clickToPay: isClick,
       };
       if (isClick) clickToPay.push(opt);
@@ -6551,11 +6558,13 @@ export default function Home() {
       const addr = (getMailCheckSettings()?.handle || '').trim();
       setSelectedPaymentMethod('mailcheck');
       if (!addr) {
-        showMessage('Mailing address is not set. Add it in Profile → Payments.');
+        showMessage(
+          'Mail check is on, but no mailing address is saved. Go to Profile → Client Payments → Mail check to, and enter name + full address (it saves as you type).'
+        );
         return;
       }
       showMessage(
-        `Mail a check for $${paymentAmount.toFixed(2)} to:\n${addr}\n\nWrite invoice # ${invoiceNumber} on the memo line.`
+        `Mail a check for $${paymentAmount.toFixed(2)} to:\n\n${addr}\n\nWrite invoice # ${invoiceNumber} on the memo line.`
       );
       return;
     }
@@ -6913,8 +6922,16 @@ export default function Home() {
               className="w-full max-w-full min-w-0 resize-y text-sm"
             />
             <p className="text-xs text-gray-500">
-              Saves automatically as you type. Clients see this address when they choose mail a check.
+              Saves automatically as you type. Clients only see <strong>Mail a check</strong> on the
+              pay screen when this toggle is on — enter the full address below so they know where to
+              mail it.
             </p>
+            {!!settings.enabled && !addressText.trim() && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 text-amber-900 text-xs p-3">
+                Toggle is <strong>on</strong>, but the pay screen needs a mailing address here.
+                Type name + street + city/state/ZIP (or use Fill from company profile).
+              </div>
+            )}
             {!addressText.trim() && (profile.company || profile.address) && (
               <button
                 type="button"
@@ -12049,7 +12066,11 @@ export default function Home() {
                     ? `Send Zelle to ${zelleHandle}`
                     : 'Scan QR or use unique name shown next';
                 }
-                if (method === 'mailcheck' && mailTo) detail = mailTo;
+                if (method === 'mailcheck') {
+                  detail = mailTo
+                    ? mailTo
+                    : 'Add a mailing address in Profile → Client Payments so clients know where to send the check';
+                }
 
                 const borderClass = primary
                   ? method === 'venmo'
@@ -12061,7 +12082,9 @@ export default function Home() {
                         : 'border-[#10b981] bg-emerald-50 hover:bg-emerald-100'
                   : selectedPaymentMethod === method
                     ? 'border-[#10b981] bg-green-50'
-                    : 'border-gray-200 bg-white hover:bg-gray-50';
+                    : method === 'mailcheck' && !mailTo
+                      ? 'border-amber-300 bg-amber-50 hover:bg-amber-100'
+                      : 'border-gray-200 bg-white hover:bg-gray-50';
 
                 return (
                   <button
@@ -12087,8 +12110,13 @@ export default function Home() {
                               Tap to pay
                             </span>
                           )}
+                          {method === 'mailcheck' && !mailTo && (
+                            <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-amber-500 text-white">
+                              Address needed
+                            </span>
+                          )}
                         </div>
-                        <div className="text-sm font-medium text-gray-700 mt-0.5 break-words">
+                        <div className="text-sm font-medium text-gray-700 mt-0.5 break-words whitespace-pre-wrap">
                           {detail}
                         </div>
                         <p className="text-xs text-gray-500 mt-2 leading-relaxed">
@@ -12096,13 +12124,17 @@ export default function Home() {
                         </p>
                         {method === 'mailcheck' && mailTo && (
                           <p className="text-[11px] text-gray-500 mt-1">
-                            Memo: invoice # {invoiceNumber}
+                            Memo: invoice # {invoiceNumber} · Amount: ${paymentAmount.toFixed(2)}
                           </p>
                         )}
                       </div>
                       {opt.clickToPay ? (
                         <span className="shrink-0 text-sm font-bold text-[#10b981] self-center">
                           Pay ${paymentAmount.toFixed(2)} →
+                        </span>
+                      ) : method === 'mailcheck' && mailTo ? (
+                        <span className="shrink-0 text-sm font-bold text-stone-700 self-center">
+                          Show address →
                         </span>
                       ) : (
                         <span className="shrink-0 text-xs font-semibold text-gray-400 self-center">
