@@ -160,7 +160,10 @@ export async function POST(request: NextRequest) {
       `${ctaLabel}:`,
       actionUrl,
       '',
-      terms ? `Terms:\n${terms.slice(0, 1500)}` : '',
+      'Third-Party Payment Disclosure:',
+      'Payment methods are independent third-party platforms. EstimateAce does not operate or guarantee them.',
+      '',
+      terms ? `Terms & Conditions / Disclosures:\n${terms.slice(0, 2500)}` : '',
       '',
       'Questions? Contact:',
       companyPhone ? `Phone: ${companyPhone}` : '',
@@ -189,6 +192,21 @@ export async function POST(request: NextRequest) {
       })
       .join('');
 
+    const paymentDisclosureHtml = `
+  <div style="margin:0 0 8px;padding:12px 14px;background:#fffbeb;border:1px solid #fcd34d;border-radius:10px;font-size:12px;color:#78350f;line-height:1.45;text-align:left;">
+    <strong style="display:block;margin-bottom:4px;">Third-Party Payment Disclosure</strong>
+    All payment options (cards, banks, mobile wallets, and similar services) are independent third-party platforms.
+    EstimateAce does not operate, control, or guarantee these systems. Resolve payment questions with the payment provider and your contractor.
+  </div>`;
+
+    const termsDisclosureHtml = terms
+      ? `
+  <div style="margin:12px 0 0;padding:12px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;font-size:12px;color:#334155;line-height:1.5;text-align:left;white-space:pre-wrap;">
+    <strong style="display:block;margin-bottom:6px;font-size:13px;color:#0f172a;">Terms &amp; Conditions / Disclosures</strong>
+    ${escapeHtml(terms.slice(0, 4000))}
+  </div>`
+      : '';
+
     const ctaHtml = `
   <div style="margin:28px 0;text-align:center;padding:20px;background:#ecfdf5;border:2px dashed #10b981;border-radius:16px;">
     ${
@@ -203,6 +221,10 @@ export async function POST(request: NextRequest) {
       ${escapeHtml(ctaLabel)}
     </a>
     <p style="margin:12px 0 0;font-size:12px;color:#64748b;">Or open this link:<br/><a href="${escapeHtml(actionUrl)}" style="color:#0f766e;word-break:break-all;">${escapeHtml(actionUrl)}</a></p>
+    <div style="margin-top:18px;">
+      ${paymentDisclosureHtml}
+      ${termsDisclosureHtml}
+    </div>
   </div>`;
 
     const html = `<!DOCTYPE html>
@@ -228,11 +250,6 @@ export async function POST(request: NextRequest) {
   <p style="margin:0 0 8px;">Balance due: <strong>${money(balanceDue)}</strong></p>
   ${depositDue >= 0.5 ? `<p style="margin:0 0 16px;color:#065f46;">Deposit (${depositPercent}%): <strong>${money(depositDue)}</strong></p>` : ''}
   ${ctaHtml}
-  ${
-    terms
-      ? `<div style="margin:20px 0;padding:12px;background:#f8fafc;border-radius:8px;font-size:13px;white-space:pre-wrap;">${escapeHtml(terms.slice(0, 2000))}</div>`
-      : ''
-  }
   <p style="margin-top:24px;font-size:14px;color:#475569;">
     Questions? ${companyPhone ? `Call ${escapeHtml(companyPhone)}` : ''}${companyPhone && companyEmail ? ' · ' : ''}${companyEmail ? `Email ${escapeHtml(companyEmail)}` : ''}
   </p>

@@ -21,10 +21,14 @@ type DocPayload = {
   depositDue?: number;
   showDeposit?: boolean;
   paymentStatus?: string;
+  terms?: string;
   items?: Array<{ description: string; qty: number; total: number }>;
   message?: string;
   error?: string;
 };
+
+const PAYMENT_DISCLOSURE =
+  'All payment options shown here—including cards, banks, mobile wallets, and other services—are independent third-party platforms. EstimateAce does not operate, control, or guarantee any of these payment systems. Resolve payment issues directly with the payment provider and your contractor.';
 
 function money(n: number) {
   return `$${Number(n || 0).toFixed(2)}`;
@@ -256,6 +260,24 @@ function ApprovePayInner() {
               </Button>
             )
           )}
+
+          {/* Disclosures under pay / approve actions */}
+          <div className="space-y-3 pt-2">
+            {String(doc?.terms || '').trim() ? (
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <h3 className="text-sm font-semibold text-slate-900 mb-2 border-b border-slate-200 pb-2">
+                  Terms &amp; Conditions / Disclosures
+                </h3>
+                <div className="text-xs text-slate-700 leading-relaxed whitespace-pre-wrap max-h-56 overflow-y-auto">
+                  {doc?.terms}
+                </div>
+              </div>
+            ) : null}
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-950 leading-relaxed">
+              <p className="font-semibold mb-1">Third-Party Payment Disclosure</p>
+              <p>{PAYMENT_DISCLOSURE}</p>
+            </div>
+          </div>
 
           <div className="pt-4 border-t text-sm text-slate-600 space-y-1">
             <p className="font-medium text-slate-800">Questions?</p>

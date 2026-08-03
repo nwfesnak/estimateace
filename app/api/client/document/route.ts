@@ -113,6 +113,7 @@ export async function GET(request: NextRequest) {
       depositDue,
       showDeposit,
       paymentStatus: row.paymentStatus || row.payment_status || 'unpaid',
+      terms: String(row.terms || profile.disclosure || '').slice(0, 8000),
       items: items.slice(0, 40).map((it: any) => ({
         description: String(it.description || 'Line item').slice(0, 200),
         qty: Number(it.qty) || 0,

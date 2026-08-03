@@ -6475,6 +6475,29 @@ export default function Home() {
     );
   };
 
+  /** Terms + third-party payment disclosure shown under pay / approve blocks */
+  const renderPaySectionDisclosures = (options?: { className?: string }) => {
+    const disclosureText = (terms || profile.disclosure || '').trim();
+    return (
+      <div className={`text-left space-y-4 ${options?.className || ''}`}>
+        {disclosureText ? (
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 sm:p-5">
+            <h4 className="text-sm font-semibold text-gray-900 mb-2 border-b pb-2">
+              {t('termsConditions') || 'Terms & Conditions'} / Disclosures
+            </h4>
+            <div className="text-xs sm:text-sm text-gray-700 leading-relaxed whitespace-pre-wrap max-h-64 overflow-y-auto">
+              {disclosureText}
+            </div>
+          </div>
+        ) : null}
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs sm:text-sm text-amber-950 leading-relaxed">
+          <p className="font-semibold mb-1">{t('paymentDisclosureTitle')}</p>
+          <p>{t('paymentDisclosureBody')}</p>
+        </div>
+      </div>
+    );
+  };
+
   const renderApprovedPaymentSection = (options?: { interactive?: boolean }) => {
     if (documentType === 'invoice') return null;
     if (!isDepositOnApprovalEnabled() && !shouldShowEscrowOnEstimate()) return null;
@@ -6537,6 +6560,7 @@ export default function Home() {
             </p>
           )
         )}
+        {renderPaySectionDisclosures({ className: 'mt-8 max-w-2xl mx-auto' })}
       </div>
     );
   };
@@ -11400,15 +11424,14 @@ export default function Home() {
                     <p className="text-center text-xs text-gray-500 mt-3">
                       Tap Pay Now to see every payment method the contractor accepts, with simple instructions.
                     </p>
+                    {renderPaySectionDisclosures({ className: 'mt-6' })}
                   </div>
                 )}
 
-                {terms && (
+                {/* Full terms also under pay when estimate (deposit section already embeds disclosures) */}
+                {documentType === 'estimate' && !isDepositOnApprovalEnabled() && !shouldShowEscrowOnEstimate() && (terms || profile.disclosure) && (
                   <div className="mt-12">
-                    <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Terms & Conditions</h3>
-                    <div className="text-gray-700 leading-relaxed whitespace-pre-wrap border rounded-xl p-6 bg-gray-50">
-                      {terms}
-                    </div>
+                    {renderPaySectionDisclosures()}
                   </div>
                 )}
 
@@ -12514,6 +12537,7 @@ export default function Home() {
                     After you pay, keep your confirmation; they will mark the invoice paid when funds
                     arrive.
                   </p>
+                  {renderPaySectionDisclosures({ className: 'mt-2' })}
                 </div>
               );
             })()}
