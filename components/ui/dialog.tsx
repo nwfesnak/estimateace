@@ -51,6 +51,8 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  // Radix warns if Description is missing; explicit undefined opts out (see DialogDescriptionWarning).
+  "aria-describedby": ariaDescribedby = undefined,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
@@ -65,6 +67,7 @@ function DialogContent({
           className
         )}
         {...props}
+        aria-describedby={ariaDescribedby}
       >
         {children}
         {showCloseButton && (

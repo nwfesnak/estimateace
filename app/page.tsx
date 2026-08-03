@@ -31,7 +31,7 @@ import {
   type BillingSnapshot,
 } from '@/lib/billing';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { getSupabaseClient, getSupabaseConfigHelpMessage } from '@/lib/supabase/client';
 import { isMediaPdfRef, resolveMediaDisplayUrl } from '@/lib/media-url';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
@@ -11529,7 +11529,12 @@ export default function Home() {
       {/* Send Modal */}
       <Dialog open={isSendModalOpen} onOpenChange={setIsSendModalOpen}>
         <DialogContent>
-          <DialogHeader><DialogTitle>📧 Choose Recipients for this {documentType === 'invoice' ? 'Invoice' : 'Estimate'}</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>📧 Choose Recipients for this {documentType === 'invoice' ? 'Invoice' : 'Estimate'}</DialogTitle>
+            <DialogDescription>
+              Select email addresses and/or phone numbers, then send this {documentType === 'invoice' ? 'invoice' : 'estimate'}.
+            </DialogDescription>
+          </DialogHeader>
           <div className="space-y-6">
             <div>
               <h4 className="font-semibold mb-2">Select Emails</h4>
