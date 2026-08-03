@@ -2531,7 +2531,7 @@ export default function Home() {
     receiptDetails?: any[];
     /** Per-job mileage log (avoids stale state after Add trip) */
     mileageLogs?: MileageLog[];
-    /** Suppress error toasts (auto-save) */
+    /** Suppress error toasts (auto-save) — still shows on hard failure */
     quiet?: boolean;
   }): Promise<{ ok: boolean; error?: string; id?: string }> => {
     if (!supabase) {
@@ -2560,63 +2560,43 @@ export default function Home() {
     const receiptsToSave = options?.receiptUrls ?? receiptUrls;
     const receiptDetailsToSave = options?.receiptDetails ?? receiptDetails;
     const milesToSave = options?.mileageLogs ?? jobMileageLogs;
-    const data = {
+    const payload = {
+      id: docId,
       user_id: workspaceUserId,
-      jobName,
-      address,
-      city,
-      state,
-      zipCode,
-      phones,
-      emails,
-      date,
+      jobName: jobName || '',
+      address: address || '',
+      city: city || '',
+      state: state || '',
+      zipCode: zipCode || '',
+      phones: Array.isArray(phones) ? phones : [],
+      emails: Array.isArray(emails) ? emails : [],
+      date: date || '',
       invoiceNumber: docId,
-      items,
-      terms,
+      items: items || [],
+      terms: terms || '',
       profile: getDocumentProfileSnapshot(profileToSave, breakdownToSave, milesToSave),
-      documentType,
-      dueDate,
-      paymentStatus,
-      amountPaid,
-      paymentMethod,
-      photoUrls: photosToSave,
-      videoUrls: videosToSave,
-      receiptUrls: receiptsToSave,
-      receiptDetails: receiptDetailsToSave,
-      laborHours,
-      laborRate,
-      laborFixedAmount,
-      useHourlyLabor,
-      laborAmount,
+      documentType: documentType || 'estimate',
+      dueDate: dueDate || '',
+      paymentStatus: paymentStatus || 'pending',
+      amountPaid: amountPaid || 0,
+      paymentMethod: paymentMethod || '',
+      photoUrls: photosToSave || [],
+      videoUrls: videosToSave || [],
+      receiptUrls: receiptsToSave || [],
+      receiptDetails: receiptDetailsToSave || [],
+      laborHours: laborHours || 0,
+      laborRate: laborRate || 0,
+      laborFixedAmount: laborFixedAmount || 0,
+      useHourlyLabor: useHourlyLabor !== false,
+      laborAmount: laborAmount || 0,
       taxRate: baseTaxRate,
       taxAmount,
-      isTaxExempt,
-      taxLabor,
+      isTaxExempt: !!isTaxExempt,
+      taxLabor: taxLabor !== false,
       updated_at: new Date().toISOString(),
     };
 
-    try {
-      const { error } = await supabase.from('estimates').upsert({ id: docId, ...data });
-      if (error) {
-        console.error('Save error:', error);
-        const errMsg =
-          error.message ||
-          error.details ||
-          error.hint ||
-          'Failed to save document.';
-        const friendly =
-          /row-level security|RLS|permission|policy/i.test(errMsg)
-            ? 'Save blocked by database security (RLS). Make sure you are logged in and RLS policies allow your user to insert/update estimates.'
-            : /column|schema|does not exist/i.test(errMsg)
-              ? `Save failed (database schema): ${errMsg}`
-              : `Failed to save: ${errMsg}`;
-        setSaveStatus('error');
-        setSaveErrorDetail(friendly);
-        if (!options?.quiet) showMessage(friendly);
-        return { ok: false, error: friendly, id: docId };
-      }
-
-      // Saving an INV- invoice must clear the original EST- work order from the Estimates page
+    const markOk = async () => {
       if (String(docId).toUpperCase().startsWith('INV')) {
         await removeEstimateWorkOrderForInvoice(
           {
@@ -2633,14 +2613,87 @@ export default function Home() {
       }
       setLastSaved(new Date().toLocaleTimeString());
       setSaveStatus('saved');
+      setSaveErrorDetail('');
       void refreshSavedList();
-      return { ok: true, id: docId };
+      return { ok: true as const, id: docId };
+    };
+
+    try {
+      // 1) Direct client upsert (camelCase) — works when schema matches
+      let clientErr: any = null;
+      {
+        const { error } = await supabase
+          .from('estimates')
+          .upsert(payload, { onConflict: 'id' });
+        if (!error) return await markOk();
+        clientErr = error;
+        console.warn('Client camelCase save failed:', error);
+      }
+
+      // 2) Lowercase column names (Postgres unquoted schema)
+      {
+        const lower: Record<string, any> = {};
+        for (const [k, v] of Object.entries(payload)) {
+          if (k === 'id' || k === 'user_id' || k === 'updated_at' || k === 'profile' || k === 'items' || k === 'terms' || k === 'phones' || k === 'emails' || k === 'address' || k === 'city' || k === 'state' || k === 'date') {
+            lower[k] = v;
+          } else {
+            lower[k.toLowerCase()] = v;
+          }
+        }
+        const { error } = await supabase.from('estimates').upsert(lower, { onConflict: 'id' });
+        if (!error) return await markOk();
+        console.warn('Client lowercase save failed:', error);
+        clientErr = error;
+      }
+
+      // 3) Server save (service role) — reliable when RLS or client path fails
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (token) {
+        const res = await fetch('/api/documents/save', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (res.ok && json.ok) {
+          return await markOk();
+        }
+        const serverErr =
+          json.error ||
+          clientErr?.message ||
+          'Save failed on server. Check SUPABASE_SERVICE_ROLE_KEY and estimates table.';
+        console.error('Server save failed:', json);
+        setSaveStatus('error');
+        setSaveErrorDetail(serverErr);
+        // Always surface save failures so the user knows estimates are not persisting
+        showMessage(`❌ Could not save estimate: ${String(serverErr).slice(0, 180)}`);
+        return { ok: false, error: serverErr, id: docId };
+      }
+
+      const errMsg =
+        clientErr?.message ||
+        clientErr?.details ||
+        'Failed to save document.';
+      const friendly =
+        /row-level security|RLS|permission|policy/i.test(errMsg)
+          ? 'Save blocked by database security (RLS). Run supabase/rls-policies.sql or ensure SUPABASE_SERVICE_ROLE_KEY is set on Vercel.'
+          : /column|schema|does not exist/i.test(errMsg)
+            ? `Save failed (database schema): ${errMsg}`
+            : `Failed to save: ${errMsg}`;
+      setSaveStatus('error');
+      setSaveErrorDetail(friendly);
+      showMessage(`❌ ${friendly}`);
+      return { ok: false, error: friendly, id: docId };
     } catch (e: any) {
       const err = e?.message || 'Network error while saving.';
       console.error('Save exception:', e);
       setSaveStatus('error');
       setSaveErrorDetail(err);
-      if (!options?.quiet) showMessage(err);
+      showMessage(`❌ ${err}`);
       return { ok: false, error: err, id: docId };
     }
   };
