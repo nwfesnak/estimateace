@@ -19,6 +19,16 @@ import {
   type MarketMaterialLine,
 } from '@/lib/market-material-caps';
 import { alignBreakdownToUnitPrice } from '@/lib/breakdown-pricing';
+import {
+  applyPriceMemoryToBreakdown,
+  formatPriceMemoryForPrompt,
+  normalizeAiPriceMemory,
+  type AiPriceMemory,
+} from '@/lib/ai-price-memory';
+import {
+  blendWithTaskMarket,
+  estimateUnitJobLaborHours,
+} from '@/lib/task-market-pricing';
 
 // Simple in-memory rate limiter (per-user, resets on server restart)
 // For production: use Redis / Upstash / Vercel KV with proper middleware
@@ -157,11 +167,31 @@ function estimateJobLaborHours(
     return finish(lf / 15, lf / 10, lf / 6);
   }
 
+  // Unit / each jobs — use task-specific hours (NOT trade-day maxHoursPerUnit).
+  // Old bug: toilet/faucet used 5–20 hrs because maxHoursPerUnit was treated as expected.
   const qty = Math.max(1, scope.scopeQty);
-  if (qty <= 4) {
-    return finish(maxHoursPerUnit * 0.5, maxHoursPerUnit, maxHoursPerUnit * 2);
+  const unitGuide = estimateUnitJobLaborHours(description);
+  if (unitGuide) {
+    const minH = unitGuide.minHours * Math.min(qty, 4);
+    const expH = unitGuide.expectedHours * Math.min(qty, 4);
+    const maxH = unitGuide.maxHours * Math.min(qty, 6);
+    // For 5+ identical units, add diminishing hours beyond the first few
+    if (qty > 4) {
+      const extra = (qty - 4) * unitGuide.expectedHours * 0.75;
+      return finish(minH + extra * 0.6, expH + extra, maxH + extra * 1.1);
+    }
+    return finish(minH, expH, maxH);
   }
-  return finish(maxHoursPerUnit, maxHoursPerUnit * 2, maxHoursPerUnit * 4);
+
+  // Fallback: modest handyman-scale hours (never multi-day trade max as "expected")
+  if (qty <= 4) {
+    return finish(1, Math.min(4, maxHoursPerUnit * 0.35), Math.min(10, maxHoursPerUnit * 0.75));
+  }
+  return finish(
+    Math.min(8, maxHoursPerUnit * 0.5),
+    Math.min(16, maxHoursPerUnit),
+    Math.min(40, maxHoursPerUnit * 2.5)
+  );
 }
 
 function detectLaborRateCap(
@@ -252,7 +282,10 @@ function normalizeLaborBreakdown(
   return buildLaborFromGuide(labor, guide, jobDescription, suggestedQty, laborMultiplier);
 }
 
-/** Final price = materials + realistic labor (hours × rate). Never crush price to a low AI guess. */
+/**
+ * Final price = materials + realistic labor (hours × rate), then blended with
+ * AI + known task market bands so unit jobs are not wildly over/under priced.
+ */
 function finalizeLaborAndPrice(
   materials: MaterialLine[],
   labor: LaborBreakdown | null,
@@ -260,7 +293,8 @@ function finalizeLaborAndPrice(
   suggestedQty: number,
   unit: string,
   laborMultiplier = 1,
-  aiUnitPrice?: number
+  aiUnitPrice?: number,
+  regional?: ReturnType<typeof resolveRegionalPricing>
 ): { materials: MaterialLine[]; labor: LaborBreakdown | null; unitPrice: number } {
   const guide = estimateJobLaborHours(jobDescription, suggestedQty, unit);
   const { typicalRate, maxRate } = detectLaborRateCap(jobDescription, laborMultiplier);
@@ -277,8 +311,12 @@ function finalizeLaborAndPrice(
     );
 
   let hours = Number(lab.hours) || 0;
-  if (hours < guide.minHours) hours = guide.expectedHours;
-  if (hours > guide.maxHours) hours = guide.maxHours;
+  // Soft clamp: prefer AI hours when inside the guide band; only replace when absurd
+  if (hours <= 0) hours = guide.expectedHours;
+  else if (hours < guide.minHours * 0.5) hours = guide.minHours;
+  else if (hours < guide.minHours) hours = roundMoney((hours + guide.expectedHours) / 2);
+  else if (hours > guide.maxHours * 1.25) hours = guide.maxHours;
+  else if (hours > guide.maxHours) hours = roundMoney((hours + guide.maxHours) / 2);
 
   let rate = Number(lab.rate) || 0;
   if (rate <= 0) rate = typicalRate;
@@ -296,23 +334,51 @@ function finalizeLaborAndPrice(
   };
 
   let mats = materials.map(m => recalcMaterialLine(m));
-  let unitPrice = roundMoney(sumMaterialTotals(mats) + perUnitLabor);
+  let builtUp = roundMoney(sumMaterialTotals(mats) + perUnitLabor);
 
-  // Only scale UP when built-up is far below AI (materials likely missing) — never scale down.
-  if (aiUnitPrice && unitPrice > 0 && unitPrice < aiUnitPrice * 0.75 && aiUnitPrice / unitPrice <= 1.6) {
-    const ratio = aiUnitPrice / unitPrice;
+  // Blend AI with built-up when both look usable (don't only ever scale UP)
+  if (aiUnitPrice && aiUnitPrice > 0 && builtUp > 0) {
+    const ratio = aiUnitPrice / builtUp;
+    if (ratio >= 0.7 && ratio <= 1.35) {
+      // Close enough — average them (slight preference for built-up materials+labor)
+      builtUp = roundMoney(builtUp * 0.55 + aiUnitPrice * 0.45);
+    } else if (ratio > 1.35 && ratio <= 1.8) {
+      // AI higher: partial scale-up (materials may be thin)
+      builtUp = roundMoney(builtUp * 0.65 + aiUnitPrice * 0.35);
+    } else if (ratio < 0.7 && ratio >= 0.45) {
+      // AI lower: partial pull-down (labor guide may have been high)
+      builtUp = roundMoney(builtUp * 0.55 + aiUnitPrice * 0.45);
+    } else if (ratio > 1.8) {
+      // AI much higher: don't fully trust — mild bump only
+      builtUp = roundMoney(builtUp * 1.12);
+    }
+    // ratio < 0.45: ignore AI as likely underquote / bad parse
+  }
+
+  // Known fixture/task market band keeps customer charge realistic
+  if (regional) {
+    const market = blendWithTaskMarket(jobDescription, regional, builtUp * qty);
+    // market.total is full job; convert back to per-line unit price
+    const marketPerUnit = roundMoney(market.total / qty);
+    if (market.band) {
+      builtUp = marketPerUnit;
+    }
+  }
+
+  // Re-scale labor + materials shares to match final unit price
+  const matsTotal = sumMaterialTotals(mats);
+  const current = roundMoney(matsTotal + lab.total);
+  if (current > 0 && Math.abs(current - builtUp) > 0.02) {
+    const scale = builtUp / current;
     mats = mats.map(m => {
-      const total = roundMoney(m.total * ratio);
+      const total = roundMoney(m.total * scale);
       const unitPriceLine = m.qty > 0 ? roundMoney(total / m.qty) : total;
       return recalcMaterialLine({ ...m, unitPrice: unitPriceLine, total });
     });
-    lab = {
-      ...lab,
-      total: roundMoney(lab.total * ratio),
-    };
-    unitPrice = roundMoney(sumMaterialTotals(mats) + lab.total);
+    lab = { ...lab, total: roundMoney(lab.total * scale) };
   }
 
+  const unitPrice = roundMoney(sumMaterialTotals(mats) + (lab?.total || 0));
   return { materials: mats, labor: lab, unitPrice };
 }
 
@@ -593,7 +659,43 @@ export async function POST(request: NextRequest) {
     const jobLocation = (body?.jobLocation || body?.location) as QuoteLocationInput | undefined;
     const companyLocation = body?.companyLocation as QuoteLocationInput | undefined;
     const lineContext = body?.lineContext as QuoteLineContext | undefined;
+    const priceMemory: AiPriceMemory = normalizeAiPriceMemory(body?.priceMemory);
+    const priceMemoryPrompt = formatPriceMemoryForPrompt(priceMemory);
     const regional = resolveRegionalPricing(jobLocation, companyLocation);
+
+    const applyMemoryAndAlign = (
+      materialsIn: MaterialLine[],
+      laborIn: LaborBreakdown | null,
+      jobDesc: string,
+      unitPrice: number,
+      qty: number,
+      unit: string
+    ) => {
+      const applied = applyPriceMemoryToBreakdown(materialsIn, laborIn, priceMemory);
+      // Prefer contractor unit prices: rebuild line unit price from materials + labor when memory applied
+      let nextUnitPrice = unitPrice;
+      if (applied.appliedMaterialCount > 0 || applied.appliedLaborRate) {
+        const matSum = sumMaterialTotals(applied.materials);
+        const labSum = applied.labor?.total || 0;
+        const built = roundMoney(matSum + labSum);
+        if (built > 0) nextUnitPrice = built;
+      }
+      const aligned = buildAlignedQuoteBreakdown(
+        applied.materials,
+        applied.labor,
+        jobDesc,
+        nextUnitPrice,
+        qty,
+        unit,
+        regional
+      );
+      return {
+        aligned,
+        appliedMaterialCount: applied.appliedMaterialCount,
+        appliedLaborRate: applied.appliedLaborRate,
+        unitPrice: nextUnitPrice,
+      };
+    };
 
     const anchoredQuote = computePricingAnchor(jobDescription, regional);
     if (anchoredQuote) {
@@ -603,20 +705,22 @@ export async function POST(request: NextRequest) {
         unitPrice: anchoredQuote.unitPrice,
         total: anchoredQuote.total,
       });
-      const aligned = buildAlignedQuoteBreakdown(
-        anchoredQuote.materials,
-        anchoredQuote.laborBreakdown,
-        jobDescription,
-        structured.unitPrice,
-        structured.suggestedQty,
-        structured.unit,
-        regional
-      );
+      const { aligned, appliedMaterialCount, appliedLaborRate, unitPrice: memUnitPrice } =
+        applyMemoryAndAlign(
+          anchoredQuote.materials,
+          anchoredQuote.laborBreakdown,
+          jobDescription,
+          structured.unitPrice,
+          structured.suggestedQty,
+          structured.unit
+        );
+      const finalUnit = memUnitPrice > 0 ? memUnitPrice : structured.unitPrice;
+      const finalTotal = roundMoney(finalUnit * structured.suggestedQty);
       return NextResponse.json({
-        unitPrice: structured.unitPrice,
+        unitPrice: finalUnit,
         unit: structured.unit,
         suggestedQty: structured.suggestedQty,
-        total: structured.total,
+        total: finalTotal,
         billingMode: structured.billingMode,
         breakdown: anchoredQuote.breakdown,
         confidence: anchoredQuote.confidence,
@@ -629,6 +733,10 @@ export async function POST(request: NextRequest) {
         jobLaborTotal: aligned.laborCostTotal,
         analyzedScope: imageAnalysis?.scopeDescription,
         imageAnalysis,
+        priceMemoryApplied: {
+          materials: appliedMaterialCount,
+          laborRate: appliedLaborRate,
+        },
         pricingRegion: {
           label: regional.label,
           source: regional.source,
@@ -658,30 +766,43 @@ export async function POST(request: NextRequest) {
         messages: [
           {
             role: 'system',
-            content: `You are a professional contractor cost estimator for residential and light commercial work.
-Build competitive, market-aligned prices for the job's LOCAL area — NOT premium, NOT padded, NOT commercial/union rates.
+            content: `You are a professional residential contractor estimator. Your quotes must match what a real local contractor would charge a homeowner for the EXACT task described — competitive mid-market, not luxury and not a giveaway.
 
-PRICING ONLY — do not rewrite or improve the customer-facing line description. Price the scope exactly as described.
+PRICING ONLY — do not rewrite the customer-facing description. Price only what is written (no extras, no "while we're there" work).
 
-Return ONLY valid JSON for the described line item.
+Return ONLY valid JSON.
 
 ${regionalPrompt}
 
-PRICING METHODOLOGY (critical):
-- Use mid-grade 2026 retail / supply-house material costs for the job location (local Home Depot, Lowe's, regional supply house averages).
-- Do NOT use luxury brands, specialty imports, or contractor resale markup on materials.
-- Do NOT add overhead, profit margin, contingency, or permit fees into unitPrice — only direct materials + direct labor.
-- Labor rates must reflect the LOCAL market described above — adjust hours and hourly rate for regional cost tier.
-- laborBreakdown.hours = TOTAL crew-hours for the ENTIRE job scope (all sqft, squares, or units in the description) — never hours per sqft.
-- Labor production guides (total job hours): roof replacement ~1.5–3.5 hrs per square (100 sqft); 4800 sqft roof ≈ 48 squares ≈ 72–170 hrs. Flooring ~1 hr per 25–35 sqft. Interior paint on a whole home: use PAINTABLE wall+ceiling sqft (~3–4× home floor sqft for a ranch), NOT floor sqft alone — e.g. 1500 sq ft ranch with 9 ft ceilings ≈ 5200 paintable sq ft ≈ 30–40 crew-hours. Small fixture swap 1–3 hrs.
-- Do NOT return 4 hours for a large roof, whole-house paint, or other large-area work.
+${priceMemoryPrompt ? `\n${priceMemoryPrompt}\n` : ''}
 
-SMALL REPAIR / HARDWARE JOBS (critical — do NOT price like a remodel):
-- Screen door handle, door knob, latch, hinge, lockset, outlet, switch, faucet cartridge: suggestedQty = 1, unit = "Unit", unitPrice = FULL job total only.
-- Typical totals: screen door / storm door handle replacement $150–$450 | door knob or latch $175–$400 | single outlet/switch $175–$500 | minor faucet repair $165–$550.
-- Labor: 1–2.5 hours total for one handle/knob/outlet — NOT 8+ hours. Materials: handle kit $25–$95, not a full door.
-- NEVER quote $800+ for replacing only a handle, knob, or small hardware unless the description explicitly includes a full door, frame, or large-area work.
-- The final unitPrice must cover realistic materials PLUS labor at production-based hours × local labor rate. Do not under-quote large jobs.
+ACCURACY RULES (critical — quotes are often too high or too low when ignored):
+1) Scope lock: Price ONLY the described task. If they say "replace toilet", do not include bathroom remodel, tile, or vanity.
+2) Think: materials at big-box/supply-house retail + labor hours a competent tech needs × local hourly rate.
+3) unitPrice for Unit jobs = FULL job total the customer pays for that one task (materials + labor). For SF jobs = price PER square foot installed.
+4) Prefer realistic mid-market installed prices. If unsure, stay near typical homeowner-facing contractor pricing for 2025–2026.
+
+TYPICAL INSTALLED TOTALS (Unit jobs — adjust ±15–25% for the regional factors above):
+- Screen/storm door handle or door knob/latch: $150–$400 | single outlet/switch/GFCI: $150–$450
+- Faucet repair/cartridge: $150–$450 | new faucet install: $220–$550 | toilet replace: $350–$750
+- Garbage disposal: $300–$650 | ceiling fan: $220–$550 | light fixture swap: $160–$450
+- Interior prehung door: $280–$650 | entry door: $900–$2,800 | single window: $550–$1,600
+- Drywall small patch: $175–$500 | water heater (tank): $1,200–$2,800
+- Dishwasher install: $250–$550 | vanity install: $450–$1,400
+
+LABOR HOURS (total crew-hours for the WHOLE task — not per sqft unless SF billing):
+- Small hardware / outlet / fixture swap: 0.75–3 hrs
+- Toilet, faucet install, disposal, fan: 1.5–4 hrs
+- Interior door / drywall patch: 1.5–5 hrs
+- Entry door / water heater: 3–10 hrs
+- Roof: ~1.5–3.5 hrs per square (100 sqft). Flooring: ~1 hr per 25–35 sqft. Whole-home paint: use paintable wall+ceiling area (~3–4× floor sqft), not floor alone.
+- NEVER assign 8–20 hours to a single toilet, faucet, handle, or outlet.
+
+PRICING METHODOLOGY:
+- Mid-grade retail materials (Home Depot / Lowe's / supply house). No luxury brands unless described.
+- Do NOT add overhead, profit pad, contingency, or permits into unitPrice — direct materials + direct labor only.
+- laborBreakdown.hours = TOTAL crew-hours for the entire scope described.
+- Do not under-quote large area work (roof, whole-house paint, full flooring).
 
 MATERIAL PRICE ANCHORS (per unit, mid-grade retail — scale up/down for the job region vs US average):
 - Drywall sheet 4x8: $12–16 | 2x4x8 stud: $3.50–5 | Interior paint gallon: $28–38
@@ -700,7 +821,7 @@ MATERIALS LIST (client-facing — must match the quoted scope):
 - Skip materials that are negligible cost or not meaningful to show the client.
 
 PRICING MATH (strict — numbers must reconcile):
-- BILLING MODE (critical): If the job can be measured in square feet (paint, roof, flooring, drywall, siding, stucco, insulation), set suggestedQty = total sqft, unit = "SF", unitPrice = high-end local $/sqft. All other jobs (fixtures, fences, permits, lump-sum): suggestedQty = 1, unit = "Unit", unitPrice = full job total.
+- BILLING MODE (critical): If the job can be measured in square feet (paint, roof, flooring, drywall, siding, stucco, insulation), set suggestedQty = total sqft, unit = "SF", unitPrice = mid-market local installed $/sqft. All other jobs (fixtures, small installs, lump-sum): suggestedQty = 1, unit = "Unit", unitPrice = full job total.
 - unitPrice = rate per SF or full Unit price BEFORE multiplying by suggestedQty.
 - materialsCostTotal + laborCostTotal MUST EXACTLY equal unitPrice (to the penny). Never higher, never lower.
 - Material line totals must be sized for ONE unit of measure — do NOT put the full multi-qty job cost in materials when suggestedQty > 1.
@@ -805,6 +926,13 @@ PRICING MATH (strict — numbers must reconcile):
       lineUnit
     );
 
+    // Apply contractor-edited preferred prices before reconciling totals
+    {
+      const applied = applyPriceMemoryToBreakdown(materials, laborBreakdown, priceMemory);
+      materials = applied.materials as MaterialLine[];
+      laborBreakdown = applied.labor;
+    }
+
     const reconciled = reconcileBuiltUpPrice(materials, laborBreakdown, {
       aiUnitPrice: aiTargetUnitPrice,
       suggestedQty,
@@ -817,25 +945,36 @@ PRICING MATH (strict — numbers must reconcile):
       suggestedQty,
       lineUnit,
       regional.laborMultiplier,
-      aiTargetUnitPrice
+      aiTargetUnitPrice,
+      regional
     );
     materials = finalized.materials;
     laborBreakdown = finalized.labor;
+
+    // Re-apply memory after finalize so labor rate / material unit prices stick
+    const memoryPass = applyPriceMemoryToBreakdown(materials, laborBreakdown, priceMemory);
+    materials = memoryPass.materials as MaterialLine[];
+    laborBreakdown = memoryPass.labor;
+    let memoryUnitPrice = finalized.unitPrice;
+    if (memoryPass.appliedMaterialCount > 0 || memoryPass.appliedLaborRate) {
+      const built = roundMoney(sumMaterialTotals(materials) + (laborBreakdown?.total || 0));
+      if (built > 0) memoryUnitPrice = built;
+    }
 
     const materialsCostTotal = sumMaterialTotals(materials);
     const laborCostTotal = roundMoney(laborBreakdown?.total || 0);
     const structured = resolveQuoteLineStructure(jobDescription, regional, {
       suggestedQty,
       unit: lineUnit || parsed.unit,
-      unitPrice: finalized.unitPrice,
-      total: roundMoney(finalized.unitPrice * suggestedQty),
+      unitPrice: memoryUnitPrice,
+      total: roundMoney(memoryUnitPrice * suggestedQty),
     });
 
     if (structured.unitPrice <= 0 || structured.total <= 0) {
       return NextResponse.json({ error: 'AI could not produce a valid price for this description' }, { status: 500 });
     }
 
-    const aligned = buildAlignedQuoteBreakdown(
+    let aligned = buildAlignedQuoteBreakdown(
       materials,
       laborBreakdown,
       jobDescription,
@@ -844,6 +983,29 @@ PRICING MATH (strict — numbers must reconcile):
       structured.unit,
       regional
     );
+
+    // Final pass: lock contractor-preferred material unit prices + labor rate into the response
+    const finalMem = applyPriceMemoryToBreakdown(
+      aligned.materials,
+      aligned.labor,
+      priceMemory
+    );
+    if (finalMem.appliedMaterialCount > 0 || finalMem.appliedLaborRate) {
+      const matSum = sumMaterialTotals(finalMem.materials);
+      const labSum = finalMem.labor?.total || 0;
+      const built = roundMoney(matSum + labSum);
+      aligned = {
+        ...aligned,
+        materials: finalMem.materials as MaterialLine[],
+        labor: finalMem.labor,
+        materialsCostTotal: matSum,
+        laborCostTotal: labSum,
+      };
+      if (built > 0) {
+        structured.unitPrice = built;
+        structured.total = roundMoney(built * structured.suggestedQty);
+      }
+    }
 
     return NextResponse.json({
       unitPrice: structured.unitPrice,
@@ -859,6 +1021,10 @@ PRICING MATH (strict — numbers must reconcile):
       laborBreakdown: aligned.labor,
       analyzedScope: imageAnalysis?.scopeDescription,
       imageAnalysis,
+      priceMemoryApplied: {
+        materials: finalMem.appliedMaterialCount,
+        laborRate: finalMem.appliedLaborRate,
+      },
       pricingRegion: {
         label: regional.label,
         source: regional.source,

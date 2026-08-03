@@ -44,6 +44,11 @@ import {
 } from '@/lib/languages';
 import { getQuoteOfTheDay } from '@/lib/quote-of-the-day';
 import {
+  learnFromBreakdownEdit,
+  normalizeAiPriceMemory,
+  type AiPriceMemory,
+} from '@/lib/ai-price-memory';
+import {
   buildPaymentTrackingNote,
   buildPayPalPayUrl,
   buildZellePaymentMemo,
@@ -805,6 +810,8 @@ export default function Home() {
     /** SMS 2-step verification on login */
     twoFactorEnabled: false,
     twoFactorPhone: '',
+    /** Learned material unit prices + labor rates from user AI breakdown edits */
+    aiPriceMemory: { materials: [] } as AiPriceMemory,
   });
   const [profile, setProfile] = useState(blankProfile);
 
@@ -1051,6 +1058,7 @@ export default function Home() {
     paymentSettings: mergePaymentSettings(full.paymentSettings),
     twoFactorEnabled: full.twoFactorEnabled === true,
     twoFactorPhone: String(full.twoFactorPhone || '').trim(),
+    aiPriceMemory: normalizeAiPriceMemory(full.aiPriceMemory),
     // deliberately omit: teammates, ccFee*, crewSubscriptionActive, etc.
   });
 
@@ -3582,6 +3590,9 @@ export default function Home() {
             (l as any).twoFactorPhone,
             ''
           ),
+          aiPriceMemory: normalizeAiPriceMemory(
+            (s as any).aiPriceMemory || (l as any).aiPriceMemory
+          ),
           language: preferredLang,
           teammates: ((s.teammates || l.teammates || []) as any[]).map((t: any) => ({
             ...t,
@@ -3823,6 +3834,9 @@ export default function Home() {
     }
     if (data.laborBreakdown?.hours) {
       msg += `\nLabor: ${data.laborBreakdown.description || 'Installation'} — ${data.laborBreakdown.hours} hrs`;
+      if (data.laborBreakdown.rate) {
+        msg += ` @ $${Number(data.laborBreakdown.rate).toFixed(2)}/hr`;
+      }
     }
     if (normalizedBreakdown.materials.length || normalizedBreakdown.labor) {
       const mat = normalizedBreakdown.materialsCostTotal.toFixed(2);
@@ -3832,6 +3846,10 @@ export default function Home() {
         ? `matches line total $${linePricing.total.toFixed(2)} (${linePricing.qty.toLocaleString()} SF × $${linePricing.price.toFixed(2)}/SF)`
         : `matches line total $${linePricing.total.toFixed(2)}`;
       msg += `\nBuilt-up cost: materials $${mat} + labor $${lab} = $${builtUp} (${matchNote})`;
+    }
+    if (data.priceMemoryApplied?.materials || data.priceMemoryApplied?.laborRate) {
+      msg += `\n\nUsing your saved prices: ${data.priceMemoryApplied.materials || 0} material(s)`;
+      if (data.priceMemoryApplied.laborRate) msg += ' + labor rate';
     }
     showMessage(msg);
   };
@@ -3865,6 +3883,8 @@ export default function Home() {
             address: profile.address,
           },
           lineContext: { qty: item.qty, unit: item.unit },
+          // Contractor-edited material unit prices + labor rate from prior breakdown saves
+          priceMemory: normalizeAiPriceMemory(profile.aiPriceMemory),
         }),
       });
 
@@ -4045,6 +4065,16 @@ export default function Home() {
       : null;
     const builtUp = getBuiltUpBreakdownPrice(materials, labor);
 
+    // Remember edited material unit prices + labor rate for future AI quotes
+    const nextMemory = learnFromBreakdownEdit(
+      profile.aiPriceMemory,
+      materials,
+      labor
+    );
+    const nextProfile = { ...profile, aiPriceMemory: nextMemory };
+    setProfile(nextProfile);
+    void saveProfileSettings(nextProfile, { quiet: true });
+
     setItems(prev => prev.map(item => {
       if (item.id !== breakdownEditItemId) return item;
       const qty = item.qty || 0;
@@ -4070,8 +4100,14 @@ export default function Home() {
     }));
 
     closeBreakdownEditor();
-    showMessage('✅ Line breakdown saved');
-    saveToDB();
+    const learnedCount = nextMemory.materials.length;
+    const laborNote = nextMemory.laborRate
+      ? ` Labor rate remembered: $${nextMemory.laborRate.toFixed(2)}/hr.`
+      : '';
+    showMessage(
+      `✅ Line breakdown saved.${learnedCount ? ` ${learnedCount} material price(s) remembered for next AI quote.` : ''}${laborNote}`
+    );
+    saveToDB({ profile: nextProfile });
   };
 
   // === TRANSLATE FUNCTION (added exactly as requested) ===
