@@ -91,22 +91,101 @@ const DEFAULT_PAYMENT_SETTINGS = {
 const CRYPTO_PAYMENT_METHODS = new Set(['nowpayments', 'coinbase_commerce']);
 
 const getPaymentMethodMeta = (method: string) => {
-  const meta: Record<string, { icon: string; label: string; description: string; category: 'traditional' | 'crypto' }> = {
-    stripe: { icon: '💳', label: 'Stripe', description: 'Cards, Apple Pay, Google Pay', category: 'traditional' },
-    echeck: { icon: '🏦', label: 'eCheck / ACH', description: 'Bank account (ACH)', category: 'traditional' },
-    paypal: { icon: '💰', label: 'PayPal', description: 'PayPal.Me link or business email — accept real payments', category: 'traditional' },
-    venmo: { icon: '📱', label: 'Venmo', description: 'Mobile app payment', category: 'traditional' },
-    zelle: { icon: '🏦', label: 'Zelle', description: 'QR code or unique name/email/phone for client payments', category: 'traditional' },
+  const meta: Record<
+    string,
+    {
+      icon: string;
+      label: string;
+      description: string;
+      howItWorks: string;
+      category: 'traditional' | 'crypto';
+      /** Opens an app / payment page with amount (when set up) */
+      clickToPay: boolean;
+    }
+  > = {
+    venmo: {
+      icon: '📱',
+      label: 'Venmo',
+      description: 'Pay in the Venmo app',
+      howItWorks:
+        'Tap Pay to open Venmo with the amount and invoice note filled in. Complete the payment in Venmo, then the contractor can mark your invoice paid.',
+      category: 'traditional',
+      clickToPay: true,
+    },
+    paypal: {
+      icon: '💰',
+      label: 'PayPal',
+      description: 'Pay with PayPal (card or balance)',
+      howItWorks:
+        'Tap Pay to open a real PayPal checkout with the amount ready. Pay with your PayPal balance or linked card. No account setup on this screen.',
+      category: 'traditional',
+      clickToPay: true,
+    },
+    zelle: {
+      icon: '🏦',
+      label: 'Zelle',
+      description: 'Bank-to-bank transfer',
+      howItWorks:
+        'Tap Pay to see the contractor’s Zelle name/email/phone or QR code. Send the exact amount in your bank’s Zelle app and put the invoice number in the memo.',
+      category: 'traditional',
+      clickToPay: true,
+    },
+    stripe: {
+      icon: '💳',
+      label: 'Card (Stripe)',
+      description: 'Credit / debit card',
+      howItWorks:
+        'Card checkout is arranged by the contractor (Stripe link or in person). Contact them if you prefer to pay by card.',
+      category: 'traditional',
+      clickToPay: false,
+    },
+    echeck: {
+      icon: '🏦',
+      label: 'eCheck / ACH',
+      description: 'Pay from your bank account',
+      howItWorks:
+        'Bank draft / ACH is set up with the contractor. They will send instructions or a payment link for an electronic bank payment.',
+      category: 'traditional',
+      clickToPay: false,
+    },
     mailcheck: {
       icon: '✉️',
-      label: 'Mail check to',
-      description: 'Mailing address for clients to send paper checks',
+      label: 'Mail a check',
+      description: 'Paper check by mail',
+      howItWorks:
+        'Mail a check for the amount due to the address shown. Write the invoice number on the memo line. The contractor marks the invoice paid when the check clears.',
       category: 'traditional',
+      clickToPay: false,
     },
-    nowpayments: { icon: '₿', label: 'NOWPayments', description: 'Bitcoin, Ethereum, and 300+ cryptocurrencies', category: 'crypto' },
-    coinbase_commerce: { icon: '🪙', label: 'Coinbase Commerce', description: 'Crypto checkout via Coinbase Commerce', category: 'crypto' },
+    nowpayments: {
+      icon: '₿',
+      label: 'NOWPayments (Crypto)',
+      description: 'Bitcoin and other crypto',
+      howItWorks:
+        'Crypto payments use the contractor’s NOWPayments account. Ask them for a payment link if this option is offered.',
+      category: 'crypto',
+      clickToPay: false,
+    },
+    coinbase_commerce: {
+      icon: '🪙',
+      label: 'Coinbase Commerce',
+      description: 'Crypto via Coinbase',
+      howItWorks:
+        'Crypto checkout via Coinbase Commerce. The contractor provides a payment link when you choose this method.',
+      category: 'crypto',
+      clickToPay: false,
+    },
   };
-  return meta[method] || { icon: '💳', label: method, description: 'Payment provider', category: 'traditional' };
+  return (
+    meta[method] || {
+      icon: '💳',
+      label: method,
+      description: 'Payment option',
+      howItWorks: 'Follow the contractor’s instructions to complete payment.',
+      category: 'traditional' as const,
+      clickToPay: false,
+    }
+  );
 };
 
 const mergePaymentSettings = (settings?: Record<string, PaymentMethodSettings>) => {
@@ -6283,50 +6362,28 @@ export default function Home() {
           </p>
         )}
         {interactive ? (
-          <div className={`mt-6 flex flex-col gap-4 justify-center max-w-lg mx-auto`}>
+          <div className="mt-6 flex flex-col gap-4 justify-center max-w-lg mx-auto">
             {isDepositOnApprovalEnabled() && (
-              <div className="flex flex-col sm:flex-row gap-4">
-                <Button
-                  onClick={openDepositPayment}
-                  className="flex-1 text-xl py-6 bg-[#10b981] hover:bg-[#0ea16b] text-white font-semibold rounded-2xl shadow-lg"
-                >
-                  Pay Deposit (${depositDue.toFixed(2)})
-                  {profile.chargeCCFee && (
-                    <span className="text-sm block mt-1 font-normal opacity-90">(includes {profile.ccFeePercentage || 3}% CC fee)</span>
-                  )}
-                </Button>
-                {isVenmoPaymentReady() && renderVenmoPayButton(depositDue, 'deposit', { size: 'large' })}
-                {isZellePaymentReady() && (
-                  <Button
-                    type="button"
-                    onClick={() => openZellePayment(depositDue, 'deposit')}
-                    className="flex-1 text-xl py-6 bg-[#6d28d9] hover:bg-[#5b21b6] text-white font-semibold rounded-2xl shadow-lg"
-                  >
-                    <span className="inline-flex flex-col items-center">
-                      <span>🏦 Pay ${depositDue.toFixed(2)} with Zelle</span>
-                      <span className="text-sm font-normal opacity-90">Scan QR or send to your unique name</span>
-                    </span>
-                  </Button>
+              <Button
+                onClick={openDepositPayment}
+                className="w-full text-xl py-7 bg-[#10b981] hover:bg-[#0ea16b] text-white font-semibold rounded-2xl shadow-lg"
+              >
+                Pay Deposit Now (${depositDue.toFixed(2)})
+                {profile.chargeCCFee && (
+                  <span className="text-sm block mt-1 font-normal opacity-90">
+                    (includes {profile.ccFeePercentage || 3}% CC fee if paying by card)
+                  </span>
                 )}
-                {isPayPalPaymentReady() && (
-                  <Button
-                    type="button"
-                    onClick={() => openPayPalPayment(depositDue, 'deposit')}
-                    className="flex-1 text-xl py-6 bg-[#0070ba] hover:bg-[#005ea6] text-white font-semibold rounded-2xl shadow-lg"
-                  >
-                    <span className="inline-flex flex-col items-center">
-                      <span>💰 Pay ${depositDue.toFixed(2)} with PayPal</span>
-                      <span className="text-sm font-normal opacity-90">Opens real PayPal checkout</span>
-                    </span>
-                  </Button>
-                )}
-              </div>
+                <span className="text-sm block mt-1 font-normal opacity-90">
+                  Choose Venmo, PayPal, Zelle &amp; more
+                </span>
+              </Button>
             )}
             {shouldShowEscrowOnEstimate() && (
               <Button
                 onClick={() => setIsEscrowModalOpen(true)}
                 variant="outline"
-                className="flex-1 text-xl py-6 font-semibold rounded-2xl border-2 border-[#14b8a6] text-[#0f766e] hover:bg-teal-50"
+                className="w-full text-xl py-6 font-semibold rounded-2xl border-2 border-[#14b8a6] text-[#0f766e] hover:bg-teal-50"
               >
                 Third Party Escrow
               </Button>
@@ -6352,45 +6409,95 @@ export default function Home() {
     setSelectedPaymentMethod(method);
   };
 
-  const proceedWithPayment = () => {
-    if (!selectedPaymentMethod) return showMessage('Please select a payment method');
+  /** Profile-enabled payment methods for clients, click-to-pay first */
+  const getClientPaymentOptions = () => {
+    const settings = mergePaymentSettings(profile.paymentSettings);
+    type Opt = {
+      method: string;
+      settings: { enabled?: boolean; connected?: boolean; handle?: string; qrUrl?: string };
+      meta: ReturnType<typeof getPaymentMethodMeta>;
+      ready: boolean;
+      clickToPay: boolean;
+    };
+    const clickToPay: Opt[] = [];
+    const other: Opt[] = [];
 
-    if (selectedPaymentMethod === 'venmo') {
+    const orderClick = ['venmo', 'paypal', 'zelle'];
+    const orderOther = ['mailcheck', 'stripe', 'echeck', 'nowpayments', 'coinbase_commerce'];
+
+    const pushIfReady = (method: string) => {
+      const s = settings[method];
+      if (!s?.enabled) return;
+      if (method === 'venmo' && !hasVenmoHandle(s.handle)) return;
+      if (method === 'zelle' && !hasZelleSetup(s)) return;
+      if (method === 'paypal' && !hasPayPalSetup(s)) return;
+      if (method === 'mailcheck' && !hasMailCheckSetup(s)) return;
+      // stripe / echeck / crypto: show if enabled (even without deep link)
+      const meta = getPaymentMethodMeta(method);
+      const isClick =
+        meta.clickToPay &&
+        ((method === 'venmo' && hasVenmoHandle(s.handle)) ||
+          (method === 'paypal' && hasPayPalSetup(s)) ||
+          (method === 'zelle' && hasZelleSetup(s)));
+      const opt: Opt = {
+        method,
+        settings: s,
+        meta,
+        ready: true,
+        clickToPay: isClick,
+      };
+      if (isClick) clickToPay.push(opt);
+      else other.push(opt);
+    };
+
+    for (const m of orderClick) pushIfReady(m);
+    for (const m of orderOther) pushIfReady(m);
+    // any other enabled keys
+    for (const m of Object.keys(settings)) {
+      if (orderClick.includes(m) || orderOther.includes(m)) continue;
+      pushIfReady(m);
+    }
+    return { clickToPay, other, all: [...clickToPay, ...other] };
+  };
+
+  const startClientPayment = (method: string) => {
+    if (method === 'venmo') {
       closePaymentModal();
       startVenmoPayment(paymentAmount, paymentType);
       return;
     }
-
-    if (selectedPaymentMethod === 'zelle') {
+    if (method === 'zelle') {
       closePaymentModal();
       openZellePayment(paymentAmount, paymentType === 'deposit' ? 'deposit' : 'balance');
       return;
     }
-
-    if (selectedPaymentMethod === 'paypal') {
+    if (method === 'paypal') {
       closePaymentModal();
       openPayPalPayment(paymentAmount, paymentType === 'deposit' ? 'deposit' : 'balance');
       return;
     }
-
-    if (selectedPaymentMethod === 'mailcheck') {
+    if (method === 'mailcheck') {
       const addr = (getMailCheckSettings()?.handle || '').trim();
-      closePaymentModal();
+      setSelectedPaymentMethod('mailcheck');
       if (!addr) {
-        showMessage('Mailing address is not set. Add it in Profile → Payments → Mail check to.');
+        showMessage('Mailing address is not set. Add it in Profile → Payments.');
         return;
       }
       showMessage(
-        `Mail a check for $${paymentAmount.toFixed(2)} to the address shown. Put ${invoiceNumber} on the memo line. The contractor will mark the invoice paid when the check clears.`
+        `Mail a check for $${paymentAmount.toFixed(2)} to:\n${addr}\n\nWrite invoice # ${invoiceNumber} on the memo line.`
       );
       return;
     }
-
-    closePaymentModal();
-    const meta = getPaymentMethodMeta(selectedPaymentMethod);
+    setSelectedPaymentMethod(method);
+    const meta = getPaymentMethodMeta(method);
     showMessage(
-      `${meta.label} is not connected for automatic checkout. Use Venmo, Zelle, PayPal, mail a check, or pay ${profile.company || 'the contractor'} directly.`
+      `${meta.label}: ${meta.howItWorks} Contact ${profile.company || 'the contractor'} if you need a payment link.`
     );
+  };
+
+  const proceedWithPayment = () => {
+    if (!selectedPaymentMethod) return showMessage('Tap a payment option above to continue.');
+    startClientPayment(selectedPaymentMethod);
   };
 
   const updateVenmoUsername = (value: string) => {
@@ -10956,21 +11063,27 @@ export default function Home() {
                         remainder = remainder * (1 + (profile.ccFeePercentage || 3) / 100);
                       }
                       return (
-                        <div className="mt-6 space-y-4">
+                        <div className="mt-6 space-y-3">
                           <Button
                             onClick={() => openPaymentModal('balance', remainder)}
-                            className="w-full py-8 text-2xl font-bold bg-[#f59e0b] hover:bg-orange-600 text-white rounded-3xl"
+                            className="w-full py-8 text-2xl font-bold bg-[#f59e0b] hover:bg-orange-600 text-white rounded-3xl shadow-lg"
                           >
-                            Pay the Balance Now (${remainder.toFixed(2)})
-                            {profile.chargeCCFee && <span className="text-xs block mt-1 font-normal opacity-90">(includes CC fee)</span>}
+                            Pay Now — ${remainder.toFixed(2)}
+                            {profile.chargeCCFee && (
+                              <span className="text-sm block mt-1 font-normal opacity-90">
+                                (includes CC fee if paying by card)
+                              </span>
+                            )}
+                            <span className="text-sm block mt-1 font-normal opacity-90">
+                              Easy options: Venmo · PayPal · Zelle · more
+                            </span>
                           </Button>
-                          {isVenmoPaymentReady() && renderVenmoPayButton(remainder, 'balance', {
-                            className: 'w-full py-8 text-2xl font-bold bg-[#008cff] hover:bg-[#0070cc] text-white rounded-3xl',
-                          })}
                         </div>
                       );
                     })()}
-                    <p className="text-center text-xs text-gray-500 mt-3">Choose a payment option above to pay the remaining balance</p>
+                    <p className="text-center text-xs text-gray-500 mt-3">
+                      Tap Pay Now to see every payment method the contractor accepts, with simple instructions.
+                    </p>
                   </div>
                 )}
 
@@ -11796,172 +11909,172 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* Payment Modal */}
+      {/* Payment Modal — all profile-enabled methods; click-to-pay first */}
       <Dialog open={isPaymentModalOpen} onOpenChange={setIsPaymentModalOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-lg max-h-[90dvh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>
-              Pay {paymentType === 'deposit' ? 'Deposit' : 'Balance'}
+            <DialogTitle className="text-xl">
+              Easy pay — {paymentType === 'deposit' ? 'Deposit' : 'Balance'}
             </DialogTitle>
           </DialogHeader>
-          <div className="py-4">
-            <div className="text-center mb-6">
-              <div className="text-5xl font-bold text-[#10b981]">${paymentAmount.toFixed(2)}</div>
-              <p className="text-sm text-gray-500 mt-1">to complete your {paymentType}</p>
+          <div className="py-2 space-y-5">
+            <div className="text-center rounded-2xl bg-emerald-50 border border-emerald-100 p-5">
+              <div className="text-4xl sm:text-5xl font-bold text-[#10b981]">
+                ${paymentAmount.toFixed(2)}
+              </div>
+              <p className="text-sm text-gray-600 mt-1">
+                Pay {profile.company || 'the contractor'}
+                {invoiceNumber ? ` · #${invoiceNumber}` : ''}
+              </p>
               {profile.chargeCCFee && ccFeePercent > 0 && (
-                <p className="text-xs text-amber-600 mt-1">
-                  (includes {ccFeePercent}% credit card processing fee)
+                <p className="text-xs text-amber-700 mt-1">
+                  Card payments may include a {ccFeePercent}% processing fee
                 </p>
               )}
             </div>
 
-            <div className="space-y-3">
-              {Object.entries(mergePaymentSettings(profile.paymentSettings)).map(([method, settings]) => {
-                if (!settings.enabled) return null;
-                if (method === 'venmo' && !hasVenmoHandle(settings.handle)) return null;
-                if (method === 'zelle' && !hasZelleSetup(settings)) return null;
-                if (method === 'paypal' && !hasPayPalSetup(settings)) return null;
-                if (method === 'mailcheck' && !hasMailCheckSetup(settings)) return null;
-                const meta = getPaymentMethodMeta(method);
-                const venmoHandle = method === 'venmo' ? cleanVenmoHandle(settings.handle || '') : '';
-                const zelleHandle = method === 'zelle' ? cleanZelleHandle(settings.handle || '') : '';
-                const paypalHandle = method === 'paypal' ? cleanPayPalHandle(settings.handle || '') : '';
+            {(() => {
+              const { clickToPay, other, all } = getClientPaymentOptions();
+              if (all.length === 0) {
+                return (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                    No payment methods are set up yet. The contractor should enable Venmo, PayPal,
+                    Zelle, or mail check under Profile → Client Payments.
+                  </div>
+                );
+              }
+
+              const renderPayCard = (
+                opt: ReturnType<typeof getClientPaymentOptions>['all'][0],
+                primary: boolean
+              ) => {
+                const { method, settings, meta } = opt;
+                const venmoHandle =
+                  method === 'venmo' ? cleanVenmoHandle(settings.handle || '') : '';
+                const zelleHandle =
+                  method === 'zelle' ? cleanZelleHandle(settings.handle || '') : '';
+                const paypalHandle =
+                  method === 'paypal' ? cleanPayPalHandle(settings.handle || '') : '';
                 const mailTo = method === 'mailcheck' ? (settings.handle || '').trim() : '';
 
-                if (method === 'mailcheck') {
-                  return (
-                    <button
-                      key={method}
-                      type="button"
-                      onClick={() => selectPaymentMethod(method)}
-                      className={`w-full flex items-start gap-4 p-4 border-2 rounded-2xl hover:bg-gray-50 transition-all text-left ${
-                        selectedPaymentMethod === method ? 'border-[#10b981] bg-green-50' : 'border-gray-200'
-                      }`}
-                    >
-                      <span className="text-3xl flex-shrink-0">{meta.icon}</span>
-                      <div className="flex-1 min-w-0">
-                        <div className="font-semibold">{meta.label}</div>
-                        <div className="text-xs text-gray-600 mt-1 whitespace-pre-wrap break-words">
-                          {mailTo}
-                        </div>
-                        <div className="text-[11px] text-gray-500 mt-1">
-                          Write invoice # {invoiceNumber} on the memo line
-                        </div>
-                      </div>
-                    </button>
-                  );
+                let detail = meta.description;
+                if (method === 'venmo' && venmoHandle) detail = `Pay @${venmoHandle}`;
+                if (method === 'paypal' && paypalHandle) {
+                  detail = isPayPalEmail(paypalHandle)
+                    ? `Pay ${paypalHandle}`
+                    : `paypal.me/${paypalHandle}`;
                 }
-
-                if (method === 'venmo') {
-                  return (
-                    <button
-                      key={method}
-                      type="button"
-                      onClick={() => {
-                        closePaymentModal();
-                        openVenmoPayment(paymentAmount, paymentType === 'deposit' ? 'deposit' : 'balance');
-                      }}
-                      className="w-full flex items-center gap-4 p-4 border-2 rounded-2xl border-[#008cff] bg-blue-50 hover:bg-blue-100 transition-all"
-                    >
-                      <span className="text-3xl flex-shrink-0">{meta.icon}</span>
-                      <div className="flex-1 text-left min-w-0">
-                        <div className="font-semibold text-[#005fa3]">{meta.label}</div>
-                        <div className="text-xs text-gray-600 break-words">
-                          Pay @{venmoHandle} · invoice note auto-filled for tracking
-                        </div>
-                      </div>
-                      <span className="text-xs font-semibold text-[#008cff] shrink-0">Pay →</span>
-                    </button>
-                  );
-                }
-
                 if (method === 'zelle') {
-                  return (
-                    <button
-                      key={method}
-                      type="button"
-                      onClick={() => {
-                        closePaymentModal();
-                        openZellePayment(paymentAmount, paymentType === 'deposit' ? 'deposit' : 'balance');
-                      }}
-                      className="w-full flex items-center gap-4 p-4 border-2 rounded-2xl border-violet-500 bg-violet-50 hover:bg-violet-100 transition-all"
-                    >
-                      <span className="text-3xl flex-shrink-0">{meta.icon}</span>
-                      <div className="flex-1 text-left min-w-0">
-                        <div className="font-semibold text-violet-900">{meta.label}</div>
-                        <div className="text-xs text-gray-600 break-words">
-                          {zelleHandle
-                            ? `Send to ${zelleHandle} · include invoice # in memo`
-                            : 'Scan QR · include invoice # in memo'}
-                        </div>
-                      </div>
-                      <span className="text-xs font-semibold text-violet-700 shrink-0">Pay →</span>
-                    </button>
-                  );
+                  detail = zelleHandle
+                    ? `Send Zelle to ${zelleHandle}`
+                    : 'Scan QR or use unique name shown next';
                 }
+                if (method === 'mailcheck' && mailTo) detail = mailTo;
 
-                if (method === 'paypal') {
-                  return (
-                    <button
-                      key={method}
-                      type="button"
-                      onClick={() => {
-                        closePaymentModal();
-                        openPayPalPayment(paymentAmount, paymentType === 'deposit' ? 'deposit' : 'balance');
-                      }}
-                      className="w-full flex items-center gap-4 p-4 border-2 rounded-2xl border-[#0070ba] bg-sky-50 hover:bg-sky-100 transition-all"
-                    >
-                      <span className="text-3xl flex-shrink-0">{meta.icon}</span>
-                      <div className="flex-1 text-left min-w-0">
-                        <div className="font-semibold text-[#003087]">{meta.label}</div>
-                        <div className="text-xs text-gray-600 break-words">
-                          {isPayPalEmail(paypalHandle)
-                            ? `Pay ${paypalHandle} · amount + invoice note`
-                            : `paypal.me/${paypalHandle} · amount pre-filled`}
-                        </div>
-                      </div>
-                      <span className="text-xs font-semibold text-[#0070ba] shrink-0">Pay →</span>
-                    </button>
-                  );
-                }
+                const borderClass = primary
+                  ? method === 'venmo'
+                    ? 'border-[#008cff] bg-blue-50 hover:bg-blue-100'
+                    : method === 'paypal'
+                      ? 'border-[#0070ba] bg-sky-50 hover:bg-sky-100'
+                      : method === 'zelle'
+                        ? 'border-violet-500 bg-violet-50 hover:bg-violet-100'
+                        : 'border-[#10b981] bg-emerald-50 hover:bg-emerald-100'
+                  : selectedPaymentMethod === method
+                    ? 'border-[#10b981] bg-green-50'
+                    : 'border-gray-200 bg-white hover:bg-gray-50';
 
                 return (
                   <button
                     key={method}
                     type="button"
-                    onClick={() => selectPaymentMethod(method)}
-                    className={`w-full flex items-center gap-4 p-4 border-2 rounded-2xl hover:bg-gray-50 transition-all ${selectedPaymentMethod === method ? 'border-[#10b981] bg-green-50' : 'border-gray-200'}`}
+                    onClick={() => {
+                      if (opt.clickToPay) {
+                        startClientPayment(method);
+                      } else {
+                        selectPaymentMethod(method);
+                        if (method === 'mailcheck') startClientPayment('mailcheck');
+                      }
+                    }}
+                    className={`w-full text-left p-4 border-2 rounded-2xl transition-all ${borderClass}`}
                   >
-                    <span className="text-3xl flex-shrink-0">{meta.icon}</span>
-                    <div className="flex-1 text-left">
-                      <div className="font-semibold">{meta.label}</div>
-                      <div className="text-xs text-gray-500">{meta.description}</div>
+                    <div className="flex items-start gap-3">
+                      <span className="text-3xl flex-shrink-0">{meta.icon}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-bold text-[#1e293b]">{meta.label}</span>
+                          {opt.clickToPay && (
+                            <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-[#10b981] text-white">
+                              Tap to pay
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-sm font-medium text-gray-700 mt-0.5 break-words">
+                          {detail}
+                        </div>
+                        <p className="text-xs text-gray-500 mt-2 leading-relaxed">
+                          {meta.howItWorks}
+                        </p>
+                        {method === 'mailcheck' && mailTo && (
+                          <p className="text-[11px] text-gray-500 mt-1">
+                            Memo: invoice # {invoiceNumber}
+                          </p>
+                        )}
+                      </div>
+                      {opt.clickToPay ? (
+                        <span className="shrink-0 text-sm font-bold text-[#10b981] self-center">
+                          Pay ${paymentAmount.toFixed(2)} →
+                        </span>
+                      ) : (
+                        <span className="shrink-0 text-xs font-semibold text-gray-400 self-center">
+                          Details
+                        </span>
+                      )}
                     </div>
                   </button>
                 );
-              })}
-            </div>
+              };
+
+              return (
+                <div className="space-y-5">
+                  {clickToPay.length > 0 && (
+                    <div>
+                      <h4 className="text-xs font-bold uppercase tracking-wide text-[#10b981] mb-2">
+                        Fastest — one tap to pay
+                      </h4>
+                      <div className="space-y-3">
+                        {clickToPay.map((opt) => renderPayCard(opt, true))}
+                      </div>
+                    </div>
+                  )}
+                  {other.length > 0 && (
+                    <div>
+                      <h4 className="text-xs font-bold uppercase tracking-wide text-gray-500 mb-2">
+                        Other ways to pay
+                      </h4>
+                      <div className="space-y-3">
+                        {other.map((opt) => renderPayCard(opt, false))}
+                      </div>
+                    </div>
+                  )}
+                  <p className="text-[11px] text-center text-gray-400 leading-relaxed">
+                    Only methods enabled in the contractor’s Profile → Client Payments are shown.
+                    After you pay, keep your confirmation; they will mark the invoice paid when funds
+                    arrive.
+                  </p>
+                </div>
+              );
+            })()}
           </div>
-          <DialogFooter className="flex gap-3">
+          <DialogFooter className="flex gap-3 sm:justify-between">
             <Button variant="outline" onClick={closePaymentModal} className="flex-1">
-              Cancel
+              Close
             </Button>
-            <Button
-              onClick={proceedWithPayment}
-              disabled={
-                !selectedPaymentMethod ||
-                selectedPaymentMethod === 'venmo' ||
-                selectedPaymentMethod === 'zelle' ||
-                selectedPaymentMethod === 'paypal'
-              }
-              className="flex-1 bg-[#10b981]"
-            >
-              {selectedPaymentMethod === 'venmo' ||
-              selectedPaymentMethod === 'zelle' ||
-              selectedPaymentMethod === 'paypal'
-                ? 'Tap method above'
-                : 'Continue to Pay'}
-            </Button>
+            {selectedPaymentMethod &&
+              !['venmo', 'zelle', 'paypal'].includes(selectedPaymentMethod) && (
+                <Button onClick={proceedWithPayment} className="flex-1 bg-[#10b981]">
+                  Continue
+                </Button>
+              )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
