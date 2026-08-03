@@ -256,11 +256,13 @@ export default function Home() {
   const [showMainForgot, setShowMainForgot] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
 
-  // 2FA states
+  // SMS 2-step verification (Twilio)
   const [requires2FA, setRequires2FA] = useState(false);
   const [twoFactorPhone, setTwoFactorPhone] = useState('');
   const [twoFactorCode, setTwoFactorCode] = useState('');
-  const [expected2FACode, setExpected2FACode] = useState('');
+  const [twoFactorBusy, setTwoFactorBusy] = useState(false);
+  const [twoFactorError, setTwoFactorError] = useState('');
+  const [mfaChecking, setMfaChecking] = useState(false);
 
   // Simple i18n translations (expand as needed) - full keys for entire app
   const translations: any = {
@@ -799,7 +801,10 @@ export default function Home() {
     crewSubscriptionActive: false,
     chargeCCFee: false,
     ccFeePercentage: 3,
-    paymentSettings: { ...DEFAULT_PAYMENT_SETTINGS } as any
+    paymentSettings: { ...DEFAULT_PAYMENT_SETTINGS } as any,
+    /** SMS 2-step verification on login */
+    twoFactorEnabled: false,
+    twoFactorPhone: '',
   });
   const [profile, setProfile] = useState(blankProfile);
 
@@ -1044,6 +1049,8 @@ export default function Home() {
     showDiscountOnEstimate: full.showDiscountOnEstimate === true,
     taxesEnabled: full.taxesEnabled !== false,
     paymentSettings: mergePaymentSettings(full.paymentSettings),
+    twoFactorEnabled: full.twoFactorEnabled === true,
+    twoFactorPhone: String(full.twoFactorPhone || '').trim(),
     // deliberately omit: teammates, ccFee*, crewSubscriptionActive, etc.
   });
 
@@ -1898,11 +1905,104 @@ export default function Home() {
     </div>
   );
 
+  /** After password login: require SMS code when 2FA is enabled on the account */
+  const mfaGateRef = useRef<string | null>(null);
+  const completeLoginWithOptional2FA = async (authUser: any) => {
+    if (!supabase || !authUser) return;
+    // Prevent double SMS when both login() and onAuthStateChange fire
+    if (mfaGateRef.current === authUser.id) return;
+    mfaGateRef.current = authUser.id;
+    setMfaChecking(true);
+    setTwoFactorError('');
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) {
+        setUser(authUser);
+        setRequires2FA(false);
+        setShowLogin(false);
+        return;
+      }
+
+      const statusRes = await fetch('/api/auth/2fa/status', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const status = await statusRes.json().catch(() => ({}));
+
+      if (!statusRes.ok || !status.required || status.verified) {
+        setRequires2FA(false);
+        setTwoFactorPhone('');
+        setUser(authUser);
+        setShowLogin(false);
+        mfaGateRef.current = authUser.id; // stay locked to skip re-send on refresh path
+        showMessage('Login successful!');
+        return;
+      }
+
+      // 2FA required — keep session in Supabase but do not open the app yet
+      setUser(null);
+      setRequires2FA(true);
+      setShowLogin(false);
+      setTwoFactorPhone(status.phoneMasked || 'your phone');
+
+      const sendRes = await fetch('/api/auth/2fa/send', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const sendJson = await sendRes.json().catch(() => ({}));
+      if (!sendRes.ok) {
+        setTwoFactorError(sendJson.error || 'Could not send verification text.');
+        showMessage(sendJson.error || 'Could not send verification text.');
+      } else if (sendJson.phoneMasked) {
+        setTwoFactorPhone(sendJson.phoneMasked);
+        showMessage(`Text message sent to ${sendJson.phoneMasked}`);
+      } else if (sendJson.verified) {
+        setRequires2FA(false);
+        setUser(authUser);
+        showMessage('Login successful!');
+      }
+    } catch {
+      // Fail open to login if 2FA service is down (user still authenticated)
+      setRequires2FA(false);
+      setUser(authUser);
+      setShowLogin(false);
+      showMessage('Login successful (2FA check skipped — network error).');
+    } finally {
+      setMfaChecking(false);
+    }
+  };
+
   useEffect(() => {
     if (!supabase) return;
-    supabase.auth.getSession().then(({ data }) => setUser(data.session?.user ?? null));
-    const { data: listener } = supabase.auth.onAuthStateChange((_, session) => setUser(session?.user ?? null));
-    return () => listener.subscription.unsubscribe();
+    let cancelled = false;
+    supabase.auth.getSession().then(({ data }) => {
+      if (cancelled) return;
+      const u = data.session?.user ?? null;
+      if (u) void completeLoginWithOptional2FA(u);
+      else setUser(null);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (cancelled) return;
+      if (event === 'SIGNED_OUT' || !session?.user) {
+        setUser(null);
+        setRequires2FA(false);
+        setTwoFactorCode('');
+        setTwoFactorError('');
+        mfaGateRef.current = null;
+        return;
+      }
+      // Avoid re-running 2FA on token refresh when already in app
+      if (event === 'TOKEN_REFRESHED' && user?.id === session.user.id && !requires2FA) {
+        return;
+      }
+      if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION' || event === 'USER_UPDATED') {
+        void completeLoginWithOptional2FA(session.user);
+      }
+    });
+    return () => {
+      cancelled = true;
+      listener.subscription.unsubscribe();
+    };
   }, [supabase]);
 
   // After main login: if this user is crew, load owner workspace + permissions
@@ -2214,19 +2314,16 @@ export default function Home() {
 
       const authUser = data.session?.user ?? data.user ?? null;
       if (authUser) {
-        setUser(authUser);
         setLoginError('');
-        setShowLogin(false);
-        showMessage('Login successful!');
+        // Auth listener runs completeLoginWithOptional2FA (SMS 2FA gate)
+        await completeLoginWithOptional2FA(authUser);
         return;
       }
 
       const { data: sessionData } = await supabase.auth.getSession();
       if (sessionData.session?.user) {
-        setUser(sessionData.session.user);
         setLoginError('');
-        setShowLogin(false);
-        showMessage('Login successful!');
+        await completeLoginWithOptional2FA(sessionData.session.user);
         return;
       }
 
@@ -2249,20 +2346,73 @@ export default function Home() {
     }
   };
 
-  const verify2FA = () => {
-    if (twoFactorCode === expected2FACode) {
+  const verify2FA = async () => {
+    if (!supabase || twoFactorCode.length !== 6) return;
+    setTwoFactorBusy(true);
+    setTwoFactorError('');
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      const authUser = sessionData.session?.user;
+      if (!token || !authUser) {
+        setTwoFactorError('Session expired. Go back and log in again.');
+        return;
+      }
+      const res = await fetch('/api/auth/2fa/verify', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ code: twoFactorCode }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setTwoFactorError(json.error || 'Incorrect code.');
+        showMessage(json.error || 'Incorrect code.');
+        return;
+      }
       setRequires2FA(false);
       setTwoFactorCode('');
+      setTwoFactorError('');
+      setUser(authUser);
       setShowLogin(false);
-    } else {
-      showMessage('Incorrect code. Please try again.');
+      showMessage('✅ Verified — welcome back!');
+    } catch {
+      setTwoFactorError('Network error verifying code.');
+    } finally {
+      setTwoFactorBusy(false);
     }
   };
 
-  const resend2FACode = () => {
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    setExpected2FACode(code);
-    showMessage(`A new verification code was sent to ${twoFactorPhone}.`);
+  const resend2FACode = async () => {
+    if (!supabase) return;
+    setTwoFactorBusy(true);
+    setTwoFactorError('');
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) {
+        setTwoFactorError('Session expired. Go back and log in again.');
+        return;
+      }
+      const res = await fetch('/api/auth/2fa/send', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setTwoFactorError(json.error || 'Could not resend code.');
+        showMessage(json.error || 'Could not resend code.');
+        return;
+      }
+      if (json.phoneMasked) setTwoFactorPhone(json.phoneMasked);
+      showMessage(json.message || `Code sent to ${json.phoneMasked || twoFactorPhone}`);
+    } catch {
+      setTwoFactorError('Network error resending code.');
+    } finally {
+      setTwoFactorBusy(false);
+    }
   };
 
   const resetWorkspaceUi = () => {
@@ -2304,6 +2454,8 @@ export default function Home() {
     setCrewResolved(false);
     resetWorkspaceUi();
     setRequires2FA(false);
+    setTwoFactorError('');
+    setTwoFactorPhone('');
     setShowLogin(true);
     setTwoFactorCode('');
     showMessage('You have been logged out.');
@@ -3330,6 +3482,13 @@ export default function Home() {
               ),
             },
           }),
+          twoFactorEnabled:
+            (s as any).twoFactorEnabled === true || (l as any).twoFactorEnabled === true,
+          twoFactorPhone: pickFilled(
+            (s as any).twoFactorPhone,
+            (l as any).twoFactorPhone,
+            ''
+          ),
           language: preferredLang,
           teammates: ((s.teammates || l.teammates || []) as any[]).map((t: any) => ({
             ...t,
@@ -7182,44 +7341,68 @@ export default function Home() {
     );
   }
 
-  // Two-Factor Authentication screen - DISABLED for production (was 100% simulated/fake)
-  // Real 2FA should use Supabase Auth Phone, authenticator apps, or SMS provider.
-  // Phase A: real MFA not shipped — keep 2FA UI permanently disabled
-  if (false && requires2FA) {
+  // SMS two-step verification (after password, before app access)
+  if (requires2FA) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#f4f4f4]">
+      <div className="min-h-screen flex items-center justify-center bg-[#f4f4f4] p-4">
+        <ToastContainer />
         <Card className="w-full max-w-md p-8">
           <h2 className="text-2xl font-bold text-center mb-2">{t('twoStepVerification')}</h2>
-          <p className="text-center text-gray-600 mb-4">
-            Enter the 6-digit code sent to <strong>{twoFactorPhone}</strong>
+          <p className="text-center text-gray-600 mb-4 text-sm leading-relaxed">
+            We texted a 6-digit code to <strong>{twoFactorPhone || 'your phone'}</strong>.
+            Enter it below to finish signing in.
           </p>
-          <Input 
-            placeholder="000000" 
-            value={twoFactorCode} 
-            onChange={e => setTwoFactorCode(e.target.value.replace(/\D/g, '').slice(0,6))} 
-            className="mb-6 text-center text-3xl tracking-[12px] font-mono" 
+          {twoFactorError && (
+            <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">
+              {twoFactorError}
+            </div>
+          )}
+          <Input
+            placeholder="000000"
+            value={twoFactorCode}
+            onChange={(e) => {
+              setTwoFactorCode(e.target.value.replace(/\D/g, '').slice(0, 6));
+              setTwoFactorError('');
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && twoFactorCode.length === 6) void verify2FA();
+            }}
+            className="mb-6 text-center text-3xl tracking-[12px] font-mono"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            disabled={twoFactorBusy}
           />
-          <Button onClick={verify2FA} className="w-full mb-3" disabled={twoFactorCode.length !== 6}>
-            {t('verifyCode')}
+          <Button
+            onClick={() => void verify2FA()}
+            className="w-full mb-3"
+            disabled={twoFactorCode.length !== 6 || twoFactorBusy}
+          >
+            {twoFactorBusy ? 'Checking…' : t('verifyCode')}
           </Button>
-          <Button onClick={resend2FACode} variant="outline" className="w-full mb-4">
+          <Button
+            onClick={() => void resend2FACode()}
+            variant="outline"
+            className="w-full mb-4"
+            disabled={twoFactorBusy}
+          >
             {t('resendCode')}
           </Button>
-          <Button 
-            variant="ghost" 
-            className="w-full text-sm" 
+          <Button
+            variant="ghost"
+            className="w-full text-sm"
+            disabled={twoFactorBusy}
             onClick={() => {
-              if (supabase) supabase.auth.signOut();
+              if (supabase) void supabase.auth.signOut();
               setUser(null);
               setCurrentCrew(null);
               setRequires2FA(false);
               setTwoFactorCode('');
+              setTwoFactorError('');
               setShowLogin(true);
             }}
           >
             {t('backToLogin')}
           </Button>
-
         </Card>
       </div>
     );
@@ -9178,6 +9361,67 @@ export default function Home() {
                         Save Company Info
                       </Button>
                       <span className="text-xs text-gray-500">Optional — changes already auto-save</span>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+                      <h3 className="text-sm font-semibold text-[#1e293b]">🔐 Two-step verification (SMS)</h3>
+                      <p className="text-xs text-gray-500 leading-relaxed">
+                        When enabled, logging in requires your password <strong>and</strong> a code texted
+                        to this phone (Twilio). Turn this on for extra account security.
+                      </p>
+                      <label className="flex items-center gap-2 cursor-pointer text-sm">
+                        <input
+                          type="checkbox"
+                          className="w-4 h-4 accent-[#10b981]"
+                          checked={!!profile.twoFactorEnabled}
+                          onChange={(e) => {
+                            const on = e.target.checked;
+                            const next = {
+                              ...profileRef.current,
+                              twoFactorEnabled: on,
+                              twoFactorPhone:
+                                profileRef.current.twoFactorPhone ||
+                                profileRef.current.phone ||
+                                '',
+                            };
+                            setProfile(next);
+                            void saveProfileSettings(next, { quiet: true });
+                            showMessage(
+                              on
+                                ? '✅ SMS 2-step on — next login will text a code'
+                                : 'SMS 2-step verification turned off'
+                            );
+                          }}
+                        />
+                        <span>Require text code at login</span>
+                      </label>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">
+                          Mobile number for codes
+                        </label>
+                        <Input
+                          type="tel"
+                          placeholder="(555) 123-4567"
+                          value={profile.twoFactorPhone || ''}
+                          onChange={(e) =>
+                            setProfile((prev) => ({
+                              ...prev,
+                              twoFactorPhone: e.target.value,
+                            }))
+                          }
+                          onBlur={() => {
+                            const next = {
+                              ...profileRef.current,
+                              twoFactorPhone: profileRef.current.twoFactorPhone || '',
+                            };
+                            void saveProfileSettings(next, { quiet: true });
+                          }}
+                          className="bg-white max-w-md"
+                        />
+                        <p className="text-[11px] text-gray-400 mt-1">
+                          US numbers: 10 digits. Uses Twilio SMS on the server.
+                        </p>
+                      </div>
                     </div>
 
                     <div>
