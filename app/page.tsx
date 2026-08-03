@@ -8767,6 +8767,14 @@ export default function Home() {
                 <div className="flex flex-wrap gap-3 mb-8">
                   <Button onClick={printDocument} className="bg-[#3b82f6]">{t('printPreview')}</Button>
                   <Button onClick={markAsPaidCash} className="bg-green-600">Paid Cash</Button>
+                  <Button
+                    type="button"
+                    onClick={openSendPreview}
+                    className="bg-[#8b5cf6] hover:bg-[#7c3aed] text-white"
+                    title="Send or resend this invoice to the client by email or text"
+                  >
+                    📧 Send Invoice
+                  </Button>
                   {isVenmoPaymentReady() && (
                     <Button
                       onClick={() => openVenmoPayment(Math.max(0, grandTotal - (Number(amountPaid) || 0)), 'invoice')}
