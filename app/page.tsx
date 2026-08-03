@@ -68,6 +68,9 @@ import {
 } from '@/lib/payment-links';
 import {
   normalizeStoredCostBreakdown,
+  recalcBreakdownAsStored,
+  scaleBreakdownQuantities,
+  scaleBreakdownToJobTotal,
   syncLineItemPricingFromJobTotal,
 } from '@/lib/breakdown-pricing';
 import { rankAddressSuggestions } from '@/lib/address-autocomplete';
@@ -1507,6 +1510,9 @@ export default function Home() {
     const rawLabor = item.laborBreakdown;
     if (!rawMaterials.length && !rawLabor) return null;
 
+    // User-edited breakdowns: show exact saved unit prices / qty / rates (no AI re-align)
+    const preferStored = item.breakdownUserEdited === true || item.breakdownLocked === true;
+
     const normalized = normalizeStoredCostBreakdown({
       description: item.description || '',
       qty: Number(item.qty) || 1,
@@ -1525,6 +1531,7 @@ export default function Home() {
       typicalLaborRate: 62,
       maxLaborRate: 75,
       expectedLaborHours: Number(rawLabor?.hours) || undefined,
+      preferStored,
     });
 
     const materialsWithCost = normalized.materials.filter(
@@ -1538,7 +1545,7 @@ export default function Home() {
     const laborSubtotal = normalized.laborCostTotal;
     const builtUpPrice = roundMoney(materialsSubtotal + laborSubtotal);
     const { billing, linePricing } = normalized;
-    const lineTotal = linePricing.total;
+    const lineTotal = getLineItemExpectedTotal(item) || linePricing.total;
 
     return (
       <div className={className}>
@@ -1585,8 +1592,10 @@ export default function Home() {
     className = '',
     options?: { showMaterials?: boolean; showLabor?: boolean }
   ) => {
-    const materials = getItemMaterials(item);
-    const labor = item.laborBreakdown;
+    // Always show recalc'd qty × unitPrice so edits appear immediately
+    const stored = recalcBreakdownAsStored(getItemMaterials(item), item.laborBreakdown || null);
+    const materials = stored.materials;
+    const labor = stored.labor;
     const showMaterials = options?.showMaterials === true;
     const showLabor = options?.showLabor === true;
     const visibleMaterials = showMaterials ? materials : [];
@@ -1604,6 +1613,8 @@ export default function Home() {
                 <li key={i}>
                   {m.description || 'Material'}
                   {m.qty != null ? ` — ${m.qty} ${m.unit || ''}`.trim() : ''}
+                  {Number(m.unitPrice) > 0 ? ` × $${Number(m.unitPrice).toFixed(2)}` : ''}
+                  {Number(m.total) > 0 ? ` = $${Number(m.total).toFixed(2)}` : ''}
                 </li>
               ))}
             </ul>
@@ -1614,6 +1625,12 @@ export default function Home() {
             <span className="font-semibold">Labor: </span>
             {visibleLabor.description || 'Installation'}
             {visibleLabor.hours != null ? ` — ${visibleLabor.hours} hrs` : ''}
+            {Number(visibleLabor.rate) > 0
+              ? ` × $${Number(visibleLabor.rate).toFixed(2)}/hr`
+              : ''}
+            {Number(visibleLabor.total) > 0
+              ? ` = $${Number(visibleLabor.total).toFixed(2)}`
+              : ''}
           </div>
         )}
       </div>
@@ -3739,24 +3756,56 @@ export default function Home() {
   const addRow = () => setItems(prev => [{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }, ...prev]);
 
   const updateItem = (id: number, field: string, value: any) => {
-    setItems(prev => prev.map(item => {
-      if (item.id !== id) return item;
+    setItems((prev) =>
+      prev.map((item) => {
+        if (item.id !== id) return item;
 
-      const updatedItem = { ...item, [field]: value };
+        const updatedItem: any = { ...item, [field]: value };
+        const oldQty = Number(item.qty) || 0;
+        const oldTotal = getLineItemExpectedTotal(item);
 
-      if (field === 'total') {
-        const total = parseFloat(value) || 0;
-        const qty = item.qty || 0;
-        updatedItem.total = roundMoney(total);
-        updatedItem.price = qty > 0 ? roundMoney(total / qty) : roundMoney(total);
-      } else if (field === 'qty' || field === 'price') {
-        const qty = field === 'qty' ? (parseFloat(value) || 0) : (item.qty || 0);
-        const price = field === 'price' ? (parseFloat(value) || 0) : (item.price || 0);
-        updatedItem.total = roundMoney(qty * price);
-      }
+        if (field === 'total') {
+          const total = parseFloat(value) || 0;
+          const qty = oldQty || 1;
+          updatedItem.total = roundMoney(total);
+          updatedItem.price = qty > 0 ? roundMoney(total / qty) : roundMoney(total);
+        } else if (field === 'qty' || field === 'price') {
+          const qty = field === 'qty' ? parseFloat(value) || 0 : oldQty;
+          const price =
+            field === 'price' ? parseFloat(value) || 0 : Number(item.price) || 0;
+          updatedItem.qty = qty;
+          updatedItem.price = price;
+          updatedItem.total = roundMoney(qty * price);
+        }
 
-      return updatedItem;
-    }));
+        // Keep AI/manual cost breakdown in sync with line edits
+        if (
+          (field === 'qty' || field === 'price' || field === 'total') &&
+          hasItemBreakdown(item)
+        ) {
+          const materials = getItemMaterials(item);
+          const labor = item.laborBreakdown || null;
+          const newTotal = getLineItemExpectedTotal(updatedItem);
+
+          let synced;
+          if (field === 'qty' && oldQty > 0 && Number(updatedItem.qty) > 0) {
+            const ratio = Number(updatedItem.qty) / oldQty;
+            synced = scaleBreakdownQuantities(materials, labor, ratio, newTotal);
+          } else if (newTotal > 0) {
+            synced = scaleBreakdownToJobTotal(materials, labor, newTotal);
+          } else {
+            synced = recalcBreakdownAsStored(materials, labor);
+          }
+
+          updatedItem.materialsList = synced.materials;
+          updatedItem.materialBreakdown = null;
+          updatedItem.laborBreakdown = synced.labor;
+          updatedItem.breakdownUserEdited = true;
+        }
+
+        return updatedItem;
+      })
+    );
   };
 
   const compressImageSourceForAi = async (
@@ -3859,6 +3908,8 @@ export default function Home() {
         if (normalizedBreakdown.labor) {
           updated.laborBreakdown = normalizedBreakdown.labor;
         }
+        // Fresh AI quote — allow one align pass until user edits
+        updated.breakdownUserEdited = false;
         return updated;
       })
     );
@@ -4044,8 +4095,13 @@ export default function Home() {
   );
 
   const openBreakdownEditor = (item: any) => {
-    const materials = getItemMaterials(item).map(normalizeBreakdownMaterial);
-    const labor = item.laborBreakdown ? normalizeBreakdownLabor(item.laborBreakdown) : null;
+    // Open with the same numbers shown on the line (qty × unit price, hours × rate)
+    const stored = recalcBreakdownAsStored(
+      getItemMaterials(item),
+      item.laborBreakdown || null
+    );
+    const materials = stored.materials.map(normalizeBreakdownMaterial);
+    const labor = stored.labor ? normalizeBreakdownLabor(stored.labor) : null;
     setBreakdownEditItemId(item.id);
     setBreakdownMaterials(materials.length ? materials : [emptyBreakdownMaterial()]);
     setBreakdownLabor(labor);
@@ -4110,13 +4166,17 @@ export default function Home() {
   const saveBreakdown = () => {
     if (breakdownEditItemId == null) return;
 
-    const materials = breakdownMaterials
+    // Normalize totals from qty × unitPrice / hours × rate so display matches inputs
+    const rawMaterials = breakdownMaterials
       .map(normalizeBreakdownMaterial)
-      .filter(m => m.description.length > 0);
-    const labor = breakdownIncludeLabor
+      .filter((m) => m.description.length > 0);
+    const rawLabor = breakdownIncludeLabor
       ? normalizeBreakdownLabor(breakdownLabor || emptyBreakdownLabor())
       : null;
-    const builtUp = getBuiltUpBreakdownPrice(materials, labor);
+    const stored = recalcBreakdownAsStored(rawMaterials, rawLabor);
+    const materials = stored.materials;
+    const labor = stored.labor;
+    const builtUp = stored.builtUp;
 
     // Remember edited material unit prices + labor rate for future AI quotes
     const nextMemory = learnFromBreakdownEdit(
@@ -4128,39 +4188,49 @@ export default function Home() {
     setProfile(nextProfile);
     void saveProfileSettings(nextProfile, { quiet: true });
 
-    setItems(prev => prev.map(item => {
-      if (item.id !== breakdownEditItemId) return item;
-      const qty = item.qty || 0;
-      const updated: any = {
-        ...item,
-        materialsList: materials,
-        materialBreakdown: null,
-        laborBreakdown: labor && (labor.description || labor.hours || labor.rate || labor.total) ? labor : null,
-      };
-      if (breakdownSyncLinePrice && builtUp > 0) {
-        const pricing = syncLineItemPricingFromJobTotal(
-          item.description || '',
-          qty || 1,
-          item.unit || '',
-          builtUp
-        );
-        updated.qty = pricing.qty;
-        updated.unit = pricing.unit;
-        updated.price = pricing.price;
-        updated.total = pricing.total;
-      }
-      return updated;
-    }));
+    setItems((prev) =>
+      prev.map((item) => {
+        if (item.id !== breakdownEditItemId) return item;
+        const qty = item.qty || 1;
+        const updated: any = {
+          ...item,
+          materialsList: materials,
+          materialBreakdown: null,
+          laborBreakdown:
+            labor && (labor.description || labor.hours || labor.rate || labor.total)
+              ? labor
+              : null,
+          // Lock display to these exact values (no AI re-align on next render)
+          breakdownUserEdited: true,
+        };
+        // Default: line price follows breakdown total so they always match
+        if (breakdownSyncLinePrice && builtUp > 0) {
+          const pricing = syncLineItemPricingFromJobTotal(
+            item.description || '',
+            qty,
+            item.unit || '',
+            builtUp
+          );
+          updated.qty = pricing.qty;
+          updated.unit = pricing.unit;
+          updated.price = pricing.price;
+          updated.total = pricing.total;
+        }
+        return updated;
+      })
+    );
 
     closeBreakdownEditor();
-    const learnedCount = nextMemory.materials.length;
-    const laborNote = nextMemory.laborRate
-      ? ` Labor rate remembered: $${nextMemory.laborRate.toFixed(2)}/hr.`
+    const laborNote = labor?.rate
+      ? ` Labor: ${labor.hours} hrs × $${Number(labor.rate).toFixed(2)}/hr.`
       : '';
     showMessage(
-      `✅ Line breakdown saved.${learnedCount ? ` ${learnedCount} material price(s) remembered for next AI quote.` : ''}${laborNote}`
+      `✅ Breakdown saved — materials & labor match the line${builtUp > 0 ? ` ($${builtUp.toFixed(2)})` : ''}.${laborNote}`
     );
-    saveToDB({ profile: nextProfile });
+    // Persist immediately so refresh keeps edits
+    setTimeout(() => {
+      void saveToDB({ profile: nextProfile, quiet: false });
+    }, 50);
   };
 
   // === TRANSLATE FUNCTION (added exactly as requested) ===

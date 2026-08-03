@@ -338,7 +338,210 @@ export function alignBreakdownToUnitPrice(
   };
 }
 
-/** Fix stored line breakdown (e.g. legacy per-SF pennies) for display or save. */
+/**
+ * Recalc material/labor dollar totals from qty × unitPrice and hours × rate.
+ * Does NOT invent new rates — preserves user edits.
+ */
+export function recalcBreakdownAsStored(
+  materials: MarketMaterialLine[],
+  labor: BreakdownLabor | null
+): {
+  materials: MarketMaterialLine[];
+  labor: BreakdownLabor | null;
+  materialsCostTotal: number;
+  laborCostTotal: number;
+  builtUp: number;
+} {
+  const mats = (materials || [])
+    .filter((m) => m?.description?.trim())
+    .map((m) => {
+      const qty = Number(m.qty) || 0;
+      const unitPrice = roundMoney(Number(m.unitPrice) || 0);
+      let total = roundMoney(Number(m.total) || 0);
+      if (qty > 0 && unitPrice > 0) total = roundMoney(qty * unitPrice);
+      else if (total > 0 && qty > 0 && unitPrice <= 0) {
+        return recalcMaterialLine({
+          ...m,
+          qty,
+          unitPrice: roundMoney(total / qty),
+          total,
+        });
+      }
+      return recalcMaterialLine({
+        description: String(m.description || '').trim(),
+        qty,
+        unit: String(m.unit || '').trim() || 'ea',
+        unitPrice,
+        total,
+      });
+    });
+
+  let lab: BreakdownLabor | null = null;
+  if (labor && (labor.description || labor.hours || labor.rate || labor.total)) {
+    const hours = Number(labor.hours) || 0;
+    let rate = roundMoney(Number(labor.rate) || 0);
+    let total = roundMoney(Number(labor.total) || 0);
+    if (hours > 0 && rate > 0) total = roundMoney(hours * rate);
+    else if (hours > 0 && total > 0 && rate <= 0) rate = roundMoney(total / hours);
+    lab = {
+      description: String(labor.description || 'Labor').trim() || 'Labor',
+      hours,
+      rate,
+      total,
+    };
+  }
+
+  const materialsCostTotal = sumMaterialTotals(mats);
+  const laborCostTotal = roundMoney(lab?.total || 0);
+  return {
+    materials: mats,
+    labor: lab,
+    materialsCostTotal,
+    laborCostTotal,
+    builtUp: roundMoney(materialsCostTotal + laborCostTotal),
+  };
+}
+
+/**
+ * Scale money amounts so materials + labor = jobTotal.
+ * Keeps material qty and labor hours; adjusts unit prices and rate.
+ */
+export function scaleBreakdownToJobTotal(
+  materials: MarketMaterialLine[],
+  labor: BreakdownLabor | null,
+  jobTotal: number
+): {
+  materials: MarketMaterialLine[];
+  labor: BreakdownLabor | null;
+  materialsCostTotal: number;
+  laborCostTotal: number;
+  builtUp: number;
+} {
+  const target = roundMoney(Math.max(0, jobTotal));
+  const base = recalcBreakdownAsStored(materials, labor);
+  if (target <= 0) return base;
+
+  const current = base.builtUp;
+  if (current <= 0) {
+    // No breakdown dollars yet — put everything in labor (or one materials lot)
+    if (base.labor || !base.materials.length) {
+      const hours = Math.max(0.5, base.labor?.hours || 2);
+      const rate = roundMoney(target / hours);
+      return {
+        materials: base.materials,
+        labor: {
+          description: base.labor?.description || 'Labor',
+          hours,
+          rate,
+          total: target,
+        },
+        materialsCostTotal: sumMaterialTotals(base.materials),
+        laborCostTotal: target,
+        builtUp: target,
+      };
+    }
+    const mats = [
+      recalcMaterialLine({
+        description: base.materials[0]?.description || 'Materials & supplies',
+        qty: 1,
+        unit: 'lot',
+        unitPrice: target,
+        total: target,
+      }),
+    ];
+    return {
+      materials: mats,
+      labor: null,
+      materialsCostTotal: target,
+      laborCostTotal: 0,
+      builtUp: target,
+    };
+  }
+
+  const ratio = target / current;
+  const mats = scaleMaterialLines(base.materials, ratio);
+  let lab = base.labor;
+  if (lab) {
+    const total = roundMoney((lab.total || 0) * ratio);
+    const hours = Number(lab.hours) || 0;
+    const rate = hours > 0 ? roundMoney(total / hours) : total;
+    lab = { ...lab, total, rate };
+  }
+
+  // Fix penny drift on last material or labor
+  let materialsCostTotal = sumMaterialTotals(mats);
+  let laborCostTotal = roundMoney(lab?.total || 0);
+  let drift = roundMoney(target - (materialsCostTotal + laborCostTotal));
+  if (Math.abs(drift) >= 0.01) {
+    if (lab && laborCostTotal > 0) {
+      laborCostTotal = roundMoney(laborCostTotal + drift);
+      const hours = Number(lab.hours) || 0;
+      lab = {
+        ...lab,
+        total: laborCostTotal,
+        rate: hours > 0 ? roundMoney(laborCostTotal / hours) : laborCostTotal,
+      };
+    } else if (mats.length) {
+      const last = mats[mats.length - 1];
+      const total = roundMoney(last.total + drift);
+      mats[mats.length - 1] = recalcMaterialLine({
+        ...last,
+        total,
+        unitPrice: last.qty > 0 ? roundMoney(total / last.qty) : total,
+      });
+      materialsCostTotal = sumMaterialTotals(mats);
+    }
+  }
+
+  return {
+    materials: mats,
+    labor: lab,
+    materialsCostTotal: sumMaterialTotals(mats),
+    laborCostTotal: roundMoney(lab?.total || 0),
+    builtUp: target,
+  };
+}
+
+/**
+ * When line qty changes, scale material qtys (and labor hours) by the same ratio,
+ * keep unit prices/rates, then optionally nudge money to match line total.
+ */
+export function scaleBreakdownQuantities(
+  materials: MarketMaterialLine[],
+  labor: BreakdownLabor | null,
+  qtyRatio: number,
+  jobTotal?: number
+): ReturnType<typeof scaleBreakdownToJobTotal> {
+  const r = Number.isFinite(qtyRatio) && qtyRatio > 0 ? qtyRatio : 1;
+  const mats = (materials || []).map((m) => {
+    const qty = roundMoney((Number(m.qty) || 0) * r);
+    const unitPrice = roundMoney(Number(m.unitPrice) || 0);
+    return recalcMaterialLine({
+      ...m,
+      qty,
+      unitPrice,
+      total: roundMoney(qty * unitPrice),
+    });
+  });
+  let lab = labor;
+  if (labor) {
+    const hours = roundMoney((Number(labor.hours) || 0) * r);
+    const rate = roundMoney(Number(labor.rate) || 0);
+    lab = {
+      ...labor,
+      hours,
+      rate,
+      total: roundMoney(hours * rate),
+    };
+  }
+  const base = recalcBreakdownAsStored(mats, lab);
+  if (jobTotal != null && jobTotal > 0 && Math.abs(base.builtUp - jobTotal) > 0.05) {
+    return scaleBreakdownToJobTotal(mats, lab, jobTotal);
+  }
+  return base;
+}
+
+/** Fix stored line breakdown for display or save. */
 export function normalizeStoredCostBreakdown(input: {
   description: string;
   qty: number;
@@ -351,6 +554,8 @@ export function normalizeStoredCostBreakdown(input: {
   typicalLaborRate?: number;
   maxLaborRate?: number;
   expectedLaborHours?: number;
+  /** When true, keep user-edited unit prices / rates — only scale to line total if needed */
+  preferStored?: boolean;
 }) {
   const billing = resolveJobBillingContext(
     input.description,
@@ -359,6 +564,46 @@ export function normalizeStoredCostBreakdown(input: {
     input.unitPrice,
     input.total
   );
+
+  // User-edited breakdowns: preserve exact unit prices / labor rate
+  if (input.preferStored) {
+    const stored = recalcBreakdownAsStored(input.materials, input.labor);
+    let materials = stored.materials;
+    let labor = stored.labor;
+    let materialsCostTotal = stored.materialsCostTotal;
+    let laborCostTotal = stored.laborCostTotal;
+    let jobTotal = stored.builtUp;
+
+    // Soft match to line total if off by more than a few cents
+    if (billing.jobTotal > 0 && Math.abs(jobTotal - billing.jobTotal) > 0.05) {
+      const scaled = scaleBreakdownToJobTotal(materials, labor, billing.jobTotal);
+      materials = scaled.materials;
+      labor = scaled.labor;
+      materialsCostTotal = scaled.materialsCostTotal;
+      laborCostTotal = scaled.laborCostTotal;
+      jobTotal = scaled.builtUp;
+    }
+
+    const linePricing = syncLineItemPricingFromJobTotal(
+      input.description,
+      billing.lineQty,
+      billing.unit,
+      billing.jobTotal > 0 ? billing.jobTotal : jobTotal
+    );
+
+    return {
+      billing: {
+        ...billing,
+        unitPrice: linePricing.price,
+        jobTotal: linePricing.total,
+      },
+      linePricing,
+      materials,
+      labor,
+      materialsCostTotal,
+      laborCostTotal,
+    };
+  }
 
   const aligned = alignBreakdownToUnitPrice(input.materials, input.labor, billing.unitPrice, {
     jobDescription: input.description,
