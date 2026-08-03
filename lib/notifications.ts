@@ -12,17 +12,71 @@ export type NotificationResult = {
   errors: string[];
 };
 
+const DEFAULT_FROM_DOMAIN = 'estimateace.com';
+const DEFAULT_PLATFORM_FROM = 'EstimateAce <notifications@estimateace.com>';
+
+/** Domain used for outbound From addresses (must be verified in Resend). */
+export function getNotificationFromDomain(): string {
+  const fromEnv = (process.env.NOTIFICATION_FROM_DOMAIN || '').trim().toLowerCase();
+  if (fromEnv) return fromEnv.replace(/^@/, '');
+
+  const full = (process.env.NOTIFICATION_FROM_EMAIL || '').trim();
+  const angle = full.match(/<([^>]+)>/);
+  const addr = (angle?.[1] || full).trim();
+  const at = addr.lastIndexOf('@');
+  if (at > 0) {
+    const domain = addr.slice(at + 1).toLowerCase();
+    if (domain && !domain.includes('resend.dev')) return domain;
+  }
+  return DEFAULT_FROM_DOMAIN;
+}
+
+/**
+ * Build a client-facing From header from the contractor company name.
+ * Example: "Mitigation Hero" → Mitigation Hero <mitigationhero@estimateace.com>
+ * Local-part is a slug of the company; domain must stay on the verified Resend domain.
+ */
+export function buildCompanyFromAddress(companyName?: string | null): string {
+  const raw = String(companyName || '').trim();
+  if (!raw) return DEFAULT_PLATFORM_FROM;
+
+  // Strip characters unsafe in email display names
+  const safeDisplay = raw.replace(/[<>\r\n"]/g, '').slice(0, 80) || 'EstimateAce';
+
+  // "Mitigation Hero" → mitigationhero
+  let local = safeDisplay
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '')
+    .slice(0, 40);
+
+  if (!local) local = 'notifications';
+
+  const domain = getNotificationFromDomain();
+  return `${safeDisplay} <${local}@${domain}>`;
+}
+
 export async function sendEmailNotification(
   to: string,
   subject: string,
   text: string,
-  options?: { html?: string; replyTo?: string }
+  options?: {
+    html?: string;
+    replyTo?: string;
+    /** When set, From becomes "Company Name <slug@yourdomain.com>" */
+    companyName?: string;
+    /** Override full From header (advanced) */
+    from?: string;
+  }
 ): Promise<{ ok: boolean; error?: string; id?: string }> {
   const resendKey = process.env.RESEND_API_KEY;
-  // Must be an address on a verified Resend domain (estimateace.com). onboarding@resend.dev only emails your own inbox.
-  const fromEmail =
-    (process.env.NOTIFICATION_FROM_EMAIL || '').trim() ||
-    'EstimateAce <notifications@estimateace.com>';
+
+  let fromEmail =
+    (options?.from || '').trim() ||
+    (options?.companyName
+      ? buildCompanyFromAddress(options.companyName)
+      : (process.env.NOTIFICATION_FROM_EMAIL || '').trim() || DEFAULT_PLATFORM_FROM);
 
   if (!resendKey) {
     return { ok: false, error: 'Email service not configured. Add RESEND_API_KEY to Vercel (and redeploy).' };

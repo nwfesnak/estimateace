@@ -163,6 +163,8 @@ export async function POST(request: NextRequest) {
       const result = await sendEmailNotification(email, subject, text, {
         html,
         replyTo,
+        // Client inbox shows contractor company, e.g. Mitigation Hero <mitigationhero@estimateace.com>
+        companyName: company,
       });
       if (result.ok) emailsSent.push(email);
       else errors.push(`${email}: ${result.error}`);
