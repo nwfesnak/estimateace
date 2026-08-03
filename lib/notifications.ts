@@ -54,7 +54,9 @@ export function buildCompanyFromAddress(companyName?: string | null): string {
   if (!local) local = 'notifications';
 
   const domain = getNotificationFromDomain();
-  return `${safeDisplay} <${local}@${domain}>`;
+  // Quote display name so Resend accepts names with spaces / punctuation
+  const quoted = `"${safeDisplay.replace(/\\/g, '\\\\')}"`;
+  return `${quoted} <${local}@${domain}>`;
 }
 
 export async function sendEmailNotification(

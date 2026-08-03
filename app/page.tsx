@@ -11586,6 +11586,42 @@ export default function Home() {
                     showMessage('Please log in again to send.');
                     return;
                   }
+                  // Slim payload only — avoid non-serializable / huge fields that break send
+                  const emailItems = (items || []).slice(0, 40).map((it: any) => ({
+                    description: String(it?.description || '').slice(0, 500),
+                    qty: Number(it?.qty) || 0,
+                    unit: String(it?.unit || '').slice(0, 40),
+                    price: Number(it?.price) || 0,
+                    total: Number(it?.total) || 0,
+                    materialsList: Array.isArray(it?.materialsList)
+                      ? it.materialsList.slice(0, 40).map((m: any) => ({
+                          description: String(m?.description || '').slice(0, 200),
+                          qty: Number(m?.qty) || 0,
+                          unit: String(m?.unit || '').slice(0, 40),
+                          unitPrice: Number(m?.unitPrice) || 0,
+                          total: Number(m?.total) || 0,
+                        }))
+                      : undefined,
+                    materialBreakdown: it?.materialBreakdown?.description
+                      ? {
+                          description: String(it.materialBreakdown.description || '').slice(0, 200),
+                          qty: Number(it.materialBreakdown.qty) || 0,
+                          unit: String(it.materialBreakdown.unit || '').slice(0, 40),
+                          unitPrice: Number(it.materialBreakdown.unitPrice) || 0,
+                          total: Number(it.materialBreakdown.total) || 0,
+                        }
+                      : undefined,
+                    laborBreakdown: it?.laborBreakdown
+                      ? {
+                          description: String(it.laborBreakdown.description || 'Labor').slice(0, 200),
+                          hours: Number(it.laborBreakdown.hours) || 0,
+                          rate: Number(it.laborBreakdown.rate) || 0,
+                          total: Number(it.laborBreakdown.total) || 0,
+                        }
+                      : undefined,
+                    breakdownUserEdited: it?.breakdownUserEdited === true,
+                    breakdownLocked: it?.breakdownLocked === true,
+                  }));
                   const res = await fetch('/api/documents/send', {
                     method: 'POST',
                     headers: {
@@ -11606,12 +11642,10 @@ export default function Home() {
                       state,
                       zipCode,
                       date,
-                      terms,
-                      // Full line items include materialsList / laborBreakdown for email
-                      items,
+                      terms: String(terms || '').slice(0, 4000),
+                      items: emailItems,
                       grandTotal,
                       amountPaid,
-                      // Same toggles as preview/PDF — only open breakdowns are emailed
                       breakdownSettings: {
                         showMaterialBreakdownOnEstimate:
                           !!estimateBreakdownSettings.showMaterialBreakdownOnEstimate,
@@ -11624,10 +11658,13 @@ export default function Home() {
                   });
                   const json = await res.json().catch(() => ({}));
                   if (!res.ok) {
-                    showMessage(
+                    const detail =
+                      (Array.isArray(json.errors) && json.errors.length
+                        ? json.errors.join('\n')
+                        : '') ||
                       json.error ||
-                        'Send failed. Add RESEND_API_KEY on Vercel (for email) and redeploy. Check spam folder if using Resend test domain.'
-                    );
+                      `Send failed (HTTP ${res.status}). Check Resend domain + Vercel env, then redeploy.`;
+                    showMessage(detail);
                     return;
                   }
                   const parts: string[] = [];
@@ -11640,12 +11677,17 @@ export default function Home() {
                   if (json.errors?.length) {
                     parts.push(`Some failed: ${json.errors.join('; ')}`);
                   }
+                  if (!parts.length) {
+                    parts.push('Request completed, but no recipients were confirmed.');
+                  }
                   showMessage(
                     `✅ ${documentType === 'invoice' ? 'Invoice' : 'Estimate'} sent!\n${parts.join('\n')}`
                   );
                   setIsSendModalOpen(false);
-                } catch {
-                  showMessage('Network error — could not send. Try again.');
+                } catch (err: any) {
+                  showMessage(
+                    `Could not send: ${err?.message || 'Network error. Check connection and try again.'}`
+                  );
                 } finally {
                   setSendDocBusy(false);
                 }

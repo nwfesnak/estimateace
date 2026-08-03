@@ -74,6 +74,18 @@ export function formatItemBreakdownText(
   item: any,
   settings?: EmailBreakdownSettings | null
 ): string {
+  try {
+    return formatItemBreakdownTextUnsafe(item, settings);
+  } catch (err) {
+    console.error('formatItemBreakdownText:', err);
+    return '';
+  }
+}
+
+function formatItemBreakdownTextUnsafe(
+  item: any,
+  settings?: EmailBreakdownSettings | null
+): string {
   const parts = getVisibleParts(item, settings);
   if (!parts.showMaterials && !parts.showLabor && !parts.showCosts) return '';
 
@@ -177,6 +189,18 @@ export function formatItemBreakdownText(
 
 /** HTML block under a line item (empty string if nothing client-visible). */
 export function formatItemBreakdownHtml(
+  item: any,
+  settings?: EmailBreakdownSettings | null
+): string {
+  try {
+    return formatItemBreakdownHtmlUnsafe(item, settings);
+  } catch (err) {
+    console.error('formatItemBreakdownHtml:', err);
+    return '';
+  }
+}
+
+function formatItemBreakdownHtmlUnsafe(
   item: any,
   settings?: EmailBreakdownSettings | null
 ): string {
