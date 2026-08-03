@@ -7182,7 +7182,7 @@ export default function Home() {
   }, [archivesList]);
 
   /**
-   * All mileage trips across active estimates/invoices + archives (for Profile total).
+   * All mileage trips across active estimates/invoices + archives (for Reports → Profit).
    * Archive wins over active for same id. Open editor job uses live jobMileageLogs.
    */
   const allJobsMileageLogs = useMemo(() => {
@@ -9650,19 +9650,6 @@ export default function Home() {
                       </div>
                     </div>
 
-                    {/* Total miles across all jobs */}
-                    <div className="pt-6 border-t border-slate-200">
-                      <MileageTracker
-                        summaryOnly
-                        logs={allJobsMileageLogs}
-                        ratePerMile={mileageRatePerMile}
-                        onChangeLogs={() => {}}
-                        onChangeRate={setMileageRatePerMile}
-                        onSave={saveMileageRate}
-                        saving={mileageSaving}
-                      />
-                    </div>
-
                     <div className="pt-2 flex flex-wrap items-center gap-3">
                       <Button 
                         size="sm" 
@@ -10381,6 +10368,20 @@ export default function Home() {
                     <p className="text-sm text-gray-500">Profit details are restricted for your crew access level.</p>
                   ) : (
                     <>
+                  {/* Total business miles (write-off) — from all jobs */}
+                  <section className="mb-12">
+                    <MileageTracker
+                      summaryOnly
+                      title="🚗 Total business miles"
+                      logs={allJobsMileageLogs}
+                      ratePerMile={mileageRatePerMile}
+                      onChangeLogs={() => {}}
+                      onChangeRate={setMileageRatePerMile}
+                      onSave={saveMileageRate}
+                      saving={mileageSaving}
+                    />
+                  </section>
+
                   {/* Archived invoices by month / year of invoice date */}
                   <section className="mb-12">
                     <div className="flex flex-wrap items-start justify-between gap-3 mb-4">

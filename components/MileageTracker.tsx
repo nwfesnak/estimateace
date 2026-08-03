@@ -245,7 +245,8 @@ export function MileageTracker({
             {title || '🚗 Total business miles'}
           </h3>
           <p className="text-sm text-gray-500 mt-1">
-            Sum of miles logged on all jobs (estimates &amp; invoices). Log trips on each job under Receipts.
+            Sum of miles logged on all jobs (estimates &amp; invoices) for profit / tax write-off.
+            Log trips on each job with the <strong>Mileage</strong> button next to Labor.
           </p>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
