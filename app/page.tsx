@@ -1375,7 +1375,10 @@ export default function Home() {
 
   // Last saved state (required for existing saveToDB call)
   const [lastSaved, setLastSaved] = useState('');
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [saveErrorDetail, setSaveErrorDetail] = useState('');
   const [toasts, setToasts] = useState<any[]>([]);
+  const saveInFlightRef = useRef(false);
 
   const showMessage = (message: string) => {
     const clean = message.replace(/^[^\s]*\.vercel\.app says:\s*/i, '').trim();
@@ -2435,7 +2438,9 @@ export default function Home() {
     setReceiptDetails([]);
     setJobMileageLogs([]);
     setItems([{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
-    setInvoiceNumber('');
+    setInvoiceNumber('EST-0001');
+    setSaveStatus('idle');
+    setSaveErrorDetail('');
     lastSavedCompanyFingerprintRef.current = '';
     profileHydratingRef.current = true;
     // Remove legacy shared key that leaked company data across accounts
@@ -2484,6 +2489,30 @@ export default function Home() {
     }
   };
 
+  /** Guarantee a stable document id before writing to Supabase */
+  const ensureDocumentId = (preferred?: string): string => {
+    const existing = String(preferred || invoiceNumber || '').trim();
+    if (existing && existing.toLowerCase() !== 'undefined' && existing.toLowerCase() !== 'null') {
+      return existing;
+    }
+    let n = 0;
+    try {
+      n = parseInt(localStorage.getItem('estimateCount') || '0', 10) || 0;
+    } catch {
+      n = 0;
+    }
+    n += 1;
+    try {
+      localStorage.setItem('estimateCount', String(n));
+    } catch {
+      /* ignore */
+    }
+    const prefix = documentType === 'invoice' ? 'INV' : 'EST';
+    const id = `${prefix}-${String(n).padStart(4, '0')}`;
+    setInvoiceNumber(id);
+    return id;
+  };
+
   const saveToDB = async (options?: {
     profile?: typeof profile;
     breakdown?: typeof estimateBreakdownSettings;
@@ -2494,8 +2523,28 @@ export default function Home() {
     receiptDetails?: any[];
     /** Per-job mileage log (avoids stale state after Add trip) */
     mileageLogs?: MileageLog[];
-  }) => {
-    if (!user || !supabase || !workspaceUserId) return;
+    /** Suppress error toasts (auto-save) */
+    quiet?: boolean;
+  }): Promise<{ ok: boolean; error?: string; id?: string }> => {
+    if (!supabase) {
+      const err = 'Not connected to database. Check internet and refresh.';
+      if (!options?.quiet) showMessage(err);
+      setSaveStatus('error');
+      setSaveErrorDetail(err);
+      return { ok: false, error: err };
+    }
+    if (!user?.id || !workspaceUserId) {
+      const err = 'Not logged in — cannot save. Log in again.';
+      if (!options?.quiet) showMessage(err);
+      setSaveStatus('error');
+      setSaveErrorDetail(err);
+      return { ok: false, error: err };
+    }
+
+    const docId = ensureDocumentId();
+    setSaveStatus('saving');
+    setSaveErrorDetail('');
+
     const profileToSave = options?.profile ?? profile;
     const breakdownToSave = options?.breakdown ?? estimateBreakdownSettings;
     const photosToSave = options?.photoUrls ?? photoUrls;
@@ -2505,32 +2554,66 @@ export default function Home() {
     const milesToSave = options?.mileageLogs ?? jobMileageLogs;
     const data = {
       user_id: workspaceUserId,
-      jobName, address, city, state, zipCode, phones, emails, date, invoiceNumber,
-      items, terms, profile: getDocumentProfileSnapshot(profileToSave, breakdownToSave, milesToSave),
-      documentType, dueDate, paymentStatus, amountPaid,
+      jobName,
+      address,
+      city,
+      state,
+      zipCode,
+      phones,
+      emails,
+      date,
+      invoiceNumber: docId,
+      items,
+      terms,
+      profile: getDocumentProfileSnapshot(profileToSave, breakdownToSave, milesToSave),
+      documentType,
+      dueDate,
+      paymentStatus,
+      amountPaid,
       paymentMethod,
       photoUrls: photosToSave,
       videoUrls: videosToSave,
       receiptUrls: receiptsToSave,
       receiptDetails: receiptDetailsToSave,
-      laborHours, laborRate, laborFixedAmount, useHourlyLabor, laborAmount,
+      laborHours,
+      laborRate,
+      laborFixedAmount,
+      useHourlyLabor,
+      laborAmount,
       taxRate: baseTaxRate,
       taxAmount,
       isTaxExempt,
       taxLabor,
-      updated_at: new Date().toISOString()
+      updated_at: new Date().toISOString(),
     };
-    const { error } = await supabase.from('estimates').upsert({ id: invoiceNumber, ...data });
-    if (error) {
-      console.error('Save error:', error);
-      showMessage('Failed to save document. Please try again.');
-    } else {
+
+    try {
+      const { error } = await supabase.from('estimates').upsert({ id: docId, ...data });
+      if (error) {
+        console.error('Save error:', error);
+        const errMsg =
+          error.message ||
+          error.details ||
+          error.hint ||
+          'Failed to save document.';
+        const friendly =
+          /row-level security|RLS|permission|policy/i.test(errMsg)
+            ? 'Save blocked by database security (RLS). Make sure you are logged in and RLS policies allow your user to insert/update estimates.'
+            : /column|schema|does not exist/i.test(errMsg)
+              ? `Save failed (database schema): ${errMsg}`
+              : `Failed to save: ${errMsg}`;
+        setSaveStatus('error');
+        setSaveErrorDetail(friendly);
+        if (!options?.quiet) showMessage(friendly);
+        return { ok: false, error: friendly, id: docId };
+      }
+
       // Saving an INV- invoice must clear the original EST- work order from the Estimates page
-      if (String(invoiceNumber || '').toUpperCase().startsWith('INV')) {
+      if (String(docId).toUpperCase().startsWith('INV')) {
         await removeEstimateWorkOrderForInvoice(
           {
-            id: invoiceNumber,
-            invoiceNumber,
+            id: docId,
+            invoiceNumber: docId,
             documentType: 'invoice',
             jobName,
             address,
@@ -2541,7 +2624,16 @@ export default function Home() {
         );
       }
       setLastSaved(new Date().toLocaleTimeString());
-      refreshSavedList();
+      setSaveStatus('saved');
+      void refreshSavedList();
+      return { ok: true, id: docId };
+    } catch (e: any) {
+      const err = e?.message || 'Network error while saving.';
+      console.error('Save exception:', e);
+      setSaveStatus('error');
+      setSaveErrorDetail(err);
+      if (!options?.quiet) showMessage(err);
+      return { ok: false, error: err, id: docId };
     }
   };
 
@@ -4019,8 +4111,11 @@ export default function Home() {
   const updateEmail = (i: number, value: string) => { const arr = [...emails]; arr[i] = value; setEmails(arr); };
 
   const saveNamedEstimate = async () => {
-    await saveToDB();
-    showMessage(`✅ Saved as "${jobName || 'Untitled'} - ${invoiceNumber}"`);
+    const result = await saveToDB({ quiet: false });
+    if (result.ok) {
+      showMessage(`✅ Saved as "${jobName || 'Untitled'} - ${result.id || invoiceNumber}"`);
+    }
+    // errors already toasted inside saveToDB
   };
 
   const printDocument = () => window.print();
@@ -5649,14 +5744,49 @@ export default function Home() {
 
   const debouncedSave = () => {
     if (!profile.autoSaveEnabled) return;
+    if (!user?.id || !workspaceUserId || !supabase) return;
+    if (profileHydratingRef.current) return;
+    if (requires2FA) return;
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    saveTimeoutRef.current = setTimeout(saveToDB, 800);
+    saveTimeoutRef.current = setTimeout(() => {
+      void saveToDB({ quiet: true });
+    }, 1000);
   };
 
   useEffect(() => {
     if (view === 'editor') debouncedSave();
-    return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
-  }, [jobName, address, city, state, zipCode, phones, emails, date, invoiceNumber, items, terms, profile, documentType, dueDate, paymentStatus, amountPaid, paymentMethod, view, receiptDetails, jobMileageLogs, isTaxExempt, taxLabor, appliedDiscountDescription, appliedDiscountValue, appliedDiscountType]);
+    return () => {
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    };
+  }, [
+    jobName,
+    address,
+    city,
+    state,
+    zipCode,
+    phones,
+    emails,
+    date,
+    invoiceNumber,
+    items,
+    terms,
+    documentType,
+    dueDate,
+    paymentStatus,
+    amountPaid,
+    paymentMethod,
+    view,
+    receiptDetails,
+    jobMileageLogs,
+    isTaxExempt,
+    taxLabor,
+    appliedDiscountDescription,
+    appliedDiscountValue,
+    appliedDiscountType,
+    user?.id,
+    workspaceUserId,
+    profile.autoSaveEnabled,
+  ]);
 
   useEffect(() => {
     const saved = localStorage.getItem('quickLines');
@@ -8540,11 +8670,24 @@ export default function Home() {
                   )}
                 </div>
               ) : (
-                <div className="flex flex-wrap gap-3 mb-8">
-                  <Button onClick={saveNamedEstimate} className="bg-[#1e293b]">{t('saveEstimate')}</Button>
+                <div className="flex flex-wrap items-center gap-3 mb-8">
+                  <Button onClick={() => void saveNamedEstimate()} className="bg-[#1e293b]">
+                    {t('saveEstimate')}
+                  </Button>
                   <Button onClick={printDocument} className="bg-[#3b82f6]">{t('printPreview')}</Button>
                   <Button onClick={openSendPreview} className="bg-[#8b5cf6]">{t('sendEstimate')}</Button>
                   <Button onClick={convertToInvoice} className="bg-[#f59e0b]">{t('convertToInvoice')}</Button>
+                  <span className="text-xs text-gray-500 self-center">
+                    {saveStatus === 'saving' && 'Saving…'}
+                    {saveStatus === 'saved' && lastSaved && `Saved ${lastSaved}`}
+                    {saveStatus === 'error' && (
+                      <span className="text-red-600 font-medium">
+                        Save failed{saveErrorDetail ? `: ${saveErrorDetail.slice(0, 80)}` : ''}
+                      </span>
+                    )}
+                    {saveStatus === 'idle' && profile.autoSaveEnabled !== false && 'Auto-save on'}
+                    {profile.autoSaveEnabled === false && saveStatus === 'idle' && 'Auto-save off — use Save'}
+                  </span>
                 </div>
               )}
 
