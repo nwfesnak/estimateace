@@ -205,18 +205,40 @@ export async function createJobCheckoutSession(
     payment_intent_data: {
       metadata,
     },
-    // Card first; enable us_bank_account in Dashboard for ACH on Checkout
-    payment_method_types: ['card'],
+    /**
+     * Card + US bank ACH (eCheck-style).
+     * ACH must also be enabled in Stripe Dashboard → Settings → Payment methods
+     * (and for Connect: connected account capabilities / payment method settings).
+     * If ACH is not enabled, Stripe may error — we fall back to card-only below.
+     */
+    payment_method_types: ['card', 'us_bank_account'],
   };
 
   if (input.clientEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.clientEmail)) {
     sessionParams.customer_email = input.clientEmail;
   }
 
+  const createSession = async (params: Stripe.Checkout.SessionCreateParams, opts?: Stripe.RequestOptions) => {
+    try {
+      return await stripe.checkout.sessions.create(params, opts);
+    } catch (e: any) {
+      // ACH not enabled on account → retry card only
+      const msg = String(e?.message || '');
+      if (/us_bank_account|bank.account|payment_method_types/i.test(msg)) {
+        const cardOnly = {
+          ...params,
+          payment_method_types: ['card'] as Stripe.Checkout.SessionCreateParams.PaymentMethodType[],
+        };
+        return await stripe.checkout.sessions.create(cardOnly, opts);
+      }
+      throw e;
+    }
+  };
+
   try {
     if (canChargeConnected && connectedId) {
       // Direct charge on connected account → money to contractor
-      const session = await stripe.checkout.sessions.create(sessionParams, {
+      const session = await createSession(sessionParams, {
         stripeAccount: connectedId,
       });
       if (!session.url) return { ok: false, error: 'Stripe did not return a checkout URL.' };
@@ -224,7 +246,7 @@ export async function createJobCheckoutSession(
     }
 
     // Platform fallback (same Stripe as SaaS — for testing or sole operator)
-    const session = await stripe.checkout.sessions.create({
+    const session = await createSession({
       ...sessionParams,
       metadata: { ...metadata, settle_to: 'platform' },
       payment_intent_data: {
