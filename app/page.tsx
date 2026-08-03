@@ -141,12 +141,12 @@ const getPaymentMethodMeta = (method: string) => {
     },
     echeck: {
       icon: '🏦',
-      label: 'eCheck / ACH',
-      description: 'Bank debit (enable in Stripe Dashboard)',
+      label: 'eCheck / ACH (bank)',
+      description: 'Pay from your US bank account via Stripe',
       howItWorks:
-        'Bank debit can appear inside Stripe Checkout when enabled on the contractor’s Stripe account. Use Card (Stripe) Pay — ACH shows there if turned on in Stripe. This row is informational if listed alone.',
+        'Opens the same secure Stripe Checkout as card pay. On the Stripe page, choose US bank account / bank debit if available (must be enabled in Stripe). Settlement often takes 3–5 business days.',
       category: 'traditional',
-      clickToPay: false,
+      clickToPay: true,
     },
     mailcheck: {
       icon: '✉️',
@@ -6532,8 +6532,10 @@ export default function Home() {
     const clickToPay: Opt[] = [];
     const other: Opt[] = [];
 
-    const orderClick = ['stripe', 'venmo', 'paypal', 'zelle'];
-    const orderOther = ['mailcheck', 'echeck', 'nowpayments', 'coinbase_commerce'];
+    // Card + ACH both use Stripe Checkout (echeck is not a separate processor)
+    const orderClick = ['stripe', 'echeck', 'venmo', 'paypal', 'zelle'];
+    const orderOther = ['mailcheck', 'nowpayments', 'coinbase_commerce'];
+    const stripeConfigured = stripeConnectStatus?.stripeConfigured !== false;
 
     const pushIfReady = (method: string) => {
       const s = settings[method];
@@ -6542,28 +6544,45 @@ export default function Home() {
       if (method === 'venmo' && !hasVenmoHandle(s.handle)) return;
       if (method === 'zelle' && !hasZelleSetup(s)) return;
       if (method === 'paypal' && !hasPayPalSetup(s)) return;
-      // Stripe card checkout: enabled + platform Stripe configured
-      if (method === 'stripe' && stripeConnectStatus?.stripeConfigured === false) return;
-      // Mail check: show whenever the toggle is ON
+      // Stripe card + ACH: need platform Stripe keys (Connect optional for payouts)
+      if ((method === 'stripe' || method === 'echeck') && !stripeConfigured) return;
+      // Avoid two identical Stripe Checkout rows: if both stripe + echeck on, only show stripe once
+      // (echeck still opens same checkout). Skip echeck when stripe already listed.
+      if (method === 'echeck' && settings.stripe?.enabled && stripeConfigured) return;
+
       const meta = getPaymentMethodMeta(method);
+      const isStripeCheckout = method === 'stripe' || method === 'echeck';
       const isClick =
-        (method === 'stripe' && (stripeConnectStatus?.stripeConfigured !== false)) ||
-        (meta.clickToPay &&
-          ((method === 'venmo' && hasVenmoHandle(s.handle)) ||
-            (method === 'paypal' && hasPayPalSetup(s)) ||
-            (method === 'zelle' && hasZelleSetup(s))));
+        (isStripeCheckout && stripeConfigured) ||
+        (method === 'venmo' && hasVenmoHandle(s.handle)) ||
+        (method === 'paypal' && hasPayPalSetup(s)) ||
+        (method === 'zelle' && hasZelleSetup(s));
       const ready =
         method === 'mailcheck'
           ? !!(s.handle || '').trim()
-          : method === 'stripe'
-            ? stripeConnectStatus?.stripeConfigured !== false
+          : isStripeCheckout
+            ? stripeConfigured
             : method === 'venmo' || method === 'zelle' || method === 'paypal'
               ? !!isClick
               : true;
+
+      // Label card option as card + bank when ACH is also enabled
+      let displayMeta = meta;
+      if (method === 'stripe' && settings.echeck?.enabled) {
+        displayMeta = {
+          ...meta,
+          label: 'Card or bank (Stripe)',
+          description: 'Card · Apple Pay · US bank ACH (eCheck-style)',
+          howItWorks:
+            'Opens Stripe Checkout. Choose card or US bank account on the next screen. Bank/ACH must be turned on in Stripe Dashboard → Payment methods. ACH often takes 3–5 business days.',
+          clickToPay: true,
+        };
+      }
+
       const opt: Opt = {
-        method,
+        method: isStripeCheckout ? 'stripe' : method, // echeck alone still routes to stripe checkout
         settings: s,
-        meta,
+        meta: displayMeta,
         ready,
         clickToPay: !!isClick,
       };
@@ -6582,7 +6601,8 @@ export default function Home() {
   };
 
   const startClientPayment = (method: string) => {
-    if (method === 'stripe') {
+    // Card and eCheck/ACH both open Stripe Checkout (ACH is a method inside Checkout)
+    if (method === 'stripe' || method === 'echeck') {
       void startJobCardCheckout(paymentAmount);
       return;
     }
@@ -7293,7 +7313,6 @@ export default function Home() {
 
     if (method === 'stripe' || method === 'echeck') {
       const connectReady = !!stripeConnectStatus?.connectReady;
-      const connected = connectReady || !!settings.connected;
       return (
         <div
           key={method}
@@ -7306,18 +7325,25 @@ export default function Home() {
                 <div className="font-semibold text-base sm:text-lg break-words">{meta.label}</div>
                 <div className="text-sm text-gray-500 break-words">
                   {method === 'stripe'
-                    ? 'Clients pay by card (Apple Pay / Google Pay when available) via Stripe Checkout'
-                    : 'Bank debit can appear in Stripe Checkout when enabled in your Stripe account'}
+                    ? 'Clients pay by card (and bank/ACH if enabled) via Stripe Checkout'
+                    : 'Same Stripe Checkout as Card — client picks US bank account on the Stripe page'}
                 </div>
                 <div className="text-sm text-gray-500 mt-1">
-                  {connectReady ? (
+                  {method === 'echeck' ? (
+                    <>
+                      Turn this <strong>and Card (Stripe)</strong> on. Enable{' '}
+                      <strong>US bank account</strong> in Stripe → Settings → Payment methods.
+                      Clients use <strong>Pay Now → Card or bank</strong> (not a separate broken
+                      button).
+                    </>
+                  ) : connectReady ? (
                     <><span className="text-green-500">✓</span> Stripe Connect ready — charges enabled</>
                   ) : stripeConnectStatus?.connected ? (
                     <><span className="text-amber-500">…</span> Connected — finish verification in Stripe if needed</>
                   ) : stripeConnectStatus?.stripeConfigured ? (
                     'Connect Stripe so job payments can go to your bank (does not change app subscriptions)'
                   ) : (
-                    'Add STRIPE_SECRET_KEY on Vercel to enable card job payments'
+                    'Add STRIPE_SECRET_KEY on Vercel to enable card/ACH job payments'
                   )}
                 </div>
               </div>
@@ -7349,8 +7375,17 @@ export default function Home() {
             </div>
           </div>
           <p className="text-xs text-gray-500 sm:pl-14">
-            Separate from EstimateAce monthly subscriptions. Job card payments use Stripe Checkout;
-            SaaS billing is unchanged.
+            {method === 'echeck' ? (
+              <>
+                eCheck/ACH is not a separate app. Stripe Checkout can offer bank debit when ACH is
+                enabled for your platform and connected accounts. Settlement is often 3–5 days.
+              </>
+            ) : (
+              <>
+                Separate from EstimateAce monthly subscriptions. Job card/ACH uses Stripe Checkout;
+                SaaS billing is unchanged.
+              </>
+            )}
           </p>
         </div>
       );
