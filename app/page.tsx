@@ -1200,6 +1200,9 @@ export default function Home() {
 
   // Payment modal states
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  /** Contractor: mark invoice paid via Cash / Venmo / Zelle (replaces separate Mark Paid buttons) */
+  const [isMarkPaidMethodOpen, setIsMarkPaidMethodOpen] = useState(false);
+  const [markPaidBusy, setMarkPaidBusy] = useState(false);
   const [isEscrowModalOpen, setIsEscrowModalOpen] = useState(false);
   const [paymentType, setPaymentType] = useState<'deposit' | 'balance'>('deposit');
   const [paymentAmount, setPaymentAmount] = useState(0);
@@ -4839,38 +4842,102 @@ export default function Home() {
     setView('archivesView');
   };
 
-  const markAsPaidCash = async () => {
-    if (!confirm('Mark this invoice as Paid (Cash) and close it out to the archives?')) return;
-    if (!user || !supabase) return;
+  /** Open chooser: mark paid as Cash, Venmo, or Zelle */
+  const openMarkPaidChooser = () => {
+    if (documentType !== 'invoice') {
+      showMessage('Open an invoice to mark it paid.');
+      return;
+    }
+    if (paymentStatus === 'paid') {
+      showMessage('This invoice is already marked paid.');
+      return;
+    }
+    setIsMarkPaidMethodOpen(true);
+  };
+
+  /**
+   * Mark invoice fully paid with a method label (Cash / Venmo / Zelle) and archive to Paid Invoices.
+   */
+  const markAsPaidWithMethod = async (methodLabel: 'Cash' | 'Venmo' | 'Zelle') => {
+    if (!user || !supabase) {
+      showMessage('Please log in first.');
+      return;
+    }
+    if (!confirm(`Mark this invoice as Paid (${methodLabel}) and move it to Paid Invoices?`)) return;
 
     const id = invoiceNumber;
+    setMarkPaidBusy(true);
+    setIsMarkPaidMethodOpen(false);
 
     try {
-      // Explicitly save the paid/cash status (avoids stale state from setPayment* + immediate await saveToDB)
       const paidData = {
         user_id: workspaceUserId,
-        jobName, address, city, state, zipCode, phones, emails, date, invoiceNumber: id,
-        items, terms, profile: getDocumentProfileSnapshot(),
-        documentType, dueDate,
+        jobName,
+        address,
+        city,
+        state,
+        zipCode,
+        phones,
+        emails,
+        date,
+        invoiceNumber: id,
+        items,
+        terms,
+        profile: getDocumentProfileSnapshot(),
+        documentType,
+        dueDate,
         paymentStatus: 'paid',
         amountPaid: grandTotal,
-        paymentMethod: 'Cash',
-        photoUrls, videoUrls, receiptUrls, receiptDetails,
-        laborHours, laborRate, laborFixedAmount, useHourlyLabor, laborAmount,
+        paymentMethod: methodLabel,
+        photoUrls,
+        videoUrls,
+        receiptUrls,
+        receiptDetails,
+        laborHours,
+        laborRate,
+        laborFixedAmount,
+        useHourlyLabor,
+        laborAmount,
         taxRate: baseTaxRate,
         taxAmount,
         isTaxExempt,
         taxLabor,
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
       };
-      const { error: saveErr } = await supabase.from('estimates').upsert({ id, ...paidData });
-      if (saveErr) {
-        console.error('Failed to save paid status:', saveErr);
-        showMessage('❌ Failed to mark as paid.');
-        return;
+
+      // Prefer reliable server save, then client fallback
+      let saved = false;
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const token = sessionData.session?.access_token;
+        if (token) {
+          const res = await fetch('/api/documents/save', {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ id, ...paidData }),
+          });
+          const json = await res.json().catch(() => ({}));
+          if (res.ok && json.ok) saved = true;
+        }
+      } catch {
+        /* fall through */
+      }
+      if (!saved) {
+        const { error: saveErr } = await supabase.from('estimates').upsert({ id, ...paidData });
+        if (saveErr) {
+          console.error('Failed to save paid status:', saveErr);
+          showMessage('❌ Failed to mark as paid: ' + (saveErr.message || 'save error'));
+          return;
+        }
       }
 
-      // Re-fetch the freshly updated row (defensively scoped to this user)
+      setPaymentStatus('paid');
+      setAmountPaid(grandTotal);
+      setPaymentMethod(methodLabel);
+
       const { data: est, error: fetchErr } = await supabase
         .from('estimates')
         .select('*')
@@ -4879,7 +4946,7 @@ export default function Home() {
         .single();
       if (fetchErr || !est) {
         console.error('Fetch for archive failed:', fetchErr);
-        showMessage('✅ Invoice marked as Paid (Cash), but could not load for archiving.');
+        showMessage(`✅ Invoice marked as Paid (${methodLabel}), but could not load for archiving.`);
         setProfileTab('paidInvoices');
         setView('profileView');
         await refreshSavedList();
@@ -4890,24 +4957,28 @@ export default function Home() {
       if (archiveErr) {
         console.error('Archive insert error after mark paid:', archiveErr);
         showMessage(
-          `✅ Invoice marked as Paid (Cash), but archiving failed: ${(archiveErr as any).message || 'unknown'} — Run ensure_archives_table.sql`
+          `✅ Invoice marked as Paid (${methodLabel}), but archiving failed: ${(archiveErr as any).message || 'unknown'}`
         );
         await refreshSavedList();
         return;
       }
 
-      showMessage('✅ Invoice marked as Paid (Cash) and moved to Paid Invoices');
+      showMessage(`✅ Invoice marked as Paid (${methodLabel}) and moved to Paid Invoices`);
       setProfileTab('paidInvoices');
       setView('profileView');
       await refreshSavedList();
       await refreshArchivesList();
     } catch (e: any) {
-      console.error('Unexpected error in markAsPaidCash:', e);
-      const msg = e?.message || 'unexpected error';
-      showMessage(`✅ Invoice marked as Paid (Cash), but archiving failed: ${msg}`);
+      console.error('Unexpected error in markAsPaidWithMethod:', e);
+      showMessage(`❌ Could not mark paid: ${e?.message || 'unexpected error'}`);
       await refreshSavedList();
+    } finally {
+      setMarkPaidBusy(false);
     }
   };
+
+  /** @deprecated use openMarkPaidChooser / markAsPaidWithMethod */
+  const markAsPaidCash = () => openMarkPaidChooser();
 
   const openSendPreview = () => {
     setView('sendPreview');
@@ -8873,7 +8944,15 @@ export default function Home() {
               {documentType === 'invoice' ? (
                 <div className="flex flex-wrap gap-3 mb-8">
                   <Button onClick={printDocument} className="bg-[#3b82f6]">{t('printPreview')}</Button>
-                  <Button onClick={markAsPaidCash} className="bg-green-600">Paid Cash</Button>
+                  <Button
+                    type="button"
+                    onClick={openMarkPaidChooser}
+                    disabled={markPaidBusy || paymentStatus === 'paid'}
+                    className="bg-green-600 hover:bg-green-700 text-white"
+                    title="Mark invoice paid — choose Cash, Venmo, or Zelle"
+                  >
+                    {paymentStatus === 'paid' ? 'Already Paid' : 'Paid Cash'}
+                  </Button>
                   <Button
                     type="button"
                     onClick={openSendPreview}
@@ -8882,7 +8961,7 @@ export default function Home() {
                   >
                     📧 Send Invoice
                   </Button>
-                  {isVenmoPaymentReady() && (
+                  {isVenmoPaymentReady() && paymentStatus !== 'paid' && (
                     <Button
                       onClick={() => openVenmoPayment(Math.max(0, grandTotal - (Number(amountPaid) || 0)), 'invoice')}
                       className="bg-[#008cff] hover:bg-[#0070cc]"
@@ -8890,16 +8969,7 @@ export default function Home() {
                       Pay / Confirm Venmo
                     </Button>
                   )}
-                  {isVenmoPaymentReady() && paymentStatus !== 'paid' && (
-                    <Button
-                      variant="outline"
-                      className="border-blue-300 text-blue-800"
-                      onClick={() => void markInvoicePaid('Venmo')}
-                    >
-                      Mark Paid (Venmo received)
-                    </Button>
-                  )}
-                  {isZellePaymentReady() && (
+                  {isZellePaymentReady() && paymentStatus !== 'paid' && (
                     <Button
                       onClick={() => openZellePayment(Math.max(0, grandTotal - (Number(amountPaid) || 0)), 'invoice')}
                       className="bg-[#6d28d9] hover:bg-[#5b21b6]"
@@ -8907,39 +8977,12 @@ export default function Home() {
                       Pay / Confirm Zelle
                     </Button>
                   )}
-                  {isZellePaymentReady() && paymentStatus !== 'paid' && (
-                    <Button
-                      variant="outline"
-                      className="border-violet-300 text-violet-800"
-                      onClick={() => void markInvoicePaid('Zelle')}
-                    >
-                      Mark Paid (Zelle received)
-                    </Button>
-                  )}
-                  {isPayPalPaymentReady() && (
+                  {isPayPalPaymentReady() && paymentStatus !== 'paid' && (
                     <Button
                       onClick={() => openPayPalPayment(Math.max(0, grandTotal - (Number(amountPaid) || 0)), 'invoice')}
                       className="bg-[#0070ba] hover:bg-[#005ea6]"
                     >
                       Pay / Confirm PayPal
-                    </Button>
-                  )}
-                  {isPayPalPaymentReady() && paymentStatus !== 'paid' && (
-                    <Button
-                      variant="outline"
-                      className="border-sky-300 text-sky-900"
-                      onClick={() => void markInvoicePaid('PayPal')}
-                    >
-                      Mark Paid (PayPal received)
-                    </Button>
-                  )}
-                  {hasMailCheckSetup(getMailCheckSettings()) && paymentStatus !== 'paid' && (
-                    <Button
-                      variant="outline"
-                      className="border-stone-300 text-stone-800"
-                      onClick={() => void markInvoicePaid('Check')}
-                    >
-                      Mark Paid (Check received)
                     </Button>
                   )}
                 </div>
@@ -11904,6 +11947,67 @@ export default function Home() {
           <DialogFooter>
             <Button onClick={() => setIsEscrowModalOpen(false)} className="bg-[#10b981]">
               Got it
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Mark invoice paid — Cash / Venmo / Zelle */}
+      <Dialog open={isMarkPaidMethodOpen} onOpenChange={setIsMarkPaidMethodOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Mark invoice paid</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-gray-600 -mt-1 mb-2">
+            How did you receive payment? This records the method, marks the invoice paid, and moves
+            it to Paid Invoices.
+          </p>
+          <div className="space-y-3 py-2">
+            <button
+              type="button"
+              disabled={markPaidBusy}
+              onClick={() => void markAsPaidWithMethod('Cash')}
+              className="w-full flex items-center gap-4 p-4 border-2 border-green-500 bg-green-50 hover:bg-green-100 rounded-2xl text-left transition"
+            >
+              <span className="text-3xl">💵</span>
+              <div>
+                <div className="font-bold text-green-900">Cash</div>
+                <div className="text-xs text-gray-600">Received physical cash or equivalent in hand</div>
+              </div>
+            </button>
+            <button
+              type="button"
+              disabled={markPaidBusy}
+              onClick={() => void markAsPaidWithMethod('Venmo')}
+              className="w-full flex items-center gap-4 p-4 border-2 border-[#008cff] bg-blue-50 hover:bg-blue-100 rounded-2xl text-left transition"
+            >
+              <span className="text-3xl">📱</span>
+              <div>
+                <div className="font-bold text-[#005fa3]">Venmo</div>
+                <div className="text-xs text-gray-600">Payment received in Venmo (same as cash for records)</div>
+              </div>
+            </button>
+            <button
+              type="button"
+              disabled={markPaidBusy}
+              onClick={() => void markAsPaidWithMethod('Zelle')}
+              className="w-full flex items-center gap-4 p-4 border-2 border-violet-500 bg-violet-50 hover:bg-violet-100 rounded-2xl text-left transition"
+            >
+              <span className="text-3xl">🏦</span>
+              <div>
+                <div className="font-bold text-violet-900">Zelle</div>
+                <div className="text-xs text-gray-600">Payment received via Zelle (same as cash for records)</div>
+              </div>
+            </button>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              className="w-full"
+              disabled={markPaidBusy}
+              onClick={() => setIsMarkPaidMethodOpen(false)}
+            >
+              Cancel
             </Button>
           </DialogFooter>
         </DialogContent>
