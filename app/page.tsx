@@ -408,6 +408,10 @@ export default function Home() {
       photoFolderClosed: "Click to open photo folder",
       photoFolderOpen: "Close photo folder",
       photoFolderCount: "{count} photos",
+      receiptFolderTitle: "Receipt folder",
+      receiptFolderClosed: "Click to open all receipts",
+      receiptFolderOpen: "Close receipt folder",
+      receiptFolderCount: "{count} receipts",
       videosSection: "Videos",
       receiptsSection: "Receipts",
       loginMain: "Log In (Main Account)",
@@ -534,6 +538,10 @@ export default function Home() {
       photoFolderClosed: "Clic para abrir la carpeta de fotos",
       photoFolderOpen: "Cerrar carpeta de fotos",
       photoFolderCount: "{count} fotos",
+      receiptFolderTitle: "Carpeta de recibos",
+      receiptFolderClosed: "Clic para ver todos los recibos",
+      receiptFolderOpen: "Cerrar carpeta de recibos",
+      receiptFolderCount: "{count} recibos",
       videosSection: "Videos",
       receiptsSection: "Recibos",
       loginMain: "Iniciar Sesión (Cuenta Principal)",
@@ -660,6 +668,10 @@ export default function Home() {
       photoFolderClosed: "Cliquez pour ouvrir le dossier de photos",
       photoFolderOpen: "Fermer le dossier de photos",
       photoFolderCount: "{count} photos",
+      receiptFolderTitle: "Dossier des reçus",
+      receiptFolderClosed: "Cliquez pour ouvrir tous les reçus",
+      receiptFolderOpen: "Fermer le dossier des reçus",
+      receiptFolderCount: "{count} reçus",
       videosSection: "Vidéos",
       receiptsSection: "Reçus",
       loginMain: "Connexion (Compte Principal)",
@@ -1473,6 +1485,8 @@ export default function Home() {
   /** When more than 6 photos, collapse into a click-to-open folder */
   const PHOTO_FOLDER_THRESHOLD = 6;
   const [photosFolderOpen, setPhotosFolderOpen] = useState(false);
+  /** Receipts always sit in a folder; click to open the full set */
+  const [receiptsFolderOpen, setReceiptsFolderOpen] = useState(false);
 
   // Last saved state (required for existing saveToDB call)
   const [lastSaved, setLastSaved] = useState('');
@@ -9533,21 +9547,112 @@ export default function Home() {
                     className="hidden"
                     onChange={(e) => void handleReceiptGalleryChange(e.target.files)}
                   />
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    {receiptDisplayUrls.map((url, i) => (
-                      <div key={i} className="relative group">
-                        <img src={url} alt="" className="w-full h-40 object-cover rounded-lg border" />
-                        <button
-                          type="button"
-                          onClick={() => removeMedia('receipt', i)}
-                          className="absolute top-2 right-2 bg-red-500 hover:bg-red-600 text-white text-xs px-3 py-1 rounded-full shadow-md opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition"
-                          title="Remove receipt"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    ))}
-                  </div>
+                  {receiptDisplayUrls.length > 0 && (
+                    <div className="space-y-3">
+                      <button
+                        type="button"
+                        onClick={() => setReceiptsFolderOpen((open) => !open)}
+                        className={`w-full text-left border-2 rounded-xl p-4 sm:p-5 transition shadow-sm ${
+                          receiptsFolderOpen
+                            ? 'border-emerald-400 bg-emerald-50/80 hover:bg-emerald-50'
+                            : 'border-sky-300 bg-gradient-to-br from-sky-50 to-indigo-50 hover:from-sky-100 hover:to-indigo-100'
+                        }`}
+                        aria-expanded={receiptsFolderOpen}
+                      >
+                        <div className="flex items-center gap-4 min-w-0">
+                          <div className="relative shrink-0 w-16 h-14" aria-hidden>
+                            <div className="absolute left-2 top-0 w-12 h-10 rounded-md bg-sky-200 border border-sky-300 rotate-[-6deg]" />
+                            <div className="absolute left-1 top-1 w-12 h-10 rounded-md bg-sky-300 border border-sky-400 rotate-[-2deg]" />
+                            <div className="absolute left-0 top-2 w-12 h-10 rounded-md bg-sky-500 border border-sky-600 flex items-center justify-center text-2xl shadow-sm">
+                              🧾
+                            </div>
+                            {receiptDisplayUrls[0] && (
+                              <img
+                                src={receiptDisplayUrls[0]}
+                                alt=""
+                                className="absolute -right-1 top-3 w-8 h-8 object-cover rounded border-2 border-white shadow"
+                              />
+                            )}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="font-semibold text-[#1e293b] flex flex-wrap items-center gap-2">
+                              <span>{t('receiptFolderTitle') || 'Receipt folder'}</span>
+                              <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-white/80 border text-gray-700">
+                                {(t('receiptFolderCount') || '{count} receipts').replace(
+                                  '{count}',
+                                  String(receiptDisplayUrls.length)
+                                )}
+                              </span>
+                            </div>
+                            <p className="text-sm text-gray-600 mt-0.5">
+                              {receiptsFolderOpen
+                                ? t('receiptFolderOpen') || 'Close receipt folder'
+                                : t('receiptFolderClosed') || 'Click to open all receipts'}
+                            </p>
+                            {!receiptsFolderOpen && (
+                              <div className="flex gap-1.5 mt-2">
+                                {receiptDisplayUrls.slice(0, 4).map((url, i) => (
+                                  <img
+                                    key={i}
+                                    src={url}
+                                    alt=""
+                                    className="w-9 h-9 object-cover rounded border border-white shadow-sm"
+                                  />
+                                ))}
+                                {receiptDisplayUrls.length > 4 && (
+                                  <span className="w-9 h-9 rounded bg-white/90 border text-[10px] font-semibold text-gray-600 flex items-center justify-center">
+                                    +{receiptDisplayUrls.length - 4}
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                          <span className="text-2xl text-gray-500 shrink-0" aria-hidden>
+                            {receiptsFolderOpen ? '▾' : '▸'}
+                          </span>
+                        </div>
+                      </button>
+
+                      {receiptsFolderOpen && (
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-1">
+                          {receiptDisplayUrls.map((url, i) => {
+                            const detail =
+                              receiptDetails.find((d: any) => d?.url === receiptUrls[i]) ||
+                              receiptDetails[i];
+                            return (
+                              <div key={i} className="relative group rounded-lg border bg-white overflow-hidden shadow-sm">
+                                <img
+                                  src={url}
+                                  alt={detail?.vendor ? `Receipt ${detail.vendor}` : `Receipt ${i + 1}`}
+                                  className="w-full h-40 object-cover"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => removeMedia('receipt', i)}
+                                  className="absolute top-2 right-2 bg-red-500 hover:bg-red-600 text-white text-xs px-3 py-1 rounded-full shadow-md opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition"
+                                  title="Remove receipt"
+                                >
+                                  ✕
+                                </button>
+                                {(detail?.vendor || detail?.amount) && (
+                                  <div className="px-2 py-1.5 text-[11px] text-gray-700 border-t bg-gray-50">
+                                    {detail.vendor ? (
+                                      <div className="font-medium truncate">{detail.vendor}</div>
+                                    ) : null}
+                                    {detail.amount != null && Number(detail.amount) > 0 ? (
+                                      <div className="text-emerald-700 font-semibold">
+                                        ${Number(detail.amount).toFixed(2)}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
