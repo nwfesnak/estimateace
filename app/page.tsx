@@ -394,6 +394,7 @@ export default function Home() {
       uploadPhotos: "Upload from Device",
       recordVideo: "Record Video",
       scanReceipt: "Scan Receipt",
+      uploadReceipt: "Upload Receipt",
       labor: "Labor",
       photos: "Photos",
       videos: "Videos",
@@ -519,6 +520,7 @@ export default function Home() {
       uploadPhotos: "Subir desde Dispositivo",
       recordVideo: "Grabar Video",
       scanReceipt: "Escanear Recibo",
+      uploadReceipt: "Subir Recibo",
       labor: "Mano de Obra",
       photos: "Fotos",
       videos: "Videos",
@@ -644,6 +646,7 @@ export default function Home() {
       uploadPhotos: "Importer depuis l'Appareil",
       recordVideo: "Enregistrer Vidéo",
       scanReceipt: "Scanner Reçu",
+      uploadReceipt: "Importer Reçu",
       labor: "Main d'Œuvre",
       photos: "Photos",
       videos: "Vidéos",
@@ -1465,6 +1468,8 @@ export default function Home() {
   const [isPhotoPickerOpen, setIsPhotoPickerOpen] = useState(false);
   const [isDeviceCameraOpen, setIsDeviceCameraOpen] = useState(false);
   const [deviceCameraMode, setDeviceCameraMode] = useState<DeviceCameraMode>('photo');
+  /** Device camera photo saves as job photo or receipt */
+  const [deviceCameraPhotoTarget, setDeviceCameraPhotoTarget] = useState<'photo' | 'receipt'>('photo');
   /** When more than 6 photos, collapse into a click-to-open folder */
   const PHOTO_FOLDER_THRESHOLD = 6;
   const [photosFolderOpen, setPhotosFolderOpen] = useState(false);
@@ -3118,6 +3123,18 @@ export default function Home() {
       showMessage('Please log in before taking photos.');
       return;
     }
+    setDeviceCameraPhotoTarget('photo');
+    setDeviceCameraMode('photo');
+    setIsDeviceCameraOpen(true);
+  };
+
+  /** Scan receipt with the same easy in-app camera (saves as receipt photo). */
+  const openDeviceReceiptCamera = () => {
+    if (!user || !supabase) {
+      showMessage('Please log in before scanning receipts.');
+      return;
+    }
+    setDeviceCameraPhotoTarget('receipt');
     setDeviceCameraMode('photo');
     setIsDeviceCameraOpen(true);
   };
@@ -3145,6 +3162,17 @@ export default function Home() {
     window.setTimeout(() => {
       videoGalleryInputRef.current?.click();
     }, 150);
+  };
+
+  /** Upload receipt photo(s) from device gallery (no live camera). */
+  const triggerReceiptGallery = () => {
+    if (!user || !supabase) {
+      showMessage('Please log in before uploading receipts.');
+      return;
+    }
+    window.setTimeout(() => {
+      receiptGalleryInputRef.current?.click();
+    }, 50);
   };
 
   const handlePhotoGalleryChange = async (files: FileList | null) => {
@@ -3180,9 +3208,14 @@ export default function Home() {
   const handleDeviceCameraPhoto = async (file: File) => {
     const dt = new DataTransfer();
     dt.items.add(file);
-    const saved = await handleMediaUpload(dt.files, 'photo');
+    const asReceipt = deviceCameraPhotoTarget === 'receipt';
+    const saved = await handleMediaUpload(dt.files, asReceipt ? 'receipt' : 'photo');
     if (saved > 0) {
-      showMessage('✅ Photo saved to this estimate.');
+      showMessage(
+        asReceipt
+          ? '✅ Receipt photo saved. Enter vendor & amount if needed.'
+          : '✅ Photo saved to this estimate.'
+      );
     }
   };
 
@@ -3195,13 +3228,36 @@ export default function Home() {
     }
   };
 
+  const handleReceiptGalleryChange = async (files: FileList | null) => {
+    try {
+      const saved = await handleMediaUpload(files, 'receipt');
+      if (saved > 0) {
+        showMessage(
+          `✅ ${saved} receipt photo${saved === 1 ? '' : 's'} uploaded. Enter vendor & amount if needed.`
+        );
+      }
+    } catch (err) {
+      console.error(err);
+      showMessage('Receipt upload failed. Try Scan Receipt with the camera instead.');
+    } finally {
+      if (receiptGalleryInputRef.current) receiptGalleryInputRef.current.value = '';
+    }
+  };
+
   const handleDeviceCameraClose = (count: number) => {
     setIsDeviceCameraOpen(false);
     if (count > 0) {
+      const kind =
+        deviceCameraMode === 'video'
+          ? 'video'
+          : deviceCameraPhotoTarget === 'receipt'
+            ? 'receipt'
+            : 'photo';
       showMessage(
-        `${count} ${deviceCameraMode === 'video' ? 'video' : 'photo'}${count === 1 ? '' : 's'} saved to this estimate.`
+        `${count} ${kind}${count === 1 ? '' : 's'} saved to this estimate.`
       );
     }
+    setDeviceCameraPhotoTarget('photo');
   };
 
   const isSettingsDocRow = (row: any) =>
@@ -6095,6 +6151,7 @@ export default function Home() {
   /** Gallery pickers (no capture) — camera uses DeviceCamera component instead. */
   const photoGalleryInputRef = useRef<HTMLInputElement>(null);
   const videoGalleryInputRef = useRef<HTMLInputElement>(null);
+  const receiptGalleryInputRef = useRef<HTMLInputElement>(null);
   /** Main scrollable app column (editor → preview must reset so docs open at top on mobile). */
   const mainScrollRef = useRef<HTMLDivElement>(null);
 
@@ -9419,30 +9476,75 @@ export default function Home() {
               <Card className="mb-8">
                 <CardContent className="p-6">
                   <h3 className="text-xl font-semibold mb-4">{t('receiptsSection')} ({receiptUrls.length})</h3>
-                  <div className="flex flex-wrap gap-2 mb-4">
-                    <Button onClick={() => document.getElementById('receipts-camera')?.click()}>
-                      {t('scanReceipt')}
-                    </Button>
-                    <Button onClick={() => setIsLaborModalOpen(true)} className="bg-[#14b8a6] text-white">
-                      {t('laborButton')}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                    <button
+                      type="button"
+                      onClick={openDeviceReceiptCamera}
+                      className="flex flex-col items-center justify-center min-h-[5.5rem] border-2 border-dashed border-emerald-400 bg-emerald-50 rounded-xl cursor-pointer hover:bg-emerald-100 transition px-2 py-3"
+                    >
+                      <div className="text-3xl mb-1">📷</div>
+                      <div className="text-xs font-semibold text-emerald-900 text-center">
+                        {t('scanReceipt')}
+                      </div>
+                      <div className="text-[10px] text-emerald-700/80 mt-0.5 text-center">
+                        Easy photo scan
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={triggerReceiptGallery}
+                      className="flex flex-col items-center justify-center min-h-[5.5rem] border-2 border-dashed border-gray-300 rounded-xl cursor-pointer hover:bg-gray-50 transition px-2 py-3"
+                    >
+                      <div className="text-3xl mb-1">📁</div>
+                      <div className="text-xs font-semibold text-gray-800 text-center">
+                        {t('uploadReceipt') || 'Upload Receipt'}
+                      </div>
+                      <div className="text-[10px] text-gray-500 mt-0.5 text-center">
+                        From camera roll
+                      </div>
+                    </button>
+                    <Button
+                      type="button"
+                      onClick={() => setIsLaborModalOpen(true)}
+                      className="bg-[#14b8a6] text-white h-auto min-h-[5.5rem] flex flex-col gap-1 py-3"
+                    >
+                      <span className="text-xl">💼</span>
+                      <span className="text-xs sm:text-sm">{t('laborButton')}</span>
                     </Button>
                     <Button
                       type="button"
                       onClick={() => setIsMileageModalOpen(true)}
-                      className="bg-[#0ea5e9] text-white"
+                      className="bg-[#0ea5e9] text-white h-auto min-h-[5.5rem] flex flex-col gap-1 py-3"
                     >
-                      🚗 Mileage
-                      {jobMileageLogs.length > 0
-                        ? ` (${sumMileageLogs(jobMileageLogs).toFixed(1)} mi)`
-                        : ''}
+                      <span className="text-xl">🚗</span>
+                      <span className="text-xs sm:text-sm">
+                        Mileage
+                        {jobMileageLogs.length > 0
+                          ? ` (${sumMileageLogs(jobMileageLogs).toFixed(1)} mi)`
+                          : ''}
+                      </span>
                     </Button>
                   </div>
-                  <input id="receipts-camera" type="file" accept="image/*" capture="environment" multiple onChange={e => handleMediaUpload(e.target.files, 'receipt')} className="hidden" />
+                  <input
+                    ref={receiptGalleryInputRef}
+                    type="file"
+                    accept="image/*,image/heic,image/heif,.heic,.heif"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => void handleReceiptGalleryChange(e.target.files)}
+                  />
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     {receiptDisplayUrls.map((url, i) => (
                       <div key={i} className="relative group">
                         <img src={url} alt="" className="w-full h-40 object-cover rounded-lg border" />
-                        <button onClick={() => removeMedia('receipt', i)} className="absolute top-2 right-2 bg-red-500 hover:bg-red-600 text-white text-xs px-3 py-1 rounded-full shadow-md opacity-0 group-hover:opacity-100 transition">✕</button>
+                        <button
+                          type="button"
+                          onClick={() => removeMedia('receipt', i)}
+                          className="absolute top-2 right-2 bg-red-500 hover:bg-red-600 text-white text-xs px-3 py-1 rounded-full shadow-md opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition"
+                          title="Remove receipt"
+                        >
+                          ✕
+                        </button>
                       </div>
                     ))}
                   </div>
