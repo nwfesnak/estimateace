@@ -12112,6 +12112,12 @@ export default function Home() {
                       items: emailItems,
                       grandTotal,
                       amountPaid,
+                      subtotalBeforeDiscount,
+                      discountAmount: hasActiveDiscount() ? discountAmount : 0,
+                      discountDescription: appliedDiscountDescription.trim() || 'Discount',
+                      discountValue: appliedDiscountValue,
+                      discountType: appliedDiscountType,
+                      taxAmount,
                       depositPercent: Number(profile.depositPercentage) || 0,
                       showDepositOnApproval: profile.showDepositOnApproval !== false,
                       breakdownSettings: {

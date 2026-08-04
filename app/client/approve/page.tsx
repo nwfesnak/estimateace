@@ -17,6 +17,12 @@ type DocPayload = {
   grandTotal?: number;
   amountPaid?: number;
   balanceDue?: number;
+  subtotalBeforeDiscount?: number;
+  discountAmount?: number;
+  discountDescription?: string;
+  discountType?: string;
+  discountValue?: number;
+  taxAmount?: number;
   depositPercent?: number;
   depositDue?: number;
   showDeposit?: boolean;
@@ -179,6 +185,36 @@ function ApprovePayInner() {
           )}
 
           <div className="rounded-xl bg-slate-50 p-4 space-y-1">
+            {(Number(doc?.discountAmount) || 0) > 0.005 && (
+              <>
+                <div className="flex justify-between text-sm text-slate-600">
+                  <span>Subtotal</span>
+                  <span>
+                    {money(
+                      Number(doc?.subtotalBeforeDiscount) ||
+                        Number(doc?.grandTotal) + Number(doc?.discountAmount) ||
+                        0
+                    )}
+                  </span>
+                </div>
+                <div className="flex justify-between text-sm font-semibold text-red-700">
+                  <span>
+                    Discount
+                    {doc?.discountDescription ? ` — ${doc.discountDescription}` : ''}
+                    {doc?.discountType === 'percent' && Number(doc?.discountValue) > 0
+                      ? ` (${doc.discountValue}%)`
+                      : ''}
+                  </span>
+                  <span>−{money(Number(doc?.discountAmount) || 0)}</span>
+                </div>
+                {(Number(doc?.taxAmount) || 0) > 0 && (
+                  <div className="flex justify-between text-sm text-slate-600">
+                    <span>Tax</span>
+                    <span>{money(Number(doc?.taxAmount) || 0)}</span>
+                  </div>
+                )}
+              </>
+            )}
             <div className="flex justify-between text-lg font-bold">
               <span>Grand total</span>
               <span className="text-emerald-700">{money(Number(doc?.grandTotal) || 0)}</span>

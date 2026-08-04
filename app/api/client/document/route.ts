@@ -69,6 +69,7 @@ export async function GET(request: NextRequest) {
     }
 
     const profile = (row.profile || {}) as any;
+    const storedDiscount = profile._discount || {};
     const items = Array.isArray(row.items) ? row.items : [];
     const itemsTotal = items.reduce((sum: number, it: any) => {
       const t = Number(it.total);
@@ -76,14 +77,34 @@ export async function GET(request: NextRequest) {
       return sum + (Number(it.qty) || 0) * (Number(it.price) || 0);
     }, 0);
 
+    const discountDescription = String(
+      row.discountDescription || storedDiscount.discountDescription || ''
+    ).trim();
+    const discountType =
+      (row.discountType || storedDiscount.discountType) === 'percent' ? 'percent' : 'dollar';
+    const discountValue = Number(row.discountValue ?? storedDiscount.discountValue) || 0;
+    let discountAmount = Number(row.discountAmount ?? storedDiscount.discountAmount) || 0;
+    if (!(discountAmount > 0) && discountValue > 0 && itemsTotal > 0) {
+      discountAmount =
+        discountType === 'percent'
+          ? Math.round(Math.min(itemsTotal, itemsTotal * (discountValue / 100)) * 100) / 100
+          : Math.round(Math.min(itemsTotal, discountValue) * 100) / 100;
+    }
+    const subtotalBeforeDiscount = itemsTotal;
+    const subtotalAfterDiscount = Math.max(0, itemsTotal - discountAmount);
+
     // Prefer stored totals if present on row
     const grandTotal =
       Number(row.grandTotal) ||
       Number(row.grand_total) ||
+      (Number(row.taxAmount) > 0
+        ? subtotalAfterDiscount + Number(row.taxAmount)
+        : subtotalAfterDiscount) ||
       itemsTotal ||
       0;
     const amountPaid = Number(row.amountPaid ?? row.amount_paid) || 0;
     const balanceDue = Math.max(0, grandTotal - amountPaid);
+    const taxAmount = Number(row.taxAmount ?? row.tax_amount) || 0;
     const depositPercent = Number(profile.depositPercentage) || 0;
     const showDeposit =
       typ === 'estimate'
@@ -106,6 +127,12 @@ export async function GET(request: NextRequest) {
         .filter(Boolean)
         .join(', '),
       date: row.date || '',
+      subtotalBeforeDiscount,
+      discountAmount,
+      discountDescription: discountDescription || (discountAmount > 0 ? 'Discount' : ''),
+      discountType,
+      discountValue,
+      taxAmount,
       grandTotal,
       amountPaid,
       balanceDue,

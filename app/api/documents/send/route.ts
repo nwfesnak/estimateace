@@ -72,6 +72,20 @@ export async function POST(request: NextRequest) {
     const amountPaid = Number(body.amountPaid) || 0;
     const balanceDue = Math.max(0, grandTotal - amountPaid);
     const items: LineItem[] = Array.isArray(body.items) ? body.items : [];
+    const subtotalBeforeDiscount = Math.max(
+      0,
+      Number(body.subtotalBeforeDiscount) ||
+        items.reduce(
+          (s, it) => s + (Number(it.total) || Number(it.qty || 0) * Number(it.price || 0)),
+          0
+        )
+    );
+    const discountAmount = Math.max(0, Number(body.discountAmount) || 0);
+    const discountDescription = String(body.discountDescription || '').trim() || 'Discount';
+    const discountType = body.discountType === 'percent' ? 'percent' : 'dollar';
+    const discountValue = Number(body.discountValue) || 0;
+    const taxAmount = Math.max(0, Number(body.taxAmount) || 0);
+    const showDiscount = discountAmount > 0.005;
     const depositPercent = Math.max(0, Number(body.depositPercent) || 0);
     const showDepositOnApproval = body.showDepositOnApproval !== false;
     const depositDue =
@@ -152,6 +166,13 @@ export async function POST(request: NextRequest) {
       'Line items:',
       lineLines || '(see contractor for details)',
       '',
+      showDiscount ? `Subtotal: ${money(subtotalBeforeDiscount)}` : '',
+      showDiscount
+        ? `Discount (${discountDescription}${
+            discountType === 'percent' && discountValue > 0 ? ` ${discountValue}%` : ''
+          }): -${money(discountAmount)}`
+        : '',
+      showDiscount && taxAmount > 0 ? `Tax: ${money(taxAmount)}` : '',
       `Grand total: ${money(grandTotal)}`,
       amountPaid > 0 ? `Amount paid: ${money(amountPaid)}` : '',
       `Balance due: ${money(balanceDue)}`,
@@ -232,10 +253,25 @@ export async function POST(request: NextRequest) {
       ${rowsHtml || '<tr><td colspan="3" style="padding:8px;">See contractor for full details</td></tr>'}
     </tbody>
   </table>
-  <p style="font-size:18px;font-weight:700;margin:16px 0 4px;">Grand total: ${money(grandTotal)}</p>
-  ${amountPaid > 0 ? `<p style="margin:0 0 4px;">Amount paid: ${money(amountPaid)}</p>` : ''}
-  <p style="margin:0 0 8px;">Balance due: <strong>${money(balanceDue)}</strong></p>
-  ${depositDue >= 0.5 ? `<p style="margin:0 0 16px;color:#065f46;">Deposit (${depositPercent}%): <strong>${money(depositDue)}</strong></p>` : ''}
+  <div style="margin:16px 0 8px;font-size:14px;">
+    ${
+      showDiscount
+        ? `<p style="margin:0 0 4px;color:#475569;">Subtotal: ${money(subtotalBeforeDiscount)}</p>
+    <p style="margin:0 0 4px;color:#b91c1c;font-weight:600;">
+      Discount — ${escapeHtml(discountDescription)}${
+            discountType === 'percent' && discountValue > 0
+              ? ` (${discountValue}%)`
+              : ''
+          }: −${money(discountAmount)}
+    </p>
+    ${taxAmount > 0 ? `<p style="margin:0 0 4px;color:#475569;">Tax: ${money(taxAmount)}</p>` : ''}`
+        : ''
+    }
+    <p style="font-size:18px;font-weight:700;margin:8px 0 4px;">Grand total: ${money(grandTotal)}</p>
+    ${amountPaid > 0 ? `<p style="margin:0 0 4px;">Amount paid: ${money(amountPaid)}</p>` : ''}
+    <p style="margin:0 0 8px;">Balance due: <strong>${money(balanceDue)}</strong></p>
+    ${depositDue >= 0.5 ? `<p style="margin:0 0 8px;color:#065f46;">Deposit (${depositPercent}%): <strong>${money(depositDue)}</strong></p>` : ''}
+  </div>
   ${ctaHtml}
   <p style="margin-top:24px;font-size:14px;color:#475569;">
     Questions? ${companyPhone ? `Call ${escapeHtml(companyPhone)}` : ''}${companyPhone && companyEmail ? ' · ' : ''}${companyEmail ? `Email ${escapeHtml(companyEmail)}` : ''}
