@@ -1424,7 +1424,11 @@ export default function Home() {
 
   const [isReceiptExtractModalOpen, setIsReceiptExtractModalOpen] = useState(false);
   const [currentReceiptUrl, setCurrentReceiptUrl] = useState('');
+  /** Storage path for the receipt being edited (stable key; signed URLs expire) */
+  const [currentReceiptPath, setCurrentReceiptPath] = useState('');
   const [tempReceiptData, setTempReceiptData] = useState({ date: '', vendor: '', amount: 0, notes: '' });
+  const [receiptScanBusy, setReceiptScanBusy] = useState(false);
+  const [receiptScanStatus, setReceiptScanStatus] = useState('');
 
   const [exportOptions, setExportOptions] = useState({
     estimates: true,
@@ -3015,10 +3019,63 @@ export default function Home() {
     else if (type === 'receipt') {
       setReceiptUrls(nextReceipts);
       setReceiptsFolderOpen(true);
-      const firstUrl = await getMediaUrl(newUrls[0]);
-      if (firstUrl) setCurrentReceiptUrl(firstUrl);
-      setTempReceiptData({ date: new Date().toISOString().split('T')[0], vendor: '', amount: 0, notes: '' });
-      setIsReceiptExtractModalOpen(true);
+      // AI-scan each new receipt for total (running folder total updates after)
+      void (async () => {
+        setReceiptScanBusy(true);
+        setReceiptScanStatus('AI scanning receipt…');
+        let addedDetails: any[] = [];
+        try {
+          for (let i = 0; i < newUrls.length; i++) {
+            const path = newUrls[i];
+            setReceiptScanStatus(
+              newUrls.length > 1
+                ? `AI scanning receipt ${i + 1} of ${newUrls.length}…`
+                : 'AI reading total on receipt…'
+            );
+            const detail = await scanReceiptPathWithAi(path);
+            if (detail) addedDetails.push(detail);
+          }
+          if (addedDetails.length > 0) {
+            setReceiptDetails((prev) => {
+              const next = [...prev];
+              for (const d of addedDetails) {
+                const idx = next.findIndex((x: any) => x?.url === d.url || x?.path === d.url);
+                if (idx >= 0) next[idx] = { ...next[idx], ...d };
+                else next.push(d);
+              }
+              const all = next;
+              const totalSum = all.reduce(
+                (s: number, r: any) => s + (Number(r.amount) || 0),
+                0
+              );
+              void saveToDB({
+                receiptUrls: nextReceipts,
+                receiptDetails: all,
+              });
+              showMessage(
+                `✅ AI found ${addedDetails.length} receipt total${addedDetails.length === 1 ? '' : 's'}. Folder total: $${totalSum.toFixed(2)}`
+              );
+              return all;
+            });
+          } else {
+            // Fallback: open manual entry for first receipt
+            const firstUrl = await getMediaUrl(newUrls[0]);
+            setCurrentReceiptPath(newUrls[0]);
+            if (firstUrl) setCurrentReceiptUrl(firstUrl);
+            setTempReceiptData({
+              date: new Date().toISOString().split('T')[0],
+              vendor: 'Material/Supplies',
+              amount: 0,
+              notes: '',
+            });
+            setIsReceiptExtractModalOpen(true);
+            showMessage('Could not auto-read total — enter amount manually.');
+          }
+        } finally {
+          setReceiptScanBusy(false);
+          setReceiptScanStatus('');
+        }
+      })();
     }
 
     await saveToDB({
@@ -3030,19 +3087,138 @@ export default function Home() {
     return newUrls.length;
   };
 
+  /** Sum of all receipt amounts in this job's folder */
+  const receiptsFolderTotal = useMemo(
+    () =>
+      (receiptDetails || []).reduce((sum: number, r: any) => sum + (Number(r?.amount) || 0), 0),
+    [receiptDetails]
+  );
+
+  const findReceiptDetail = (path: string, index: number) => {
+    const byPath = (receiptDetails || []).find(
+      (d: any) => d?.url === path || d?.path === path
+    );
+    if (byPath) return byPath;
+    return receiptDetails[index] || null;
+  };
+
+  /**
+   * AI-scan one receipt storage path via Grok vision; returns detail row or null.
+   */
+  const scanReceiptPathWithAi = async (storagePath: string): Promise<any | null> => {
+    if (!supabase || !user) return null;
+    try {
+      const signed = await getMediaUrl(storagePath);
+      if (!signed) return null;
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) return null;
+
+      const res = await fetch('/api/receipts/scan', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ imageUrl: signed }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !(Number(json.total) > 0)) {
+        console.warn('receipt scan failed:', json.error || res.status);
+        return null;
+      }
+
+      const vendorRaw = String(json.vendor || '').trim();
+      const category =
+        /gas|shell|exxon|chevron|bp\b|fuel|petrol/i.test(vendorRaw)
+          ? 'Gas'
+          : /restaurant|cafe|coffee|mcdonald|subway|meal|food/i.test(vendorRaw)
+            ? 'Meals'
+            : vendorRaw
+              ? vendorRaw
+              : 'Material/Supplies';
+
+      return {
+        url: storagePath,
+        path: storagePath,
+        date: json.date || new Date().toISOString().split('T')[0],
+        vendor: category,
+        amount: Number(json.total) || 0,
+        notes: [json.lineItemsSummary, json.notes, json.confidence ? `AI confidence: ${json.confidence}` : '']
+          .filter(Boolean)
+          .join(' · ')
+          .slice(0, 500),
+        aiScanned: true,
+      };
+    } catch (e) {
+      console.error('scanReceiptPathWithAi:', e);
+      return null;
+    }
+  };
+
+  const rescanReceiptAtIndex = async (index: number) => {
+    const path = receiptUrls[index];
+    if (!path) return;
+    setReceiptScanBusy(true);
+    setReceiptScanStatus('AI re-scanning receipt…');
+    try {
+      const detail = await scanReceiptPathWithAi(path);
+      if (!detail) {
+        showMessage('AI could not read a total on this receipt. Enter it manually.');
+        const signed = await getMediaUrl(path);
+        setCurrentReceiptPath(path);
+        if (signed) setCurrentReceiptUrl(signed);
+        const existing = findReceiptDetail(path, index);
+        setTempReceiptData({
+          date: existing?.date || new Date().toISOString().split('T')[0],
+          vendor: existing?.vendor || 'Material/Supplies',
+          amount: Number(existing?.amount) || 0,
+          notes: existing?.notes || '',
+        });
+        setIsReceiptExtractModalOpen(true);
+        return;
+      }
+      setReceiptDetails((prev) => {
+        const next = [...prev];
+        const idx = next.findIndex((x: any) => x?.url === path || x?.path === path);
+        if (idx >= 0) next[idx] = { ...next[idx], ...detail };
+        else next.push(detail);
+        void saveToDB({ receiptDetails: next });
+        const totalSum = next.reduce((s: number, r: any) => s + (Number(r.amount) || 0), 0);
+        showMessage(`✅ AI total $${Number(detail.amount).toFixed(2)}. Folder total: $${totalSum.toFixed(2)}`);
+        return next;
+      });
+    } finally {
+      setReceiptScanBusy(false);
+      setReceiptScanStatus('');
+    }
+  };
+
   const saveReceiptExtraction = () => {
-    if (!currentReceiptUrl) return;
+    const path = currentReceiptPath || currentReceiptUrl;
+    if (!path) return;
     const newDetail = {
-      url: currentReceiptUrl,
+      url: path,
+      path,
       date: tempReceiptData.date,
       vendor: tempReceiptData.vendor,
       amount: parseFloat(tempReceiptData.amount.toString()) || 0,
-      notes: tempReceiptData.notes
+      notes: tempReceiptData.notes,
+      aiScanned: false,
     };
-    setReceiptDetails(prev => [...prev, newDetail]);
+    setReceiptDetails((prev) => {
+      const next = [...prev];
+      const idx = next.findIndex((x: any) => x?.url === path || x?.path === path);
+      if (idx >= 0) next[idx] = { ...next[idx], ...newDetail };
+      else next.push(newDetail);
+      void saveToDB({ receiptDetails: next });
+      return next;
+    });
     setIsReceiptExtractModalOpen(false);
-    saveToDB();
-    showMessage('✅ Receipt data saved to database');
+    setCurrentReceiptPath('');
+    showMessage(
+      `✅ Receipt saved ($${Number(newDetail.amount).toFixed(2)}). Folder total updates in the receipt folder.`
+    );
   };
 
   const handleCertificateUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -3108,8 +3284,17 @@ export default function Home() {
     if (type === 'photo') setPhotoUrls(prev => prev.filter((_, i) => i !== index));
     else if (type === 'video') setVideoUrls(prev => prev.filter((_, i) => i !== index));
     else if (type === 'receipt') {
-      setReceiptUrls(prev => prev.filter((_, i) => i !== index));
-      setReceiptDetails(prev => prev.filter((_, i) => i !== index));
+      const path = receiptUrls[index];
+      const nextUrls = receiptUrls.filter((_, i) => i !== index);
+      const nextDetails = (receiptDetails || []).filter(
+        (d: any, i: number) =>
+          i !== index && d?.url !== path && d?.path !== path
+      );
+      setReceiptUrls(nextUrls);
+      setReceiptDetails(nextDetails);
+      void saveToDB({ receiptUrls: nextUrls, receiptDetails: nextDetails });
+      showMessage('Receipt removed from folder.');
+      return;
     }
     saveToDB();
     if (type === 'video') showMessage('Video removed from this estimate.');
@@ -9490,7 +9675,27 @@ export default function Home() {
 
               <Card className="mb-8">
                 <CardContent className="p-6">
-                  <h3 className="text-xl font-semibold mb-4">{t('receiptsSection')} ({receiptUrls.length})</h3>
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+                    <h3 className="text-xl font-semibold">
+                      {t('receiptsSection')} ({receiptUrls.length})
+                    </h3>
+                    {receiptUrls.length > 0 && (
+                      <div className="text-right">
+                        <div className="text-xs uppercase tracking-wide text-gray-500 font-semibold">
+                          Receipts total
+                        </div>
+                        <div className="text-2xl font-bold text-emerald-700">
+                          ${receiptsFolderTotal.toFixed(2)}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  {receiptScanBusy && (
+                    <div className="mb-3 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900 flex items-center gap-2">
+                      <span className="animate-pulse">🤖</span>
+                      <span>{receiptScanStatus || 'AI scanning receipt…'}</span>
+                    </div>
+                  )}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
                     <button
                       type="button"
@@ -9584,11 +9789,17 @@ export default function Home() {
                                   String(receiptDisplayUrls.length)
                                 )}
                               </span>
+                              <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-600 text-white">
+                                ${receiptsFolderTotal.toFixed(2)}
+                              </span>
                             </div>
                             <p className="text-sm text-gray-600 mt-0.5">
                               {receiptsFolderOpen
                                 ? t('receiptFolderOpen') || 'Close receipt folder'
                                 : t('receiptFolderClosed') || 'Click to open all receipts'}
+                              {!receiptsFolderOpen && receiptsFolderTotal > 0
+                                ? ` · Running total $${receiptsFolderTotal.toFixed(2)}`
+                                : ''}
                             </p>
                             {!receiptsFolderOpen && (
                               <div className="flex gap-1.5 mt-2">
@@ -9615,41 +9826,70 @@ export default function Home() {
                       </button>
 
                       {receiptsFolderOpen && (
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-1">
-                          {receiptDisplayUrls.map((url, i) => {
-                            const detail =
-                              receiptDetails.find((d: any) => d?.url === receiptUrls[i]) ||
-                              receiptDetails[i];
-                            return (
-                              <div key={i} className="relative group rounded-lg border bg-white overflow-hidden shadow-sm">
-                                <img
-                                  src={url}
-                                  alt={detail?.vendor ? `Receipt ${detail.vendor}` : `Receipt ${i + 1}`}
-                                  className="w-full h-40 object-cover"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => removeMedia('receipt', i)}
-                                  className="absolute top-2 right-2 bg-red-500 hover:bg-red-600 text-white text-xs px-3 py-1 rounded-full shadow-md opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition"
-                                  title="Remove receipt"
+                        <div className="space-y-3 pt-1">
+                          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+                            <span className="text-sm font-semibold text-emerald-900">
+                              Running total (all receipts)
+                            </span>
+                            <span className="text-xl font-bold text-emerald-700">
+                              ${receiptsFolderTotal.toFixed(2)}
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            {receiptDisplayUrls.map((url, i) => {
+                              const path = receiptUrls[i];
+                              const detail = findReceiptDetail(path, i);
+                              return (
+                                <div
+                                  key={path || i}
+                                  className="relative group rounded-lg border bg-white overflow-hidden shadow-sm"
                                 >
-                                  ✕
-                                </button>
-                                {(detail?.vendor || detail?.amount) && (
-                                  <div className="px-2 py-1.5 text-[11px] text-gray-700 border-t bg-gray-50">
-                                    {detail.vendor ? (
+                                  <img
+                                    src={url}
+                                    alt={
+                                      detail?.vendor
+                                        ? `Receipt ${detail.vendor}`
+                                        : `Receipt ${i + 1}`
+                                    }
+                                    className="w-full h-40 object-cover"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => removeMedia('receipt', i)}
+                                    className="absolute top-2 right-2 bg-red-500 hover:bg-red-600 text-white text-xs px-3 py-1 rounded-full shadow-md opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition"
+                                    title="Remove receipt"
+                                  >
+                                    ✕
+                                  </button>
+                                  <div className="px-2 py-1.5 text-[11px] text-gray-700 border-t bg-gray-50 space-y-1">
+                                    {detail?.vendor ? (
                                       <div className="font-medium truncate">{detail.vendor}</div>
-                                    ) : null}
-                                    {detail.amount != null && Number(detail.amount) > 0 ? (
-                                      <div className="text-emerald-700 font-semibold">
-                                        ${Number(detail.amount).toFixed(2)}
-                                      </div>
-                                    ) : null}
+                                    ) : (
+                                      <div className="text-gray-400">No vendor yet</div>
+                                    )}
+                                    <div className="text-emerald-700 font-semibold text-sm">
+                                      {detail?.amount != null && Number(detail.amount) > 0
+                                        ? `$${Number(detail.amount).toFixed(2)}`
+                                        : '—'}
+                                      {detail?.aiScanned ? (
+                                        <span className="ml-1 text-[10px] text-sky-600 font-medium">
+                                          AI
+                                        </span>
+                                      ) : null}
+                                    </div>
+                                    <button
+                                      type="button"
+                                      disabled={receiptScanBusy}
+                                      onClick={() => void rescanReceiptAtIndex(i)}
+                                      className="text-[10px] font-semibold text-sky-700 hover:underline disabled:opacity-50"
+                                    >
+                                      {receiptScanBusy ? 'Scanning…' : 'AI re-scan total'}
+                                    </button>
                                   </div>
-                                )}
-                              </div>
-                            );
-                          })}
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
                       )}
                     </div>
@@ -12006,21 +12246,35 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* Receipt Extraction Modal */}
+      {/* Receipt Extraction Modal (manual / AI fallback) */}
       <Dialog open={isReceiptExtractModalOpen} onOpenChange={setIsReceiptExtractModalOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>📄 Extract Receipt Information</DialogTitle>
+            <DialogTitle>📄 Receipt total</DialogTitle>
+            <DialogDescription>
+              AI usually fills this automatically when you scan or upload. Adjust if needed.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-6 py-4">
+            {currentReceiptUrl ? (
+              <img
+                src={currentReceiptUrl}
+                alt="Receipt"
+                className="w-full max-h-40 object-contain rounded-lg border bg-gray-50"
+              />
+            ) : null}
             <div>
               <label className="block text-sm font-semibold mb-1">Receipt Date</label>
               <Input type="date" value={tempReceiptData.date} onChange={e => setTempReceiptData({...tempReceiptData, date: e.target.value})} />
             </div>
             <div>
-              <label className="block text-sm font-semibold mb-1">Category</label>
+              <label className="block text-sm font-semibold mb-1">Category / Vendor</label>
               <select 
-                value={tempReceiptData.vendor} 
+                value={
+                  ['Material/Supplies', 'Gas', 'Meals', 'Other'].includes(tempReceiptData.vendor)
+                    ? tempReceiptData.vendor
+                    : 'Other'
+                } 
                 onChange={e => setTempReceiptData({...tempReceiptData, vendor: e.target.value})}
                 className="w-full p-3 border rounded-xl"
               >
@@ -12030,19 +12284,20 @@ export default function Home() {
                 <option value="Other">Other (custom)</option>
               </select>
             </div>
-            {tempReceiptData.vendor === 'Other' && (
+            {(tempReceiptData.vendor === 'Other' ||
+              !['Material/Supplies', 'Gas', 'Meals', 'Other'].includes(tempReceiptData.vendor)) && (
               <div>
-                <label className="block text-sm font-semibold mb-1">Custom Category</label>
+                <label className="block text-sm font-semibold mb-1">Custom vendor / category</label>
                 <Input 
-                  value={tempReceiptData.vendor} 
-                  onChange={e => setTempReceiptData({...tempReceiptData, vendor: e.target.value})} 
-                  placeholder="Enter custom category"
+                  value={tempReceiptData.vendor === 'Other' ? '' : tempReceiptData.vendor} 
+                  onChange={e => setTempReceiptData({...tempReceiptData, vendor: e.target.value || 'Other'})} 
+                  placeholder="Store name or category"
                 />
               </div>
             )}
             <div>
               <label className="block text-sm font-semibold mb-1">Total Amount</label>
-              <Input type="number" value={tempReceiptData.amount} onChange={e => setTempReceiptData({...tempReceiptData, amount: parseFloat(e.target.value) || 0})} />
+              <Input type="number" step="0.01" value={tempReceiptData.amount} onChange={e => setTempReceiptData({...tempReceiptData, amount: parseFloat(e.target.value) || 0})} />
             </div>
             <div>
               <label className="block text-sm font-semibold mb-1">Notes / Items</label>
@@ -12051,7 +12306,7 @@ export default function Home() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsReceiptExtractModalOpen(false)}>Cancel</Button>
-            <Button onClick={saveReceiptExtraction} className="bg-[#10b981]">Save to Database</Button>
+            <Button onClick={saveReceiptExtraction} className="bg-[#10b981]">Save receipt</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
