@@ -3014,6 +3014,7 @@ export default function Home() {
     else if (type === 'video') setVideoUrls(nextVideos);
     else if (type === 'receipt') {
       setReceiptUrls(nextReceipts);
+      setReceiptsFolderOpen(true);
       const firstUrl = await getMediaUrl(newUrls[0]);
       if (firstUrl) setCurrentReceiptUrl(firstUrl);
       setTempReceiptData({ date: new Date().toISOString().split('T')[0], vendor: '', amount: 0, notes: '' });
