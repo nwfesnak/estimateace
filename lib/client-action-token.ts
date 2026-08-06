@@ -3,10 +3,10 @@ import { createHmac, timingSafeEqual } from 'crypto';
 export type ClientActionPayload = {
   /** Contractor workspace user id */
   uid: string;
-  /** Document id / invoice number */
+  /** Document id / invoice number / recurring plan id */
   inv: string;
-  /** estimate | invoice */
-  typ: 'estimate' | 'invoice';
+  /** estimate | invoice | recurring */
+  typ: 'estimate' | 'invoice' | 'recurring';
   /** Unix ms expiry */
   exp: number;
 };
@@ -81,8 +81,9 @@ export function verifyClientActionToken(
     if (!payload.exp || Date.now() > Number(payload.exp)) {
       return { ok: false, error: 'This link has expired. Ask your contractor to resend.' };
     }
-    if (payload.typ !== 'invoice' && payload.typ !== 'estimate') {
-      payload.typ = 'estimate';
+    if (payload.typ !== 'invoice' && payload.typ !== 'estimate' && payload.typ !== 'recurring') {
+      // REC- ids are recurring plans even if typ was missing
+      payload.typ = String(payload.inv || '').startsWith('REC-') ? 'recurring' : 'estimate';
     }
     return { ok: true, payload };
   } catch {

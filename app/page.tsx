@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { TouchDoubleTapTextarea } from '@/components/TouchDoubleTapTextarea';
 import { DeviceCamera, type DeviceCameraMode } from '@/components/DeviceCamera';
+import { RecurringServicesPanel } from '@/components/RecurringServicesPanel';
 import {
   MileageTracker,
   normalizeMileageLogs,
@@ -319,7 +320,7 @@ export default function Home() {
   };
 
   const [user, setUser] = useState<any>(null);
-  const [view, setView] = useState<'dashboard' | 'editor' | 'estimatesList' | 'invoicesList' | 'profileView' | 'archivesView' | 'sendPreview' | 'reportsView' | 'receptionistView'>('dashboard');
+  const [view, setView] = useState<'dashboard' | 'editor' | 'estimatesList' | 'invoicesList' | 'profileView' | 'archivesView' | 'sendPreview' | 'reportsView' | 'receptionistView' | 'recurringView'>('dashboard');
 
   // Login
   const [email, setEmail] = useState('');
@@ -3467,8 +3468,15 @@ export default function Home() {
     row.documenttype === 'settings' ||
     String(row.id || '').startsWith('SETTINGS-');
 
+  /** Client recurring service plans (mowing etc.) — not estimates/invoices or SaaS */
+  const isRecurringPlanRow = (row: any) =>
+    !!row &&
+    (row.documentType === 'recurring_plan' ||
+      row.documenttype === 'recurring_plan' ||
+      String(row.id || '').startsWith('REC-'));
+
   const isInvoiceDocRow = (row: any) => {
-    if (!row || isSettingsDocRow(row)) return false;
+    if (!row || isSettingsDocRow(row) || isRecurringPlanRow(row)) return false;
     const num = String(row.invoiceNumber ?? row.invoicenumber ?? row.id ?? '');
     const id = String(row.id || '');
     const numU = num.toUpperCase();
@@ -3482,7 +3490,7 @@ export default function Home() {
   };
 
   const isEstimateTypeRow = (row: any) => {
-    if (!row || isSettingsDocRow(row) || isInvoiceDocRow(row)) return false;
+    if (!row || isSettingsDocRow(row) || isInvoiceDocRow(row) || isRecurringPlanRow(row)) return false;
     const num = String(row.invoiceNumber ?? row.invoicenumber ?? row.id ?? '');
     const id = String(row.id || '');
     const numU = num.toUpperCase();
@@ -8599,6 +8607,28 @@ export default function Home() {
                 </CardContent>
               </Card>
 
+              <Card className="mb-8 border-teal-200 bg-gradient-to-br from-white to-teal-50/50">
+                <CardContent className="p-6">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <h3 className="font-semibold text-lg flex items-center gap-2">
+                        🔁 Recurring client charges
+                      </h3>
+                      <p className="text-sm text-gray-600 mt-1 max-w-lg">
+                        Auto-bill customers for <strong>monthly mowing</strong>, maintenance, and other
+                        scheduled services. Separate from your EstimateAce software subscription.
+                      </p>
+                    </div>
+                    <Button
+                      className="bg-teal-700 hover:bg-teal-800 text-white shrink-0"
+                      onClick={() => setView('recurringView')}
+                    >
+                      Open recurring services
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
               <Card className="mb-8 border-emerald-200 bg-gradient-to-br from-white to-emerald-50/40">
                 <CardContent className="p-6">
                   <div className="flex flex-wrap items-start justify-between gap-4">
@@ -11576,6 +11606,18 @@ export default function Home() {
                 </div>
               )}
             </div>
+          )}
+
+          {view === 'recurringView' && (
+            <RecurringServicesPanel
+              onBack={goToDashboard}
+              showMessage={showMessage}
+              getAccessToken={async () => {
+                if (!supabase) return null;
+                const { data } = await supabase.auth.getSession();
+                return data.session?.access_token || null;
+              }}
+            />
           )}
 
           {view === 'receptionistView' && (

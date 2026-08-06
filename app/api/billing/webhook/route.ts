@@ -3,6 +3,7 @@ import type Stripe from 'stripe';
 import { getStripe } from '@/lib/stripe-server';
 import { upsertSubscriptionFromStripe } from '@/lib/billing-sync';
 import { markDocumentPaidFromJobCheckout } from '@/lib/job-payments';
+import { markRecurringActiveFromCheckout } from '@/lib/recurring-services';
 
 export const runtime = 'nodejs';
 
@@ -41,7 +42,20 @@ export async function POST(request: NextRequest) {
           break;
         }
 
-        // SaaS subscription checkout only
+        // Client recurring service (mowing, etc.) — does NOT touch SaaS
+        if (session.metadata?.purpose === 'client_recurring_subscription') {
+          const recResult = await markRecurringActiveFromCheckout(session);
+          if (!recResult.ok) {
+            console.error('webhook client recurring:', recResult.error);
+          }
+          break;
+        }
+
+        // SaaS subscription checkout only (EstimateAce monthly/yearly)
+        // Skip if explicitly marked as client recurring
+        if (session.metadata?.saas_billing === 'false') {
+          break;
+        }
         const userId = (session.client_reference_id ||
           session.metadata?.supabase_user_id) as string | undefined;
         if (session.subscription) {
@@ -50,6 +64,10 @@ export async function POST(request: NextRequest) {
               ? session.subscription
               : session.subscription.id;
           const sub = await stripe.subscriptions.retrieve(subId);
+          // Client recurring subs carry purpose in subscription metadata
+          if (sub.metadata?.purpose === 'client_recurring_subscription') {
+            break;
+          }
           const result = await upsertSubscriptionFromStripe(sub, userId || null);
           if (!result.ok) console.error('webhook checkout upsert:', result.error);
         }
@@ -59,6 +77,10 @@ export async function POST(request: NextRequest) {
       case 'customer.subscription.updated':
       case 'customer.subscription.deleted': {
         const sub = event.data.object as Stripe.Subscription;
+        // Never mix client service subs into EstimateAce SaaS table
+        if (sub.metadata?.purpose === 'client_recurring_subscription') {
+          break;
+        }
         const result = await upsertSubscriptionFromStripe(sub);
         if (!result.ok) console.error('webhook sub upsert:', result.error);
         break;
@@ -71,6 +93,9 @@ export async function POST(request: NextRequest) {
         if (!subRef) break;
         const subId = typeof subRef === 'string' ? subRef : subRef.id;
         const sub = await stripe.subscriptions.retrieve(subId);
+        if (sub.metadata?.purpose === 'client_recurring_subscription') {
+          break;
+        }
         const result = await upsertSubscriptionFromStripe(sub);
         if (!result.ok) console.error('webhook invoice upsert:', result.error);
         break;
