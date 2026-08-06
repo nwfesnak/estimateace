@@ -295,15 +295,18 @@ function ApprovePayInner() {
             )
           )}
 
-          {/* Company terms under pay / approve actions */}
+          {/* Terms as hyperlink (full text on /client/terms) */}
           {String(doc?.terms || '').trim() ? (
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 pt-2">
-              <h3 className="text-sm font-semibold text-slate-900 mb-2 border-b border-slate-200 pb-2">
-                Terms &amp; Conditions / Disclosures
-              </h3>
-              <div className="text-xs text-slate-700 leading-relaxed whitespace-pre-wrap max-h-56 overflow-y-auto">
-                {doc?.terms}
-              </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-center">
+              <a
+                href={`/client/terms?token=${encodeURIComponent(token)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm font-semibold text-teal-800 underline underline-offset-2"
+              >
+                View Terms &amp; Conditions
+              </a>
+              <p className="text-[11px] text-slate-500 mt-1">Opens full terms in a new tab</p>
             </div>
           ) : null}
 

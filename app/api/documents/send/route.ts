@@ -131,6 +131,7 @@ export async function POST(request: NextRequest) {
       expDays: 60,
     });
     const actionUrl = `${appUrl}/client/approve?token=${encodeURIComponent(actionToken)}`;
+    const termsUrl = `${appUrl}/client/terms?token=${encodeURIComponent(actionToken)}`;
 
     const ctaLabel =
       documentType === 'estimate'
@@ -181,7 +182,7 @@ export async function POST(request: NextRequest) {
       `${ctaLabel}:`,
       actionUrl,
       '',
-      terms ? `Terms & Conditions / Disclosures:\n${terms.slice(0, 2500)}` : '',
+      terms ? `Terms & Conditions: ${termsUrl}` : '',
       '',
       'Questions? Contact:',
       companyPhone ? `Phone: ${companyPhone}` : '',
@@ -212,9 +213,12 @@ export async function POST(request: NextRequest) {
 
     const termsDisclosureHtml = terms
       ? `
-  <div style="margin:18px 0 0;padding:12px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;font-size:12px;color:#334155;line-height:1.5;text-align:left;white-space:pre-wrap;">
-    <strong style="display:block;margin-bottom:6px;font-size:13px;color:#0f172a;">Terms &amp; Conditions / Disclosures</strong>
-    ${escapeHtml(terms.slice(0, 4000))}
+  <div style="margin:18px 0 0;padding:14px 16px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;font-size:14px;color:#334155;text-align:center;">
+    <a href="${escapeHtml(termsUrl)}"
+       style="color:#0f766e;font-weight:700;text-decoration:underline;font-size:15px;">
+      View Terms &amp; Conditions
+    </a>
+    <p style="margin:8px 0 0;font-size:11px;color:#64748b;">Opens full terms in your browser (not pasted below).</p>
   </div>`
       : '';
 

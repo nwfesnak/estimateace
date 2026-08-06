@@ -1423,6 +1423,8 @@ export default function Home() {
     [appointments, appointmentsMonth, appointmentsYear]
   );
 
+  const [isTermsModalOpen, setIsTermsModalOpen] = useState(false);
+  const [documentTermsUrl, setDocumentTermsUrl] = useState('');
   const [isReceiptExtractModalOpen, setIsReceiptExtractModalOpen] = useState(false);
   const [currentReceiptUrl, setCurrentReceiptUrl] = useState('');
   /** Storage path for the receipt being edited (stable key; signed URLs expire) */
@@ -6465,7 +6467,10 @@ export default function Home() {
         setTimeout(scrollMainToTop, 200);
       }
     });
-  }, [view]);
+    if (view === 'sendPreview' || view === 'editor') {
+      void refreshDocumentTermsLink();
+    }
+  }, [view, invoiceNumber, documentType, terms]);
 
   useEffect(() => {
     if (view === 'profileView' && profileTab === 'paidInvoices') {
@@ -6740,19 +6745,68 @@ export default function Home() {
     );
   };
 
-  /** Company terms / disclosures under pay / approve blocks */
+  /** Public URL for full terms (hyperlink on estimate/invoice — not pasted full text) */
+  const refreshDocumentTermsLink = async () => {
+    if (!(terms || profile.disclosure || '').trim() || !supabase) {
+      setDocumentTermsUrl('');
+      return;
+    }
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) return;
+      const res = await fetch('/api/documents/terms-link', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          invoiceNumber: invoiceNumber || 'DOC',
+          documentType,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && json.url) setDocumentTermsUrl(String(json.url));
+    } catch {
+      /* keep previous */
+    }
+  };
+
+  /** Terms as a hyperlink on client-facing docs (full text lives on /client/terms) */
   const renderPaySectionDisclosures = (options?: { className?: string }) => {
     const disclosureText = (terms || profile.disclosure || '').trim();
     if (!disclosureText) return null;
+    const label = t('termsConditions') || 'Terms & Conditions';
+    const href = documentTermsUrl || undefined;
     return (
       <div className={`text-left ${options?.className || ''}`}>
         <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 sm:p-5">
-          <h4 className="text-sm font-semibold text-gray-900 mb-2 border-b pb-2">
-            {t('termsConditions') || 'Terms & Conditions'} / Disclosures
-          </h4>
-          <div className="text-xs sm:text-sm text-gray-700 leading-relaxed whitespace-pre-wrap max-h-64 overflow-y-auto">
-            {disclosureText}
-          </div>
+          <p className="text-sm text-gray-800">
+            {href ? (
+              <a
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-semibold text-[#0f766e] underline underline-offset-2 hover:text-[#115e59]"
+              >
+                {label}
+              </a>
+            ) : (
+              <button
+                type="button"
+                className="font-semibold text-[#0f766e] underline underline-offset-2 hover:text-[#115e59]"
+                onClick={() => {
+                  void refreshDocumentTermsLink().then(() => {
+                    // open after brief refresh if URL set
+                  });
+                  setIsTermsModalOpen(true);
+                }}
+              >
+                {label}
+              </button>
+            )}
+          </p>
         </div>
       </div>
     );
@@ -10011,12 +10065,9 @@ export default function Home() {
 
                 {renderDocumentTotals({ large: true })}
 
-                {terms && (
+                {(terms || profile.disclosure) && (
                   <div className="mt-12">
-                    <h3 className="text-2xl font-semibold mb-6 border-b pb-3">Terms & Conditions</h3>
-                    <div className="text-gray-700 leading-relaxed whitespace-pre-wrap border rounded-xl p-6 bg-gray-50">
-                      {terms}
-                    </div>
+                    {renderPaySectionDisclosures()}
                   </div>
                 )}
 
@@ -12293,6 +12344,54 @@ export default function Home() {
             >
               Done
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Full terms viewer (estimate/invoice use a hyperlink instead of pasting all text) */}
+      <Dialog open={isTermsModalOpen} onOpenChange={setIsTermsModalOpen}>
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{t('termsConditions') || 'Terms & Conditions'}</DialogTitle>
+            <DialogDescription>
+              Full terms for this {documentType === 'invoice' ? 'invoice' : 'estimate'}.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed py-2">
+            {(terms || profile.disclosure || '').trim() || 'No terms entered yet.'}
+          </div>
+          {documentTermsUrl ? (
+            <p className="text-xs text-gray-500 break-all">
+              Client link:{' '}
+              <a
+                href={documentTermsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-emerald-700 underline"
+              >
+                {documentTermsUrl}
+              </a>
+            </p>
+          ) : null}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsTermsModalOpen(false)}>
+              Close
+            </Button>
+            {documentTermsUrl ? (
+              <Button
+                className="bg-[#10b981] text-white"
+                onClick={() => window.open(documentTermsUrl, '_blank')}
+              >
+                Open public link
+              </Button>
+            ) : (
+              <Button
+                className="bg-[#10b981] text-white"
+                onClick={() => void refreshDocumentTermsLink()}
+              >
+                Generate client link
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
