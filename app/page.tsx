@@ -11612,6 +11612,9 @@ export default function Home() {
             <RecurringServicesPanel
               onBack={goToDashboard}
               showMessage={showMessage}
+              companyName={profile.company || ''}
+              companyEmail={profile.email || ''}
+              companyPhone={profile.phone || ''}
               getAccessToken={async () => {
                 if (!supabase) return null;
                 const { data } = await supabase.auth.getSession();

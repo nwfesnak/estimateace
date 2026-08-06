@@ -9,7 +9,13 @@ import { getPaymentAccount } from '@/lib/job-payments';
 import { createClientActionToken, verifyClientActionToken } from '@/lib/client-action-token';
 
 export type RecurringInterval = 'week' | 'month' | 'year';
-export type RecurringStatus = 'draft' | 'link_sent' | 'active' | 'past_due' | 'canceled';
+export type RecurringStatus =
+  | 'draft'
+  | 'link_sent'
+  | 'approved'
+  | 'active'
+  | 'past_due'
+  | 'canceled';
 
 export type RecurringPlan = {
   id: string;
@@ -29,6 +35,12 @@ export type RecurringPlan = {
   stripeSubscriptionId: string | null;
   stripeCustomerId: string | null;
   lastPaymentAt: string | null;
+  /** When client tapped Approve on the email / subscribe page */
+  clientApprovedAt: string | null;
+  approvalEmailSentAt: string | null;
+  companyName: string;
+  companyEmail: string;
+  companyPhone: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -49,6 +61,7 @@ function newRecurringId() {
 
 function rowToPlan(row: any): RecurringPlan {
   const r = row?.profile?._recurring || {};
+  const prof = row?.profile || {};
   return {
     id: String(row.id),
     user_id: String(row.user_id || ''),
@@ -67,6 +80,11 @@ function rowToPlan(row: any): RecurringPlan {
     stripeSubscriptionId: r.stripeSubscriptionId || null,
     stripeCustomerId: r.stripeCustomerId || null,
     lastPaymentAt: r.lastPaymentAt || null,
+    clientApprovedAt: r.clientApprovedAt || null,
+    approvalEmailSentAt: r.approvalEmailSentAt || null,
+    companyName: String(r.companyName || prof.company || ''),
+    companyEmail: String(r.companyEmail || prof.email || ''),
+    companyPhone: String(r.companyPhone || prof.phone || ''),
     createdAt: String(row.created_at || row.updated_at || new Date().toISOString()),
     updatedAt: String(row.updated_at || new Date().toISOString()),
   };
@@ -96,6 +114,17 @@ function planToRow(plan: Partial<RecurringPlan> & { id: string; user_id: string 
           : prev.stripeCustomerId ?? null,
       lastPaymentAt:
         plan.lastPaymentAt !== undefined ? plan.lastPaymentAt : prev.lastPaymentAt ?? null,
+      clientApprovedAt:
+        plan.clientApprovedAt !== undefined
+          ? plan.clientApprovedAt
+          : prev.clientApprovedAt ?? null,
+      approvalEmailSentAt:
+        plan.approvalEmailSentAt !== undefined
+          ? plan.approvalEmailSentAt
+          : prev.approvalEmailSentAt ?? null,
+      companyName: plan.companyName ?? prev.companyName ?? '',
+      companyEmail: plan.companyEmail ?? prev.companyEmail ?? '',
+      companyPhone: plan.companyPhone ?? prev.companyPhone ?? '',
       purpose: 'client_recurring', // never SaaS
     },
   };
@@ -201,6 +230,9 @@ export async function createRecurringPlan(
     amount: number;
     interval?: RecurringInterval;
     description?: string;
+    companyName?: string;
+    companyEmail?: string;
+    companyPhone?: string;
   }
 ): Promise<{ ok: true; plan: RecurringPlan } | { ok: false; error: string }> {
   const admin = getSupabaseAdmin();
@@ -229,6 +261,9 @@ export async function createRecurringPlan(
     interval: input.interval || 'month',
     description: String(input.description || '').trim(),
     status: 'draft',
+    companyName: String(input.companyName || '').trim(),
+    companyEmail: String(input.companyEmail || '').trim(),
+    companyPhone: String(input.companyPhone || '').trim(),
   });
 
   const { error } = await admin.from('estimates').upsert(row, { onConflict: 'id' });
@@ -411,7 +446,10 @@ export async function createClientRecurringCheckout(input: {
         stripeAccount: connectedId,
       });
       if (!session.url) return { ok: false, error: 'Stripe did not return a checkout URL.' };
-      await updateRecurringPlan(input.ownerUserId, input.planId, { status: 'link_sent' });
+      // Don't downgrade approved/active status when opening checkout
+      if (plan.status === 'draft' || plan.status === 'link_sent') {
+        await updateRecurringPlan(input.ownerUserId, input.planId, { status: 'link_sent' });
+      }
       return { ok: true, url: session.url, mode: 'connect' };
     }
 
@@ -423,7 +461,9 @@ export async function createClientRecurringCheckout(input: {
       },
     });
     if (!session.url) return { ok: false, error: 'Stripe did not return a checkout URL.' };
-    await updateRecurringPlan(input.ownerUserId, input.planId, { status: 'link_sent' });
+    if (plan.status === 'draft' || plan.status === 'link_sent') {
+      await updateRecurringPlan(input.ownerUserId, input.planId, { status: 'link_sent' });
+    }
     return { ok: true, url: session.url, mode: 'platform' };
   } catch (e: any) {
     console.error('createClientRecurringCheckout:', e);
@@ -462,6 +502,151 @@ export async function markRecurringActiveFromCheckout(
     stripeCustomerId: customerId,
     lastPaymentAt: new Date().toISOString(),
   });
+}
+
+/** Client tapped Approve — records consent before card setup. */
+export async function markClientApprovedRecurring(
+  ownerUserId: string,
+  planId: string
+): Promise<{ ok: true; plan: RecurringPlan } | { ok: false; error: string }> {
+  const plan = await getRecurringPlan(ownerUserId, planId);
+  if (!plan) return { ok: false, error: 'Plan not found' };
+  if (plan.status === 'canceled') {
+    return { ok: false, error: 'This plan was canceled. Contact your contractor.' };
+  }
+  if (plan.status === 'active') {
+    return { ok: true, plan };
+  }
+
+  const now = new Date().toISOString();
+  return updateRecurringPlan(ownerUserId, planId, {
+    status: 'approved',
+    clientApprovedAt: plan.clientApprovedAt || now,
+  });
+}
+
+/**
+ * Email the client a clear Approve button for recurring charges.
+ * Uses Resend — same path as estimate/invoice emails (not SaaS billing).
+ */
+export async function sendRecurringApprovalEmail(input: {
+  ownerUserId: string;
+  planId: string;
+  requestUrl?: string;
+  companyName?: string;
+  companyEmail?: string;
+  companyPhone?: string;
+}): Promise<{ ok: boolean; error?: string; clientLink?: string }> {
+  const plan = await getRecurringPlan(input.ownerUserId, input.planId);
+  if (!plan) return { ok: false, error: 'Plan not found' };
+
+  const to = (plan.clientEmail || '').trim();
+  if (!to || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
+    return { ok: false, error: 'Plan needs a valid client email before sending.' };
+  }
+
+  // Refresh company branding if provided
+  if (input.companyName || input.companyEmail || input.companyPhone) {
+    await updateRecurringPlan(input.ownerUserId, input.planId, {
+      companyName: input.companyName || plan.companyName,
+      companyEmail: input.companyEmail || plan.companyEmail,
+      companyPhone: input.companyPhone || plan.companyPhone,
+    });
+  }
+
+  const fresh = (await getRecurringPlan(input.ownerUserId, input.planId)) || plan;
+  const clientLink = buildRecurringClientLink(
+    input.ownerUserId,
+    input.planId,
+    input.requestUrl
+  );
+  const company = fresh.companyName || 'Your contractor';
+  const interval = intervalLabel(fresh.interval);
+  const amt = money(fresh.amount);
+  const location = [fresh.address, fresh.city, fresh.state, fresh.zipCode]
+    .filter(Boolean)
+    .join(', ');
+
+  const escape = (s: string) =>
+    String(s || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+
+  const subject = `Please approve recurring service: ${fresh.serviceName} — ${amt} ${interval}`;
+
+  const text = [
+    `${company} is asking you to approve a recurring service charge.`,
+    '',
+    `Service: ${fresh.serviceName}`,
+    fresh.clientName ? `Client: ${fresh.clientName}` : '',
+    location ? `Address: ${location}` : '',
+    `Amount: ${amt} ${interval}`,
+    fresh.description ? `Details:\n${fresh.description}` : '',
+    '',
+    'Approve and set up payment here:',
+    clientLink,
+    '',
+    fresh.companyPhone ? `Questions? Call ${fresh.companyPhone}` : '',
+    fresh.companyEmail ? `Email ${fresh.companyEmail}` : '',
+    '',
+    'This is a charge from your contractor for their service — not EstimateAce software.',
+  ]
+    .filter((l) => l !== '')
+    .join('\n');
+
+  const html = `<!DOCTYPE html>
+<html><body style="font-family:system-ui,Segoe UI,sans-serif;color:#0f172a;line-height:1.5;max-width:560px;margin:0 auto;padding:24px;">
+  <h1 style="font-size:22px;margin:0 0 8px;">Approve recurring charges</h1>
+  <p style="color:#64748b;margin:0 0 20px;">From <strong>${escape(company)}</strong></p>
+  <div style="background:#f0fdfa;border:2px solid #14b8a6;border-radius:16px;padding:20px;margin:16px 0;">
+    <p style="margin:0 0 6px;font-size:18px;font-weight:700;">${escape(fresh.serviceName)}</p>
+    ${fresh.clientName ? `<p style="margin:0 0 4px;color:#475569;">Client: ${escape(fresh.clientName)}</p>` : ''}
+    ${location ? `<p style="margin:0 0 4px;color:#475569;">${escape(location)}</p>` : ''}
+    <p style="margin:12px 0 0;font-size:24px;font-weight:800;color:#0f766e;">${escape(amt)} <span style="font-size:14px;font-weight:600;">${escape(interval)}</span></p>
+    ${
+      fresh.description
+        ? `<p style="margin:12px 0 0;font-size:13px;color:#334155;white-space:pre-wrap;">${escape(fresh.description.slice(0, 1500))}</p>`
+        : ''
+    }
+  </div>
+  <p style="font-size:14px;color:#334155;">By approving, you agree to this recurring service charge. You can set up a card on the next screen so payments run automatically.</p>
+  <div style="text-align:center;margin:28px 0;">
+    <a href="${escape(clientLink)}"
+       style="display:inline-block;background:#0f766e;color:#ffffff;text-decoration:none;font-weight:700;font-size:16px;padding:16px 32px;border-radius:12px;">
+      ✓ Approve recurring charges
+    </a>
+  </div>
+  <p style="font-size:12px;color:#64748b;text-align:center;">Or open this link:<br/>
+    <a href="${escape(clientLink)}" style="color:#0f766e;word-break:break-all;">${escape(clientLink)}</a>
+  </p>
+  <p style="margin-top:24px;font-size:13px;color:#475569;">
+    Questions? ${fresh.companyPhone ? `Call ${escape(fresh.companyPhone)}` : ''}${fresh.companyPhone && fresh.companyEmail ? ' · ' : ''}${fresh.companyEmail ? `Email ${escape(fresh.companyEmail)}` : ''}
+  </p>
+  <p style="font-size:11px;color:#94a3b8;margin-top:28px;">This emails you about a service from your contractor — not an EstimateAce software subscription.</p>
+</body></html>`;
+
+  const { sendEmailNotification } = await import('@/lib/notifications');
+  const result = await sendEmailNotification(to, subject, text, {
+    html,
+    companyName: company,
+    replyTo:
+      fresh.companyEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(fresh.companyEmail)
+        ? fresh.companyEmail
+        : undefined,
+  });
+
+  if (!result.ok) {
+    return { ok: false, error: result.error || 'Email failed', clientLink };
+  }
+
+  await updateRecurringPlan(input.ownerUserId, input.planId, {
+    status: fresh.status === 'active' || fresh.status === 'approved' ? fresh.status : 'link_sent',
+    approvalEmailSentAt: new Date().toISOString(),
+  });
+
+  return { ok: true, clientLink };
 }
 
 /** Cancel Stripe subscription for a client plan (not SaaS). */

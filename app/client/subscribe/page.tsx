@@ -15,6 +15,10 @@ type PlanView = {
   status: string;
   address: string;
   amountLabel: string;
+  clientApprovedAt?: string | null;
+  companyName?: string;
+  companyPhone?: string;
+  companyEmail?: string;
 };
 
 function SubscribeInner() {
@@ -26,27 +30,30 @@ function SubscribeInner() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [approvedLocal, setApprovedLocal] = useState(false);
+
+  const reload = async () => {
+    const res = await fetch(`/api/client/recurring?token=${encodeURIComponent(token)}`);
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json.error || 'Could not load this service plan.');
+    setPlan(json.plan);
+    if (json.plan?.clientApprovedAt || json.plan?.status === 'approved' || json.plan?.status === 'active') {
+      setApprovedLocal(true);
+    }
+  };
 
   useEffect(() => {
     if (!token) {
-      setError('This link is missing. Ask your contractor to send a new subscribe link.');
+      setError('This link is missing. Ask your contractor to send a new approval email.');
       setLoading(false);
       return;
     }
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`/api/client/recurring?token=${encodeURIComponent(token)}`);
-        const json = await res.json().catch(() => ({}));
-        if (cancelled) return;
-        if (!res.ok) {
-          setError(json.error || 'Could not load this service plan.');
-          setLoading(false);
-          return;
-        }
-        setPlan(json.plan);
-      } catch {
-        if (!cancelled) setError('Network error loading plan.');
+        await reload();
+      } catch (e: any) {
+        if (!cancelled) setError(e?.message || 'Network error loading plan.');
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -54,9 +61,18 @@ function SubscribeInner() {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
-  const startSubscribe = async () => {
+  const isApproved =
+    approvedLocal ||
+    !!plan?.clientApprovedAt ||
+    plan?.status === 'approved' ||
+    plan?.status === 'active' ||
+    subscribed === '1';
+  const isActive = plan?.status === 'active' || subscribed === '1';
+
+  const approve = async () => {
     if (!token) return;
     setBusy(true);
     setError('');
@@ -64,7 +80,40 @@ function SubscribeInner() {
       const res = await fetch('/api/client/recurring', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token }),
+        body: JSON.stringify({ token, action: 'approve' }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(json.error || 'Could not record approval.');
+        return;
+      }
+      setApprovedLocal(true);
+      await reload();
+    } catch {
+      setError('Network error. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const startSubscribe = async () => {
+    if (!token) return;
+    setBusy(true);
+    setError('');
+    try {
+      // Ensures approval is recorded even if they skip the first button
+      if (!isApproved) {
+        await fetch('/api/client/recurring', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token, action: 'approve' }),
+        });
+        setApprovedLocal(true);
+      }
+      const res = await fetch('/api/client/recurring', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, action: 'checkout' }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json.url) {
@@ -98,13 +147,11 @@ function SubscribeInner() {
     );
   }
 
-  const isActive = plan?.status === 'active' || subscribed === '1';
-
   return (
     <div className="min-h-screen bg-slate-50 p-4 md:p-8">
       <div className="max-w-lg mx-auto bg-white rounded-2xl border shadow-sm overflow-hidden">
         <div className="bg-teal-700 text-white px-6 py-5">
-          <p className="text-sm text-teal-100">Recurring service</p>
+          <p className="text-sm text-teal-100">{plan?.companyName || 'Your contractor'}</p>
           <h1 className="text-2xl font-bold mt-1">{plan?.serviceName}</h1>
           <p className="text-teal-50 mt-1">
             {plan?.amountLabel} {plan?.intervalLabel}
@@ -120,6 +167,16 @@ function SubscribeInner() {
           {subscribed === '0' && (
             <div className="rounded-xl bg-amber-50 border border-amber-200 text-amber-900 px-4 py-3 text-sm">
               Checkout was cancelled. You can try again below anytime.
+            </div>
+          )}
+
+          {isApproved && !isActive && (
+            <div className="rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-900 px-4 py-3 text-sm font-medium">
+              ✓ You approved these recurring charges
+              {plan?.clientApprovedAt
+                ? ` on ${new Date(plan.clientApprovedAt).toLocaleString()}`
+                : ''}
+              . Next step: set up your payment method.
             </div>
           )}
 
@@ -142,7 +199,7 @@ function SubscribeInner() {
           ) : null}
 
           <div className="rounded-xl border-2 border-teal-200 bg-teal-50 p-4 text-center">
-            <p className="text-sm text-teal-800">Automatic charge</p>
+            <p className="text-sm text-teal-800">Recurring charge to approve</p>
             <p className="text-3xl font-bold text-teal-900 mt-1">
               {plan?.amountLabel}
               <span className="text-base font-semibold text-teal-700"> / {plan?.interval}</span>
@@ -157,23 +214,53 @@ function SubscribeInner() {
 
           {isActive ? (
             <div className="rounded-xl border border-emerald-300 bg-emerald-50 p-4 text-center text-emerald-900 font-semibold">
-              Subscription active
+              ✓ Approved &amp; subscription active
             </div>
           ) : (
-            <Button
-              className="w-full py-7 text-lg bg-teal-700 hover:bg-teal-800 text-white rounded-xl font-semibold"
-              disabled={busy || plan?.status === 'canceled'}
-              onClick={() => void startSubscribe()}
-            >
-              {busy
-                ? 'Starting secure checkout…'
-                : `Subscribe — ${plan?.amountLabel} ${plan?.intervalLabel}`}
-            </Button>
+            <div className="space-y-3">
+              {!isApproved ? (
+                <>
+                  <Button
+                    className="w-full py-7 text-lg bg-teal-700 hover:bg-teal-800 text-white rounded-xl font-semibold shadow-md"
+                    disabled={busy || plan?.status === 'canceled'}
+                    onClick={() => void approve()}
+                  >
+                    {busy ? 'Saving…' : '✓ Approve recurring charges'}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="w-full py-5 text-base rounded-xl border-2 border-teal-600 text-teal-800"
+                    disabled={busy || plan?.status === 'canceled'}
+                    onClick={() => void startSubscribe()}
+                  >
+                    Approve &amp; set up card
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  className="w-full py-7 text-lg bg-teal-700 hover:bg-teal-800 text-white rounded-xl font-semibold"
+                  disabled={busy || plan?.status === 'canceled'}
+                  onClick={() => void startSubscribe()}
+                >
+                  {busy
+                    ? 'Starting secure checkout…'
+                    : `Set up payment — ${plan?.amountLabel} ${plan?.intervalLabel}`}
+                </Button>
+              )}
+            </div>
+          )}
+
+          {(plan?.companyPhone || plan?.companyEmail) && (
+            <div className="pt-2 border-t text-sm text-slate-600">
+              <p className="font-medium text-slate-800">Questions?</p>
+              {plan.companyPhone ? <p>Phone: {plan.companyPhone}</p> : null}
+              {plan.companyEmail ? <p>Email: {plan.companyEmail}</p> : null}
+            </div>
           )}
 
           <p className="text-[11px] text-center text-slate-500 leading-relaxed">
-            You are paying your contractor for this service only. This is not an EstimateAce software
-            subscription.
+            You are approving charges from your contractor for this service only. This is not an
+            EstimateAce software subscription.
           </p>
         </div>
       </div>

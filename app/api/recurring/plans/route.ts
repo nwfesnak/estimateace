@@ -71,6 +71,9 @@ export async function POST(request: NextRequest) {
       amount: Number(body.amount),
       interval,
       description: String(body.description || '').trim(),
+      companyName: String(body.companyName || '').trim(),
+      companyEmail: String(body.companyEmail || '').trim(),
+      companyPhone: String(body.companyPhone || '').trim(),
     });
 
     if (!result.ok) {

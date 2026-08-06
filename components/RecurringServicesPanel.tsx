@@ -21,12 +21,17 @@ export type RecurringPlanRow = {
   description: string;
   status: string;
   lastPaymentAt: string | null;
+  clientApprovedAt?: string | null;
+  approvalEmailSentAt?: string | null;
 };
 
 type Props = {
   getAccessToken: () => Promise<string | null>;
   onBack: () => void;
   showMessage: (msg: string) => void;
+  companyName?: string;
+  companyEmail?: string;
+  companyPhone?: string;
 };
 
 const emptyForm = {
@@ -46,22 +51,34 @@ const emptyForm = {
 function statusBadge(status: string) {
   const s = (status || 'draft').toLowerCase();
   if (s === 'active') return 'bg-emerald-100 text-emerald-800';
+  if (s === 'approved') return 'bg-emerald-100 text-emerald-900';
   if (s === 'canceled') return 'bg-gray-100 text-gray-600';
   if (s === 'past_due') return 'bg-red-100 text-red-800';
   if (s === 'link_sent') return 'bg-sky-100 text-sky-800';
   return 'bg-amber-100 text-amber-900';
 }
 
-function statusLabel(status: string) {
+function statusLabel(status: string, clientApprovedAt?: string | null) {
   const s = (status || 'draft').toLowerCase();
-  if (s === 'active') return 'Active — client subscribed';
+  if (s === 'active') return 'Active — client subscribed & paying';
+  if (s === 'approved' || clientApprovedAt)
+    return clientApprovedAt
+      ? `✓ Client approved ${new Date(clientApprovedAt).toLocaleDateString()} — set up card if needed`
+      : '✓ Client approved recurring charges';
   if (s === 'canceled') return 'Canceled';
   if (s === 'past_due') return 'Payment past due';
-  if (s === 'link_sent') return 'Link sent — waiting for client';
-  return 'Draft — send link to client';
+  if (s === 'link_sent') return 'Email sent — waiting for client to approve';
+  return 'Draft — email client for approval';
 }
 
-export function RecurringServicesPanel({ getAccessToken, onBack, showMessage }: Props) {
+export function RecurringServicesPanel({
+  getAccessToken,
+  onBack,
+  showMessage,
+  companyName,
+  companyEmail,
+  companyPhone,
+}: Props) {
   const [plans, setPlans] = useState<RecurringPlanRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -100,7 +117,7 @@ export function RecurringServicesPanel({ getAccessToken, onBack, showMessage }: 
     void loadPlans();
   }, [loadPlans]);
 
-  const createPlan = async () => {
+  const createPlan = async (andEmail: boolean) => {
     setSaving(true);
     try {
       const headers = await authHeaders();
@@ -110,6 +127,9 @@ export function RecurringServicesPanel({ getAccessToken, onBack, showMessage }: 
         body: JSON.stringify({
           ...form,
           amount: parseFloat(form.amount) || 0,
+          companyName,
+          companyEmail,
+          companyPhone,
         }),
       });
       const json = await res.json().catch(() => ({}));
@@ -119,23 +139,69 @@ export function RecurringServicesPanel({ getAccessToken, onBack, showMessage }: 
       }
       setShowForm(false);
       setForm(emptyForm);
-      await loadPlans();
-      if (json.clientLink) {
-        try {
-          await navigator.clipboard.writeText(json.clientLink);
+      const planId = json.plan?.id;
+      if (andEmail && planId) {
+        const sendRes = await fetch('/api/recurring/send', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            planId,
+            companyName,
+            companyEmail,
+            companyPhone,
+          }),
+        });
+        const sendJson = await sendRes.json().catch(() => ({}));
+        await loadPlans();
+        if (!sendRes.ok) {
           showMessage(
-            '✅ Plan created. Client subscribe link copied — paste it in a text or email.'
+            `Plan created, but email failed: ${sendJson.error || 'check Resend settings'}. You can retry Email client.`
           );
-        } catch {
-          showMessage('✅ Plan created. Use Copy link on the card to share with your client.');
+          return;
         }
-      } else {
-        showMessage('✅ Recurring service plan created');
+        showMessage(
+          `✅ Plan created & approval email sent to ${form.clientEmail || 'client'}.`
+        );
+        return;
       }
+      await loadPlans();
+      showMessage('✅ Plan created. Use “Email client for approval” when ready.');
     } catch (e: any) {
       showMessage(e?.message || 'Create failed');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const emailClientApproval = async (planId: string, clientEmail: string) => {
+    if (!clientEmail?.trim()) {
+      showMessage('Add a client email on this plan before sending.');
+      return;
+    }
+    setBusyId(planId);
+    try {
+      const headers = await authHeaders();
+      const res = await fetch('/api/recurring/send', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          planId,
+          companyName,
+          companyEmail,
+          companyPhone,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showMessage(json.error || 'Could not send approval email');
+        return;
+      }
+      showMessage(`✅ Approval email sent to ${clientEmail}`);
+      await loadPlans();
+    } catch (e: any) {
+      showMessage(e?.message || 'Send failed');
+    } finally {
+      setBusyId(null);
     }
   };
 
@@ -354,13 +420,23 @@ export function RecurringServicesPanel({ getAccessToken, onBack, showMessage }: 
                 placeholder="Includes mowing front and back yard, edging, and blow-off."
               />
             </div>
-            <Button
-              className="w-full bg-[#10b981] hover:bg-[#059669] text-white py-6 text-lg"
-              disabled={saving}
-              onClick={() => void createPlan()}
-            >
-              {saving ? 'Creating…' : 'Create plan & get client link'}
-            </Button>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Button
+                className="flex-1 bg-[#10b981] hover:bg-[#059669] text-white py-6 text-base"
+                disabled={saving}
+                onClick={() => void createPlan(true)}
+              >
+                {saving ? 'Working…' : 'Create & email client for approval'}
+              </Button>
+              <Button
+                variant="outline"
+                className="flex-1 py-6"
+                disabled={saving}
+                onClick={() => void createPlan(false)}
+              >
+                Create only (email later)
+              </Button>
+            </div>
           </CardContent>
         </Card>
       )}
@@ -412,7 +488,19 @@ export function RecurringServicesPanel({ getAccessToken, onBack, showMessage }: 
                         / {p.interval}
                       </span>
                     </p>
-                    <p className="text-xs text-gray-500 mt-1">{statusLabel(p.status)}</p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      {statusLabel(p.status, p.clientApprovedAt)}
+                    </p>
+                    {p.clientApprovedAt && (
+                      <p className="text-xs font-semibold text-emerald-700 mt-1">
+                        ✓ Client approved on {new Date(p.clientApprovedAt).toLocaleString()}
+                      </p>
+                    )}
+                    {p.approvalEmailSentAt && !p.clientApprovedAt && (
+                      <p className="text-xs text-sky-700 mt-1">
+                        Approval email sent {new Date(p.approvalEmailSentAt).toLocaleString()}
+                      </p>
+                    )}
                     {(p.address || p.city) && (
                       <p className="text-xs text-gray-500 mt-1">
                         {[p.address, p.city, p.state, p.zipCode].filter(Boolean).join(', ')}
@@ -420,6 +508,14 @@ export function RecurringServicesPanel({ getAccessToken, onBack, showMessage }: 
                     )}
                   </div>
                   <div className="flex flex-col gap-2 w-full sm:w-auto">
+                    <Button
+                      size="sm"
+                      className="bg-[#10b981] hover:bg-[#059669] text-white"
+                      disabled={busyId === p.id || p.status === 'canceled' || !p.clientEmail}
+                      onClick={() => void emailClientApproval(p.id, p.clientEmail)}
+                    >
+                      📧 Email client for approval
+                    </Button>
                     <Button
                       size="sm"
                       className="bg-[#0ea5e9] text-white"
@@ -458,15 +554,19 @@ export function RecurringServicesPanel({ getAccessToken, onBack, showMessage }: 
       <div className="mt-10 rounded-xl border bg-white p-5 text-sm text-gray-600 space-y-2">
         <p className="font-semibold text-gray-900">How it works</p>
         <ol className="list-decimal pl-5 space-y-1">
-          <li>Create a plan (service, client, amount, weekly/monthly/yearly).</li>
+          <li>Create a plan (service, client email, amount, weekly/monthly/yearly).</li>
           <li>
-            <strong>Copy client link</strong> and text/email it to your customer.
+            Tap <strong>Email client for approval</strong> — they get a message with an{' '}
+            <strong>Approve recurring charges</strong> button.
           </li>
-          <li>They open the link and enter a card once.</li>
-          <li>Stripe charges them automatically each period — money goes via your job Stripe/Connect setup.</li>
+          <li>
+            When they approve, you&apos;ll see <strong>✓ Client approved</strong> on the plan.
+          </li>
+          <li>They set up a card; Stripe charges automatically each period.</li>
         </ol>
         <p className="text-xs text-gray-500 pt-2">
           Tip: Finish Stripe Connect under Profile → Payments so charges can pay out to your bank.
+          Requires Resend email setup (same as estimate send).
         </p>
       </div>
     </div>
