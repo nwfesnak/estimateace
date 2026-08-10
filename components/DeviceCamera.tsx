@@ -21,14 +21,30 @@ function clampZoom(z: number) {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(z * 100) / 100));
 }
 
-/** Center crop matching object-fit:cover + digital zoom (FILL_CENTER). */
-function aspectFillCrop(
+/**
+ * Capture crop for the viewfinder.
+ * zoom === 1 → full sensor frame (no digital crop / no "already zoomed" look).
+ * zoom > 1 → center crop (digital zoom), matching CSS scale.
+ */
+function cropForCapture(
   videoW: number,
   videoH: number,
   viewW: number,
   viewH: number,
   zoom: number
 ) {
+  const z = Math.max(1, zoom);
+  // Widest shot: use entire camera frame
+  if (z <= 1.001) {
+    return {
+      sx: 0,
+      sy: 0,
+      cropW: Math.round(videoW),
+      cropH: Math.round(videoH),
+    };
+  }
+
+  // Center crop matching object-fit:cover + digital zoom
   const va = videoW / Math.max(1, videoH);
   const ba = viewW / Math.max(1, viewH);
   let cropW: number;
@@ -40,7 +56,6 @@ function aspectFillCrop(
     cropW = videoW;
     cropH = videoW / ba;
   }
-  const z = Math.max(1, zoom);
   cropW = Math.max(1, cropW / z);
   cropH = Math.max(1, cropH / z);
   const sx = Math.max(0, (videoW - cropW) / 2);
@@ -51,6 +66,28 @@ function aspectFillCrop(
     cropW: Math.round(Math.min(cropW, videoW - sx)),
     cropH: Math.round(Math.min(cropH, videoH - sy)),
   };
+}
+
+/** Force hardware zoom to the camera's minimum (true wide / not pre-zoomed). */
+async function applyMinimumHardwareZoom(stream: MediaStream) {
+  try {
+    const track = stream.getVideoTracks()[0];
+    if (!track) return;
+    const caps = track.getCapabilities?.() as MediaTrackCapabilities & {
+      zoom?: { min?: number; max?: number; step?: number };
+    };
+    if (!caps || caps.zoom == null) return;
+    const minZ =
+      typeof caps.zoom === 'object' && caps.zoom && 'min' in caps.zoom
+        ? Number(caps.zoom.min)
+        : 1;
+    if (!Number.isFinite(minZ)) return;
+    await track.applyConstraints({
+      advanced: [{ zoom: minZ } as MediaTrackConstraintSet],
+    });
+  } catch {
+    // Device may not support zoom constraints — ignore
+  }
 }
 
 /**
@@ -179,6 +216,9 @@ export function DeviceCamera({
     }
 
     streamRef.current = stream;
+    // Prefer widest FOV — some phones open mid-zoom by default
+    await applyMinimumHardwareZoom(stream);
+    setZoomLevel(1);
 
     const attach = async (n = 0): Promise<void> => {
       const video = videoRef.current;
@@ -204,7 +244,7 @@ export function DeviceCamera({
       }
     };
     await attach();
-  }, [mode, stopStream]);
+  }, [mode, stopStream, setZoomLevel]);
 
   // Open / close: lock page zoom so only the preview inside the frame can scale
   React.useEffect(() => {
@@ -213,12 +253,17 @@ export function DeviceCamera({
       setReady(false);
       setError(null);
       setZoomLevel(1);
+      zoomRef.current = 1;
       setCaptured(0);
       capturedRef.current = 0;
       setBusy(false);
       setFlashOn(false);
       return;
     }
+
+    // Always start at 1× (not mid-zoom) every time the camera opens
+    setZoomLevel(1);
+    zoomRef.current = 1;
 
     document.documentElement.classList.add('device-camera-lock');
     const meta = document.querySelector('meta[name="viewport"]');
@@ -281,7 +326,7 @@ export function DeviceCamera({
     try {
       const viewW = box?.clientWidth || window.innerWidth;
       const viewH = box?.clientHeight || window.innerHeight;
-      const { sx, sy, cropW, cropH } = aspectFillCrop(
+      const { sx, sy, cropW, cropH } = cropForCapture(
         video.videoWidth,
         video.videoHeight,
         viewW,
@@ -437,10 +482,11 @@ export function DeviceCamera({
           <div ref={viewfinderRef} className="device-camera-viewfinder">
             <video
               ref={videoRef}
-              className="device-camera-video"
+              className={`device-camera-video ${zoom <= 1 ? 'device-camera-video-wide' : 'device-camera-video-zoom'}`}
               style={{
                 // ONLY the live feed zooms — not the border, not the shutter
-                transform: `translate(-50%, -50%) scale(${zoom})`,
+                // At 1× use full FOV (no CSS scale crop). Zoom in only when user taps +.
+                transform: `translate(-50%, -50%) scale(${Math.max(1, zoom)})`,
               }}
               autoPlay
               playsInline

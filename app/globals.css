@@ -263,7 +263,7 @@ html.device-camera-lock body {
   contain: paint;
 }
 
-/* Live preview — FILL_CENTER; digital zoom applied only here */
+/* Live preview — digital zoom applied only here */
 .device-camera-video {
   position: absolute;
   top: 50%;
@@ -272,11 +272,20 @@ html.device-camera-lock body {
   height: 100%;
   min-width: 100%;
   min-height: 100%;
-  object-fit: cover;
   object-position: center center;
   transform: translate(-50%, -50%);
   transform-origin: center center;
   background: #000;
+}
+
+/* 1× = full wide view (contain), not pre-cropped/cover which looks zoomed-in */
+.device-camera-video-wide {
+  object-fit: contain;
+}
+
+/* When user zooms past 1×, fill the frame */
+.device-camera-video-zoom {
+  object-fit: cover;
   pointer-events: none;
   will-change: transform;
 }
