@@ -261,9 +261,11 @@ html.device-camera-lock body {
   background: #000;
   /* Critical: clip scaled video so it never covers chrome outside the border */
   contain: paint;
+  /* Pinch-to-zoom handled in JS (phone-like) */
+  touch-action: none;
 }
 
-/* Live preview — digital zoom applied only here */
+/* Live preview — digital scale only when past hardware zoom max */
 .device-camera-video {
   position: absolute;
   top: 50%;
@@ -276,17 +278,22 @@ html.device-camera-lock body {
   transform: translate(-50%, -50%);
   transform-origin: center center;
   background: #000;
+  /* Let pinch events hit the viewfinder */
+  pointer-events: none;
 }
 
-/* 1× = full wide view (contain), not pre-cropped/cover which looks zoomed-in */
+/*
+ * 1× normal range: no CSS scale crop.
+ * Hardware zoom is set to min so this is the true wide FOV (not telephoto).
+ * contain avoids the extra digital crop that cover causes on tall phones.
+ */
 .device-camera-video-wide {
   object-fit: contain;
 }
 
-/* When user zooms past 1×, fill the frame */
+/* Digital zoom past hardware max — cover + scale */
 .device-camera-video-zoom {
   object-fit: cover;
-  pointer-events: none;
   will-change: transform;
 }
 

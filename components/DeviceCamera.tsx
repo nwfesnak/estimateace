@@ -3,8 +3,9 @@
 import * as React from 'react';
 import { createPortal } from 'react-dom';
 
+/** UI zoom: 1 = widest / normal FOV; user can go higher like a phone camera */
 const MIN_ZOOM = 1;
-const MAX_ZOOM = 4;
+const MAX_ZOOM = 8;
 const ZOOM_STEP = 0.25;
 
 export type DeviceCameraMode = 'photo' | 'video';
@@ -17,24 +18,110 @@ type DeviceCameraProps = {
   onVideo?: (file: File) => void | Promise<void>;
 };
 
-function clampZoom(z: number) {
-  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(z * 100) / 100));
+type ZoomCaps = {
+  min: number;
+  max: number;
+  step: number;
+  /** True when the track accepts the `zoom` constraint (optical / continuous zoom). */
+  hardware: boolean;
+};
+
+function clampZoom(z: number, max = MAX_ZOOM) {
+  return Math.min(max, Math.max(MIN_ZOOM, Math.round(z * 100) / 100));
+}
+
+function readZoomCaps(track: MediaStreamTrack | null | undefined): ZoomCaps {
+  const fallback: ZoomCaps = { min: 1, max: 1, step: 0.1, hardware: false };
+  if (!track?.getCapabilities) return fallback;
+  try {
+    const caps = track.getCapabilities() as MediaTrackCapabilities & {
+      zoom?: number | { min?: number; max?: number; step?: number };
+    };
+    const z = caps.zoom;
+    if (z == null) return fallback;
+    if (typeof z === 'number') {
+      return { min: z, max: z, step: 0.1, hardware: true };
+    }
+    const min = Number(z.min);
+    const max = Number(z.max);
+    const step = Number(z.step);
+    if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) {
+      return fallback;
+    }
+    return {
+      min,
+      max,
+      step: Number.isFinite(step) && step > 0 ? step : 0.1,
+      hardware: true,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * Map UI zoom (1 = normal wide) onto hardware zoom.
+ * UI 1 → hardware min (widest FOV). Higher UI values stretch toward hardware max,
+ * then remaining zoom is done digitally via CSS.
+ */
+function uiToHardwareZoom(uiZoom: number, caps: ZoomCaps): number {
+  if (!caps.hardware) return caps.min;
+  const ui = Math.max(MIN_ZOOM, uiZoom);
+  // Hardware range expressed as multipliers from min: e.g. min=1 max=5 → up to 5× optical
+  const hwSpan = caps.max / Math.max(caps.min, 0.001);
+  // Use hardware for the first portion of zoom (up to hwSpan ×), rest is digital
+  const hwFactor = Math.min(ui, hwSpan);
+  let hw = caps.min * hwFactor;
+  hw = Math.min(caps.max, Math.max(caps.min, hw));
+  // Snap to step when available
+  if (caps.step > 0) {
+    const steps = Math.round((hw - caps.min) / caps.step);
+    hw = caps.min + steps * caps.step;
+    hw = Math.min(caps.max, Math.max(caps.min, hw));
+  }
+  return hw;
+}
+
+/** Digital CSS scale after hardware has done as much as it can. */
+function digitalScaleFromUi(uiZoom: number, caps: ZoomCaps): number {
+  const ui = Math.max(MIN_ZOOM, uiZoom);
+  if (!caps.hardware) return ui;
+  const hwSpan = caps.max / Math.max(caps.min, 0.001);
+  if (ui <= hwSpan) return 1;
+  return ui / hwSpan;
+}
+
+async function applyHardwareZoom(track: MediaStreamTrack, zoomValue: number) {
+  try {
+    await track.applyConstraints({
+      advanced: [{ zoom: zoomValue } as MediaTrackConstraintSet],
+    });
+  } catch {
+    try {
+      await track.applyConstraints({
+        // Some browsers accept zoom at the top level
+        // @ts-expect-error zoom is non-standard but widely supported on mobile
+        zoom: zoomValue,
+      });
+    } catch {
+      // ignore
+    }
+  }
 }
 
 /**
  * Capture crop for the viewfinder.
- * zoom === 1 → full sensor frame (no digital crop / no "already zoomed" look).
- * zoom > 1 → center crop (digital zoom), matching CSS scale.
+ * zoom === 1 (and digital scale 1) → full video frame.
+ * digital zoom > 1 → center crop matching CSS scale + object-fit cover.
  */
 function cropForCapture(
   videoW: number,
   videoH: number,
   viewW: number,
   viewH: number,
-  zoom: number
+  digitalScale: number
 ) {
-  const z = Math.max(1, zoom);
-  // Widest shot: use entire camera frame
+  const z = Math.max(1, digitalScale);
   if (z <= 1.001) {
     return {
       sx: 0,
@@ -44,7 +131,6 @@ function cropForCapture(
     };
   }
 
-  // Center crop matching object-fit:cover + digital zoom
   const va = videoW / Math.max(1, videoH);
   const ba = viewW / Math.max(1, viewH);
   let cropW: number;
@@ -68,33 +154,11 @@ function cropForCapture(
   };
 }
 
-/** Force hardware zoom to the camera's minimum (true wide / not pre-zoomed). */
-async function applyMinimumHardwareZoom(stream: MediaStream) {
-  try {
-    const track = stream.getVideoTracks()[0];
-    if (!track) return;
-    const caps = track.getCapabilities?.() as MediaTrackCapabilities & {
-      zoom?: { min?: number; max?: number; step?: number };
-    };
-    if (!caps || caps.zoom == null) return;
-    const minZ =
-      typeof caps.zoom === 'object' && caps.zoom && 'min' in caps.zoom
-        ? Number(caps.zoom.min)
-        : 1;
-    if (!Number.isFinite(minZ)) return;
-    await track.applyConstraints({
-      advanced: [{ zoom: minZ } as MediaTrackConstraintSet],
-    });
-  } catch {
-    // Device may not support zoom constraints — ignore
-  }
-}
-
 /**
- * Device-style camera UI:
- * - Stationary outer shell + frame border (never scales)
- * - Capture / Done controls attached to that shell (never zoom away)
- * - Only the live preview inside the frame digitally zooms
+ * Device-style camera:
+ * - Opens at normal wide FOV (hardware min zoom, no forced telephoto resolution)
+ * - Pinch + ± controls zoom like a phone camera
+ * - Shell / border / shutter never scale
  */
 export function DeviceCamera({
   open,
@@ -117,6 +181,8 @@ export function DeviceCamera({
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
   const viewfinderRef = React.useRef<HTMLDivElement>(null);
   const streamRef = React.useRef<MediaStream | null>(null);
+  const trackRef = React.useRef<MediaStreamTrack | null>(null);
+  const zoomCapsRef = React.useRef<ZoomCaps>({ min: 1, max: 1, step: 0.1, hardware: false });
   const flashRef = React.useRef<HTMLDivElement>(null);
   const zoomRef = React.useRef(1);
   const capturedRef = React.useRef(0);
@@ -124,6 +190,10 @@ export function DeviceCamera({
   const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
   const recordedChunksRef = React.useRef<Blob[]>([]);
   const recordTimerRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Pinch state
+  const pinchStartDistRef = React.useRef(0);
+  const pinchStartZoomRef = React.useRef(1);
 
   React.useEffect(() => setMounted(true), []);
 
@@ -145,16 +215,32 @@ export function DeviceCamera({
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     }
+    trackRef.current = null;
+    zoomCapsRef.current = { min: 1, max: 1, step: 0.1, hardware: false };
     if (videoRef.current) videoRef.current.srcObject = null;
     setRecording(false);
     setRecordMs(0);
   }, []);
 
-  const setZoomLevel = React.useCallback((value: number) => {
+  const applyZoom = React.useCallback(async (value: number) => {
     const next = clampZoom(value);
     zoomRef.current = next;
     setZoom(next);
+
+    const track = trackRef.current;
+    const caps = zoomCapsRef.current;
+    if (track && caps.hardware) {
+      const hw = uiToHardwareZoom(next, caps);
+      await applyHardwareZoom(track, hw);
+    }
   }, []);
+
+  const setZoomLevel = React.useCallback(
+    (value: number) => {
+      void applyZoom(value);
+    },
+    [applyZoom]
+  );
 
   const fireFlash = React.useCallback(() => {
     setFlashOn(true);
@@ -182,19 +268,25 @@ export function DeviceCamera({
       return;
     }
 
-    const portrait =
-      typeof window !== 'undefined' && window.matchMedia('(orientation: portrait)').matches;
-
+    /*
+     * IMPORTANT: Do NOT force 1080×1920 (or similar). On multi-lens phones that
+     * often selects a telephoto / cropped sensor, so "1×" already looks zoomed-in.
+     * Request rear camera only and let the device pick its normal wide default.
+     */
     const attempts: MediaStreamConstraints[] = [
       {
         video: {
           facingMode: { ideal: 'environment' },
-          width: { ideal: portrait ? 1080 : 1920 },
-          height: { ideal: portrait ? 1920 : 1080 },
+          // Prefer a normal working resolution without locking a tall portrait crop
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
         },
         audio: mode === 'video',
       },
-      { video: { facingMode: { ideal: 'environment' } }, audio: mode === 'video' },
+      {
+        video: { facingMode: { ideal: 'environment' } },
+        audio: mode === 'video',
+      },
       { video: true, audio: mode === 'video' },
     ];
 
@@ -216,9 +308,19 @@ export function DeviceCamera({
     }
 
     streamRef.current = stream;
-    // Prefer widest FOV — some phones open mid-zoom by default
-    await applyMinimumHardwareZoom(stream);
-    setZoomLevel(1);
+    const track = stream.getVideoTracks()[0] ?? null;
+    trackRef.current = track;
+
+    const caps = readZoomCaps(track);
+    zoomCapsRef.current = caps;
+
+    // Always open at widest hardware FOV (true normal range)
+    if (track && caps.hardware) {
+      await applyHardwareZoom(track, caps.min);
+    }
+
+    zoomRef.current = 1;
+    setZoom(1);
 
     const attach = async (n = 0): Promise<void> => {
       const video = videoRef.current;
@@ -237,6 +339,10 @@ export function DeviceCamera({
       video.setAttribute('webkit-playsinline', 'true');
       try {
         await video.play();
+        // Re-assert min zoom after play — some devices reset mid-start
+        if (track && caps.hardware) {
+          await applyHardwareZoom(track, caps.min);
+        }
         setReady(true);
       } catch (e) {
         console.warn(e);
@@ -244,16 +350,68 @@ export function DeviceCamera({
       }
     };
     await attach();
-  }, [mode, stopStream, setZoomLevel]);
+  }, [mode, stopStream]);
 
-  // Open / close: lock page zoom so only the preview inside the frame can scale
+  // Pinch-to-zoom on the viewfinder (phone-like)
+  React.useEffect(() => {
+    if (!open) return;
+    const el = viewfinderRef.current;
+    if (!el) return;
+
+    const dist = (t: TouchList) => {
+      if (t.length < 2) return 0;
+      const a = t[0];
+      const b = t[1];
+      return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+    };
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        e.preventDefault();
+        pinchStartDistRef.current = dist(e.touches);
+        pinchStartZoomRef.current = zoomRef.current;
+      }
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 2 && pinchStartDistRef.current > 0) {
+        e.preventDefault();
+        const d = dist(e.touches);
+        if (d <= 0) return;
+        const ratio = d / pinchStartDistRef.current;
+        const next = clampZoom(pinchStartZoomRef.current * ratio);
+        void applyZoom(next);
+      }
+    };
+
+    const onTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2) {
+        pinchStartDistRef.current = 0;
+      }
+    };
+
+    const opts: AddEventListenerOptions = { passive: false };
+    el.addEventListener('touchstart', onTouchStart, opts);
+    el.addEventListener('touchmove', onTouchMove, opts);
+    el.addEventListener('touchend', onTouchEnd, opts);
+    el.addEventListener('touchcancel', onTouchEnd, opts);
+
+    return () => {
+      el.removeEventListener('touchstart', onTouchStart, opts);
+      el.removeEventListener('touchmove', onTouchMove, opts);
+      el.removeEventListener('touchend', onTouchEnd, opts);
+      el.removeEventListener('touchcancel', onTouchEnd, opts);
+    };
+  }, [open, ready, applyZoom]);
+
+  // Open / close: lock page zoom so browser chrome doesn't steal pinch
   React.useEffect(() => {
     if (!open) {
       stopStream();
       setReady(false);
       setError(null);
-      setZoomLevel(1);
       zoomRef.current = 1;
+      setZoom(1);
       setCaptured(0);
       capturedRef.current = 0;
       setBusy(false);
@@ -261,9 +419,8 @@ export function DeviceCamera({
       return;
     }
 
-    // Always start at 1× (not mid-zoom) every time the camera opens
-    setZoomLevel(1);
     zoomRef.current = 1;
+    setZoom(1);
 
     document.documentElement.classList.add('device-camera-lock');
     const meta = document.querySelector('meta[name="viewport"]');
@@ -275,17 +432,20 @@ export function DeviceCamera({
       );
     }
 
-    // Block browser pinch-zoom entirely (capture button must never leave the screen)
-    const blockMultiTouch = (e: TouchEvent) => {
-      if (e.touches.length > 1) e.preventDefault();
+    // Block page-level pinch / gesture zoom outside the viewfinder
+    const blockPagePinch = (e: TouchEvent) => {
+      if (e.touches.length < 2) return;
+      const vf = viewfinderRef.current;
+      if (vf && e.target instanceof Node && vf.contains(e.target)) return;
+      e.preventDefault();
     };
     const blockGesture = (e: Event) => e.preventDefault();
     const blockWheel = (e: WheelEvent) => {
       if (e.ctrlKey) e.preventDefault();
     };
     const opts: AddEventListenerOptions = { passive: false, capture: true };
-    document.addEventListener('touchmove', blockMultiTouch, opts);
-    document.addEventListener('touchstart', blockMultiTouch, opts);
+    document.addEventListener('touchmove', blockPagePinch, opts);
+    document.addEventListener('touchstart', blockPagePinch, opts);
     document.addEventListener('gesturestart', blockGesture, opts);
     document.addEventListener('gesturechange', blockGesture, opts);
     document.addEventListener('wheel', blockWheel, opts);
@@ -301,13 +461,15 @@ export function DeviceCamera({
         m.setAttribute('content', viewportMetaPrev.current);
         viewportMetaPrev.current = null;
       }
-      document.removeEventListener('touchmove', blockMultiTouch, opts);
-      document.removeEventListener('touchstart', blockMultiTouch, opts);
+      document.removeEventListener('touchmove', blockPagePinch, opts);
+      document.removeEventListener('touchstart', blockPagePinch, opts);
       document.removeEventListener('gesturestart', blockGesture, opts);
       document.removeEventListener('gesturechange', blockGesture, opts);
       document.removeEventListener('wheel', blockWheel, opts);
     };
-  }, [open, startCamera, stopStream, setZoomLevel]);
+  }, [open, startCamera, stopStream]);
+
+  const digitalScale = digitalScaleFromUi(zoom, zoomCapsRef.current);
 
   const takePhoto = React.useCallback(async () => {
     if (busy || mode !== 'photo') return;
@@ -326,12 +488,14 @@ export function DeviceCamera({
     try {
       const viewW = box?.clientWidth || window.innerWidth;
       const viewH = box?.clientHeight || window.innerHeight;
+      // Hardware zoom already baked into the stream; only crop for digital scale
+      const dig = digitalScaleFromUi(zoomRef.current, zoomCapsRef.current);
       const { sx, sy, cropW, cropH } = cropForCapture(
         video.videoWidth,
         video.videoHeight,
         viewW,
         viewH,
-        zoomRef.current
+        dig
       );
       canvas.width = cropW;
       canvas.height = cropH;
@@ -441,6 +605,7 @@ export function DeviceCamera({
   if (!mounted || !open) return null;
 
   const recordLabel = `${Math.floor(recordMs / 60000)}:${String(Math.floor((recordMs % 60000) / 1000)).padStart(2, '0')}`;
+  const scale = Math.max(1, digitalScale);
 
   const ui = (
     <div
@@ -449,7 +614,6 @@ export function DeviceCamera({
       aria-modal="true"
       aria-label={mode === 'photo' ? 'Camera' : 'Video camera'}
     >
-      {/* Full-screen flash — does not move with zoom */}
       <div
         ref={flashRef}
         className="device-camera-flash-layer"
@@ -457,7 +621,6 @@ export function DeviceCamera({
         aria-hidden
       />
 
-      {/* ===== STATIONARY CHROME (never transformed / never zooms) ===== */}
       <header className="device-camera-top">
         <div className="device-camera-top-info">
           <div className="device-camera-title">
@@ -467,8 +630,8 @@ export function DeviceCamera({
             {captured > 0
               ? `${captured} saved · keep going or Done`
               : mode === 'photo'
-                ? 'Zoom the shot only · shutter stays put'
-                : 'Tap to record · tap again to stop'}
+                ? 'Pinch or + / − to zoom · shutter stays put'
+                : 'Tap to record · pinch to zoom'}
           </div>
         </div>
         <button type="button" className="device-camera-done" onClick={handleDone}>
@@ -476,17 +639,17 @@ export function DeviceCamera({
         </button>
       </header>
 
-      {/* Frame border is stationary; only the video inside scales */}
       <div className="device-camera-frame">
         <div className="device-camera-frame-border">
           <div ref={viewfinderRef} className="device-camera-viewfinder">
             <video
               ref={videoRef}
-              className={`device-camera-video ${zoom <= 1 ? 'device-camera-video-wide' : 'device-camera-video-zoom'}`}
+              className={`device-camera-video ${
+                scale <= 1.001 ? 'device-camera-video-wide' : 'device-camera-video-zoom'
+              }`}
               style={{
-                // ONLY the live feed zooms — not the border, not the shutter
-                // At 1× use full FOV (no CSS scale crop). Zoom in only when user taps +.
-                transform: `translate(-50%, -50%) scale(${Math.max(1, zoom)})`,
+                // Digital scale only when past hardware max; at 1× no CSS zoom crop
+                transform: `translate(-50%, -50%) scale(${scale})`,
               }}
               autoPlay
               playsInline
@@ -516,7 +679,6 @@ export function DeviceCamera({
               </div>
             )}
 
-            {/* Zoom controls sit on the frame, not on the scaled video */}
             <div className="device-camera-zoom-bar">
               <button
                 type="button"
@@ -542,7 +704,6 @@ export function DeviceCamera({
         </div>
       </div>
 
-      {/* Capture control bar — attached to shell, never zooms with the shot */}
       <footer className="device-camera-bottom">
         <div className="device-camera-shutter-row">
           <div className="device-camera-side-slot">
@@ -567,6 +728,7 @@ export function DeviceCamera({
               className="device-camera-zoom-reset"
               onClick={() => setZoomLevel(1)}
               disabled={zoom === 1}
+              aria-label="Reset zoom to 1×"
             >
               1×
             </button>
@@ -574,10 +736,10 @@ export function DeviceCamera({
         </div>
         <p className="device-camera-hint">
           {mode === 'photo'
-            ? 'White flash = saved · border & shutter stay fixed while you zoom'
+            ? 'Opens wide · pinch to zoom in · flash = saved'
             : recording
               ? 'Recording… tap the red button to stop and save'
-              : 'Border & shutter stay fixed · only the preview zooms'}
+              : 'Opens wide · pinch or + to zoom · shutter stays fixed'}
         </p>
       </footer>
     </div>
