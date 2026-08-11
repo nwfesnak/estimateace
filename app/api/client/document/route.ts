@@ -68,7 +68,32 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    const profile = (row.profile || {}) as any;
+    let profile = (row.profile || {}) as any;
+    // Merge latest company payment settings from SETTINGS so pay link shows all enabled methods
+    try {
+      const { data: settingsRow } = await admin
+        .from('estimates')
+        .select('profile')
+        .eq('id', `SETTINGS-${uid}`)
+        .maybeSingle();
+      const sp = (settingsRow?.profile || {}) as any;
+      if (sp?.paymentSettings) {
+        profile = {
+          ...profile,
+          paymentSettings: {
+            ...(profile.paymentSettings || {}),
+            ...sp.paymentSettings,
+          },
+          chargeCCFee: sp.chargeCCFee !== undefined ? sp.chargeCCFee : profile.chargeCCFee,
+          ccFeePercentage: sp.ccFeePercentage ?? profile.ccFeePercentage,
+          company: profile.company || sp.company,
+          phone: profile.phone || sp.phone,
+          email: profile.email || sp.email,
+        };
+      }
+    } catch {
+      /* optional */
+    }
     const storedDiscount = profile._discount || {};
     const items = Array.isArray(row.items) ? row.items : [];
     const itemsTotal = items.reduce((sum: number, it: any) => {
@@ -114,13 +139,27 @@ export async function GET(request: NextRequest) {
       ? Math.round(((grandTotal * depositPercent) / 100) * 100) / 100
       : 0;
 
+    const invoiceNumber = row.invoiceNumber || row.invoicenumber || inv;
+    const company = profile.company || 'Your contractor';
+    const payAmount = showDeposit && depositDue >= 0.5 ? depositDue : balanceDue;
+
+    // All methods the contractor enabled (Venmo, PayPal, Zelle, Stripe, mail check, …)
+    const { buildClientPaymentOptions } = await import('@/lib/client-payment-options');
+    const paymentOptions = buildClientPaymentOptions({
+      paymentSettings: profile.paymentSettings || {},
+      amount: payAmount,
+      invoiceNumber: String(invoiceNumber),
+      company,
+      label: showDeposit ? 'Deposit' : 'Invoice payment',
+    });
+
     return NextResponse.json({
       ok: true,
       fromDb: true,
       documentType: row.documentType || row.document_type || typ,
-      invoiceNumber: row.invoiceNumber || row.invoicenumber || inv,
+      invoiceNumber,
       jobName: row.jobName || row.jobname || 'Your project',
-      company: profile.company || 'Your contractor',
+      company,
       companyPhone: profile.phone || '',
       companyEmail: profile.email || '',
       address: [row.address, row.city, row.state, row.zipCode || row.zipcode]
@@ -141,6 +180,9 @@ export async function GET(request: NextRequest) {
       showDeposit,
       paymentStatus: row.paymentStatus || row.payment_status || 'unpaid',
       terms: String(row.terms || profile.disclosure || '').slice(0, 8000),
+      chargeCCFee: profile.chargeCCFee !== false,
+      ccFeePercentage: Number(profile.ccFeePercentage) || 2.9,
+      paymentOptions,
       items: items.slice(0, 40).map((it: any) => ({
         description: String(it.description || 'Line item').slice(0, 200),
         qty: Number(it.qty) || 0,

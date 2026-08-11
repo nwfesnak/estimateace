@@ -266,7 +266,12 @@ export async function createJobCheckoutSession(
     });
   }
 
-  const sessionParams: Stripe.Checkout.SessionCreateParams = {
+  /**
+   * Prefer automatic payment methods so Stripe can show:
+   * card, Apple Pay / Google Pay (wallets), Link, US bank ACH when enabled.
+   * Explicit payment_method_types alone often hides wallets / ACH incorrectly.
+   */
+  const sessionParams: Record<string, unknown> = {
     mode: 'payment',
     line_items,
     success_url: input.successUrl || defaultSuccess,
@@ -275,31 +280,62 @@ export async function createJobCheckoutSession(
     payment_intent_data: {
       metadata,
     },
-    /**
-     * Card + US bank ACH (eCheck-style).
-     * ACH must also be enabled in Stripe Dashboard → Settings → Payment methods
-     * (and for Connect: connected account capabilities / payment method settings).
-     * If ACH is not enabled, Stripe may error — we fall back to card-only below.
-     */
-    payment_method_types: ['card', 'us_bank_account'],
+    automatic_payment_methods: {
+      enabled: true,
+      allow_redirects: 'always',
+    },
   };
 
   if (input.clientEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.clientEmail)) {
     sessionParams.customer_email = input.clientEmail;
   }
 
-  const createSession = async (params: Stripe.Checkout.SessionCreateParams, opts?: Stripe.RequestOptions) => {
+  const createSession = async (params: Record<string, unknown>, opts?: Stripe.RequestOptions) => {
     try {
-      return await stripe.checkout.sessions.create(params, opts);
+      return await stripe.checkout.sessions.create(
+        params as Stripe.Checkout.SessionCreateParams,
+        opts
+      );
     } catch (e: any) {
-      // ACH not enabled on account → retry card only
       const msg = String(e?.message || '');
+      // Fallback chain: card + ACH → card only
+      if (/automatic_payment_methods|payment_method/i.test(msg)) {
+        try {
+          const withTypes = {
+            ...params,
+            automatic_payment_methods: undefined,
+            payment_method_types: ['card', 'us_bank_account'],
+          };
+          return await stripe.checkout.sessions.create(
+            withTypes as Stripe.Checkout.SessionCreateParams,
+            opts
+          );
+        } catch (e2: any) {
+          const msg2 = String(e2?.message || '');
+          if (/us_bank_account|bank.account|payment_method_types/i.test(msg2)) {
+            const cardOnly = {
+              ...params,
+              automatic_payment_methods: undefined,
+              payment_method_types: ['card'],
+            };
+            return await stripe.checkout.sessions.create(
+              cardOnly as Stripe.Checkout.SessionCreateParams,
+              opts
+            );
+          }
+          throw e2;
+        }
+      }
       if (/us_bank_account|bank.account|payment_method_types/i.test(msg)) {
         const cardOnly = {
           ...params,
-          payment_method_types: ['card'] as Stripe.Checkout.SessionCreateParams.PaymentMethodType[],
+          automatic_payment_methods: undefined,
+          payment_method_types: ['card'],
         };
-        return await stripe.checkout.sessions.create(cardOnly, opts);
+        return await stripe.checkout.sessions.create(
+          cardOnly as Stripe.Checkout.SessionCreateParams,
+          opts
+        );
       }
       throw e;
     }
