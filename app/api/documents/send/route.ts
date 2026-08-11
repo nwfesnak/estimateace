@@ -88,10 +88,19 @@ export async function POST(request: NextRequest) {
     const showDiscount = discountAmount > 0.005;
     const depositPercent = Math.max(0, Number(body.depositPercent) || 0);
     const showDepositOnApproval = body.showDepositOnApproval !== false;
-    const depositDue =
-      documentType === 'estimate' && showDepositOnApproval && depositPercent > 0
-        ? Math.round(((grandTotal * depositPercent) / 100) * 100) / 100
-        : 0;
+    const { resolveAmountDue, computeProcessingFee } = await import('@/lib/stripe-fees');
+    const due = resolveAmountDue({
+      documentType,
+      grandTotal,
+      amountPaid,
+      depositPercent,
+      showDepositOnApproval,
+    });
+    const depositDue = due.depositDue;
+    const amountDueNow = due.amountDueNow;
+    const payLabel = due.payLabel;
+    // Example card fee for email (actual fee shown per method on pay page)
+    const exampleFee = computeProcessingFee(amountDueNow, { method: 'stripe' });
 
     const rawBreakdown = body.breakdownSettings || body.estimateBreakdownSettings || {};
     const breakdownSettings: EmailBreakdownSettings = {
@@ -135,11 +144,13 @@ export async function POST(request: NextRequest) {
 
     const ctaLabel =
       documentType === 'estimate'
-        ? depositDue >= 0.5
-          ? `Approve & pay deposit (${money(depositDue)})`
+        ? amountDueNow >= 0.5
+          ? `Approve & pay deposit (${money(amountDueNow)} + fees)`
           : 'Approve this estimate'
-        : balanceDue >= 0.5
-          ? `Pay balance (${money(balanceDue)})`
+        : amountDueNow >= 0.5
+          ? amountPaid > 0
+            ? `Pay remaining balance (${money(amountDueNow)} + fees)`
+            : `Pay invoice total (${money(amountDueNow)} + fees)`
           : 'View invoice & pay';
 
     const location = [address, city, state, zipCode].filter(Boolean).join(', ');
@@ -175,9 +186,18 @@ export async function POST(request: NextRequest) {
         : '',
       showDiscount && taxAmount > 0 ? `Tax: ${money(taxAmount)}` : '',
       `Grand total: ${money(grandTotal)}`,
-      amountPaid > 0 ? `Amount paid: ${money(amountPaid)}` : '',
-      `Balance due: ${money(balanceDue)}`,
-      depositDue >= 0.5 ? `Deposit due (${depositPercent}%): ${money(depositDue)}` : '',
+      amountPaid > 0 ? `Amount paid (e.g. deposit): ${money(amountPaid)}` : '',
+      documentType === 'estimate' && depositDue >= 0.5
+        ? `Deposit due now (${depositPercent}%): ${money(depositDue)}`
+        : '',
+      documentType === 'invoice'
+        ? `${payLabel}: ${money(amountDueNow)}`
+        : depositDue < 0.5
+          ? `Amount due: ${money(amountDueNow)}`
+          : '',
+      amountDueNow >= 0.5
+        ? `Card pay example: ${money(exampleFee.totalAmount)} (includes ~${money(exampleFee.feeAmount)} processing fee)`
+        : '',
       '',
       `${ctaLabel}:`,
       actionUrl,
@@ -226,10 +246,12 @@ export async function POST(request: NextRequest) {
   <div style="margin:28px 0;text-align:center;padding:20px;background:#ecfdf5;border:2px dashed #10b981;border-radius:16px;">
     ${
       documentType === 'estimate' && depositDue >= 0.5
-        ? `<p style="margin:0 0 8px;font-size:15px;color:#065f46;">Deposit due to schedule work: <strong>${money(depositDue)}</strong> (${depositPercent}% of total)</p>`
+        ? `<p style="margin:0 0 8px;font-size:15px;color:#065f46;">Deposit due now: <strong>${money(depositDue)}</strong> (${depositPercent}% of ${money(grandTotal)}). Processing fees apply at checkout.</p>`
         : documentType === 'estimate'
           ? `<p style="margin:0 0 8px;font-size:15px;color:#065f46;">Ready to move forward? Approve this estimate online.</p>`
-          : `<p style="margin:0 0 8px;font-size:15px;color:#065f46;">Balance due: <strong>${money(balanceDue)}</strong></p>`
+          : amountPaid > 0
+            ? `<p style="margin:0 0 8px;font-size:15px;color:#065f46;">Balance due (total ${money(grandTotal)} − paid ${money(amountPaid)}): <strong>${money(amountDueNow)}</strong>. Processing fees apply at payment.</p>`
+            : `<p style="margin:0 0 8px;font-size:15px;color:#065f46;">Total due: <strong>${money(amountDueNow)}</strong>. Processing fees apply at payment.</p>`
     }
     <a href="${escapeHtml(actionUrl)}"
        style="display:inline-block;background:#10b981;color:#ffffff;text-decoration:none;font-weight:700;font-size:16px;padding:14px 28px;border-radius:12px;margin-top:8px;">
@@ -272,9 +294,13 @@ export async function POST(request: NextRequest) {
         : ''
     }
     <p style="font-size:18px;font-weight:700;margin:8px 0 4px;">Grand total: ${money(grandTotal)}</p>
-    ${amountPaid > 0 ? `<p style="margin:0 0 4px;">Amount paid: ${money(amountPaid)}</p>` : ''}
-    <p style="margin:0 0 8px;">Balance due: <strong>${money(balanceDue)}</strong></p>
-    ${depositDue >= 0.5 ? `<p style="margin:0 0 8px;color:#065f46;">Deposit (${depositPercent}%): <strong>${money(depositDue)}</strong></p>` : ''}
+    ${amountPaid > 0 ? `<p style="margin:0 0 4px;">Amount paid (deposit etc.): ${money(amountPaid)}</p>` : ''}
+    ${
+      documentType === 'estimate' && depositDue >= 0.5
+        ? `<p style="margin:0 0 4px;color:#065f46;font-weight:600;">Deposit due now (${depositPercent}%): ${money(depositDue)}</p>
+    <p style="margin:0 0 8px;color:#64748b;font-size:13px;">Remaining after deposit: ${money(Math.max(0, grandTotal - depositDue))}</p>`
+        : `<p style="margin:0 0 8px;">${escapeHtml(payLabel)}: <strong>${money(amountDueNow)}</strong></p>`
+    }
   </div>
   ${ctaHtml}
   <p style="margin-top:24px;font-size:14px;color:#475569;">

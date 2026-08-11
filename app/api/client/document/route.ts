@@ -128,35 +128,41 @@ export async function GET(request: NextRequest) {
       itemsTotal ||
       0;
     const amountPaid = Number(row.amountPaid ?? row.amount_paid) || 0;
-    const balanceDue = Math.max(0, grandTotal - amountPaid);
     const taxAmount = Number(row.taxAmount ?? row.tax_amount) || 0;
     const depositPercent = Number(profile.depositPercentage) || 0;
-    const showDeposit =
-      typ === 'estimate'
-        ? profile.showDepositOnApproval !== false && depositPercent > 0
-        : false;
-    const depositDue = showDeposit
-      ? Math.round(((grandTotal * depositPercent) / 100) * 100) / 100
-      : 0;
+    const docTypeRaw = String(row.documentType || row.document_type || typ || 'estimate');
+
+    const { resolveAmountDue } = await import('@/lib/stripe-fees');
+    const due = resolveAmountDue({
+      documentType: docTypeRaw,
+      grandTotal,
+      amountPaid,
+      depositPercent,
+      showDepositOnApproval: profile.showDepositOnApproval !== false,
+    });
 
     const invoiceNumber = row.invoiceNumber || row.invoicenumber || inv;
     const company = profile.company || 'Your contractor';
-    const payAmount = showDeposit && depositDue >= 0.5 ? depositDue : balanceDue;
+    const feePercent =
+      profile.chargeCCFee !== false && Number(profile.ccFeePercentage) > 0
+        ? Number(profile.ccFeePercentage)
+        : 2.9;
 
-    // All methods the contractor enabled (Venmo, PayPal, Zelle, Stripe, mail check, …)
+    // All methods the contractor enabled — each total includes processing fee
     const { buildClientPaymentOptions } = await import('@/lib/client-payment-options');
     const paymentOptions = buildClientPaymentOptions({
       paymentSettings: profile.paymentSettings || {},
-      amount: payAmount,
+      amount: due.amountDueNow,
       invoiceNumber: String(invoiceNumber),
       company,
-      label: showDeposit ? 'Deposit' : 'Invoice payment',
+      label: due.payLabel,
+      feePercentRate: feePercent,
     });
 
     return NextResponse.json({
       ok: true,
       fromDb: true,
-      documentType: row.documentType || row.document_type || typ,
+      documentType: due.documentType,
       invoiceNumber,
       jobName: row.jobName || row.jobname || 'Your project',
       company,
@@ -172,16 +178,20 @@ export async function GET(request: NextRequest) {
       discountType,
       discountValue,
       taxAmount,
-      grandTotal,
-      amountPaid,
-      balanceDue,
-      depositPercent,
-      depositDue,
-      showDeposit,
+      grandTotal: due.grandTotal,
+      amountPaid: due.amountPaid,
+      balanceDue: due.balanceDue,
+      depositPercent: due.depositPercent,
+      depositDue: due.depositDue,
+      /** Estimate → deposit; invoice → full remaining balance */
+      showDeposit: due.payKind === 'deposit',
+      amountDueNow: due.amountDueNow,
+      payKind: due.payKind,
+      payLabel: due.payLabel,
       paymentStatus: row.paymentStatus || row.payment_status || 'unpaid',
       terms: String(row.terms || profile.disclosure || '').slice(0, 8000),
       chargeCCFee: profile.chargeCCFee !== false,
-      ccFeePercentage: Number(profile.ccFeePercentage) || 2.9,
+      ccFeePercentage: feePercent,
       paymentOptions,
       items: items.slice(0, 40).map((it: any) => ({
         description: String(it.description || 'Line item').slice(0, 200),

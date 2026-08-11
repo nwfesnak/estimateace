@@ -4784,8 +4784,13 @@ export default function Home() {
       ? previousId.replace(/^est/i, 'INV').replace(/^EST/, 'INV')
       : previousId;
 
+    // Keep deposit already paid — final invoice balance = grand total − deposit
+    const depositAlreadyPaid = Math.max(0, Number(amountPaid) || 0);
+    const remaining = Math.max(0, grandTotal - depositAlreadyPaid);
+
     setDocumentType('invoice');
     if (prevUpper.startsWith('EST')) setInvoiceNumber(nextNumber);
+    // amountPaid stays so balance due on invoice is total − deposit
     setView('sendPreview');
 
     // Persist as invoice under the new INV- id and drop the EST- work order immediately
@@ -4807,8 +4812,8 @@ export default function Home() {
           profile: getDocumentProfileSnapshot(),
           documentType: 'invoice' as const,
           dueDate,
-          paymentStatus,
-          amountPaid,
+          paymentStatus: depositAlreadyPaid > 0 && remaining < 0.01 ? 'paid' : paymentStatus || 'pending',
+          amountPaid: depositAlreadyPaid,
           paymentMethod,
           photoUrls,
           videoUrls,
@@ -4861,7 +4866,13 @@ export default function Home() {
             )
           );
           await refreshSavedList();
-          showMessage('✅ Converted to invoice — estimate removed from the Estimates page.');
+          if (depositAlreadyPaid > 0.009) {
+            showMessage(
+              `✅ Converted to invoice. Deposit paid $${depositAlreadyPaid.toFixed(2)} applied — balance due $${remaining.toFixed(2)}.`
+            );
+          } else {
+            showMessage('✅ Converted to invoice — full amount is due. Estimate removed from Estimates.');
+          }
         }
       } catch (e) {
         console.error('convertToInvoice unexpected error:', e);
@@ -13023,33 +13034,41 @@ export default function Home() {
                   percentRate: rate,
                   fixedFee: STRIPE_CARD_FIXED_USD,
                 });
+                const isDepositPay = paymentType === 'deposit';
                 return (
                   <>
                     <div className="text-4xl sm:text-5xl font-bold text-[#10b981]">
                       ${fee.totalAmount.toFixed(2)}
                     </div>
                     <p className="text-sm text-gray-600 mt-1">
-                      Total if paying by card · {profile.company || 'the contractor'}
+                      {isDepositPay ? 'Deposit' : documentType === 'invoice' ? 'Invoice total due' : 'Amount due'}{' '}
+                      + processing fee · {profile.company || 'the contractor'}
                       {invoiceNumber ? ` · #${invoiceNumber}` : ''}
                     </p>
                     <div className="mt-3 text-left text-xs sm:text-sm space-y-1 max-w-xs mx-auto text-gray-700">
                       <div className="flex justify-between gap-3">
-                        <span>{paymentType === 'deposit' ? 'Deposit' : 'Balance due'}</span>
+                        <span>
+                          {isDepositPay
+                            ? 'Deposit'
+                            : amountPaid > 0
+                              ? 'Balance after deposit'
+                              : 'Amount due'}
+                        </span>
                         <span className="font-semibold">${fee.baseAmount.toFixed(2)}</span>
                       </div>
                       <div className="flex justify-between gap-3 text-amber-800">
                         <span>
-                          Card processing ({fee.percentRate}% + ${fee.fixedFee.toFixed(2)})
+                          Processing fee ({fee.percentRate}% + ${fee.fixedFee.toFixed(2)})
                         </span>
                         <span className="font-semibold">${fee.feeAmount.toFixed(2)}</span>
                       </div>
                       <div className="flex justify-between gap-3 pt-1 border-t border-emerald-200 font-bold text-emerald-900">
-                        <span>You pay by card</span>
+                        <span>Client pays (any method)</span>
                         <span>${fee.totalAmount.toFixed(2)}</span>
                       </div>
                     </div>
                     <p className="text-[11px] text-gray-500 mt-2">
-                      Venmo / Zelle / cash stay at the base amount only (no card fee).
+                      Fee applies to Stripe, Venmo, PayPal, Zelle, and check so you receive the full job amount.
                     </p>
                     {stripeConnectStatus?.isTest && (
                       <p className="text-[11px] text-amber-700 font-medium mt-1">

@@ -27,6 +27,9 @@ type DocPayload = {
   depositPercent?: number;
   depositDue?: number;
   showDeposit?: boolean;
+  amountDueNow?: number;
+  payKind?: 'deposit' | 'balance';
+  payLabel?: string;
   paymentStatus?: string;
   terms?: string;
   items?: Array<{ description: string; qty: number; total: number }>;
@@ -41,6 +44,11 @@ type DocPayload = {
     qrUrl?: string;
     payUrl?: string;
     clickToPay: boolean;
+    baseAmount?: number;
+    feeAmount?: number;
+    totalAmount?: number;
+    feeLabel?: string;
+    feeDescription?: string;
   }>;
   message?: string;
   error?: string;
@@ -97,9 +105,26 @@ function ApprovePayInner() {
   const isEstimate = (doc?.documentType || 'estimate') !== 'invoice';
   const depositDue = Number(doc?.depositDue) || 0;
   const balanceDue = Number(doc?.balanceDue) || 0;
-  const showDeposit = !!doc?.showDeposit && depositDue >= 0.5;
-  const payKind: 'deposit' | 'balance' = showDeposit ? 'deposit' : 'balance';
-  const basePay = showDeposit ? depositDue : balanceDue;
+  const amountPaid = Number(doc?.amountPaid) || 0;
+  const grandTotal = Number(doc?.grandTotal) || 0;
+  // Estimate → deposit; invoice → full remaining (total − deposit already paid)
+  const payKind: 'deposit' | 'balance' =
+    doc?.payKind === 'deposit' || (!!doc?.showDeposit && depositDue >= 0.5)
+      ? 'deposit'
+      : 'balance';
+  const basePay =
+    Number(doc?.amountDueNow) > 0
+      ? Number(doc?.amountDueNow)
+      : payKind === 'deposit'
+        ? depositDue
+        : balanceDue;
+  const payLabel =
+    doc?.payLabel ||
+    (payKind === 'deposit'
+      ? 'Deposit due'
+      : amountPaid > 0
+        ? 'Balance due (after deposit)'
+        : 'Total due');
   const paymentOptions = doc?.paymentOptions || [];
   const canPay = basePay >= 0.5;
 
@@ -149,24 +174,35 @@ function ApprovePayInner() {
       return;
     }
 
+    const totalWithFee = Number(opt.totalAmount) > 0 ? Number(opt.totalAmount) : basePay;
+    const feeAmt = Number(opt.feeAmount) || 0;
+
     if (opt.payUrl && (method === 'venmo' || method === 'paypal')) {
       window.open(opt.payUrl, '_blank', 'noopener,noreferrer');
       setInfoBanner(
-        `Opened ${opt.label}. Complete payment there for ${money(basePay)}, then your contractor will mark this paid.`
+        `Opened ${opt.label}. Pay ${money(totalWithFee)}` +
+          (feeAmt > 0
+            ? ` (includes ${money(feeAmt)} ${opt.feeLabel || 'processing fee'})`
+            : '') +
+          `. Your contractor will mark the job paid when funds arrive.`
       );
       return;
     }
 
     if (method === 'zelle') {
       setInfoBanner(
-        `Send ${money(basePay)} via Zelle to ${opt.handle || 'the contractor'}. Put invoice # ${doc?.invoiceNumber || ''} in the memo.`
+        `Send ${money(totalWithFee)} via Zelle to ${opt.handle || 'the contractor'}` +
+          (feeAmt > 0 ? ` (job ${money(basePay)} + ${money(feeAmt)} fee)` : '') +
+          `. Put invoice # ${doc?.invoiceNumber || ''} in the memo.`
       );
       return;
     }
 
     if (method === 'mailcheck') {
       setInfoBanner(
-        `Mail a check for ${money(basePay)} to:\n${opt.handle || 'address on file'}\nWrite # ${doc?.invoiceNumber || ''} on the memo line.`
+        `Mail a check for ${money(totalWithFee)} to:\n${opt.handle || 'address on file'}\n` +
+          (feeAmt > 0 ? `(Job ${money(basePay)} + ${money(feeAmt)} processing fee)\n` : '') +
+          `Write # ${doc?.invoiceNumber || ''} on the memo line.`
       );
       return;
     }
@@ -285,10 +321,10 @@ function ApprovePayInner() {
               </div>
             )}
             <div className="flex justify-between text-sm">
-              <span>Balance due</span>
-              <span className="font-semibold">{money(balanceDue)}</span>
+              <span>{payLabel}</span>
+              <span className="font-semibold">{money(basePay)}</span>
             </div>
-            {showDeposit && (
+            {payKind === 'deposit' && depositDue >= 0.5 && (
               <div className="flex justify-between text-sm text-emerald-800 pt-2 border-t mt-2">
                 <span>Deposit ({doc?.depositPercent || 0}%)</span>
                 <span className="font-semibold">{money(depositDue)}</span>
@@ -296,36 +332,27 @@ function ApprovePayInner() {
             )}
           </div>
 
+          {/* Amount due summary */}
           {canPay && (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm space-y-1">
-              {(() => {
-                const fee = computeStripeCardFee(basePay, {
-                  percentRate: STRIPE_CARD_PERCENT,
-                  fixedFee: STRIPE_CARD_FIXED_USD,
-                });
-                return (
-                  <>
-                    <p className="font-semibold text-amber-950">If you pay by card / Apple Pay / eCheck</p>
-                    <div className="flex justify-between text-amber-900">
-                      <span>{showDeposit ? 'Deposit' : 'Balance'}</span>
-                      <span>{money(fee.baseAmount)}</span>
-                    </div>
-                    <div className="flex justify-between text-amber-900">
-                      <span>
-                        Card processing ({fee.percentRate}% + ${fee.fixedFee.toFixed(2)})
-                      </span>
-                      <span>{money(fee.feeAmount)}</span>
-                    </div>
-                    <div className="flex justify-between font-bold text-amber-950 pt-1 border-t border-amber-200">
-                      <span>Stripe Checkout total</span>
-                      <span>{money(fee.totalAmount)}</span>
-                    </div>
-                    <p className="text-[11px] text-amber-800/80 pt-1">
-                      Venmo, PayPal, Zelle, and mail check use the base amount only (no card fee).
-                    </p>
-                  </>
-                );
-              })()}
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm space-y-1">
+              <div className="flex justify-between font-semibold text-slate-900">
+                <span>{payLabel}</span>
+                <span>{money(basePay)}</span>
+              </div>
+              {isEstimate && payKind === 'deposit' && (
+                <p className="text-xs text-slate-600">
+                  Deposit only. Remaining balance after deposit: {money(Math.max(0, grandTotal - basePay))}
+                  {amountPaid > 0 ? ` (already paid ${money(amountPaid)})` : ''}.
+                </p>
+              )}
+              {!isEstimate && amountPaid > 0 && (
+                <p className="text-xs text-slate-600">
+                  Job total {money(grandTotal)} − deposit/payments {money(amountPaid)} = balance due.
+                </p>
+              )}
+              <p className="text-[11px] text-amber-800 pt-1">
+                A processing fee is added on every payment method so your contractor receives the full job amount.
+              </p>
             </div>
           )}
 
@@ -353,24 +380,22 @@ function ApprovePayInner() {
           {isEstimate && approved && (
             <div className="rounded-xl border-2 border-emerald-500 bg-emerald-50 p-3 text-center">
               <p className="text-emerald-800 font-semibold">Estimate approved</p>
-              <p className="text-sm text-emerald-700">Choose how you want to pay below.</p>
+              <p className="text-sm text-emerald-700">Choose how you want to pay the deposit below.</p>
             </div>
           )}
 
-          {/* All contractor-enabled payment methods */}
-          {canPay && (!isEstimate || approved || showDeposit) && (
+          {/* All contractor-enabled methods — totals include processing fee */}
+          {canPay && (!isEstimate || approved || payKind === 'deposit') && (
             <div className="space-y-3 pt-1">
               <p className="text-sm font-semibold text-slate-800">
-                Pay {showDeposit ? 'deposit' : 'balance'} — {money(basePay)}
+                {payLabel} — choose a payment method
               </p>
               <p className="text-xs text-slate-500">
                 Options enabled by {doc?.company || 'your contractor'}:
               </p>
               {paymentOptions.map((opt) => {
-                const isStripe = opt.method === 'stripe';
-                const cardTotal = isStripe
-                  ? computeStripeCardFee(basePay).totalAmount
-                  : basePay;
+                const total = Number(opt.totalAmount) > 0 ? Number(opt.totalAmount) : basePay;
+                const feeAmt = Number(opt.feeAmount) || 0;
                 return (
                   <button
                     key={opt.method}
@@ -407,15 +432,22 @@ function ApprovePayInner() {
                             className="mt-2 w-28 h-28 object-contain border rounded bg-white"
                           />
                         )}
-                        <p className="text-[11px] text-slate-500 mt-1">{opt.howItWorks}</p>
+                        <div className="mt-2 text-[11px] text-slate-600 space-y-0.5">
+                          <div className="flex justify-between gap-2">
+                            <span>{payLabel}</span>
+                            <span>{money(Number(opt.baseAmount) || basePay)}</span>
+                          </div>
+                          {feeAmt > 0 && (
+                            <div className="flex justify-between gap-2 text-amber-800">
+                              <span>{opt.feeLabel || 'Processing fee'}</span>
+                              <span>{money(feeAmt)}</span>
+                            </div>
+                          )}
+                        </div>
                       </div>
                       <div className="shrink-0 text-right">
-                        <div className="text-sm font-bold text-emerald-700">
-                          {money(cardTotal)}
-                        </div>
-                        {isStripe && (
-                          <div className="text-[10px] text-slate-500">incl. card fee</div>
-                        )}
+                        <div className="text-sm font-bold text-emerald-700">{money(total)}</div>
+                        <div className="text-[10px] text-slate-500">you pay</div>
                         <div className="text-xs font-semibold text-emerald-600 mt-1">
                           {busy && selectedMethod === opt.method ? '…' : 'Pay →'}
                         </div>
@@ -430,7 +462,9 @@ function ApprovePayInner() {
                   disabled={busy}
                   onClick={() => void startStripeCheckout(payKind)}
                 >
-                  {busy ? 'Starting…' : `Pay with Stripe (${money(computeStripeCardFee(basePay).totalAmount)})`}
+                  {busy
+                    ? 'Starting…'
+                    : `Pay with Stripe (${money(computeStripeCardFee(basePay).totalAmount)})`}
                 </Button>
               )}
             </div>

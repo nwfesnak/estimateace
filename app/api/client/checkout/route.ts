@@ -52,16 +52,23 @@ export async function POST(request: NextRequest) {
       itemsTotal ||
       0;
     const amountPaid = Number(row?.amountPaid ?? row?.amount_paid) || 0;
-    const balanceDue = Math.max(0, grandTotal - amountPaid);
     const depositPercent =
       Number(body.depositPercent) || Number(profile.depositPercentage) || 0;
-    let amount =
-      kind === 'balance'
-        ? balanceDue
-        : Math.round(((grandTotal * depositPercent) / 100) * 100) / 100;
+    const documentType = String(row?.documentType || row?.document_type || typ || 'estimate');
 
-    // Allow explicit amount from client page when DB missing (validated min)
-    if ((!amount || amount < 0.5) && Number(body.amount) >= 0.5) {
+    const { resolveAmountDue } = await import('@/lib/stripe-fees');
+    const due = resolveAmountDue({
+      documentType,
+      grandTotal,
+      amountPaid,
+      depositPercent,
+      showDepositOnApproval: profile.showDepositOnApproval !== false,
+    });
+
+    // Force correct amount: estimate → deposit; invoice → remaining balance
+    let amount = due.amountDueNow;
+    // Allow explicit amount only if it matches the due type and is valid
+    if (Number(body.amount) >= 0.5 && Math.abs(Number(body.amount) - amount) < 0.02) {
       amount = Number(body.amount);
     }
 
@@ -69,7 +76,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           error:
-            kind === 'deposit'
+            due.payKind === 'deposit'
               ? 'Deposit amount is too small or not set. Contact your contractor.'
               : 'Balance due is too small or already paid.',
         },
@@ -80,9 +87,8 @@ export async function POST(request: NextRequest) {
     const invoiceNumber = String(row?.invoiceNumber || row?.invoicenumber || inv);
     const invoiceId = String(row?.id || inv);
     const jobName = String(row?.jobName || row?.jobname || body.jobName || '');
-    const documentType = String(row?.documentType || row?.document_type || typ || 'estimate');
 
-    // Pass card processing fee to payee (shown as its own Checkout line)
+    // Always pass processing fee to payee (separate Checkout line)
     const chargeCCFee = profile.chargeCCFee !== false;
     const feePercentRate =
       chargeCCFee && Number(profile.ccFeePercentage) > 0
@@ -97,11 +103,11 @@ export async function POST(request: NextRequest) {
       amount,
       invoiceId,
       invoiceNumber,
-      documentType,
+      documentType: due.documentType,
       jobName,
       clientEmail: clientEmail || undefined,
       requestUrl: request.url,
-      paymentKind: kind,
+      paymentKind: due.payKind,
       successUrl: `${returnBase}&paid=1`,
       cancelUrl: `${returnBase}&paid=0`,
       passProcessingFee: true,
