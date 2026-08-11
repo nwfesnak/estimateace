@@ -28,10 +28,14 @@ export type RecurringPlanRow = {
 type Props = {
   getAccessToken: () => Promise<string | null>;
   onBack: () => void;
+  /** Optional: return to estimate editor instead of only dashboard */
+  onBackToEstimate?: () => void;
   showMessage: (msg: string) => void;
   companyName?: string;
   companyEmail?: string;
   companyPhone?: string;
+  companySlogan?: string;
+  logoUrl?: string;
 };
 
 const emptyForm = {
@@ -74,10 +78,13 @@ function statusLabel(status: string, clientApprovedAt?: string | null) {
 export function RecurringServicesPanel({
   getAccessToken,
   onBack,
+  onBackToEstimate,
   showMessage,
   companyName,
   companyEmail,
   companyPhone,
+  companySlogan,
+  logoUrl,
 }: Props) {
   const [plans, setPlans] = useState<RecurringPlanRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -286,21 +293,51 @@ export function RecurringServicesPanel({
   };
 
   return (
-    <div className="max-w-3xl mx-auto">
-      <Button variant="outline" onClick={onBack} className="mb-6">
-        ← Back to dashboard
-      </Button>
+    <div className="w-full max-w-4xl mx-auto min-w-0">
+      {/* Same chrome style as Create Estimate */}
+      <div className="flex flex-wrap items-center gap-2 mb-6">
+        <Button variant="outline" onClick={onBack}>
+          ← Back to dashboard
+        </Button>
+        {onBackToEstimate && (
+          <Button variant="outline" onClick={onBackToEstimate}>
+            ← Back to estimate
+          </Button>
+        )}
+      </div>
 
-      <div className="mb-6">
-        <h2 className="text-3xl font-semibold text-[#1e293b]">🔁 Recurring client charges</h2>
-        <p className="text-gray-600 mt-2 max-w-2xl">
-          Bill <strong>your clients</strong> automatically for services like monthly mowing, pest
-          control, or maintenance.
-        </p>
-        <div className="mt-3 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950">
-          <strong>Not your EstimateAce plan.</strong> Monthly/yearly software billing stays under
-          Profile → Billing. These plans only charge the customer for the work you do.
+      <div className="flex flex-wrap justify-between items-start gap-4 mb-8">
+        <div className="flex items-start gap-4 min-w-0">
+          {logoUrl ? (
+            <img
+              src={logoUrl}
+              alt=""
+              className="w-16 h-16 object-contain border rounded shrink-0"
+            />
+          ) : null}
+          <div className="min-w-0">
+            <h1 className="text-3xl sm:text-4xl font-bold text-[#1e293b]">
+              {companyName || 'Your company'}
+            </h1>
+            {companySlogan ? (
+              <p className="text-lg text-gray-600">{companySlogan}</p>
+            ) : null}
+            <p className="text-xl font-semibold text-teal-800 mt-2">🔁 Recurring charges</p>
+            <p className="text-sm text-gray-600 mt-1 max-w-xl">
+              Create scheduled client billing (mowing, maintenance, etc.) — same workflow as an
+              estimate, for auto-charges.
+            </p>
+          </div>
         </div>
+        <div className="text-right shrink-0">
+          <div className="text-sm text-gray-500">Document type</div>
+          <div className="text-2xl font-mono font-bold text-teal-700">RECURRING</div>
+        </div>
+      </div>
+
+      <div className="mb-6 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950">
+        <strong>Not your EstimateAce plan.</strong> These charges bill <strong>your clients</strong>{' '}
+        only. Software billing stays under Profile → Billing.
       </div>
 
       <div className="flex flex-wrap gap-3 mb-6">

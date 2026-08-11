@@ -8700,28 +8700,6 @@ export default function Home() {
                 </CardContent>
               </Card>
 
-              <Card className="mb-8 border-teal-200 bg-gradient-to-br from-white to-teal-50/50">
-                <CardContent className="p-6">
-                  <div className="flex flex-wrap items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <h3 className="font-semibold text-lg flex items-center gap-2">
-                        🔁 Recurring client charges
-                      </h3>
-                      <p className="text-sm text-gray-600 mt-1 max-w-lg">
-                        Auto-bill customers for <strong>monthly mowing</strong>, maintenance, and other
-                        scheduled services. Separate from your EstimateAce software subscription.
-                      </p>
-                    </div>
-                    <Button
-                      className="bg-teal-700 hover:bg-teal-800 text-white shrink-0"
-                      onClick={() => setView('recurringView')}
-                    >
-                      Open recurring services
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-
               <Card className="mb-8 border-emerald-200 bg-gradient-to-br from-white to-emerald-50/40">
                 <CardContent className="p-6">
                   <div className="flex flex-wrap items-start justify-between gap-4">
@@ -8997,7 +8975,18 @@ export default function Home() {
 
           {view === 'editor' && (
             <div className="w-full max-w-full min-w-0 overflow-x-hidden box-border">
-              <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to {t('dashboard')}</Button>
+              <div className="flex flex-wrap items-center gap-2 mb-6">
+                <Button variant="outline" onClick={goToDashboard}>
+                  ← Back to {t('dashboard')}
+                </Button>
+                <Button
+                  type="button"
+                  className="bg-teal-700 hover:bg-teal-800 text-white"
+                  onClick={() => setView('recurringView')}
+                >
+                  🔁 Recurring charges
+                </Button>
+              </div>
 
               <div className="flex justify-between items-start mb-8">
                 <div className="flex items-start gap-4">
@@ -11701,10 +11690,13 @@ export default function Home() {
           {view === 'recurringView' && (
             <RecurringServicesPanel
               onBack={goToDashboard}
+              onBackToEstimate={() => setView('editor')}
               showMessage={showMessage}
               companyName={profile.company || ''}
               companyEmail={profile.email || ''}
               companyPhone={profile.phone || ''}
+              companySlogan={profile.slogan || ''}
+              logoUrl={logoDisplayUrl || ''}
               getAccessToken={async () => {
                 if (!supabase) return null;
                 const { data } = await supabase.auth.getSession();
