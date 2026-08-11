@@ -1,6 +1,7 @@
 import type Stripe from 'stripe';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
-import { getStripe, getAppUrl } from '@/lib/stripe-server';
+import { getStripe, getAppUrl, getStripeMode } from '@/lib/stripe-server';
+import { computeStripeCardFee, shouldPassProcessingFeeToPayee } from '@/lib/stripe-fees';
 
 export type PaymentAccountRow = {
   user_id: string;
@@ -150,6 +151,15 @@ export type JobCheckoutInput = {
   cancelUrl?: string;
   /** deposit | balance | invoice */
   paymentKind?: string;
+  /**
+   * Pass Stripe card processing fee to the payee as a separate line item.
+   * Default true. Fee shown clearly on Checkout.
+   */
+  passProcessingFee?: boolean;
+  /** Fee % (default 2.9 Stripe US card). Contractor profile may pass 3 etc. */
+  feePercentRate?: number;
+  /** Fixed fee dollars (default $0.30) */
+  feeFixedUsd?: number;
 };
 
 /**
@@ -158,14 +168,41 @@ export type JobCheckoutInput = {
  */
 export async function createJobCheckoutSession(
   input: JobCheckoutInput
-): Promise<{ ok: boolean; url?: string; mode?: string; error?: string }> {
+): Promise<{
+  ok: boolean;
+  url?: string;
+  mode?: string;
+  error?: string;
+  stripeMode?: string;
+  baseAmount?: number;
+  feeAmount?: number;
+  totalCharged?: number;
+}> {
   const stripe = getStripe();
   if (!stripe) {
     return { ok: false, error: 'Stripe is not configured (STRIPE_SECRET_KEY).' };
   }
 
-  const cents = Math.round(Math.max(0, input.amount) * 100);
-  if (cents < 50) {
+  const baseAmount = Math.max(0, Number(input.amount) || 0);
+  if (baseAmount < 0.5) {
+    return { ok: false, error: 'Amount must be at least $0.50.' };
+  }
+
+  const passFee =
+    input.passProcessingFee !== undefined
+      ? input.passProcessingFee
+      : shouldPassProcessingFeeToPayee();
+  const feeBreakdown = passFee
+    ? computeStripeCardFee(baseAmount, {
+        percentRate: input.feePercentRate,
+        fixedFee: input.feeFixedUsd,
+      })
+    : null;
+  const chargeTotal = feeBreakdown ? feeBreakdown.totalAmount : baseAmount;
+  const cents = Math.round(baseAmount * 100);
+  const feeCents = feeBreakdown ? Math.round(feeBreakdown.feeAmount * 100) : 0;
+
+  if (Math.round(chargeTotal * 100) < 50) {
     return { ok: false, error: 'Amount must be at least $0.50.' };
   }
 
@@ -173,6 +210,7 @@ export async function createJobCheckoutSession(
   const account = await getPaymentAccount(input.ownerUserId);
   const connectedId = account?.stripe_account_id || null;
   const canChargeConnected = !!(connectedId && account?.charges_enabled);
+  const stripeMode = getStripeMode();
 
   const kind = (input.paymentKind || 'payment').slice(0, 40);
   const metadata: Record<string, string> = {
@@ -183,6 +221,10 @@ export async function createJobCheckoutSession(
     invoice_number: input.invoiceNumber,
     document_type: input.documentType || 'invoice',
     job_name: (input.jobName || '').slice(0, 200),
+    base_amount: baseAmount.toFixed(2),
+    fee_amount: feeBreakdown ? feeBreakdown.feeAmount.toFixed(2) : '0',
+    total_charged: chargeTotal.toFixed(2),
+    stripe_mode: stripeMode,
   };
 
   const kindLabel =
@@ -196,21 +238,37 @@ export async function createJobCheckoutSession(
   const defaultSuccess = `${appUrl}/?job_paid=1&invoice=${encodeURIComponent(input.invoiceId)}`;
   const defaultCancel = `${appUrl}/?job_paid=0&invoice=${encodeURIComponent(input.invoiceId)}`;
 
-  const sessionParams: Stripe.Checkout.SessionCreateParams = {
-    mode: 'payment',
-    line_items: [
-      {
-        quantity: 1,
-        price_data: {
-          currency: 'usd',
-          unit_amount: cents,
-          product_data: {
-            name: productName,
-            description,
-          },
+  const line_items: Stripe.Checkout.SessionCreateParams.LineItem[] = [
+    {
+      quantity: 1,
+      price_data: {
+        currency: 'usd',
+        unit_amount: cents,
+        product_data: {
+          name: productName,
+          description,
         },
       },
-    ],
+    },
+  ];
+
+  if (feeBreakdown && feeCents > 0) {
+    line_items.push({
+      quantity: 1,
+      price_data: {
+        currency: 'usd',
+        unit_amount: feeCents,
+        product_data: {
+          name: feeBreakdown.feeLabel,
+          description: feeBreakdown.feeDescription.slice(0, 200),
+        },
+      },
+    });
+  }
+
+  const sessionParams: Stripe.Checkout.SessionCreateParams = {
+    mode: 'payment',
+    line_items,
     success_url: input.successUrl || defaultSuccess,
     cancel_url: input.cancelUrl || defaultCancel,
     metadata,
@@ -254,7 +312,15 @@ export async function createJobCheckoutSession(
         stripeAccount: connectedId,
       });
       if (!session.url) return { ok: false, error: 'Stripe did not return a checkout URL.' };
-      return { ok: true, url: session.url, mode: 'connect' };
+      return {
+        ok: true,
+        url: session.url,
+        mode: 'connect',
+        stripeMode,
+        baseAmount,
+        feeAmount: feeBreakdown?.feeAmount ?? 0,
+        totalCharged: chargeTotal,
+      };
     }
 
     // Platform fallback (same Stripe as SaaS — for testing or sole operator)
@@ -270,6 +336,10 @@ export async function createJobCheckoutSession(
       ok: true,
       url: session.url,
       mode: 'platform',
+      stripeMode,
+      baseAmount,
+      feeAmount: feeBreakdown?.feeAmount ?? 0,
+      totalCharged: chargeTotal,
     };
   } catch (e: any) {
     console.error('createJobCheckoutSession:', e);
@@ -277,7 +347,7 @@ export async function createJobCheckoutSession(
       ok: false,
       error:
         e?.message ||
-        'Could not create Stripe Checkout. Complete Connect onboarding or check Stripe keys.',
+        'Could not create Stripe Checkout. Use live keys (sk_live_…) for real payments, complete Connect, or check Stripe keys.',
     };
   }
 }
@@ -303,7 +373,15 @@ export async function markDocumentPaidFromJobCheckout(session: Stripe.Checkout.S
     return { ok: false, error: 'Missing invoice_id or user in metadata' };
   }
 
+  // Prefer base job amount (exclude card fee line) so invoice balance is correct
+  const baseFromMeta = Number(session.metadata?.base_amount);
   const amountTotal = session.amount_total != null ? session.amount_total / 100 : null;
+  const jobPaidAmount =
+    Number.isFinite(baseFromMeta) && baseFromMeta > 0
+      ? baseFromMeta
+      : amountTotal != null
+        ? amountTotal
+        : null;
 
   const { data: row, error: fetchErr } = await admin
     .from('estimates')
@@ -316,10 +394,9 @@ export async function markDocumentPaidFromJobCheckout(session: Stripe.Checkout.S
     console.error('job pay fetch:', fetchErr);
   }
 
+  const previousPaid = Number((row as any)?.amountPaid ?? (row as any)?.amountpaid ?? 0) || 0;
   const paidAmount =
-    amountTotal != null
-      ? amountTotal
-      : Number((row as any)?.amountPaid ?? (row as any)?.amountpaid ?? 0) || 0;
+    jobPaidAmount != null ? previousPaid + jobPaidAmount : previousPaid;
 
   const base = row || { id: invoiceId, user_id: ownerId };
   const updates: Record<string, unknown> = {

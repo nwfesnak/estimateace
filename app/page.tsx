@@ -8,6 +8,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { TouchDoubleTapTextarea } from '@/components/TouchDoubleTapTextarea';
 import { DeviceCamera, type DeviceCameraMode } from '@/components/DeviceCamera';
 import { RecurringServicesPanel } from '@/components/RecurringServicesPanel';
+import { computeStripeCardFee, STRIPE_CARD_FIXED_USD, STRIPE_CARD_PERCENT } from '@/lib/stripe-fees';
 import {
   MileageTracker,
   normalizeMileageLogs,
@@ -1217,8 +1218,11 @@ export default function Home() {
     connected?: boolean;
     chargesEnabled?: boolean;
     connectReady?: boolean;
-    mode?: string;
     stripeConfigured?: boolean;
+    stripeMode?: string;
+    isLive?: boolean;
+    isTest?: boolean;
+    mode?: string;
   } | null>(null);
   const [stripeConnectBusy, setStripeConnectBusy] = useState(false);
   const [jobCheckoutBusy, setJobCheckoutBusy] = useState(false);
@@ -7723,6 +7727,21 @@ export default function Home() {
             Settings → Payment methods (platform + connected accounts). Separate from EstimateAce
             monthly subscriptions.
           </p>
+          {stripeConnectStatus?.isTest && (
+            <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950 sm:ml-14">
+              <strong>Test mode.</strong> Keys start with <code className="text-xs">sk_test_</code> —
+              no real money. For live payments: Stripe Dashboard → switch to{' '}
+              <strong>Live</strong> → Developers → API keys → copy <code className="text-xs">sk_live_…</code>{' '}
+              into Vercel <code className="text-xs">STRIPE_SECRET_KEY</code>, use live price IDs + live
+              webhook secret, then redeploy.
+            </div>
+          )}
+          {stripeConnectStatus?.isLive && (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-950 sm:ml-14">
+              <strong>Live mode.</strong> Real card payments enabled. Checkout shows job amount + card
+              processing fee (default 2.9% + $0.30) as separate lines for the payee.
+            </div>
+          )}
         </div>
       );
     }
@@ -7803,6 +7822,9 @@ export default function Home() {
           connectReady: !!json.connectReady,
           mode: json.mode,
           stripeConfigured: !!json.stripeConfigured,
+          stripeMode: json.stripeMode,
+          isLive: !!json.isLive,
+          isTest: !!json.isTest,
         });
         if (json.connectReady || json.connected) {
           const nextProfile = {
@@ -7876,6 +7898,12 @@ export default function Home() {
         return;
       }
       const clientEmail = (emails || []).map((e) => String(e || '').trim()).find(Boolean) || '';
+      const feePercent =
+        profile.chargeCCFee !== false
+          ? Number(profile.ccFeePercentage) > 0
+            ? Number(profile.ccFeePercentage)
+            : 2.9
+          : 2.9;
       const res = await fetch('/api/payments/job-checkout', {
         method: 'POST',
         headers: {
@@ -7889,6 +7917,8 @@ export default function Home() {
           documentType,
           jobName,
           clientEmail,
+          passProcessingFee: true,
+          feePercentRate: feePercent,
         }),
       });
       const json = await res.json().catch(() => ({}));
@@ -7896,9 +7926,18 @@ export default function Home() {
         showMessage(json.error || 'Could not start Stripe Checkout.');
         return;
       }
-      if (json.mode === 'platform') {
+      if (json.stripeMode === 'test') {
+        showMessage(
+          '⚠ Stripe is still in TEST mode (sk_test_). Replace STRIPE_SECRET_KEY with sk_live_… in Vercel for real money.'
+        );
+      } else if (json.mode === 'platform') {
         showMessage(
           'Opening card checkout (platform Stripe). Connect Stripe in Profile for payouts to your bank.'
+        );
+      }
+      if (json.feeAmount > 0) {
+        showMessage(
+          `Client pays $${Number(json.totalCharged).toFixed(2)} (job $${Number(json.baseAmount).toFixed(2)} + card fee $${Number(json.feeAmount).toFixed(2)}). Opening checkout…`
         );
       }
       closePaymentModal();
@@ -12981,18 +13020,53 @@ export default function Home() {
           </DialogHeader>
           <div className="py-2 space-y-5">
             <div className="text-center rounded-2xl bg-emerald-50 border border-emerald-100 p-5">
-              <div className="text-4xl sm:text-5xl font-bold text-[#10b981]">
-                ${paymentAmount.toFixed(2)}
-              </div>
-              <p className="text-sm text-gray-600 mt-1">
-                Pay {profile.company || 'the contractor'}
-                {invoiceNumber ? ` · #${invoiceNumber}` : ''}
-              </p>
-              {profile.chargeCCFee && ccFeePercent > 0 && (
-                <p className="text-xs text-amber-700 mt-1">
-                  Card payments may include a {ccFeePercent}% processing fee
-                </p>
-              )}
+              {(() => {
+                const rate =
+                  profile.chargeCCFee !== false
+                    ? Number(profile.ccFeePercentage) > 0
+                      ? Number(profile.ccFeePercentage)
+                      : STRIPE_CARD_PERCENT
+                    : STRIPE_CARD_PERCENT;
+                const fee = computeStripeCardFee(paymentAmount, {
+                  percentRate: rate,
+                  fixedFee: STRIPE_CARD_FIXED_USD,
+                });
+                return (
+                  <>
+                    <div className="text-4xl sm:text-5xl font-bold text-[#10b981]">
+                      ${fee.totalAmount.toFixed(2)}
+                    </div>
+                    <p className="text-sm text-gray-600 mt-1">
+                      Total if paying by card · {profile.company || 'the contractor'}
+                      {invoiceNumber ? ` · #${invoiceNumber}` : ''}
+                    </p>
+                    <div className="mt-3 text-left text-xs sm:text-sm space-y-1 max-w-xs mx-auto text-gray-700">
+                      <div className="flex justify-between gap-3">
+                        <span>{paymentType === 'deposit' ? 'Deposit' : 'Balance due'}</span>
+                        <span className="font-semibold">${fee.baseAmount.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between gap-3 text-amber-800">
+                        <span>
+                          Card processing ({fee.percentRate}% + ${fee.fixedFee.toFixed(2)})
+                        </span>
+                        <span className="font-semibold">${fee.feeAmount.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between gap-3 pt-1 border-t border-emerald-200 font-bold text-emerald-900">
+                        <span>You pay by card</span>
+                        <span>${fee.totalAmount.toFixed(2)}</span>
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-gray-500 mt-2">
+                      Venmo / Zelle / cash stay at the base amount only (no card fee).
+                    </p>
+                    {stripeConnectStatus?.isTest && (
+                      <p className="text-[11px] text-amber-700 font-medium mt-1">
+                        Stripe test mode — no real charges until live keys are set.
+                      </p>
+                    )}
+                  </>
+                );
+              })()}
             </div>
 
             {(() => {

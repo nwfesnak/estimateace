@@ -375,7 +375,10 @@ export async function createClientRecurringCheckout(input: {
   if (!plan) return { ok: false, error: 'Plan not found' };
   if (plan.amount < 0.5) return { ok: false, error: 'Plan amount must be at least $0.50' };
 
-  const cents = Math.round(plan.amount * 100);
+  const { computeStripeCardFee } = await import('@/lib/stripe-fees');
+  const fee = computeStripeCardFee(plan.amount);
+  const serviceCents = Math.round(plan.amount * 100);
+  const feeCents = Math.round(fee.feeAmount * 100);
   const appUrl = getAppUrl(input.requestUrl);
   const account = await getPaymentAccount(input.ownerUserId);
   const connectedId = account?.stripe_account_id || null;
@@ -389,6 +392,9 @@ export async function createClientRecurringCheckout(input: {
   });
   const returnBase = `${appUrl}/client/subscribe?token=${encodeURIComponent(token)}`;
 
+  const interval =
+    plan.interval === 'week' ? 'week' : plan.interval === 'year' ? 'year' : 'month';
+
   const metadata: Record<string, string> = {
     purpose: 'client_recurring_subscription',
     // Explicit: never treat as SaaS
@@ -396,6 +402,8 @@ export async function createClientRecurringCheckout(input: {
     supabase_user_id: input.ownerUserId,
     recurring_plan_id: input.planId,
     service_name: plan.serviceName.slice(0, 200),
+    base_amount: plan.amount.toFixed(2),
+    fee_amount: fee.feeAmount.toFixed(2),
   };
 
   const productName = `${plan.serviceName}`.slice(0, 120);
@@ -408,24 +416,38 @@ export async function createClientRecurringCheckout(input: {
     .join(' · ')
     .slice(0, 200);
 
-  const sessionParams: Stripe.Checkout.SessionCreateParams = {
-    mode: 'subscription',
-    line_items: [
-      {
-        quantity: 1,
-        price_data: {
-          currency: 'usd',
-          unit_amount: cents,
-          recurring: {
-            interval: plan.interval === 'week' ? 'week' : plan.interval === 'year' ? 'year' : 'month',
-          },
-          product_data: {
-            name: productName,
-            description: description || `Recurring ${intervalLabel(plan.interval)}`,
-          },
+  const line_items: Stripe.Checkout.SessionCreateParams.LineItem[] = [
+    {
+      quantity: 1,
+      price_data: {
+        currency: 'usd',
+        unit_amount: serviceCents,
+        recurring: { interval },
+        product_data: {
+          name: productName,
+          description: description || `Recurring ${intervalLabel(plan.interval)}`,
         },
       },
-    ],
+    },
+  ];
+  if (feeCents > 0) {
+    line_items.push({
+      quantity: 1,
+      price_data: {
+        currency: 'usd',
+        unit_amount: feeCents,
+        recurring: { interval },
+        product_data: {
+          name: fee.feeLabel,
+          description: fee.feeDescription.slice(0, 200),
+        },
+      },
+    });
+  }
+
+  const sessionParams: Stripe.Checkout.SessionCreateParams = {
+    mode: 'subscription',
+    line_items,
     success_url: `${returnBase}&subscribed=1`,
     cancel_url: `${returnBase}&subscribed=0`,
     metadata,

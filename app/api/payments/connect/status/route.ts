@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
-import { getStripe } from '@/lib/stripe-server';
+import { getStripe, getStripeMode, isStripeLiveMode } from '@/lib/stripe-server';
 import { getPaymentAccount, syncConnectAccountStatus } from '@/lib/job-payments';
+import { STRIPE_CARD_FIXED_USD, STRIPE_CARD_PERCENT } from '@/lib/stripe-fees';
 
 export async function GET(request: NextRequest) {
   try {
@@ -11,6 +12,7 @@ export async function GET(request: NextRequest) {
     }
 
     const stripeOk = !!getStripe();
+    const stripeMode = getStripeMode();
     const sync = request.nextUrl.searchParams.get('sync') === '1';
 
     let account = await getPaymentAccount(user.id);
@@ -23,6 +25,9 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       stripeConfigured: stripeOk,
+      stripeMode,
+      isLive: isStripeLiveMode(),
+      isTest: stripeMode === 'test',
       connected: !!account?.stripe_account_id,
       chargesEnabled: !!account?.charges_enabled,
       payoutsEnabled: !!account?.payouts_enabled,
@@ -32,6 +37,11 @@ export async function GET(request: NextRequest) {
       canAcceptJobCards: stripeOk && (ready || stripeOk),
       connectReady: ready,
       mode: ready ? 'connect' : stripeOk ? 'platform_fallback' : 'none',
+      processingFee: {
+        percent: STRIPE_CARD_PERCENT,
+        fixedUsd: STRIPE_CARD_FIXED_USD,
+        label: `Card fee ${STRIPE_CARD_PERCENT}% + $${STRIPE_CARD_FIXED_USD.toFixed(2)} (passed to client on card pay)`,
+      },
     });
   } catch (e: any) {
     console.error('connect status:', e);

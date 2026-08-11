@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
+import { computeStripeCardFee, STRIPE_CARD_FIXED_USD, STRIPE_CARD_PERCENT } from '@/lib/stripe-fees';
 
 type DocPayload = {
   ok?: boolean;
@@ -237,6 +238,37 @@ function ApprovePayInner() {
             )}
           </div>
 
+          {(() => {
+            const basePay = showDeposit ? depositDue : balanceDue;
+            if (!(basePay >= 0.5)) return null;
+            const fee = computeStripeCardFee(basePay, {
+              percentRate: STRIPE_CARD_PERCENT,
+              fixedFee: STRIPE_CARD_FIXED_USD,
+            });
+            return (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm space-y-1">
+                <p className="font-semibold text-amber-950">If you pay by card</p>
+                <div className="flex justify-between text-amber-900">
+                  <span>{showDeposit ? 'Deposit' : 'Balance'}</span>
+                  <span>{money(fee.baseAmount)}</span>
+                </div>
+                <div className="flex justify-between text-amber-900">
+                  <span>
+                    Card processing ({fee.percentRate}% + ${fee.fixedFee.toFixed(2)})
+                  </span>
+                  <span>{money(fee.feeAmount)}</span>
+                </div>
+                <div className="flex justify-between font-bold text-amber-950 pt-1 border-t border-amber-200">
+                  <span>Card total</span>
+                  <span>{money(fee.totalAmount)}</span>
+                </div>
+                <p className="text-[11px] text-amber-800/80 pt-1">
+                  Fee covers card processing so your contractor receives the job amount.
+                </p>
+              </div>
+            );
+          })()}
+
           {error && (
             <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{error}</p>
           )}
@@ -269,7 +301,11 @@ function ApprovePayInner() {
                     void startCheckout('deposit');
                   }}
                 >
-                  {busy ? 'Starting checkout…' : `Approve & pay deposit (${money(depositDue)})`}
+                  {busy
+                    ? 'Starting checkout…'
+                    : `Approve & pay deposit by card (${money(
+                        computeStripeCardFee(depositDue).totalAmount
+                      )})`}
                 </Button>
               )}
 
@@ -279,7 +315,9 @@ function ApprovePayInner() {
                   disabled={busy}
                   onClick={() => void startCheckout('balance')}
                 >
-                  {busy ? 'Starting checkout…' : `Pay now (${money(balanceDue)})`}
+                  {busy
+                    ? 'Starting checkout…'
+                    : `Pay by card (${money(computeStripeCardFee(balanceDue).totalAmount)})`}
                 </Button>
               )}
             </div>
@@ -290,7 +328,9 @@ function ApprovePayInner() {
                 disabled={busy}
                 onClick={() => void startCheckout('balance')}
               >
-                {busy ? 'Starting checkout…' : `Pay balance (${money(balanceDue)})`}
+                {busy
+                  ? 'Starting checkout…'
+                  : `Pay balance by card (${money(computeStripeCardFee(balanceDue).totalAmount)})`}
               </Button>
             )
           )}

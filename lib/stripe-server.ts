@@ -1,12 +1,33 @@
 import Stripe from 'stripe';
 
 let stripe: Stripe | null = null;
+let stripeKeyUsed = '';
+
+export function getStripeSecretKey(): string {
+  return (process.env.STRIPE_SECRET_KEY || '').trim();
+}
+
+/** test | live | none — based on STRIPE_SECRET_KEY prefix */
+export function getStripeMode(): 'test' | 'live' | 'none' {
+  const key = getStripeSecretKey();
+  if (!key) return 'none';
+  if (key.startsWith('sk_live_') || key.startsWith('rk_live_')) return 'live';
+  if (key.startsWith('sk_test_') || key.startsWith('rk_test_')) return 'test';
+  // Restricted keys / unknown — assume live if not explicitly test
+  return key.includes('test') ? 'test' : 'live';
+}
+
+export function isStripeLiveMode(): boolean {
+  return getStripeMode() === 'live';
+}
 
 export function getStripe(): Stripe | null {
-  const key = (process.env.STRIPE_SECRET_KEY || '').trim();
+  const key = getStripeSecretKey();
   if (!key) return null;
-  if (!stripe) {
+  // Recreate client if key changed (e.g. rotated from test → live without restart edge cases)
+  if (!stripe || stripeKeyUsed !== key) {
     stripe = new Stripe(key, { typescript: true });
+    stripeKeyUsed = key;
   }
   return stripe;
 }

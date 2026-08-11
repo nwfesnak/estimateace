@@ -82,6 +82,13 @@ export async function POST(request: NextRequest) {
     const jobName = String(row?.jobName || row?.jobname || body.jobName || '');
     const documentType = String(row?.documentType || row?.document_type || typ || 'estimate');
 
+    // Pass card processing fee to payee (shown as its own Checkout line)
+    const chargeCCFee = profile.chargeCCFee !== false;
+    const feePercentRate =
+      chargeCCFee && Number(profile.ccFeePercentage) > 0
+        ? Number(profile.ccFeePercentage)
+        : 2.9;
+
     const appUrl = getAppUrl(request.url);
     const returnBase = `${appUrl}/client/approve?token=${encodeURIComponent(token)}`;
 
@@ -97,6 +104,8 @@ export async function POST(request: NextRequest) {
       paymentKind: kind,
       successUrl: `${returnBase}&paid=1`,
       cancelUrl: `${returnBase}&paid=0`,
+      passProcessingFee: true,
+      feePercentRate,
     });
 
     if (!result.ok || !result.url) {

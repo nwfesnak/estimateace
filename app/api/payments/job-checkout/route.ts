@@ -28,6 +28,9 @@ export async function POST(request: NextRequest) {
     const documentType = String(body.documentType || 'invoice');
     const jobName = String(body.jobName || '').trim();
     const clientEmail = String(body.clientEmail || '').trim();
+    const passProcessingFee = body.passProcessingFee !== false;
+    const feePercentRate =
+      body.feePercentRate != null ? Number(body.feePercentRate) : undefined;
 
     if (!invoiceId) {
       return NextResponse.json({ error: 'invoiceId is required' }, { status: 400 });
@@ -61,6 +64,8 @@ export async function POST(request: NextRequest) {
       jobName,
       clientEmail: clientEmail || undefined,
       requestUrl: request.url,
+      passProcessingFee,
+      feePercentRate: Number.isFinite(feePercentRate as number) ? feePercentRate : undefined,
     });
 
     if (!result.ok || !result.url) {
@@ -74,6 +79,10 @@ export async function POST(request: NextRequest) {
       ok: true,
       url: result.url,
       mode: result.mode,
+      stripeMode: result.stripeMode,
+      baseAmount: result.baseAmount,
+      feeAmount: result.feeAmount,
+      totalCharged: result.totalCharged,
       message:
         result.mode === 'platform'
           ? 'Checkout created on the platform Stripe account (complete Connect for payouts to your bank).'

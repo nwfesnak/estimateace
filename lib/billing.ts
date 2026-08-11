@@ -59,7 +59,15 @@ export function isStripeConfigured(): boolean {
 
 /** Server diagnostics for Profile billing UI */
 export function getStripeConfigDiagnostics() {
-  const hasSecretKey = Boolean((process.env.STRIPE_SECRET_KEY || '').trim());
+  const key = (process.env.STRIPE_SECRET_KEY || '').trim();
+  const hasSecretKey = Boolean(key);
+  const mode = key.startsWith('sk_live_') || key.startsWith('rk_live_')
+    ? ('live' as const)
+    : key.startsWith('sk_test_') || key.startsWith('rk_test_')
+      ? ('test' as const)
+      : key
+        ? ('unknown' as const)
+        : ('none' as const);
   const hasPriceIdMonthly = Boolean(
     (process.env.STRIPE_PRICE_ID_MONTHLY || process.env.STRIPE_PRICE_ID || '').trim()
   );
@@ -69,6 +77,9 @@ export function getStripeConfigDiagnostics() {
   const hasServiceRole = Boolean((process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim());
   return {
     hasSecretKey,
+    mode,
+    isLive: mode === 'live',
+    isTest: mode === 'test',
     hasPriceId,
     hasPriceIdMonthly,
     hasPriceIdYearly,
