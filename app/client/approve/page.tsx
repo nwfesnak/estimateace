@@ -69,6 +69,8 @@ function ApprovePayInner() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [approved, setApproved] = useState(false);
+  /** Required when contractor attached Terms & Conditions */
+  const [termsAccepted, setTermsAccepted] = useState(false);
   const [selectedMethod, setSelectedMethod] = useState<string | null>(null);
   const [infoBanner, setInfoBanner] = useState('');
 
@@ -127,9 +129,21 @@ function ApprovePayInner() {
         : 'Total due');
   const paymentOptions = doc?.paymentOptions || [];
   const canPay = basePay >= 0.5;
+  const hasTerms = Boolean(String(doc?.terms || '').trim());
+  /** Block approve/pay until client confirms they read terms (only when terms exist) */
+  const termsGateOk = !hasTerms || termsAccepted;
+
+  const requireTermsOrError = () => {
+    if (termsGateOk) return true;
+    setError(
+      'Please read the Terms & Conditions and check the box to confirm before continuing.'
+    );
+    return false;
+  };
 
   const startStripeCheckout = async (kind: 'deposit' | 'balance' = payKind) => {
     if (!token) return;
+    if (!requireTermsOrError()) return;
     setBusy(true);
     setError('');
     setInfoBanner('');
@@ -161,6 +175,7 @@ function ApprovePayInner() {
   };
 
   const handlePayOption = async (method: string) => {
+    if (!requireTermsOrError()) return;
     setSelectedMethod(method);
     setError('');
     setInfoBanner('');
@@ -367,11 +382,54 @@ function ApprovePayInner() {
             </p>
           )}
 
+          {/* Terms must be accepted before approve/pay when contractor set them up */}
+          {hasTerms && (
+            <div className="rounded-xl border-2 border-teal-300 bg-teal-50/80 p-4 space-y-3">
+              <div className="text-center">
+                <a
+                  href={`/client/terms?token=${encodeURIComponent(token)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm font-semibold text-teal-900 underline underline-offset-2"
+                >
+                  View Terms &amp; Conditions
+                </a>
+                <p className="text-[11px] text-teal-800/80 mt-1">
+                  Opens full terms in a new tab — please read before continuing
+                </p>
+              </div>
+              <label className="flex items-start gap-3 cursor-pointer select-none rounded-lg border border-teal-200 bg-white p-3">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-5 w-5 shrink-0 accent-teal-700"
+                  checked={termsAccepted}
+                  onChange={(e) => {
+                    setTermsAccepted(e.target.checked);
+                    if (e.target.checked) setError('');
+                  }}
+                />
+                <span className="text-sm text-slate-800 leading-snug">
+                  <strong>I have read and agree</strong> to the Terms &amp; Conditions for this{' '}
+                  {isEstimate ? 'estimate' : 'invoice'}.
+                </span>
+              </label>
+              {!termsAccepted && (
+                <p className="text-xs text-amber-900 text-center font-medium">
+                  Check the box above to enable approve and payment options.
+                </p>
+              )}
+            </div>
+          )}
+
           {isEstimate && !approved && (
             <Button
-              className="w-full py-6 text-lg bg-slate-800 hover:bg-slate-900 text-white rounded-xl"
-              disabled={busy}
-              onClick={() => setApproved(true)}
+              className="w-full py-6 text-lg bg-slate-800 hover:bg-slate-900 text-white rounded-xl disabled:opacity-50"
+              disabled={busy || !termsGateOk}
+              onClick={() => {
+                if (!requireTermsOrError()) return;
+                setApproved(true);
+                setError('');
+              }}
             >
               ✓ Approve estimate
             </Button>
@@ -386,7 +444,7 @@ function ApprovePayInner() {
 
           {/* All contractor-enabled methods — totals include processing fee */}
           {canPay && (!isEstimate || approved || payKind === 'deposit') && (
-            <div className="space-y-3 pt-1">
+            <div className={`space-y-3 pt-1 ${!termsGateOk ? 'opacity-60' : ''}`}>
               <p className="text-sm font-semibold text-slate-800">
                 {payLabel} — choose a payment method
               </p>
@@ -400,13 +458,13 @@ function ApprovePayInner() {
                   <button
                     key={opt.method}
                     type="button"
-                    disabled={busy}
+                    disabled={busy || !termsGateOk}
                     onClick={() => void handlePayOption(opt.method)}
                     className={`w-full text-left p-4 border-2 rounded-2xl transition ${
                       selectedMethod === opt.method
                         ? 'border-emerald-500 bg-emerald-50'
                         : 'border-slate-200 bg-white hover:bg-slate-50'
-                    }`}
+                    } disabled:cursor-not-allowed disabled:opacity-70`}
                   >
                     <div className="flex items-start gap-3">
                       <span className="text-3xl shrink-0">{opt.icon}</span>
@@ -458,8 +516,8 @@ function ApprovePayInner() {
               })}
               {paymentOptions.length === 0 && (
                 <Button
-                  className="w-full py-6 bg-emerald-600 text-white"
-                  disabled={busy}
+                  className="w-full py-6 bg-emerald-600 text-white disabled:opacity-50"
+                  disabled={busy || !termsGateOk}
                   onClick={() => void startStripeCheckout(payKind)}
                 >
                   {busy
@@ -469,21 +527,6 @@ function ApprovePayInner() {
               )}
             </div>
           )}
-
-          {/* Terms as hyperlink (full text on /client/terms) */}
-          {String(doc?.terms || '').trim() ? (
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-center">
-              <a
-                href={`/client/terms?token=${encodeURIComponent(token)}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-sm font-semibold text-teal-800 underline underline-offset-2"
-              >
-                View Terms &amp; Conditions
-              </a>
-              <p className="text-[11px] text-slate-500 mt-1">Opens full terms in a new tab</p>
-            </div>
-          ) : null}
 
           <div className="pt-4 border-t text-sm text-slate-600 space-y-1">
             <p className="font-medium text-slate-800">Questions?</p>
