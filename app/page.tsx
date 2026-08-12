@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -4695,19 +4695,55 @@ export default function Home() {
     }
   };
 
+  /** True when photo + work description are ready for AI completed look */
+  const getJobRenderLineDescription = useCallback((): {
+    lineDescription: string;
+    line: (typeof items)[0] | null;
+  } => {
+    const line =
+      jobRenderLineId != null
+        ? items.find((row) => Number(row.id) === Number(jobRenderLineId)) || null
+        : null;
+    const fromLine = String(line?.description || '').trim();
+    const fromNotes = jobRenderNotes.trim();
+    // Prefer linked line description; fall back to notes if user typed the scope there
+    const lineDescription = fromLine || fromNotes;
+    return { lineDescription, line };
+  }, [jobRenderLineId, items, jobRenderNotes]);
+
+  const jobRenderCanGenerate =
+    !jobRenderBusy &&
+    !!jobRenderSourcePath &&
+    getJobRenderLineDescription().lineDescription.length >= 3;
+
+  // Auto-select photo / line so the Generate button can go live without extra taps
+  useEffect(() => {
+    if (!jobRenderSourcePath && photoUrls.length === 1) {
+      setJobRenderSourcePath(photoUrls[0]);
+    }
+  }, [photoUrls, jobRenderSourcePath]);
+
+  useEffect(() => {
+    if (jobRenderLineId != null) {
+      // Keep selection if line still exists
+      const stillThere = items.some((row) => Number(row.id) === Number(jobRenderLineId));
+      if (stillThere) return;
+    }
+    const withDesc = items.find((row) => String(row.description || '').trim().length >= 3);
+    if (withDesc) setJobRenderLineId(Number(withDesc.id));
+  }, [items, jobRenderLineId]);
+
   const generateJobRendering = async () => {
     if (jobRenderBusy) return;
     if (!jobRenderSourcePath) {
-      showMessage('Pick or upload a site photo first.');
+      showMessage('Pick or upload a site photo first (step 1).');
       return;
     }
-    const line =
-      jobRenderLineId != null
-        ? items.find((row) => row.id === jobRenderLineId)
-        : null;
-    const lineDescription = (line?.description || '').trim();
-    if (!lineDescription) {
-      showMessage('Link a description line that relates to this photo (add text on the line first).');
+    const { lineDescription, line } = getJobRenderLineDescription();
+    if (!lineDescription || lineDescription.length < 3) {
+      showMessage(
+        'Add a line description (step 2) or type what the finished job looks like in notes (step 3).'
+      );
       return;
     }
 
@@ -4730,13 +4766,19 @@ export default function Home() {
         }
       }
 
+      // Notes only sent as extra if they are not already the main description
+      const notesExtra =
+        line && String(line.description || '').trim()
+          ? jobRenderNotes.trim() || undefined
+          : undefined;
+
       const res = await fetch('/api/job-render', {
         method: 'POST',
         headers,
         body: JSON.stringify({
           imageBase64,
           lineDescription,
-          notes: jobRenderNotes.trim() || undefined,
+          notes: notesExtra,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -4758,9 +4800,9 @@ export default function Home() {
         id: `jr-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         sourcePath: jobRenderSourcePath,
         resultPath,
-        lineItemId: line?.id ?? null,
+        lineItemId: line?.id != null ? Number(line.id) : null,
         lineDescription,
-        notes: jobRenderNotes.trim() || '',
+        notes: notesExtra || '',
         createdAt: new Date().toISOString(),
         status: 'ready',
       };
@@ -10206,19 +10248,31 @@ export default function Home() {
                         2. {t('jobRenderLinkLine')}
                       </label>
                       <select
-                        value={jobRenderLineId ?? ''}
-                        onChange={(e) =>
-                          setJobRenderLineId(e.target.value === '' ? null : Number(e.target.value))
-                        }
+                        value={jobRenderLineId != null ? String(jobRenderLineId) : ''}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setJobRenderLineId(v === '' ? null : Number(v));
+                        }}
                         className="flex h-10 w-full rounded-lg border border-input bg-white px-3 py-2 text-sm"
                       >
                         <option value="">Select a line item…</option>
                         {items.map((line, i) => (
-                          <option key={line.id} value={line.id}>
-                            Line {i + 1}: {line.description?.trim() || '(empty — add description first)'}
+                          <option key={line.id} value={String(line.id)}>
+                            Line {i + 1}:{' '}
+                            {line.description?.trim() || '(empty — add description first)'}
                           </option>
                         ))}
                       </select>
+                      {jobRenderLineId != null &&
+                        !String(
+                          items.find((r) => Number(r.id) === Number(jobRenderLineId))
+                            ?.description || ''
+                        ).trim() && (
+                          <p className="text-xs text-amber-700 mt-1">
+                            That line has no description yet — type one on the line item above, or
+                            use notes below.
+                          </p>
+                        )}
                     </div>
 
                     <div>
@@ -10228,19 +10282,53 @@ export default function Home() {
                       <Input
                         value={jobRenderNotes}
                         onChange={(e) => setJobRenderNotes(e.target.value)}
-                        placeholder="e.g. charcoal shingles, white trim, remove old deck"
+                        placeholder="e.g. charcoal shingles, white trim — or full scope if no line linked"
                         className="bg-white"
                       />
                     </div>
 
-                    <Button
+                    {/* Readiness checklist so the button clearly "goes live" */}
+                    <div className="rounded-lg border bg-white px-3 py-2 text-xs space-y-1">
+                      <div className={jobRenderSourcePath ? 'text-emerald-700 font-medium' : 'text-gray-500'}>
+                        {jobRenderSourcePath ? '✓' : '○'} Photo selected
+                      </div>
+                      <div
+                        className={
+                          getJobRenderLineDescription().lineDescription.length >= 3
+                            ? 'text-emerald-700 font-medium'
+                            : 'text-gray-500'
+                        }
+                      >
+                        {getJobRenderLineDescription().lineDescription.length >= 3 ? '✓' : '○'} Work
+                        description (line or notes)
+                      </div>
+                    </div>
+
+                    <button
                       type="button"
                       onClick={() => void generateJobRendering()}
-                      disabled={jobRenderBusy || !jobRenderSourcePath}
-                      className="bg-violet-600 hover:bg-violet-700 text-white w-full sm:w-auto"
+                      disabled={jobRenderBusy || !jobRenderCanGenerate}
+                      className={`w-full sm:w-auto min-h-[3rem] px-6 py-3 rounded-xl text-base font-semibold shadow-md transition ${
+                        jobRenderBusy
+                          ? 'bg-violet-400 text-white cursor-wait'
+                          : jobRenderCanGenerate
+                            ? 'bg-violet-600 hover:bg-violet-700 active:bg-violet-800 text-white cursor-pointer ring-2 ring-violet-300 ring-offset-2'
+                            : 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                      }`}
                     >
-                      {jobRenderBusy ? '🤖 Drawing completed look…' : `✨ ${t('jobRenderGenerate')}`}
-                    </Button>
+                      {jobRenderBusy
+                        ? '🤖 Drawing completed look…'
+                        : jobRenderCanGenerate
+                          ? `✨ ${t('jobRenderGenerate')} — ready`
+                          : `✨ ${t('jobRenderGenerate')}`}
+                    </button>
+                    {!jobRenderCanGenerate && !jobRenderBusy && (
+                      <p className="text-xs text-gray-500">
+                        {!jobRenderSourcePath
+                          ? 'Select or upload a photo above to enable this button.'
+                          : 'Link a line with a description, or type the finished scope in notes (step 3).'}
+                      </p>
+                    )}
                   </div>
 
                   {jobRenderings.length === 0 ? (
