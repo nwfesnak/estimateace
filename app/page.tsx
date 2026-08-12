@@ -13728,6 +13728,7 @@ export default function Home() {
                       company: profile.company || 'EstimateAce',
                       companyPhone: profile.phone || '',
                       companyEmail: profile.email || '',
+                      certificateUrl: String(profile.certificateUrl || '').trim(),
                       address,
                       city,
                       state,

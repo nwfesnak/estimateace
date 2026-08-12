@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyClientActionToken } from '@/lib/client-action-token';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
+import { extractMediaStoragePath, isMediaPdfRef } from '@/lib/media-url';
 
 /**
  * Public (token-gated) document summary for client approve / pay page.
@@ -50,13 +51,46 @@ export async function GET(request: NextRequest) {
 
     if (!row) {
       // Still allow CTA page using token + optional body cache — minimal fallback
+      // Also surface COI from SETTINGS if contractor has one uploaded
+      let hasCertificate = false;
+      let certificateUrl = '';
+      let certificateIsPdf = false;
+      let companyFallback = 'Your contractor';
+      try {
+        const { data: settingsRow } = await admin
+          .from('estimates')
+          .select('profile')
+          .eq('id', `SETTINGS-${uid}`)
+          .maybeSingle();
+        const sp = (settingsRow?.profile || {}) as any;
+        if (sp?.company) companyFallback = String(sp.company);
+        const certRef = String(sp?.certificateUrl || '').trim();
+        if (certRef) {
+          certificateIsPdf = isMediaPdfRef(certRef);
+          const storagePath = extractMediaStoragePath(certRef);
+          if (storagePath) {
+            const { data: signed } = await admin.storage
+              .from('media')
+              .createSignedUrl(storagePath, 60 * 60);
+            if (signed?.signedUrl) {
+              hasCertificate = true;
+              certificateUrl = signed.signedUrl;
+            }
+          } else if (/^https?:\/\//i.test(certRef)) {
+            hasCertificate = true;
+            certificateUrl = certRef;
+          }
+        }
+      } catch {
+        /* optional */
+      }
       return NextResponse.json({
         ok: true,
         fromDb: false,
         documentType: typ,
         invoiceNumber: inv,
         jobName: 'Your project',
-        company: 'Your contractor',
+        company: companyFallback,
         grandTotal: 0,
         amountPaid: 0,
         balanceDue: 0,
@@ -64,6 +98,9 @@ export async function GET(request: NextRequest) {
         depositDue: 0,
         showDeposit: typ === 'estimate',
         items: [],
+        hasCertificate,
+        certificateUrl,
+        certificateIsPdf,
         message: 'Document details will be confirmed with your contractor.',
       });
     }
@@ -77,18 +114,20 @@ export async function GET(request: NextRequest) {
         .eq('id', `SETTINGS-${uid}`)
         .maybeSingle();
       const sp = (settingsRow?.profile || {}) as any;
-      if (sp?.paymentSettings) {
+      if (sp && typeof sp === 'object') {
         profile = {
           ...profile,
           paymentSettings: {
             ...(profile.paymentSettings || {}),
-            ...sp.paymentSettings,
+            ...(sp.paymentSettings || {}),
           },
           chargeCCFee: sp.chargeCCFee !== undefined ? sp.chargeCCFee : profile.chargeCCFee,
           ccFeePercentage: sp.ccFeePercentage ?? profile.ccFeePercentage,
           company: profile.company || sp.company,
           phone: profile.phone || sp.phone,
           email: profile.email || sp.email,
+          // Prefer live company certificate over document snapshot
+          certificateUrl: String(sp.certificateUrl || profile.certificateUrl || '').trim(),
         };
       }
     } catch {
@@ -159,6 +198,32 @@ export async function GET(request: NextRequest) {
       feePercentRate: feePercent,
     });
 
+    // Certificate of Insurance — signed URL for client view (only if uploaded)
+    let hasCertificate = false;
+    let certificateUrl = '';
+    let certificateIsPdf = false;
+    const certRef = String(profile.certificateUrl || '').trim();
+    if (certRef) {
+      certificateIsPdf = isMediaPdfRef(certRef);
+      const storagePath = extractMediaStoragePath(certRef);
+      if (storagePath) {
+        try {
+          const { data: signed } = await admin.storage
+            .from('media')
+            .createSignedUrl(storagePath, 60 * 60); // 1h — page can refresh
+          if (signed?.signedUrl) {
+            hasCertificate = true;
+            certificateUrl = signed.signedUrl;
+          }
+        } catch {
+          /* optional */
+        }
+      } else if (/^https?:\/\//i.test(certRef)) {
+        hasCertificate = true;
+        certificateUrl = certRef;
+      }
+    }
+
     return NextResponse.json({
       ok: true,
       fromDb: true,
@@ -193,6 +258,9 @@ export async function GET(request: NextRequest) {
       chargeCCFee: profile.chargeCCFee !== false,
       ccFeePercentage: feePercent,
       paymentOptions,
+      hasCertificate,
+      certificateUrl,
+      certificateIsPdf,
       items: items.slice(0, 40).map((it: any) => ({
         description: String(it.description || 'Line item').slice(0, 200),
         qty: Number(it.qty) || 0,

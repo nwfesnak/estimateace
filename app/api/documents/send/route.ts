@@ -120,6 +120,21 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Certificate of Insurance — show email button only if contractor has one uploaded
+    let hasCertificate = !!String(body.certificateUrl || '').trim();
+    if (!hasCertificate && admin) {
+      try {
+        const { data: settingsRow } = await admin
+          .from('estimates')
+          .select('profile')
+          .eq('id', `SETTINGS-${ownerUserId}`)
+          .maybeSingle();
+        hasCertificate = !!String((settingsRow?.profile as any)?.certificateUrl || '').trim();
+      } catch {
+        /* optional */
+      }
+    }
+
     const appUrl = getAppUrl(request.url);
     const actionToken = createClientActionToken({
       uid: ownerUserId,
@@ -129,6 +144,7 @@ export async function POST(request: NextRequest) {
     });
     const actionUrl = `${appUrl}/client/approve?token=${encodeURIComponent(actionToken)}`;
     const termsUrl = `${appUrl}/client/terms?token=${encodeURIComponent(actionToken)}`;
+    const certificateUrl = `${appUrl}/client/certificate?token=${encodeURIComponent(actionToken)}`;
 
     // Short button labels — full amount shown as "Total due" line above buttons
     const payButtonLabelHtml =
@@ -184,6 +200,7 @@ export async function POST(request: NextRequest) {
       '',
       `Pay / approve: ${actionUrl}`,
       terms ? `Terms & Conditions: ${termsUrl}` : '',
+      hasCertificate ? `Certificate of Insurance: ${certificateUrl}` : '',
       '',
       `Grand total: ${money(grandTotal)}`,
       amountPaid > 0 ? `Already paid: ${money(amountPaid)}` : '',
@@ -314,6 +331,25 @@ export async function POST(request: NextRequest) {
         <a href="${escapeHtml(termsUrl)}"
            style="display:inline-block;background:#0f766e;color:#ffffff !important;text-decoration:none;font-weight:700;font-size:15px;padding:12px 24px;border-radius:12px;mso-hide:all;">
           View Terms &amp; Conditions
+        </a>
+        <!--<![endif]-->
+        `
+            : ''
+        }
+        ${
+          hasCertificate
+            ? `
+        <div style="height:12px;line-height:12px;font-size:12px;">&nbsp;</div>
+        <!--[if mso]>
+        <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="${escapeHtml(certificateUrl)}" style="height:44px;v-text-anchor:middle;width:260px;" arcsize="12%" fillcolor="#1e40af" stroke="f">
+          <w:anchorlock/>
+          <center style="color:#ffffff;font-family:sans-serif;font-size:15px;font-weight:bold;">View Certificate of Insurance</center>
+        </v:roundrect>
+        <![endif]-->
+        <!--[if !mso]><!-- -->
+        <a href="${escapeHtml(certificateUrl)}"
+           style="display:inline-block;background:#1e40af;color:#ffffff !important;text-decoration:none;font-weight:700;font-size:15px;padding:12px 24px;border-radius:12px;mso-hide:all;">
+          View Certificate of Insurance
         </a>
         <!--<![endif]-->
         `
