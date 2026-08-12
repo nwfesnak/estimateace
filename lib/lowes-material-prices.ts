@@ -84,6 +84,16 @@ export const LOWES_MATERIAL_PRICE_GUIDE: LowesPriceGuide[] = [
   { pattern: /garbage\s*disposal|food\s*waste|insinkerator|waste\s*king/i, unitPattern: /ea|each/i, typical: 149.0, min: 89, max: 320, label: 'Garbage disposal', unitHint: 'ea' },
   { pattern: /water\s*heater|tank\s*heater/i, unitPattern: /ea|each/i, typical: 579.0, min: 380, max: 1200, label: 'Tank water heater', unitHint: 'ea' },
   { pattern: /pex|cpvc|pvc\s*pipe|copper\s*pipe|\bpipe\b/i, unitPattern: /lf|ln\s*ft|ft|linear/i, typical: 1.28, min: 0.45, max: 8, label: 'Pipe (lf)', unitHint: 'lf' },
+  // Repair kits / short section priced as an assembly (not $1/ea)
+  {
+    pattern: /water\s*line|pipe\s*(?:repair|section|replac)|repair\s*coupling|coupling|sharkbite|push[\s-]?fit/i,
+    unitPattern: /ea|each|kit|set|lot/i,
+    typical: 28.0,
+    min: 12,
+    max: 85,
+    label: 'Pipe repair parts / couplings kit',
+    unitHint: 'ea',
+  },
   { pattern: /shut.?off\s*valve|angle\s*stop|supply\s*line|wax\s*ring|toilet\s*flange/i, unitPattern: /ea|each|kit/i, typical: 12.98, min: 4, max: 45, label: 'Plumbing fitting/part', unitHint: 'ea' },
   { pattern: /vanity/i, unitPattern: /ea|each/i, typical: 349.0, min: 149, max: 750, label: 'Bathroom vanity', unitHint: 'ea' },
   { pattern: /sink|basin|lavatory/i, unitPattern: /ea|each/i, typical: 98.0, min: 45, max: 280, label: 'Sink', unitHint: 'ea' },

@@ -114,38 +114,42 @@ const INDUSTRIES: IndustryDef[] = [
       },
     ],
   },
-  // ——— Paint (only when not primarily drywall) ———
+  // ——— Paint (runs even with drywall when paint/match finish is in scope) ———
   {
     id: 'paint',
     label: 'Painting',
-    detect: /paint|painting|primer|stain(?:ing)?\s+(?:the\s+)?(?:wall|interior|exterior|trim)/i,
-    exclude: /drywall|sheetrock|hang\s*rock|\bmud\b|tape\s*(?:and|&)?\s*mud/i,
+    detect:
+      /paint|painting|primer|prime\b|matching\s*finish|uniform.*finish|recoat|touch[\s-]?up\s*paint/i,
     measure: 'sqft',
     typicalRate: 58,
     maxRate: 75,
-    minJobHours: 2,
-    midInstalledPerUnit: 1.85,
-    fallbackUnitsPerHour: 100,
+    minJobHours: 2.5,
+    // Mid-market installed interior ceiling/wall paint ~$1.75–$2.50/SF
+    midInstalledPerUnit: 2.05,
+    fallbackUnitsPerHour: 85,
     phases: [
       {
         id: 'prep',
-        label: 'Prep / mask / sand',
+        label: 'Prep / mask / cover / sand',
         always: true,
-        unitsPerHour: 180,
-        fixedHours: 0.75,
+        unitsPerHour: 140,
+        fixedHours: 1.0,
+        hardAccessMult: 1.2,
       },
       {
         id: 'prime',
-        label: 'Prime',
-        detect: /primer|prime\b|seal/i,
-        unitsPerHour: 160,
+        label: 'Prime (esp. new drywall / patch)',
+        detect: /primer|prime\b|seal|new\s*board|drywall|patch|repair/i,
+        unitsPerHour: 120,
+        hardAccessMult: 1.15,
       },
       {
         id: 'paint',
-        label: 'Paint coats',
+        label: 'Paint coats (match / uniform finish)',
         always: true,
-        unitsPerHour: 100,
-        hardAccessMult: 1.2,
+        // Ceiling + color match often needs careful 2nd coat — slower than walls
+        unitsPerHour: 85,
+        hardAccessMult: 1.25,
       },
     ],
   },
@@ -441,19 +445,38 @@ const INDUSTRIES: IndustryDef[] = [
   {
     id: 'plumbing',
     label: 'Plumbing',
-    detect: /plumb|toilet|faucet|drain|pipe|water\s*heater|disposal|shower\s*valve|supply\s*line|pex|shut.?off/i,
+    detect:
+      /plumb|toilet|faucet|drain|pipe|water\s*line|water\s*heater|disposal|shower\s*valve|supply\s*line|pex|shut.?off|leak/i,
     measure: 'ea',
-    typicalRate: 80,
-    maxRate: 100,
-    minJobHours: 1,
+    typicalRate: 85,
+    maxRate: 110,
+    minJobHours: 1.5,
     fallbackUnitsPerHour: 1,
     phases: [
       {
+        id: 'access_pipe',
+        label: 'Access / cut-out pipe repair (ceiling or wall)',
+        detect:
+          /water\s*line|cut\s*out|replac(?:e|ing).{0,40}(?:pipe|line)|pipe\s*repair|stop\s*the\s*leak|section\s*of\s*(?:water|pipe)|access/i,
+        // Real-world: shut off, drain, cut, fit, solder/crimp, test — not a 30-min swap
+        fixedHours: 3.25,
+        unitsPerHour: 0,
+        hardAccessMult: 1.35,
+      },
+      {
         id: 'fixture',
-        label: 'Fixture / repair work',
-        always: true,
+        label: 'Fixture / standard plumbing',
+        detect: /toilet|faucet|disposal|valve|shut.?off|supply/i,
         unitsPerHour: 0.4,
-        fixedHours: 0.5,
+        fixedHours: 0.75,
+      },
+      {
+        id: 'general_plumb',
+        label: 'Plumbing work',
+        // Fallback when only generic "plumb/pipe" matched
+        detect: /plumb|pipe|leak|water/i,
+        fixedHours: 2.0,
+        unitsPerHour: 0,
       },
     ],
   },
@@ -539,21 +562,79 @@ function parseLf(description: string, suggestedQty: number, unit: string): numbe
   return null;
 }
 
+/** Parse "10 ft × 30 ft", "4x4", "10' x 30'" style dimensions into areas (sqft). */
+export function parseDimensionAreas(description: string): number[] {
+  const areas: number[] = [];
+  const re =
+    /(\d+(?:\.\d+)?)\s*(?:ft|foot|feet|')?\s*[x×]\s*(\d+(?:\.\d+)?)\s*(?:ft|foot|feet|')?/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(description || '')) !== null) {
+    const a = Number(m[1]);
+    const b = Number(m[2]);
+    if (a > 0 && b > 0) areas.push(roundMoney(a * b));
+  }
+  return areas;
+}
+
 function isHardAccess(description: string): boolean {
-  return /ceiling|overhead|second\s*st|2nd\s*st|ladder|scaffold|crawl|attic|steep|high\s*wall/i.test(
+  return /ceiling|overhead|second\s*st|2nd\s*st|ladder|scaffold|crawl|attic|steep|high\s*wall|access/i.test(
     description
   );
 }
 
-function pickQuantity(
+/**
+ * Pick quantity for a trade when MULTIPLE scopes share one description.
+ * Example: 4×4 access cut + paint 10×30 ceiling → drywall uses 16 SF, paint uses 300 SF.
+ */
+function pickQuantityForTrade(
   industry: IndustryDef,
   description: string,
   suggestedQty: number,
   unit: string
 ): number {
+  const text = description || '';
+  const areas = parseDimensionAreas(text);
+  const parsedSqft = parseSqftFromDescription(text);
+
+  if (industry.id === 'paint') {
+    // Prefer largest area (full ceiling match paint), not the small patch
+    if (areas.length) return Math.max(...areas);
+    if (parsedSqft && parsedSqft >= 40) return parsedSqft;
+    if (suggestedQty >= 40) return suggestedQty;
+    return Math.max(parsedSqft || 0, suggestedQty || 0, 1);
+  }
+
+  if (industry.id === 'drywall') {
+    // Prefer small patch / access opening when paint also covers a large area
+    const hasLargePaint =
+      /paint|matching\s*finish|uniform/i.test(text) &&
+      ((parsedSqft && parsedSqft >= 80) ||
+        areas.some((a) => a >= 80) ||
+        (suggestedQty >= 80 && /sf|sqft|sq/i.test(unit)));
+    if (hasLargePaint && areas.length) {
+      const small = Math.min(...areas.filter((a) => a > 0));
+      if (small > 0 && small < 80) return small;
+    }
+    // Explicit patch language
+    const patch = text.match(
+      /(\d+(?:\.\d+)?)\s*(?:ft|')?\s*[x×]\s*(\d+(?:\.\d+)?)\s*(?:ft|')?.{0,40}(?:section|opening|patch|access|cut)/i
+    );
+    if (patch) {
+      const a = Number(patch[1]) * Number(patch[2]);
+      if (a > 0 && a < 200) return a;
+    }
+    if (areas.length && Math.min(...areas) < 50) return Math.min(...areas);
+    if (parsedSqft && parsedSqft > 0 && parsedSqft < 80) return parsedSqft;
+    // Full drywall area job
+    if (parsedSqft) return parsedSqft;
+    if (areas.length) return Math.max(...areas);
+    if (suggestedQty > 1 && /sf|sqft/i.test(unit)) return suggestedQty;
+    return Math.max(1, suggestedQty >= 10 ? suggestedQty : 16);
+  }
+
   if (industry.measure === 'sqft') {
-    const sq = parseSqftFromDescription(description);
-    if (sq && sq > 0) return sq;
+    if (parsedSqft && parsedSqft > 0) return parsedSqft;
+    if (areas.length) return Math.max(...areas);
     if (suggestedQty > 1 && /sf|sqft|sq\.?\s*ft|square/i.test(unit)) return suggestedQty;
     if (suggestedQty >= 20) return suggestedQty;
     return Math.max(1, suggestedQty || 1);
@@ -561,7 +642,6 @@ function pickQuantity(
   if (industry.measure === 'lf') {
     return parseLf(description, suggestedQty, unit) || Math.max(1, suggestedQty || 1);
   }
-  // ea / job
   return Math.max(1, suggestedQty > 0 && suggestedQty < 50 ? suggestedQty : 1);
 }
 
@@ -571,9 +651,93 @@ function phaseApplies(phase: PhaseDef, description: string): boolean {
   return false;
 }
 
+function computeOneIndustry(
+  industry: IndustryDef,
+  description: string,
+  suggestedQty: number,
+  unit: string
+): IndustryLaborResult | null {
+  if (!industry.detect.test(description)) return null;
+  if (industry.exclude && industry.exclude.test(description)) return null;
+
+  const hard = isHardAccess(description);
+  const quantity = pickQuantityForTrade(industry, description, suggestedQty, unit);
+  const phases: IndustryLaborResult['phases'] = [];
+  let totalHours = 0;
+  const seenPhase = new Set<string>();
+
+  for (const phase of industry.phases) {
+    if (!phaseApplies(phase, description)) continue;
+    // Avoid double-counting plumbing general + access
+    if (industry.id === 'plumbing' && phase.id === 'general_plumb') {
+      if (seenPhase.has('access_pipe') || seenPhase.has('fixture')) continue;
+    }
+    // When a large paint area is in scope, paint hours come from the paint trade only
+    if (industry.id === 'drywall' && phase.id === 'paint') {
+      const areas = parseDimensionAreas(description);
+      const big =
+        Math.max(
+          ...(areas.length ? areas : [0]),
+          parseSqftFromDescription(description) || 0,
+          suggestedQty >= 80 ? suggestedQty : 0
+        ) >= 80;
+      if (big) continue;
+    }
+    let hours = 0;
+    if (phase.fixedHours) hours += phase.fixedHours;
+    if (phase.unitsPerHour > 0 && quantity > 0) {
+      hours += quantity / phase.unitsPerHour;
+    }
+    if (hard && phase.hardAccessMult) {
+      hours *= phase.hardAccessMult;
+    }
+    if (hours > 0.05) {
+      seenPhase.add(phase.id);
+      phases.push({
+        id: `${industry.id}:${phase.id}`,
+        label: `${industry.label}: ${phase.label}`,
+        hours: roundMoney(hours),
+      });
+      totalHours += hours;
+    }
+  }
+
+  if (totalHours <= 0) {
+    totalHours = quantity / Math.max(0.1, industry.fallbackUnitsPerHour);
+    phases.push({
+      id: `${industry.id}:general`,
+      label: `${industry.label} work`,
+      hours: roundMoney(totalHours),
+    });
+  }
+
+  const mob = quantity >= 80 || industry.measure === 'job' ? 0.75 : 0.4;
+  totalHours += mob;
+  phases.push({
+    id: `${industry.id}:mob`,
+    label: `${industry.label}: setup / cleanup`,
+    hours: mob,
+  });
+
+  const expected = Math.max(industry.minJobHours, totalHours);
+  return {
+    tradeId: industry.id,
+    tradeLabel: industry.label,
+    measure: industry.measure,
+    quantity,
+    minHours: roundMoney(expected * 0.8),
+    expectedHours: roundMoney(expected),
+    maxHours: roundMoney(expected * 1.35),
+    typicalRate: industry.typicalRate,
+    maxRate: industry.maxRate,
+    phases,
+    notes: `${industry.label} (${quantity} ${industry.measure})`,
+  };
+}
+
 /**
- * Estimate labor for any detected industry using phase production rates.
- * Returns null if no industry rule matches (caller falls back to unit tasks).
+ * Estimate labor across ALL matching trades (multi-scope jobs).
+ * Example: water-line repair + drywall patch + paint 300 SF ceiling → sum of all three.
  */
 export function estimateIndustryLabor(
   description: string,
@@ -581,78 +745,65 @@ export function estimateIndustryLabor(
   unit = ''
 ): IndustryLaborResult | null {
   const text = description || '';
-  const hard = isHardAccess(text);
+  const parts: IndustryLaborResult[] = [];
 
   for (const industry of INDUSTRIES) {
-    if (!industry.detect.test(text)) continue;
-    if (industry.exclude && industry.exclude.test(text)) continue;
-
-    const quantity = pickQuantity(industry, text, suggestedQty, unit);
-    const phases: IndustryLaborResult['phases'] = [];
-    let totalHours = 0;
-
-    for (const phase of industry.phases) {
-      if (!phaseApplies(phase, text)) continue;
-      let hours = 0;
-      if (phase.fixedHours) hours += phase.fixedHours;
-      if (phase.unitsPerHour > 0 && quantity > 0) {
-        hours += quantity / phase.unitsPerHour;
-      }
-      if (hard && phase.hardAccessMult) {
-        hours *= phase.hardAccessMult;
-      }
-      if (hours > 0.05) {
-        phases.push({ id: phase.id, label: phase.label, hours: roundMoney(hours) });
-        totalHours += hours;
-      }
-    }
-
-    if (totalHours <= 0) {
-      totalHours = quantity / Math.max(0.1, industry.fallbackUnitsPerHour);
-      phases.push({
-        id: 'general',
-        label: `${industry.label} work`,
-        hours: roundMoney(totalHours),
-      });
-    }
-
-    // Mobilization / setup / cleanup for any real job
-    const mob = quantity >= 50 || industry.measure === 'job' ? 1.0 : 0.5;
-    totalHours += mob;
-    phases.push({ id: 'mob', label: 'Mobilize / cleanup', hours: mob });
-
-    const expected = Math.max(industry.minJobHours, totalHours);
-    return {
-      tradeId: industry.id,
-      tradeLabel: industry.label,
-      measure: industry.measure,
-      quantity,
-      minHours: roundMoney(expected * 0.78),
-      expectedHours: roundMoney(expected),
-      maxHours: roundMoney(expected * 1.4),
-      typicalRate: industry.typicalRate,
-      maxRate: industry.maxRate,
-      phases,
-      notes: `${industry.label}: ${phases
-        .filter((p) => p.id !== 'mob')
-        .map((p) => p.label)
-        .join(' + ')} on ${quantity} ${industry.measure}`,
-    };
+    const one = computeOneIndustry(industry, text, suggestedQty, unit);
+    if (one) parts.push(one);
   }
 
-  return null;
+  if (parts.length === 0) return null;
+
+  if (parts.length === 1) {
+    return parts[0];
+  }
+
+  // Multi-trade: SUM hours; rate = hour-weighted average of trade rates
+  let expectedHours = 0;
+  let minHours = 0;
+  let maxHours = 0;
+  let rateWeight = 0;
+  let maxRate = 0;
+  const phases: IndustryLaborResult['phases'] = [];
+  const labels: string[] = [];
+
+  for (const p of parts) {
+    expectedHours += p.expectedHours;
+    minHours += p.minHours;
+    maxHours += p.maxHours;
+    rateWeight += p.typicalRate * p.expectedHours;
+    maxRate = Math.max(maxRate, p.maxRate);
+    phases.push(...p.phases);
+    labels.push(p.notes);
+  }
+
+  const typicalRate = expectedHours > 0 ? roundMoney(rateWeight / expectedHours) : 65;
+
+  // Shared job mobilization once (parts already include small per-trade setup)
+  return {
+    tradeId: 'multi',
+    tradeLabel: parts.map((p) => p.tradeLabel).join(' + '),
+    measure: 'job',
+    quantity: Math.max(...parts.map((p) => p.quantity), suggestedQty || 1),
+    minHours: roundMoney(minHours),
+    expectedHours: roundMoney(expectedHours),
+    maxHours: roundMoney(maxHours),
+    typicalRate,
+    maxRate: maxRate || typicalRate + 20,
+    phases,
+    notes: `Multi-trade job: ${labels.join(' | ')}`,
+  };
 }
 
 /** Prompt block so the AI doesn't invent fantasy production rates */
 export function formatIndustryLaborPrompt(): string {
   return `LABOR AUTHORITY (do not invent superhuman production rates):
-A server-side industry engine will recalculate crew-hours from real trade production rates.
-Your laborBreakdown.hours should be conservative/realistic. When unsure, OVER-estimate hours slightly rather than under.
-Phase thinking by trade (examples):
-- Drywall: demo + hang + tape/mud/sand + optional paint — ceiling slower; 200 SF full replace is often 14–22 crew-hrs, never 1–3.
-- Paint-only: prep + prime + coats — not the same as drywall finish.
-- Roofing: tear-off + underlayment + shingles by squares.
-- Flooring: demo + prep + install + transitions.
-- Electrical/plumbing fixtures: use typical 1–4 hrs per simple device; panels and rewires much more.
-Always set laborBreakdown.hours = TOTAL crew-hours for the FULL scope, rate = mid local trade rate, total = hours × rate (for Unit jobs) or full-job labor $ (for SF, still full-job hours).`;
+A server-side industry engine recalculates crew-hours from real trade production rates and SUMS every trade in the description.
+MULTI-SCOPE jobs (e.g. plumbing repair + drywall patch + paint full ceiling) must include hours for EACH scope — never quote only the patch.
+Examples of realistic totals:
+- Paint 300 SF ceiling for uniform match (prep+prime+2 coats): often 6–10 crew-hrs; installed paint alone often $500–$900+ in many markets.
+- Ceiling water-line cut-out repair: typically 3–5+ hrs (not under 1 hr).
+- Drywall access patch (e.g. 4×4) hang+tape+sand: typically 2.5–5 hrs.
+- Combined leak access + patch + paint whole ceiling: often 12–20+ crew-hrs total.
+When unsure, OVER-estimate hours slightly. laborBreakdown.hours = TOTAL crew-hours for the FULL multi-trade scope.`;
 }

@@ -96,9 +96,10 @@ export type SqftJobType =
 
 /** Mid-market 2026 US installed contractor rates per sqft (national baseline). */
 const MID_MARKET_SQFT_RATES: Record<SqftJobType, number> = {
-  interior_paint_whole_home: 2.2,
-  interior_paint: 1.3,
-  exterior_paint: 1.95,
+  // Installed paint mid-market 2025–2026 (not DIY materials-only)
+  interior_paint_whole_home: 2.35,
+  interior_paint: 1.95,
+  exterior_paint: 2.35,
   roofing: 4.9,
   flooring_lvp: 3.1,
   flooring_tile: 4.75,
