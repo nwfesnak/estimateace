@@ -12340,6 +12340,107 @@ export default function Home() {
                 {documentType === 'invoice' ? '📄 Invoice Preview & Final Payment' : t('sendEstimate') + ' Preview'}
               </h2>
 
+              {/* Clear attachment preview before send — Site Photos / AI / Videos */}
+              <Card className="mb-6 border-2 border-violet-200 bg-violet-50/40">
+                <CardContent className="p-5 space-y-4">
+                  <div>
+                    <h3 className="text-lg font-semibold text-[#1e293b]">
+                      What the client can receive
+                    </h3>
+                    <p className="text-sm text-gray-600 mt-1">
+                      Preview below includes these sections. When you tap Send, you can turn each
+                      one on or off for that email/text.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="rounded-xl border bg-white p-3">
+                      <div className="font-semibold text-sm mb-2">📷 Site Photos</div>
+                      {photoUrls.length === 0 ? (
+                        <p className="text-xs text-gray-500">None yet — add in editor</p>
+                      ) : (
+                        <>
+                          <p className="text-xs text-emerald-700 font-medium mb-2">
+                            {photoUrls.length} photo{photoUrls.length === 1 ? '' : 's'} on document
+                          </p>
+                          <div className="flex gap-1 flex-wrap">
+                            {photoDisplayUrls.slice(0, 4).map((url, i) => (
+                              <img
+                                key={i}
+                                src={url}
+                                alt=""
+                                className="w-12 h-12 object-cover rounded border"
+                              />
+                            ))}
+                            {photoUrls.length > 4 && (
+                              <span className="w-12 h-12 rounded border bg-gray-50 text-[10px] flex items-center justify-center text-gray-600">
+                                +{photoUrls.length - 4}
+                              </span>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </div>
+
+                    <div className="rounded-xl border bg-white p-3">
+                      <div className="font-semibold text-sm mb-2">✨ AI Job Renderings</div>
+                      {jobRenderings.length === 0 ? (
+                        <p className="text-xs text-gray-500">
+                          None yet — use AI Job Renderings in the editor
+                        </p>
+                      ) : (
+                        <>
+                          <p className="text-xs text-violet-700 font-medium mb-2">
+                            {jobRenderings.length} before/after pair
+                            {jobRenderings.length === 1 ? '' : 's'}
+                          </p>
+                          <div className="flex gap-1 flex-wrap">
+                            {jobRenderings.slice(0, 3).map((r) => {
+                              const after = r.resultPath
+                                ? jobRenderDisplayMap[r.resultPath]
+                                : '';
+                              const before = jobRenderDisplayMap[r.sourcePath];
+                              return (
+                                <div key={r.id} className="flex gap-0.5">
+                                  {before && (
+                                    <img
+                                      src={before}
+                                      alt=""
+                                      className="w-10 h-10 object-cover rounded border"
+                                    />
+                                  )}
+                                  {after && (
+                                    <img
+                                      src={after}
+                                      alt=""
+                                      className="w-10 h-10 object-cover rounded border border-violet-300"
+                                    />
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                          <p className="text-[10px] text-amber-800 mt-2 leading-snug">
+                            AI disclosure is included when these are sent.
+                          </p>
+                        </>
+                      )}
+                    </div>
+
+                    <div className="rounded-xl border bg-white p-3">
+                      <div className="font-semibold text-sm mb-2">🎥 Videos</div>
+                      {videoUrls.length === 0 ? (
+                        <p className="text-xs text-gray-500">None yet — add in editor</p>
+                      ) : (
+                        <p className="text-xs text-emerald-700 font-medium">
+                          {videoUrls.length} video{videoUrls.length === 1 ? '' : 's'} on document
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
               <div className="flex flex-wrap gap-3 mb-6">
                 <Button 
                   onClick={async () => { 
@@ -12551,9 +12652,104 @@ export default function Home() {
                   </div>
                 )}
 
-                {photoUrls.length > 0 && (
+                {/* Site Photos — always labeled; only renders images when present */}
+                {(photoUrls.length > 0 || sendIncludeSitePhotos) && photoUrls.length > 0 && (
                   <div className="mt-12">
-                    {renderPhotoGallery({ heading: 'Site Photos' })}
+                    {renderPhotoGallery({
+                      heading: 'Site Photos',
+                      forceExpanded: true,
+                    })}
+                  </div>
+                )}
+
+                {/* AI Job Renderings (with legal disclosure) */}
+                {jobRenderings.length > 0 && (
+                  <div className="mt-12">
+                    <h3 className="text-2xl font-semibold mb-3 border-b pb-3">
+                      AI Job Renderings (After Completing)
+                    </h3>
+                    <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-950 leading-relaxed">
+                      <strong className="block mb-1">Important — AI-generated imagery disclosure</strong>
+                      AI renderings are illustrative previews only. They are computer-generated
+                      visualizations of possible completed work. Actual results may vary due to site
+                      conditions, materials, weather, measurements, code requirements, and final scope.
+                      These images are not a warranty, guarantee, or contractual specification of the
+                      finished job. The written estimate/invoice and Terms &amp; Conditions control the
+                      agreement.
+                    </div>
+                    <div className="space-y-8">
+                      {jobRenderings.map((r) => {
+                        const beforeUrl = jobRenderDisplayMap[r.sourcePath];
+                        const afterUrl = r.resultPath ? jobRenderDisplayMap[r.resultPath] : '';
+                        return (
+                          <div key={r.id} className="break-inside-avoid">
+                            <p className="text-sm font-medium text-gray-800 mb-2">
+                              {r.lineDescription}
+                              {r.notes ? ` — ${r.notes}` : ''}
+                            </p>
+                            <div className="grid grid-cols-2 gap-4">
+                              <div>
+                                <div className="text-xs text-gray-500 mb-1">Before (site)</div>
+                                {beforeUrl ? (
+                                  <img
+                                    src={beforeUrl}
+                                    alt="Before"
+                                    className="w-full border rounded-xl max-h-64 object-contain bg-gray-50"
+                                  />
+                                ) : (
+                                  <div className="w-full h-40 rounded-xl border bg-gray-100" />
+                                )}
+                              </div>
+                              <div>
+                                <div className="text-xs text-violet-700 mb-1 font-semibold">
+                                  After (AI rendering)
+                                </div>
+                                {afterUrl ? (
+                                  <img
+                                    src={afterUrl}
+                                    alt="AI after rendering"
+                                    className="w-full border border-violet-200 rounded-xl max-h-64 object-contain bg-violet-50/30"
+                                  />
+                                ) : (
+                                  <div className="w-full h-40 rounded-xl border border-dashed border-violet-200 bg-violet-50" />
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Videos */}
+                {videoUrls.length > 0 && (
+                  <div className="mt-12">
+                    <h3 className="text-2xl font-semibold mb-4 border-b pb-3">
+                      Videos ({videoUrls.length})
+                    </h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {videoDisplayUrls.map((url, i) => (
+                        <div key={i} className="rounded-xl border overflow-hidden bg-black">
+                          <video
+                            src={url}
+                            controls
+                            playsInline
+                            className="w-full max-h-64 object-contain"
+                          />
+                          <div className="bg-gray-50 px-3 py-2 text-xs text-gray-600">
+                            Video {i + 1}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {photoUrls.length === 0 && jobRenderings.length === 0 && videoUrls.length === 0 && (
+                  <div className="mt-12 rounded-xl border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500">
+                    No site photos, AI renderings, or videos on this document yet. Add them in the
+                    editor (Site Photos + AI Job Renderings sections), then return here to send.
                   </div>
                 )}
               </div>
@@ -12675,18 +12871,30 @@ export default function Home() {
               >
                 <input
                   type="checkbox"
-                  className="mt-1"
+                  className="mt-1 shrink-0"
                   disabled={photoUrls.length === 0}
                   checked={sendIncludeSitePhotos && photoUrls.length > 0}
                   onChange={(e) => setSendIncludeSitePhotos(e.target.checked)}
                 />
-                <span className="min-w-0">
+                <span className="min-w-0 flex-1">
                   <span className="font-medium text-sm block">📷 Site Photos</span>
-                  <span className="text-xs text-slate-500">
+                  <span className="text-xs text-slate-500 block mb-2">
                     {photoUrls.length === 0
-                      ? 'None on this document'
-                      : `${photoUrls.length} photo${photoUrls.length === 1 ? '' : 's'} will be included`}
+                      ? 'None on this document — add Site Photos in the editor first'
+                      : `${photoUrls.length} photo${photoUrls.length === 1 ? '' : 's'} — uncheck to exclude from this send`}
                   </span>
+                  {photoDisplayUrls.length > 0 && (
+                    <span className="flex gap-1 flex-wrap">
+                      {photoDisplayUrls.slice(0, 6).map((url, i) => (
+                        <img
+                          key={i}
+                          src={url}
+                          alt=""
+                          className="w-11 h-11 object-cover rounded border"
+                        />
+                      ))}
+                    </span>
+                  )}
                 </span>
               </label>
 
@@ -12697,18 +12905,48 @@ export default function Home() {
               >
                 <input
                   type="checkbox"
-                  className="mt-1"
+                  className="mt-1 shrink-0"
                   disabled={jobRenderings.length === 0}
                   checked={sendIncludeJobRenderings && jobRenderings.length > 0}
                   onChange={(e) => setSendIncludeJobRenderings(e.target.checked)}
                 />
-                <span className="min-w-0">
+                <span className="min-w-0 flex-1">
                   <span className="font-medium text-sm block">✨ AI Job Renderings</span>
-                  <span className="text-xs text-slate-500">
+                  <span className="text-xs text-slate-500 block mb-2">
                     {jobRenderings.length === 0
-                      ? 'None on this document'
+                      ? 'None on this document — generate in AI Job Renderings section of the editor'
                       : `${jobRenderings.length} before/after rendering${jobRenderings.length === 1 ? '' : 's'}`}
                   </span>
+                  {jobRenderings.length > 0 && (
+                    <span className="flex flex-col gap-2">
+                      {jobRenderings.slice(0, 3).map((r) => {
+                        const before = jobRenderDisplayMap[r.sourcePath];
+                        const after = r.resultPath ? jobRenderDisplayMap[r.resultPath] : '';
+                        return (
+                          <span key={r.id} className="flex items-center gap-2">
+                            {before && (
+                              <img
+                                src={before}
+                                alt="Before"
+                                className="w-11 h-11 object-cover rounded border"
+                              />
+                            )}
+                            <span className="text-violet-600 text-xs">→</span>
+                            {after && (
+                              <img
+                                src={after}
+                                alt="After AI"
+                                className="w-11 h-11 object-cover rounded border border-violet-300"
+                              />
+                            )}
+                            <span className="text-[10px] text-slate-500 truncate max-w-[8rem]">
+                              {r.lineDescription}
+                            </span>
+                          </span>
+                        );
+                      })}
+                    </span>
+                  )}
                 </span>
               </label>
 
@@ -12731,17 +12969,17 @@ export default function Home() {
               >
                 <input
                   type="checkbox"
-                  className="mt-1"
+                  className="mt-1 shrink-0"
                   disabled={videoUrls.length === 0}
                   checked={sendIncludeVideos && videoUrls.length > 0}
                   onChange={(e) => setSendIncludeVideos(e.target.checked)}
                 />
-                <span className="min-w-0">
+                <span className="min-w-0 flex-1">
                   <span className="font-medium text-sm block">🎥 Videos</span>
                   <span className="text-xs text-slate-500">
                     {videoUrls.length === 0
-                      ? 'None on this document'
-                      : `${videoUrls.length} video${videoUrls.length === 1 ? '' : 's'} will be included as links`}
+                      ? 'None on this document — add Videos in the editor first'
+                      : `${videoUrls.length} video${videoUrls.length === 1 ? '' : 's'} will be included as playable links`}
                   </span>
                 </span>
               </label>
