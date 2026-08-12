@@ -47,6 +47,8 @@ import {
 import { getQuoteOfTheDay } from '@/lib/quote-of-the-day';
 import {
   learnFromBreakdownEdit,
+  learnFromLinePriceEdit,
+  aiPriceMemoryEquals,
   normalizeAiPriceMemory,
   type AiPriceMemory,
 } from '@/lib/ai-price-memory';
@@ -4287,7 +4289,44 @@ export default function Home() {
 
   const addRow = () => setItems(prev => [{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }, ...prev]);
 
+  const priceMemorySaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const priceMemoryToastAt = useRef(0);
+
+  /** Save contractor-edited prices so the next AI quote reuses them (debounced). */
+  const rememberPricesForAi = (
+    materials: any[],
+    labor: any | null,
+    lineTotal?: number,
+    options?: { toast?: boolean }
+  ) => {
+    if (priceMemorySaveTimer.current) clearTimeout(priceMemorySaveTimer.current);
+    priceMemorySaveTimer.current = setTimeout(() => {
+      const nextMemory = learnFromLinePriceEdit(profile.aiPriceMemory, {
+        materials,
+        labor,
+        lineTotal,
+      });
+      if (aiPriceMemoryEquals(profile.aiPriceMemory, nextMemory)) return;
+      const nextProfile = { ...profile, aiPriceMemory: nextMemory };
+      setProfile(nextProfile);
+      void saveProfileSettings(nextProfile, { quiet: true });
+      void saveToDB({ profile: nextProfile, quiet: true });
+      const now = Date.now();
+      if (options?.toast !== false && now - priceMemoryToastAt.current > 8000) {
+        priceMemoryToastAt.current = now;
+        const rateNote = nextMemory.laborRate
+          ? ` Next AI quote uses $${nextMemory.laborRate.toFixed(2)}/hr labor.`
+          : '';
+        showMessage(`💾 Saved your prices for AI.${rateNote}`);
+      }
+    }, 600);
+  };
+
   const updateItem = (id: number, field: string, value: any) => {
+    let learnedMaterials: any[] | null = null;
+    let learnedLabor: any | null = null;
+    let learnedLineTotal = 0;
+
     setItems((prev) =>
       prev.map((item) => {
         if (item.id !== id) return item;
@@ -4333,11 +4372,31 @@ export default function Home() {
           updatedItem.materialBreakdown = null;
           updatedItem.laborBreakdown = synced.labor;
           updatedItem.breakdownUserEdited = true;
+
+          // Remember material unit prices + implied labor $/hr for next AI quote
+          if (field === 'price' || field === 'total') {
+            learnedMaterials = synced.materials;
+            learnedLabor = synced.labor;
+            learnedLineTotal = newTotal;
+          }
+        } else if (field === 'price' || field === 'total') {
+          // No breakdown yet — still remember line total as a soft hint
+          learnedMaterials = [];
+          learnedLabor = null;
+          learnedLineTotal = getLineItemExpectedTotal(updatedItem);
         }
 
         return updatedItem;
       })
     );
+
+    if (learnedMaterials || learnedLabor || learnedLineTotal > 0) {
+      rememberPricesForAi(
+        learnedMaterials || [],
+        learnedLabor,
+        learnedLineTotal > 0 ? learnedLineTotal : undefined
+      );
+    }
   };
 
   const compressImageSourceForAi = async (
@@ -5015,11 +5074,14 @@ export default function Home() {
     );
 
     closeBreakdownEditor();
+    const rateLearned = nextMemory.laborRate
+      ? ` Next AI quotes will use $${nextMemory.laborRate.toFixed(2)}/hr for labor.`
+      : '';
     const laborNote = labor?.rate
       ? ` Labor: ${labor.hours} hrs × $${Number(labor.rate).toFixed(2)}/hr.`
       : '';
     showMessage(
-      `✅ Breakdown saved — materials & labor match the line${builtUp > 0 ? ` ($${builtUp.toFixed(2)})` : ''}.${laborNote}`
+      `✅ Breakdown saved — materials & labor match the line${builtUp > 0 ? ` ($${builtUp.toFixed(2)})` : ''}.${laborNote}${rateLearned}`
     );
     // Persist immediately so refresh keeps edits
     setTimeout(() => {

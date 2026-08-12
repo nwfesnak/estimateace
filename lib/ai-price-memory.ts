@@ -1,6 +1,6 @@
 /**
  * Remember contractor-edited material unit prices and labor rates so the next
- * AI quote breakdown reuses those values instead of reinventing them.
+ * AI quote reuses those values (e.g. labor $67 → $150 implies a new $/hr).
  */
 
 export type MaterialPriceMemory = {
@@ -17,6 +17,12 @@ export type AiPriceMemory = {
   laborRate?: number;
   laborDescription?: string;
   laborUpdatedAt?: string;
+  /**
+   * Optional last labor total the contractor accepted (full job $).
+   * Used as a soft floor when similar scope is short on hours.
+   */
+  laborTotalHint?: number;
+  laborHoursHint?: number;
 };
 
 export type MemoryMaterialLine = {
@@ -66,11 +72,15 @@ export function normalizeAiPriceMemory(raw: unknown): AiPriceMemory {
     });
   }
   const laborRate = roundMoney(o.laborRate);
+  const laborTotalHint = roundMoney(o.laborTotalHint);
+  const laborHoursHint = roundMoney(o.laborHoursHint);
   return {
     materials: materials.slice(0, MAX_MATERIALS),
     laborRate: laborRate > 0 ? laborRate : undefined,
     laborDescription: o.laborDescription ? String(o.laborDescription) : undefined,
     laborUpdatedAt: o.laborUpdatedAt ? String(o.laborUpdatedAt) : undefined,
+    laborTotalHint: laborTotalHint > 0 ? laborTotalHint : undefined,
+    laborHoursHint: laborHoursHint > 0 ? laborHoursHint : undefined,
   };
 }
 
@@ -82,7 +92,6 @@ function findMaterialMemory(
   if (!key) return null;
   const exact = memory.materials.find((m) => m.key === key);
   if (exact) return exact;
-  // Partial: either key contains the other (min length 4)
   if (key.length < 4) return null;
   const fuzzy = memory.materials.find(
     (m) =>
@@ -92,10 +101,16 @@ function findMaterialMemory(
   return fuzzy || null;
 }
 
-/** Learn from a user-saved breakdown edit. */
+/** Learn from a user-saved breakdown edit (materials + labor). */
 export function learnFromBreakdownEdit(
   previous: AiPriceMemory | null | undefined,
-  materials: Array<{ description?: string; unitPrice?: number; unit?: string; qty?: number; total?: number }>,
+  materials: Array<{
+    description?: string;
+    unitPrice?: number;
+    unit?: string;
+    qty?: number;
+    total?: number;
+  }>,
   labor: { description?: string; rate?: number; hours?: number; total?: number } | null
 ): AiPriceMemory {
   const mem = normalizeAiPriceMemory(previous);
@@ -122,15 +137,25 @@ export function learnFromBreakdownEdit(
   let laborRate = mem.laborRate;
   let laborDescription = mem.laborDescription;
   let laborUpdatedAt = mem.laborUpdatedAt;
+  let laborTotalHint = mem.laborTotalHint;
+  let laborHoursHint = mem.laborHoursHint;
+
   if (labor) {
+    const hours = Number(labor.hours) || 0;
+    const total = roundMoney(Number(labor.total) || 0);
     let rate = roundMoney(Number(labor.rate) || 0);
-    if (rate <= 0 && Number(labor.hours) > 0 && Number(labor.total) > 0) {
-      rate = roundMoney(Number(labor.total) / Number(labor.hours));
+    if (rate <= 0 && hours > 0 && total > 0) {
+      rate = roundMoney(total / hours);
     }
-    // Ignore nonsense rates
-    if (rate >= 15 && rate <= 400) {
+    // Accept real contractor rates (was capped too tightly before)
+    if (rate >= 10 && rate <= 500) {
       laborRate = rate;
       laborDescription = String(labor.description || laborDescription || 'Labor').trim();
+      laborUpdatedAt = now;
+    }
+    if (total > 0) {
+      laborTotalHint = total;
+      laborHoursHint = hours > 0 ? hours : laborHoursHint;
       laborUpdatedAt = now;
     }
   }
@@ -144,12 +169,53 @@ export function learnFromBreakdownEdit(
     laborRate,
     laborDescription,
     laborUpdatedAt,
+    laborTotalHint,
+    laborHoursHint,
   };
 }
 
 /**
- * Overlay remembered prices onto an AI (or deterministic) breakdown.
- * Rebuilds material totals and labor total from qty/hours.
+ * Learn from a line-item unit price / total edit (not only breakdown editor).
+ * If the line has a labor breakdown, derive rate from labor total ÷ hours after scale.
+ */
+export function learnFromLinePriceEdit(
+  previous: AiPriceMemory | null | undefined,
+  options: {
+    materials?: Array<{
+      description?: string;
+      unitPrice?: number;
+      unit?: string;
+      qty?: number;
+      total?: number;
+    }>;
+    labor?: { description?: string; rate?: number; hours?: number; total?: number } | null;
+    /** Full line total the contractor set */
+    lineTotal?: number;
+  }
+): AiPriceMemory {
+  let mem = learnFromBreakdownEdit(
+    previous,
+    options.materials || [],
+    options.labor || null
+  );
+
+  // If labor total/rate still empty but line total was raised a lot, store soft hint
+  const lineTotal = roundMoney(Number(options.lineTotal) || 0);
+  if (lineTotal > 0 && !options.labor?.total) {
+    const now = new Date().toISOString();
+    mem = {
+      ...mem,
+      laborTotalHint: lineTotal,
+      laborUpdatedAt: now,
+    };
+  }
+
+  return mem;
+}
+
+/**
+ * Overlay remembered prices onto an AI breakdown.
+ * Rebuilds material totals and labor total from qty/hours × preferred rate.
  */
 export function applyPriceMemoryToBreakdown(
   materials: MemoryMaterialLine[],
@@ -186,7 +252,7 @@ export function applyPriceMemoryToBreakdown(
     nextLabor = {
       ...labor,
       rate,
-      total: roundMoney(hours > 0 ? hours * rate : labor.total),
+      total: roundMoney(hours > 0 ? hours * rate : Number(labor.total) || 0),
     };
     appliedLaborRate = true;
   }
@@ -202,24 +268,42 @@ export function applyPriceMemoryToBreakdown(
 /** Compact list for the AI system prompt */
 export function formatPriceMemoryForPrompt(memory: AiPriceMemory | null | undefined): string {
   const mem = normalizeAiPriceMemory(memory);
-  if (!mem.materials.length && !mem.laborRate) return '';
+  if (!mem.materials.length && !mem.laborRate && !mem.laborTotalHint) return '';
 
   const lines: string[] = [
-    'CONTRACTOR PREFERRED PRICES (from their prior edits — use these unit prices / rates when the item matches):',
+    'CONTRACTOR PREFERRED PRICES (from their prior edits — MUST use these when applicable):',
   ];
   if (mem.laborRate) {
     lines.push(
-      `- Labor hourly rate: $${mem.laborRate.toFixed(2)}/hr${mem.laborDescription ? ` (${mem.laborDescription})` : ''}`
+      `- Labor hourly rate: $${mem.laborRate.toFixed(2)}/hr${
+        mem.laborDescription ? ` (${mem.laborDescription})` : ''
+      } — use this rate for laborBreakdown.rate on every quote unless the job is a different trade specialty.`
+    );
+  }
+  if (mem.laborTotalHint && mem.laborHoursHint) {
+    lines.push(
+      `- Last accepted labor package: $${mem.laborTotalHint.toFixed(2)} for ~${mem.laborHoursHint} hrs (implies ~$${(
+        mem.laborTotalHint / mem.laborHoursHint
+      ).toFixed(2)}/hr).`
     );
   }
   const top = mem.materials.slice(0, 40);
   for (const m of top) {
     lines.push(
-      `- Material "${m.label}": $${m.unitPrice.toFixed(2)}${m.unit ? ` per ${m.unit}` : ' unit price'}`
+      `- Material "${m.label}": $${m.unitPrice.toFixed(2)}${
+        m.unit ? ` per ${m.unit}` : ' unit price'
+      }`
     );
   }
   lines.push(
-    'When a line matches these names (same product/trade), use the preferred unitPrice or labor rate. Still estimate realistic qty/hours for THIS job.'
+    'When materials match these names, use the preferred unitPrice. Always use the preferred labor rate when set. Still estimate realistic qty/hours for THIS job.'
   );
   return lines.join('\n');
+}
+
+/** True if two memory objects are effectively the same (avoid extra saves). */
+export function aiPriceMemoryEquals(a: AiPriceMemory | null | undefined, b: AiPriceMemory | null | undefined): boolean {
+  const na = normalizeAiPriceMemory(a);
+  const nb = normalizeAiPriceMemory(b);
+  return JSON.stringify(na) === JSON.stringify(nb);
 }

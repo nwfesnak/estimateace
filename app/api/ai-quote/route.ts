@@ -187,9 +187,20 @@ function estimateJobLaborHours(
 
 function detectLaborRateCap(
   description: string,
-  laborMultiplier = 1
+  laborMultiplier = 1,
+  preferredLaborRate?: number
 ): { maxRate: number; typicalRate: number; maxHoursPerUnit: number } {
   const scale = (n: number) => roundMoney(n * laborMultiplier);
+  // Contractor-edited rate always wins as the typical (and expands the cap)
+  if (preferredLaborRate && preferredLaborRate >= 10 && preferredLaborRate <= 500) {
+    const industry = estimateIndustryLabor(description, 1, '');
+    const baseMax = industry ? industry.maxRate : 95;
+    return {
+      typicalRate: roundMoney(preferredLaborRate),
+      maxRate: roundMoney(Math.max(scale(baseMax), preferredLaborRate * 1.15, preferredLaborRate)),
+      maxHoursPerUnit: industry ? Math.max(8, industry.maxHours) : 24,
+    };
+  }
   // Prefer industry engine rates when trade is known
   const industry = estimateIndustryLabor(description, 1, '');
   if (industry) {
@@ -238,9 +249,14 @@ function buildLaborFromGuide(
   jobDescription: string,
   suggestedQty: number,
   laborMultiplier = 1,
-  perUnitLaborTotal?: number
+  perUnitLaborTotal?: number,
+  preferredLaborRate?: number
 ): LaborBreakdown {
-  const { maxRate, typicalRate } = detectLaborRateCap(jobDescription, laborMultiplier);
+  const { maxRate, typicalRate } = detectLaborRateCap(
+    jobDescription,
+    laborMultiplier,
+    preferredLaborRate
+  );
   let hours = Number(labor.hours) || 0;
   let rate = Number(labor.rate) || 0;
 
@@ -274,7 +290,8 @@ function normalizeLaborBreakdown(
   jobDescription: string,
   suggestedQty: number,
   laborMultiplier = 1,
-  unit = ''
+  unit = '',
+  preferredLaborRate?: number
 ): LaborBreakdown | null {
   // Always produce labor for a real quote — AI sometimes omits laborBreakdown entirely
   const guide = estimateJobLaborHours(jobDescription, suggestedQty, unit);
@@ -284,7 +301,15 @@ function normalizeLaborBreakdown(
     rate: 0,
     total: 0,
   };
-  return buildLaborFromGuide(seed, guide, jobDescription, suggestedQty, laborMultiplier);
+  return buildLaborFromGuide(
+    seed,
+    guide,
+    jobDescription,
+    suggestedQty,
+    laborMultiplier,
+    undefined,
+    preferredLaborRate
+  );
 }
 
 /**
@@ -299,10 +324,15 @@ function finalizeLaborAndPrice(
   unit: string,
   laborMultiplier = 1,
   aiUnitPrice?: number,
-  regional?: ReturnType<typeof resolveRegionalPricing>
+  regional?: ReturnType<typeof resolveRegionalPricing>,
+  preferredLaborRate?: number
 ): { materials: MaterialLine[]; labor: LaborBreakdown | null; unitPrice: number } {
   const guide = estimateJobLaborHours(jobDescription, suggestedQty, unit);
-  const { typicalRate, maxRate } = detectLaborRateCap(jobDescription, laborMultiplier);
+  const { typicalRate, maxRate } = detectLaborRateCap(
+    jobDescription,
+    laborMultiplier,
+    preferredLaborRate
+  );
   const qty = Math.max(1, suggestedQty);
 
   let lab =
@@ -312,7 +342,9 @@ function finalizeLaborAndPrice(
       guide,
       jobDescription,
       qty,
-      laborMultiplier
+      laborMultiplier,
+      undefined,
+      preferredLaborRate
     );
 
   let hours = Number(lab.hours) || 0;
@@ -323,10 +355,13 @@ function finalizeLaborAndPrice(
   else if (hours > guide.maxHours * 1.25) hours = guide.maxHours;
   else if (hours > guide.maxHours) hours = roundMoney((hours + guide.maxHours) / 2);
 
-  let rate = Number(lab.rate) || 0;
+  // Contractor-saved rate wins over industry defaults
+  let rate = preferredLaborRate && preferredLaborRate >= 10
+    ? preferredLaborRate
+    : Number(lab.rate) || 0;
   if (rate <= 0) rate = typicalRate;
   if (rate > maxRate) rate = maxRate;
-  if (rate < 40) rate = typicalRate;
+  if (rate < 10) rate = typicalRate;
 
   const jobLaborCost = roundMoney(hours * rate);
   const perUnitLabor = roundMoney(jobLaborCost / qty);
@@ -394,16 +429,21 @@ function buildAlignedQuoteBreakdown(
   unitPrice: number,
   suggestedQty: number,
   unit: string,
-  regional: ReturnType<typeof resolveRegionalPricing>
+  regional: ReturnType<typeof resolveRegionalPricing>,
+  preferredLaborRate?: number
 ) {
   const guide = estimateJobLaborHours(jobDescription, suggestedQty, unit);
-  const { typicalRate, maxRate } = detectLaborRateCap(jobDescription, regional.laborMultiplier);
+  const { typicalRate, maxRate } = detectLaborRateCap(
+    jobDescription,
+    regional.laborMultiplier,
+    preferredLaborRate
+  );
   return alignBreakdownToUnitPrice(materials, labor, unitPrice, {
     jobDescription,
     suggestedQty,
     unit,
     materialMultiplier: regional.materialMultiplier,
-    typicalLaborRate: typicalRate,
+    typicalLaborRate: preferredLaborRate && preferredLaborRate >= 10 ? preferredLaborRate : typicalRate,
     maxLaborRate: maxRate,
     expectedLaborHours: guide.expectedHours,
   });
@@ -684,6 +724,7 @@ export async function POST(request: NextRequest) {
     const lineContext = body?.lineContext as QuoteLineContext | undefined;
     const priceMemory: AiPriceMemory = normalizeAiPriceMemory(body?.priceMemory);
     const priceMemoryPrompt = formatPriceMemoryForPrompt(priceMemory);
+    const preferredLaborRate = priceMemory.laborRate;
     const regional = resolveRegionalPricing(jobLocation, companyLocation);
 
     const applyMemoryAndAlign = (
@@ -710,7 +751,8 @@ export async function POST(request: NextRequest) {
         nextUnitPrice,
         qty,
         unit,
-        regional
+        regional,
+        preferredLaborRate
       );
       return {
         aligned,
@@ -959,7 +1001,8 @@ PRICING MATH (strict — numbers must reconcile):
       jobDescription,
       suggestedQty,
       regional.laborMultiplier,
-      lineUnit
+      lineUnit,
+      preferredLaborRate
     );
 
     // Apply contractor-edited preferred prices before reconciling totals
@@ -982,7 +1025,8 @@ PRICING MATH (strict — numbers must reconcile):
       lineUnit,
       regional.laborMultiplier,
       aiTargetUnitPrice,
-      regional
+      regional,
+      preferredLaborRate
     );
     materials = finalized.materials;
     laborBreakdown = finalized.labor;
@@ -1017,7 +1061,8 @@ PRICING MATH (strict — numbers must reconcile):
       structured.unitPrice,
       structured.suggestedQty,
       structured.unit,
-      regional
+      regional,
+      preferredLaborRate
     );
 
     // Final pass: lock contractor-preferred material unit prices + labor rate into the response
@@ -1043,40 +1088,45 @@ PRICING MATH (strict — numbers must reconcile):
       }
     }
 
-    // Last step: re-assert real sheet/bag counts (align/scale can re-break qtys)
+    // Last step: re-assert real sheet/bag counts + force contractor-preferred labor rate
     {
       const fixed = correctMaterialQuantities(aligned.materials as MaterialLine[], {
         jobDescription,
         suggestedQty: structured.suggestedQty,
         unit: structured.unit,
       });
+      let lab = aligned.labor;
+      if (lab && preferredLaborRate && preferredLaborRate >= 10) {
+        const hours = Math.max(0.25, Number(lab.hours) || 0);
+        lab = {
+          ...lab,
+          rate: preferredLaborRate,
+          total: roundMoney(hours * preferredLaborRate),
+        };
+      }
       const matSum = sumMaterialTotals(fixed);
+      const labSum = roundMoney(lab?.total || 0);
       aligned = {
         ...aligned,
         materials: fixed,
         materialsCostTotal: matSum,
+        labor: lab,
+        laborCostTotal: labSum,
       };
       // Keep unit price coherent: for SF lines, unitPrice is per SF of materials+labor
-      const labSum = aligned.laborCostTotal || 0;
       const isSf =
         structured.suggestedQty > 1 &&
         /sf|sqft|sq\.?\s*ft|square/i.test(String(structured.unit || ''));
       if (isSf) {
-        // Materials are full-job; laborCostTotal may be full or per-unit — prefer hours×rate full job
         const laborFull =
-          aligned.labor && aligned.labor.hours > 0 && aligned.labor.rate > 0
-            ? roundMoney(aligned.labor.hours * aligned.labor.rate)
-            : labSum > matSum
-              ? labSum
-              : roundMoney(labSum * structured.suggestedQty);
+          lab && lab.hours > 0 && lab.rate > 0
+            ? roundMoney(lab.hours * lab.rate)
+            : labSum;
         const jobTotal = roundMoney(matSum + laborFull);
         structured.total = jobTotal;
         structured.unitPrice = roundMoney(jobTotal / structured.suggestedQty);
-        if (aligned.labor) {
-          aligned.labor = {
-            ...aligned.labor,
-            total: laborFull,
-          };
+        if (lab) {
+          aligned.labor = { ...lab, total: laborFull };
           aligned.laborCostTotal = laborFull;
         }
       } else {
