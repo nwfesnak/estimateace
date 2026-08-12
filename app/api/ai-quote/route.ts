@@ -276,10 +276,15 @@ function normalizeLaborBreakdown(
   laborMultiplier = 1,
   unit = ''
 ): LaborBreakdown | null {
-  if (!labor) return null;
-
+  // Always produce labor for a real quote — AI sometimes omits laborBreakdown entirely
   const guide = estimateJobLaborHours(jobDescription, suggestedQty, unit);
-  return buildLaborFromGuide(labor, guide, jobDescription, suggestedQty, laborMultiplier);
+  const seed: Partial<LaborBreakdown> = labor || {
+    description: 'Labor',
+    hours: 0,
+    rate: 0,
+    total: 0,
+  };
+  return buildLaborFromGuide(seed, guide, jobDescription, suggestedQty, laborMultiplier);
 }
 
 /**
@@ -872,10 +877,20 @@ PRICING MATH (strict — numbers must reconcile):
       return NextResponse.json({ error: 'AI returned invalid format' }, { status: 500 });
     }
 
-    const aiTargetUnitPrice =
-      typeof parsed.unitPrice === 'number' && parsed.unitPrice > 0
-        ? parsed.unitPrice
-        : undefined;
+    /** AI often returns numbers as strings — coerce safely */
+    const num = (v: unknown, fallback = 0): number => {
+      if (typeof v === 'number' && Number.isFinite(v)) return v;
+      if (typeof v === 'string') {
+        const n = parseFloat(v.replace(/[$,%\s]/g, '').replace(/,/g, ''));
+        if (Number.isFinite(n)) return n;
+      }
+      return fallback;
+    };
+
+    const aiTargetUnitPrice = (() => {
+      const n = num(parsed.unitPrice, 0);
+      return n > 0 ? n : undefined;
+    })();
 
     const rawMaterials = Array.isArray(parsed.materials)
       ? parsed.materials
@@ -886,9 +901,9 @@ PRICING MATH (strict — numbers must reconcile):
     const parsedMaterials: MaterialLine[] = rawMaterials
       .filter((m: { description?: string }) => m?.description?.trim())
       .map((m: { description?: string; qty?: number; unit?: string; unitPrice?: number; total?: number }) => {
-        const qty = typeof m.qty === 'number' ? m.qty : 1;
-        const unitPrice = typeof m.unitPrice === 'number' ? m.unitPrice : 0;
-        const total = typeof m.total === 'number' ? m.total : qty * unitPrice;
+        const qty = num(m.qty, 1) || 1;
+        const unitPrice = num(m.unitPrice, 0);
+        const total = num(m.total, 0) || qty * unitPrice;
         return {
           description: String(m.description).trim(),
           qty,
@@ -898,28 +913,25 @@ PRICING MATH (strict — numbers must reconcile):
         };
       });
 
-    const suggestedQty =
-      typeof parsed.suggestedQty === 'number' && parsed.suggestedQty > 0
-        ? parsed.suggestedQty
-        : 1;
+    const suggestedQty = (() => {
+      const n = num(parsed.suggestedQty, 1);
+      return n > 0 ? n : 1;
+    })();
 
     let materials = trimRedundantConsumables(consolidateSmallConsumables(parsedMaterials));
     materials = calibrateMaterialPrices(materials, regional.materialMultiplier);
 
     const lineUnit = parsed.unit ? String(parsed.unit).trim() : '';
 
+    // Always build a labor object when AI omits laborBreakdown — install work always has labor
+    const rawLabor = parsed.laborBreakdown || parsed.labor || null;
     let laborBreakdown = normalizeLaborBreakdown(
-      parsed.laborBreakdown
-        ? {
-            description: String(parsed.laborBreakdown.description || 'Labor').trim(),
-            hours: typeof parsed.laborBreakdown.hours === 'number' ? parsed.laborBreakdown.hours : 0,
-            rate: typeof parsed.laborBreakdown.rate === 'number' ? parsed.laborBreakdown.rate : 0,
-            total:
-              typeof parsed.laborBreakdown.total === 'number'
-                ? parsed.laborBreakdown.total
-                : (parsed.laborBreakdown.hours || 0) * (parsed.laborBreakdown.rate || 0),
-          }
-        : null,
+      {
+        description: String(rawLabor?.description || 'Labor').trim() || 'Labor',
+        hours: num(rawLabor?.hours, 0),
+        rate: num(rawLabor?.rate, 0),
+        total: num(rawLabor?.total, 0),
+      },
       jobDescription,
       suggestedQty,
       regional.laborMultiplier,

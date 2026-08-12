@@ -4391,12 +4391,47 @@ export default function Home() {
     const item = items.find(row => row.id === itemId);
     if (!item) return;
 
-    const nextQty = data.suggestedQty !== undefined && data.suggestedQty > 0 ? data.suggestedQty : (item.qty || 1);
-    const nextPrice = roundMoney(Number(data.unitPrice) || 0);
+    const coerceNum = (v: unknown, fallback = 0) => {
+      if (typeof v === 'number' && Number.isFinite(v)) return v;
+      if (typeof v === 'string') {
+        const n = parseFloat(v.replace(/[$,%\s]/g, '').replace(/,/g, ''));
+        if (Number.isFinite(n)) return n;
+      }
+      return fallback;
+    };
+
+    const nextQty =
+      data.suggestedQty !== undefined && coerceNum(data.suggestedQty) > 0
+        ? coerceNum(data.suggestedQty)
+        : item.qty || 1;
+    const nextPrice = roundMoney(coerceNum(data.unitPrice) || 0);
     const nextUnit = (data.unit || item.unit || '').trim();
-    const nextTotal = roundMoney(Number(data.total) > 0 ? Number(data.total) : nextQty * nextPrice);
+    const nextTotal = roundMoney(
+      coerceNum(data.total) > 0 ? coerceNum(data.total) : nextQty * nextPrice
+    );
     const scopeFromPhoto = String(data.analyzedScope || data.imageAnalysis?.scopeDescription || '').trim();
     const quoteDescription = (options?.fromPhoto && scopeFromPhoto) ? scopeFromPhoto : (item.description || '');
+
+    // Accept laborBreakdown OR nested labor; coerce string numbers from AI
+    const rawLabor = data.laborBreakdown || data.labor || null;
+    const laborInput = rawLabor
+      ? {
+          description: String(rawLabor.description || 'Labor').trim() || 'Labor',
+          hours: coerceNum(rawLabor.hours, 0),
+          rate: coerceNum(rawLabor.rate, 0),
+          total: coerceNum(rawLabor.total, 0),
+        }
+      : null;
+
+    const materialsInput = Array.isArray(data.materials)
+      ? data.materials.map((m: any) => ({
+          description: String(m?.description || '').trim(),
+          qty: coerceNum(m?.qty, 1) || 1,
+          unit: String(m?.unit || 'ea').trim() || 'ea',
+          unitPrice: coerceNum(m?.unitPrice, 0),
+          total: coerceNum(m?.total, 0) || coerceNum(m?.qty, 1) * coerceNum(m?.unitPrice, 0),
+        }))
+      : [];
 
     const normalizedBreakdown = normalizeStoredCostBreakdown({
       description: quoteDescription,
@@ -4404,21 +4439,29 @@ export default function Home() {
       unit: nextUnit,
       unitPrice: nextPrice,
       total: nextTotal,
-      materials: data.materials || [],
-      labor: data.laborBreakdown
-        ? {
-            description: data.laborBreakdown.description,
-            hours: data.laborBreakdown.hours,
-            rate: data.laborBreakdown.rate,
-            total: data.laborBreakdown.total,
-          }
-        : null,
+      materials: materialsInput,
+      labor: laborInput,
       materialMultiplier: data.pricingRegion?.materialMultiplier,
       typicalLaborRate: 62,
       maxLaborRate: 75,
-      expectedLaborHours: data.laborBreakdown?.hours,
+      expectedLaborHours: laborInput?.hours || undefined,
     });
     const { linePricing, billing } = normalizedBreakdown;
+
+    // Guarantee labor is stored on the line item (align can still leave null on $0 lines)
+    let laborToSave = normalizedBreakdown.labor;
+    if (!laborToSave && linePricing.total > 0) {
+      const hours = Math.max(0.5, laborInput?.hours || 2);
+      const rate = Math.max(45, laborInput?.rate || 62);
+      const matSum = normalizedBreakdown.materialsCostTotal || 0;
+      const total = Math.max(0.01, roundMoney(linePricing.total - matSum) || roundMoney(hours * rate));
+      laborToSave = {
+        description: laborInput?.description || 'Labor',
+        hours,
+        rate: hours > 0 ? roundMoney(total / hours) : rate,
+        total,
+      };
+    }
 
     setItems(prev =>
       prev.map(row => {
@@ -4433,18 +4476,37 @@ export default function Home() {
         if (options?.fromPhoto && scopeFromPhoto) {
           updated.description = scopeFromPhoto;
         }
-        if (normalizedBreakdown.materials.length) {
-          updated.materialsList = normalizedBreakdown.materials;
-          updated.materialBreakdown = null;
-        }
-        if (normalizedBreakdown.labor) {
-          updated.laborBreakdown = normalizedBreakdown.labor;
+        // Always write materials list (even empty) so stale breakdowns don't stick
+        updated.materialsList = normalizedBreakdown.materials.length
+          ? normalizedBreakdown.materials
+          : materialsInput;
+        updated.materialBreakdown = null;
+        // Always write labor when we have any
+        if (laborToSave) {
+          updated.laborBreakdown = laborToSave;
         }
         // Fresh AI quote — allow one align pass until user edits
         updated.breakdownUserEdited = false;
         return updated;
       })
     );
+
+    // Auto-show materials + labor breakdown so the quote is visible (was easy to miss)
+    if (
+      (normalizedBreakdown.materials.length > 0 || laborToSave) &&
+      (!estimateBreakdownSettings.showMaterialBreakdownOnEstimate ||
+        !estimateBreakdownSettings.showLaborBreakdownOnEstimate ||
+        !estimateBreakdownSettings.showCostBreakdownOnEstimate)
+    ) {
+      void saveEstimateBreakdownSettings(
+        {
+          showMaterialBreakdownOnEstimate: true,
+          showLaborBreakdownOnEstimate: true,
+          showCostBreakdownOnEstimate: true,
+        },
+        { quiet: true }
+      );
+    }
 
     const regionLabel = data.pricingRegion?.label;
     const regionNote = regionLabel
@@ -4465,19 +4527,24 @@ export default function Home() {
     if (data.breakdown) {
       msg += `\n\nScope: ${data.breakdown}`;
     }
-    if (data.materials?.length) {
-      msg += `\n\n${data.materials.length} materials listed.`;
+    if (normalizedBreakdown.materials.length || materialsInput.length) {
+      msg += `\n\n${(normalizedBreakdown.materials.length || materialsInput.length)} materials listed.`;
     }
-    if (data.laborBreakdown?.hours) {
-      msg += `\nLabor: ${data.laborBreakdown.description || 'Installation'} — ${data.laborBreakdown.hours} hrs`;
-      if (data.laborBreakdown.rate) {
-        msg += ` @ $${Number(data.laborBreakdown.rate).toFixed(2)}/hr`;
+    if (laborToSave) {
+      msg += `\nLabor: ${laborToSave.description || 'Installation'} — ${laborToSave.hours} hrs`;
+      if (laborToSave.rate) {
+        msg += ` @ $${Number(laborToSave.rate).toFixed(2)}/hr = $${Number(laborToSave.total).toFixed(2)}`;
       }
+    } else {
+      msg += `\n⚠️ Labor breakdown missing — open Edit Breakdown to add labor.`;
     }
-    if (normalizedBreakdown.materials.length || normalizedBreakdown.labor) {
+    if (normalizedBreakdown.materials.length || laborToSave) {
       const mat = normalizedBreakdown.materialsCostTotal.toFixed(2);
-      const lab = normalizedBreakdown.laborCostTotal.toFixed(2);
-      const builtUp = roundMoney(normalizedBreakdown.materialsCostTotal + normalizedBreakdown.laborCostTotal).toFixed(2);
+      const labTotal = Number(laborToSave?.total ?? normalizedBreakdown.laborCostTotal ?? 0);
+      const lab = labTotal.toFixed(2);
+      const builtUp = roundMoney(
+        normalizedBreakdown.materialsCostTotal + labTotal
+      ).toFixed(2);
       const matchNote = billing.perSqft
         ? `matches line total $${linePricing.total.toFixed(2)} (${linePricing.qty.toLocaleString()} SF × $${linePricing.price.toFixed(2)}/SF)`
         : `matches line total $${linePricing.total.toFixed(2)}`;
@@ -4487,6 +4554,7 @@ export default function Home() {
       msg += `\n\nUsing your saved prices: ${data.priceMemoryApplied.materials || 0} material(s)`;
       if (data.priceMemoryApplied.laborRate) msg += ' + labor rate';
     }
+    msg += `\n\nMaterials + Labor breakdown is shown under the line (toggles turned on).`;
     showMessage(msg);
   };
 
@@ -6164,12 +6232,15 @@ export default function Home() {
   };
 
   const saveEstimateBreakdownSettings = async (
-    updates: Partial<typeof estimateBreakdownSettings>
+    updates: Partial<typeof estimateBreakdownSettings>,
+    options?: { quiet?: boolean }
   ) => {
     const next = { ...estimateBreakdownSettings, ...updates };
     setEstimateBreakdownSettings(next);
-    await saveToDB({ breakdown: next });
-    showMessage('✅ Breakdown display saved for this estimate.');
+    await saveToDB({ breakdown: next, quiet: true });
+    if (!options?.quiet) {
+      showMessage('✅ Breakdown display saved for this estimate.');
+    }
   };
 
   const saveBreakdownProfileSettings = async (updates: Partial<typeof profile>) => {
