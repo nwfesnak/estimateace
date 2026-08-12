@@ -127,7 +127,7 @@ function estimateJobLaborHours(
   });
 
   if (scope.measure === 'sqft') {
-    const sqft = scope.scopeQty;
+    const sqft = Math.max(1, scope.scopeQty);
     const squares = sqft / 100;
 
     const wholeHomePaint = detectWholeHomeInteriorPaint(description);
@@ -137,31 +137,81 @@ function estimateJobLaborHours(
         wholeHomePaint.ceilingFt
       );
       const coats = wholeHomePaint.coats;
-      const production = coats === 1 ? 145 : coats === 2 ? 95 : 70;
+      // Realistic painter production (not superhero rates)
+      const production = coats === 1 ? 110 : coats === 2 ? 75 : 55;
       return finish(
-        paintableSqft / (production * 1.2),
+        paintableSqft / (production * 1.15),
         paintableSqft / production,
-        paintableSqft / (production * 0.82)
+        paintableSqft / (production * 0.8)
       );
     }
 
     if (/roof|shingle|re-?roof|tear[\s-]?off/i.test(text)) {
-      // ~1.5–3.5 crew-hours per square (100 sqft); full replacement includes tear-off.
-      return finish(squares * 1.5, squares * 2.5, squares * 4.5);
+      // ~2–4 crew-hours per square with tear-off; more with steep/complex
+      return finish(squares * 2, squares * 3.2, squares * 5);
     }
+
+    /*
+     * DRYWALL — check BEFORE paint. Descriptions often include "prime and paint"
+     * after hang/tape; matching paint first used ~175 SF/hr and produced absurd
+     * times like 1.67 hrs for 200 SF of demo+hang+finish+paint.
+     *
+     * Rates are total CREW-HOURS for a typical residential crew (production SF/hr
+     * is conservative so solo or careful finish work is covered).
+     */
+    if (/drywall|sheetrock|gypsum|hang\s*rock|\bmud\b|tape\s*(?:and|&)?\s*(?:mud|finish)|skim\s*coat/i.test(text)) {
+      const ceiling = /ceiling|overhead/i.test(text);
+      const hasDemo = /demo|remov|tear\s*out|take\s*down|ripped?|damaged|tear[\s-]?off/i.test(text);
+      const hasHang = /hang|install|new\s*drywall|replace|board|sheetrock|gypsum/i.test(text);
+      const hasFinish =
+        /tape|mud|finish|sand|texture|skim|float|joint\s*compound|3\s*coat|three\s*coat/i.test(text) ||
+        hasHang; // hang almost always needs finish for a complete job
+      const hasPaint = /paint|primer|prime\b|recoat/i.test(text);
+
+      // Phase production (sqft of area finished per crew-hour). Ceiling is slower.
+      let hours = 0;
+      if (hasDemo) {
+        hours += sqft / (ceiling ? 45 : 65); // pull down, haul debris
+      }
+      if (hasHang || (!hasDemo && !hasFinish && !hasPaint)) {
+        hours += sqft / (ceiling ? 28 : 40); // measure, cut, screw
+      }
+      if (hasFinish) {
+        // Tape + 2–3 coats + sand — usually the longest phase
+        hours += sqft / (ceiling ? 18 : 24);
+      }
+      if (hasPaint) {
+        hours += sqft / (ceiling ? 100 : 130); // prime + finish coat(s)
+      }
+      // Bare "drywall 200 sf" with no phases → hang + finish
+      if (hours <= 0) {
+        hours = sqft / (ceiling ? 12 : 16);
+      }
+
+      // Floor: even a small ceiling patch job is rarely under ~3–4 hrs once you mobilize
+      const minFloor = sqft >= 100 ? (ceiling ? 8 : 6) : sqft >= 40 ? 4 : 2;
+      const expected = Math.max(minFloor, hours);
+      return finish(expected * 0.78, expected, expected * 1.45);
+    }
+
+    // Paint-only (no drywall hang/finish in scope)
     if (/paint|primer|coat/i.test(text)) {
-      return finish(sqft / 250, sqft / 175, sqft / 120);
+      const ceiling = /ceiling/i.test(text);
+      // Cut, roll, two coats typical interior
+      const prod = ceiling ? 90 : 120;
+      return finish(sqft / (prod * 1.2), sqft / prod, sqft / (prod * 0.75));
     }
     if (/floor|tile|laminate|hardwood|lvp|vinyl|carpet/i.test(text)) {
-      return finish(sqft / 45, sqft / 30, sqft / 18);
-    }
-    if (/drywall|sheetrock|hang|mud|tape/i.test(text)) {
-      return finish(sqft / 55, sqft / 38, sqft / 25);
+      // Demo old + underlayment + install
+      const hasDemo = /demo|remov|tear|pull\s*up/i.test(text);
+      const prod = hasDemo ? 18 : 25;
+      return finish(sqft / (prod * 1.25), sqft / prod, sqft / (prod * 0.7));
     }
     if (/siding|stucco|exterior/i.test(text)) {
-      return finish(sqft / 40, sqft / 28, sqft / 18);
+      return finish(sqft / 35, sqft / 22, sqft / 14);
     }
-    return finish(sqft / 50, sqft / 35, sqft / 22);
+    // Generic area work — don't assume lightning production
+    return finish(sqft / 40, sqft / 25, sqft / 15);
   }
 
   if (scope.measure === 'lf') {
@@ -820,13 +870,20 @@ TYPICAL INSTALLED TOTALS (Unit jobs = Lowe's materials + labor — adjust ±15�
 - Drywall small patch: $175–$500 | water heater (tank): $1,200–$2,800
 - Dishwasher install: $250–$550 | vanity install: $450–$1,400
 
-LABOR HOURS (total crew-hours for the WHOLE task — not per sqft unless SF billing):
+LABOR HOURS (total CREW-HOURS for the WHOLE task — be realistic, not optimistic):
 - Small hardware / outlet / fixture swap: 0.75–3 hrs
 - Toilet, faucet install, disposal, fan: 1.5–4 hrs
-- Interior door / drywall patch: 1.5–5 hrs
+- Small drywall patch (hand-size): 1.5–5 hrs. Interior door: 1.5–5 hrs
 - Entry door / water heater: 3–10 hrs
-- Roof: ~1.5–3.5 hrs per square (100 sqft). Flooring: ~1 hr per 25–35 sqft. Whole-home paint: use paintable wall+ceiling area (~3–4× floor sqft), not floor alone.
+- DRYWALL AREA (critical — do NOT under-hour):
+  * Hang only ~25–40 SF/hr (ceiling slower than walls)
+  * Tape/mud/sand 2–3 coats often takes AS LONG OR LONGER than hang (~18–28 SF/hr)
+  * Demo old board ~40–65 SF/hr
+  * Prime+paint ceiling after finish ~90–120 SF/hr
+  * Example: 200 SF ceiling demo + hang + tape/finish + prime/paint ≈ 14–22 crew-hours (NOT 1–3 hrs)
+- Roof: ~2–4 hrs per square (100 sqft) with tear-off. Flooring install ~18–30 SF/hr with prep.
 - NEVER assign 8–20 hours to a single toilet, faucet, handle, or outlet.
+- NEVER assign under 8 hours to 100+ SF of ceiling drywall that includes demo, hang, finish, and paint.
 
 PRICING METHODOLOGY:
 - Material unitPrice MUST match Lowe's.com mid-grade (Good/Better aisle), NOT Home Depot Pro, NOT specialty showroom, NOT installed package prices.

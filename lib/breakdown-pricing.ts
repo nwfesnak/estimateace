@@ -303,127 +303,87 @@ export function alignBreakdownToUnitPrice(
     materialsTotal = sumMaterialTotals(mats);
   }
 
-  let laborTotal = roundMoney(Math.max(0, jobTarget - materialsTotal));
-
+  /*
+   * Prefer realistic HOURS from the labor guide over residual dollars from a
+   * low unit price. Old bug: $242 job − materials left ~$68 labor → 1.67 hrs
+   * even when the work (demo+hang+tape+paint 200 SF ceiling) needs ~15–20 hrs.
+   */
   let hours = roundMoney(Number(labor?.hours) || expectedHours);
   if (hours <= 0) hours = expectedHours;
+  // Never collapse long jobs below ~70% of expected crew-hours
+  if (expectedHours >= 3 && hours < expectedHours * 0.7) {
+    hours = roundMoney(expectedHours);
+  }
 
   // Prefer AI-provided rate when it looks sane; otherwise typical local rate
   let rate = roundMoney(Number(labor?.rate) || 0);
-  if (rate < 35 || rate > maxRate * 1.15) rate = roundMoney(typicalRate);
+  if (rate < 45 || rate > maxRate * 1.15) rate = roundMoney(typicalRate);
   if (rate > maxRate) rate = maxRate;
+  if (rate < 45) rate = roundMoney(Math.max(55, typicalRate));
 
-  // If residual labor dollars are tiny/zero but we still have a job, rebuild labor from hours × rate
-  const hoursDrivenLabor = roundMoney(hours * rate);
-  if (laborTotal < minLaborShare * 0.5 && hoursDrivenLabor > 0 && jobTarget > 0) {
-    laborTotal = roundMoney(Math.min(hoursDrivenLabor, jobTarget * 0.7));
-    // Shrink materials so materials + labor still equals jobTarget
-    const matsCap = roundMoney(Math.max(0, jobTarget - laborTotal));
-    if (materialsTotal > matsCap && matsCap > 0 && materialsTotal > 0) {
-      mats = scaleMaterialLines(mats, matsCap / materialsTotal);
-      materialsTotal = sumMaterialTotals(mats);
-    } else if (materialsTotal <= 0 && matsCap > 0) {
-      mats = [
-        recalcMaterialLine({
-          description: 'Materials & supplies',
-          qty: 1,
-          unit: 'lot',
-          unitPrice: matsCap,
-          total: matsCap,
-        }),
-      ];
-      materialsTotal = matsCap;
-    }
-    laborTotal = roundMoney(Math.max(0, jobTarget - materialsTotal));
-  }
+  // Labor dollars driven by real hours first (life-like), not leftover after materials
+  let laborTotal = roundMoney(hours * rate);
+  const hoursDrivenLabor = laborTotal;
 
-  if (hours > 0 && laborTotal > 0) {
-    rate = roundMoney(laborTotal / hours);
-    if (rate > maxRate) {
-      rate = maxRate;
-      hours = roundMoney(Math.max(0.5, laborTotal / rate));
-    }
-    if (rate < 35) {
-      rate = roundMoney(Math.max(45, typicalRate));
-      hours = roundMoney(Math.max(0.5, laborTotal / rate));
-    }
-    laborTotal = roundMoney(hours * rate);
-  }
-
-  let drift = roundMoney(jobTarget - (materialsTotal + laborTotal));
-  if (Math.abs(drift) >= 0.01) {
-    if (laborTotal > 0 || hours > 0) {
-      laborTotal = roundMoney(Math.max(0, laborTotal + drift));
+  // If fixed jobTarget is way below materials + real labor, expand labor side of truth
+  // by keeping hours and accepting a higher built-up (caller uses materials+labor).
+  if (jobTarget > 0 && laborTotal + materialsTotal > jobTarget * 1.15) {
+    // Keep realistic hours; do not crush hours to fit a too-low target
+    laborTotal = hoursDrivenLabor;
+  } else if (jobTarget > 0) {
+    const residual = roundMoney(Math.max(0, jobTarget - materialsTotal));
+    // Use the larger of residual and hours-driven labor (never shrink hours for a cheap residual)
+    if (residual > laborTotal * 1.1 && residual > 0) {
+      laborTotal = residual;
       if (hours > 0) rate = roundMoney(laborTotal / hours);
-      if (laborTotal <= 0 && jobTarget > 0) {
-        // Last resort: put remaining job $ into labor, never drop the labor row
-        laborTotal = roundMoney(Math.max(jobTarget * 0.35, minLaborShare));
-        hours = Math.max(0.5, hours || expectedHours);
-        rate = roundMoney(laborTotal / hours);
-        const matsCap = roundMoney(Math.max(0, jobTarget - laborTotal));
-        if (materialsTotal > 0 && matsCap >= 0) {
-          if (matsCap === 0) {
-            mats = [];
-            materialsTotal = 0;
-          } else {
-            mats = scaleMaterialLines(mats, matsCap / materialsTotal);
-            materialsTotal = sumMaterialTotals(mats);
-          }
-        }
+      if (rate > maxRate) {
+        rate = maxRate;
+        hours = roundMoney(Math.max(expectedHours * 0.7, laborTotal / rate));
+        laborTotal = roundMoney(hours * rate);
       }
-      drift = roundMoney(jobTarget - (materialsTotal + laborTotal));
+      if (rate < 45) {
+        rate = roundMoney(Math.max(55, typicalRate));
+        hours = Math.max(hours, roundMoney(laborTotal / rate));
+        laborTotal = roundMoney(hours * rate);
+      }
     }
-    if (Math.abs(drift) >= 0.01 && materialsTotal > 0) {
-      mats = scaleMaterialLines(mats, roundMoney((materialsTotal + drift) / materialsTotal));
+  }
+
+  // Materials should not erase labor room on realistic jobs
+  if (materialsTotal > 0 && laborTotal > 0 && jobTarget > 0) {
+    const maxMats = roundMoney(Math.max(0, (materialsTotal + laborTotal) * 0.55));
+    if (materialsTotal > maxMats && maxMats > 0) {
+      mats = scaleMaterialLines(mats, maxMats / materialsTotal);
       materialsTotal = sumMaterialTotals(mats);
     }
   }
 
-  // Always emit a labor line when the job has a price (AI quote must include labor)
-  const alignedLabor: BreakdownLabor | null =
-    jobTarget > 0
-      ? {
-          description: String(labor?.description || 'Labor').trim() || 'Labor',
-          hours: Math.max(0.25, hours || expectedHours),
-          rate: Math.max(35, rate || typicalRate),
-          total: Math.max(
-            0.01,
-            laborTotal > 0
-              ? laborTotal
-              : roundMoney(Math.max(0.25, hours || expectedHours) * Math.max(35, rate || typicalRate))
-          ),
-        }
-      : laborTotal > 0
-        ? {
-            description: String(labor?.description || 'Labor').trim() || 'Labor',
-            hours,
-            rate,
-            total: laborTotal,
-          }
-        : null;
+  // Rebuild labor from final hours × rate (source of truth for life-like quotes)
+  hours = Math.max(0.5, hours || expectedHours);
+  rate = Math.max(45, Math.min(maxRate, rate || typicalRate));
+  laborTotal = roundMoney(hours * rate);
 
-  // If we forced labor total above residual, re-balance materials so sums match jobTarget
-  if (alignedLabor && jobTarget > 0) {
-    laborTotal = alignedLabor.total;
-    const matsCap = roundMoney(Math.max(0, jobTarget - laborTotal));
-    if (Math.abs(materialsTotal - matsCap) > 0.05 && materialsTotal > 0) {
-      if (matsCap <= 0) {
-        mats = [];
-        materialsTotal = 0;
-      } else {
-        mats = scaleMaterialLines(mats, matsCap / materialsTotal);
-        materialsTotal = sumMaterialTotals(mats);
-      }
-    }
-    // Fix penny drift onto labor
-    const sum = roundMoney(materialsTotal + laborTotal);
-    const penny = roundMoney(jobTarget - sum);
-    if (Math.abs(penny) >= 0.01) {
-      laborTotal = roundMoney(laborTotal + penny);
-      alignedLabor.total = laborTotal;
-      if (alignedLabor.hours > 0) {
-        alignedLabor.rate = roundMoney(laborTotal / alignedLabor.hours);
-      }
+  // True job cost = materials + realistic labor (may exceed a too-low AI unit target)
+  const builtUpJob = roundMoney(materialsTotal + laborTotal);
+
+  const alignedLabor: BreakdownLabor = {
+    description: String(labor?.description || 'Labor').trim() || 'Labor',
+    hours: roundMoney(hours),
+    rate: roundMoney(rate),
+    total: laborTotal,
+  };
+
+  // Only penny-fix to jobTarget when we're already close (within 12%) — never crush hours
+  if (jobTarget > 0 && builtUpJob > 0) {
+    const ratio = jobTarget / builtUpJob;
+    if (ratio >= 0.88 && ratio <= 1.12) {
+      const scaled = scaleBreakdownToJobTotal(mats, alignedLabor, jobTarget);
+      return {
+        materials: scaled.materials,
+        labor: scaled.labor,
+        materialsCostTotal: scaled.materialsCostTotal,
+        laborCostTotal: scaled.laborCostTotal,
+      };
     }
   }
 
@@ -431,7 +391,7 @@ export function alignBreakdownToUnitPrice(
     materials: mats,
     labor: alignedLabor,
     materialsCostTotal: materialsTotal,
-    laborCostTotal: roundMoney(alignedLabor?.total || laborTotal),
+    laborCostTotal: laborTotal,
   };
 }
 

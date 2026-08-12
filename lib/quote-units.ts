@@ -1,5 +1,6 @@
 import type { RegionalPricing } from './ai-quote-region';
 import { capSmallRepairUnitPrice, isSmallRepairScope } from './small-job-pricing';
+import { blendWithTaskMarket } from './task-market-pricing';
 
 const roundMoney = (n: number) => Math.round(n * 100) / 100;
 
@@ -104,7 +105,8 @@ const MID_MARKET_SQFT_RATES: Record<SqftJobType, number> = {
   flooring_hardwood: 6.25,
   flooring_carpet: 3.85,
   flooring_general: 2.95,
-  drywall: 2.45,
+  // Full hang + tape/finish mid-market; demo + paint scopes run higher via labor rebuild
+  drywall: 8.75,
   siding: 5.1,
   stucco: 7.5,
   insulation: 2.05,
@@ -278,8 +280,8 @@ export function getMarketSqftUnitPrice(
 export const getHighEndSqftUnitPrice = getMarketSqftUnitPrice;
 
 /**
- * Normalize AI quote output: sqft-capable jobs → qty = sqft, unit = SF, high-end $/sqft.
- * Everything else → qty = 1, unit = Unit, unitPrice = full job total.
+ * Normalize AI quote output: sqft-capable jobs → qty = sqft, unit = SF, mid-market $/sqft.
+ * Everything else → qty = 1, unit = Unit, unitPrice = full job total (market-clamped when known).
  */
 export function resolveQuoteLineStructure(
   description: string,
@@ -325,12 +327,25 @@ export function resolveQuoteLineStructure(
   const aiTotal = roundMoney(
     Number(ai.total) > 0 ? Number(ai.total) : aiUnitPrice * aiQty
   );
-  let total = roundMoney(Math.max(aiTotal, aiUnitPrice));
+  // Prefer full job total; if AI returned per-unit with qty>1, expand once
+  let total = roundMoney(
+    aiQty > 1 && aiUnitPrice > 0 && Math.abs(aiTotal - aiUnitPrice) < 0.02
+      ? aiUnitPrice * aiQty
+      : Math.max(aiTotal, aiUnitPrice)
+  );
   let unitPrice = total;
 
+  // Small repairs first (tight bands)
   const capped = capSmallRepairUnitPrice(description, regional, unitPrice, total);
   unitPrice = capped.unitPrice;
   total = capped.total;
+
+  // Broader task market blend (toilet, faucet, fan, window, etc.)
+  const market = blendWithTaskMarket(description, regional, total);
+  if (market.band) {
+    unitPrice = market.total;
+    total = market.total;
+  }
 
   return {
     suggestedQty: 1,
