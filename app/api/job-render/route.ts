@@ -1,17 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { getXaiApiKey, getXaiImageModel } from '@/lib/xai-config';
+import { extractMediaStoragePath } from '@/lib/media-url';
 
-/** Image edit can take 20–60s — allow long enough for Vercel Pro / fluid compute */
+/** Image edit is slow — needs elevated duration on Vercel */
 export const maxDuration = 120;
 export const runtime = 'nodejs';
 
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
-const RATE_LIMIT = 6;
+const RATE_LIMIT = 8;
 const WINDOW_MS = 60 * 1000;
 
-/** Keep request bodies small — huge data URLs cause "Failed to fetch" / 413 */
-const MAX_DATA_URL_CHARS = 2_500_000;
+function getApiKey(): string | undefined {
+  return (
+    process.env.GROK_API_KEY?.trim() ||
+    process.env.XAI_API_KEY?.trim() ||
+    getXaiApiKey()
+  );
+}
 
 async function verifyUser(request: NextRequest) {
   const authHeader = request.headers.get('authorization');
@@ -32,9 +39,9 @@ async function verifyUser(request: NextRequest) {
     error,
   } = await supabase.auth.getUser();
   if (error || !user) {
-    return { user: null as null, error: 'Unauthorized' };
+    return { user: null as null, error: 'Unauthorized — log in again' };
   }
-  return { user, error: null as null };
+  return { user, error: null as null, token };
 }
 
 function checkRateLimit(userId: string) {
@@ -54,12 +61,6 @@ function checkRateLimit(userId: string) {
   return { allowed: true as const };
 }
 
-function normalizeImageDataUrl(imageBase64: string): string {
-  const trimmed = imageBase64.trim();
-  if (trimmed.startsWith('data:image/')) return trimmed;
-  return `data:image/jpeg;base64,${trimmed}`;
-}
-
 function buildPrompt(lineDescription: string, notes?: string): string {
   const scope = lineDescription.trim() || 'the contracted construction / repair work';
   const extra = notes?.trim() ? `\nAdditional contractor notes: ${notes.trim()}` : '';
@@ -72,57 +73,60 @@ Requirements:
 - Photorealistic, not cartoon or illustration. No text watermarks, logos, or price tags.`;
 }
 
-/**
- * Call xAI image edits. Prefer HTTPS image URLs over huge data URIs so Vercel
- * doesn't drop the request (common cause of browser "Failed to fetch").
- */
-async function callImageEdit(
+/** Load photo from Supabase storage as a data URL (server-side, no client body size issue). */
+async function loadStorageImageAsDataUrl(storagePath: string): Promise<string> {
+  const path = extractMediaStoragePath(storagePath) || storagePath.replace(/^\/+/, '');
+  if (!path) throw new Error('Invalid photo storage path');
+
+  const admin = getSupabaseAdmin();
+  if (!admin) {
+    throw new Error(
+      'Server missing SUPABASE_SERVICE_ROLE_KEY. Add it in Vercel Environment Variables and redeploy so AI render can load your photos.'
+    );
+  }
+  const { data, error } = await admin.storage.from('media').download(path);
+  if (error || !data) {
+    throw new Error(
+      `Could not load photo from storage: ${error?.message || 'not found'}. Re-upload the site photo.`
+    );
+  }
+  const buf = Buffer.from(await data.arrayBuffer());
+  const mime = data.type || 'image/jpeg';
+  return `data:${mime};base64,${buf.toString('base64')}`;
+}
+
+async function callXaiImageEdit(
   apiKey: string,
   model: string,
-  imageRef: string,
+  imageDataUrl: string,
   prompt: string
-): Promise<{ imageBase64?: string; imageUrl?: string }> {
-  const imagePayload =
-    imageRef.startsWith('data:image/') || imageRef.startsWith('http')
-      ? { url: imageRef, type: 'image_url' as const }
-      : { url: normalizeImageDataUrl(imageRef), type: 'image_url' as const };
-
-  // Prefer URL response (smaller) — fall back to b64 if needed
-  const attempts: Array<Record<string, unknown>> = [
-    {
-      model,
-      prompt,
-      image: imagePayload,
-      n: 1,
-    },
-    {
-      model,
-      prompt,
-      image: imagePayload,
-      response_format: 'url',
-      n: 1,
-    },
-    {
-      model,
-      prompt,
-      image: imagePayload,
-      response_format: 'b64_json',
-      n: 1,
-    },
-  ];
+): Promise<{ buffer: Buffer; contentType: string }> {
+  const models = [model, 'grok-imagine-image', 'grok-imagine-image-quality'].filter(
+    (m, i, arr) => m && arr.indexOf(m) === i
+  );
 
   let lastErr = 'Image edit failed';
-  for (const body of attempts) {
+
+  for (const m of models) {
     try {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 100_000);
+      const timer = setTimeout(() => controller.abort(), 110_000);
+
       const response = await fetch('https://api.x.ai/v1/images/edits', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${apiKey}`,
         },
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          model: m,
+          prompt,
+          image: {
+            url: imageDataUrl,
+            type: 'image_url',
+          },
+          n: 1,
+        }),
         signal: controller.signal,
       });
       clearTimeout(timer);
@@ -132,7 +136,7 @@ async function callImageEdit(
       try {
         data = text ? JSON.parse(text) : null;
       } catch {
-        data = null;
+        data = { raw: text?.slice(0, 500) };
       }
 
       if (!response.ok) {
@@ -141,54 +145,76 @@ async function callImageEdit(
           data?.error ||
           data?.message ||
           text?.slice(0, 400) ||
-          `Image edit failed (${response.status})`;
+          `HTTP ${response.status}`;
         lastErr = typeof msg === 'string' ? msg : JSON.stringify(msg);
-        // Try next payload shape on 4xx
-        if (response.status >= 400 && response.status < 500) continue;
-        throw new Error(lastErr);
+        console.error('[job-render] xAI error', m, response.status, lastErr);
+        // Try next model on 4xx
+        if (response.status === 404 || response.status === 400) continue;
+        if (response.status === 401 || response.status === 403) {
+          throw new Error(
+            'xAI rejected the API key. Check GROK_API_KEY / XAI_API_KEY on Vercel has Imagine image access.'
+          );
+        }
+        continue;
       }
 
       const item = data?.data?.[0] || data?.[0] || data;
       const b64 = item?.b64_json || item?.b64Json || data?.b64_json;
-      const url = item?.url || data?.url || item?.image_url;
-
-      if (url && typeof url === 'string' && url.startsWith('http')) {
-        // Download once on server so client always gets a data URL we control
-        try {
-          const imgRes = await fetch(url);
-          if (imgRes.ok) {
-            const buf = Buffer.from(await imgRes.arrayBuffer());
-            // Cap response size — re-encode isn't available without sharp; slice risk if huge
-            if (buf.length > 8_000_000) {
-              return { imageUrl: url };
-            }
-            const mime = imgRes.headers.get('content-type') || 'image/png';
-            return {
-              imageBase64: `data:${mime};base64,${buf.toString('base64')}`,
-              imageUrl: url,
-            };
-          }
-        } catch {
-          /* fall through to return URL */
-        }
-        return { imageUrl: url };
-      }
+      const outUrl = item?.url || data?.url || item?.image_url;
 
       if (b64 && typeof b64 === 'string') {
         const clean = b64.replace(/^data:image\/\w+;base64,/, '');
-        return { imageBase64: `data:image/png;base64,${clean}` };
+        return { buffer: Buffer.from(clean, 'base64'), contentType: 'image/png' };
       }
 
-      lastErr = 'AI did not return an image URL or base64 payload';
+      if (outUrl && typeof outUrl === 'string' && outUrl.startsWith('http')) {
+        const imgRes = await fetch(outUrl);
+        if (!imgRes.ok) {
+          lastErr = `Could not download generated image (${imgRes.status})`;
+          continue;
+        }
+        const buf = Buffer.from(await imgRes.arrayBuffer());
+        const contentType = imgRes.headers.get('content-type') || 'image/png';
+        return { buffer: buf, contentType };
+      }
+
+      lastErr = 'xAI returned no image data';
     } catch (e: any) {
       if (e?.name === 'AbortError') {
-        throw new Error('AI image generation timed out. Try a smaller photo and try again.');
+        throw new Error(
+          'AI image generation timed out (over 100s). Try a simpler photo or try again later.'
+        );
       }
       lastErr = e?.message || String(e);
+      console.error('[job-render] xAI call exception', m, lastErr);
     }
   }
 
   throw new Error(lastErr);
+}
+
+async function uploadResult(
+  userId: string,
+  buffer: Buffer,
+  contentType: string
+): Promise<string> {
+  const admin = getSupabaseAdmin();
+  if (!admin) {
+    throw new Error(
+      'Server missing SUPABASE_SERVICE_ROLE_KEY — cannot save AI rendering. Add it in Vercel and redeploy.'
+    );
+  }
+  const ext = contentType.includes('png') ? 'png' : 'jpg';
+  const filePath = `${userId}/render/result-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const { error } = await admin.storage.from('media').upload(filePath, buffer, {
+    contentType: contentType.includes('png') ? 'image/png' : 'image/jpeg',
+    upsert: true,
+    cacheControl: '3600',
+  });
+  if (error) {
+    throw new Error(`Could not save rendering: ${error.message}`);
+  }
+  return filePath;
 }
 
 export async function POST(request: NextRequest) {
@@ -211,101 +237,140 @@ export async function POST(request: NextRequest) {
       body = await request.json();
     } catch {
       return NextResponse.json(
-        {
-          error:
-            'Could not read request (photo may be too large). Use a smaller site photo and try again.',
-        },
-        { status: 413 }
+        { error: 'Invalid request body. Send storagePath + lineDescription only.' },
+        { status: 400 }
       );
     }
 
     const lineDescription = String(body.lineDescription || body.description || '').trim();
     const notes = String(body.notes || '').trim();
+    const storagePathRaw = String(body.storagePath || body.sourcePath || '').trim();
+    const imageUrl = String(body.imageUrl || '').trim();
     const imageBase64 = typeof body.imageBase64 === 'string' ? body.imageBase64.trim() : '';
-    const imageUrl = typeof body.imageUrl === 'string' ? body.imageUrl.trim() : '';
 
     if (!lineDescription || lineDescription.length < 3) {
       return NextResponse.json(
-        { error: 'Link a description line so AI knows what the completed job should look like.' },
+        { error: 'Link a description line so AI knows what the finished work should look like.' },
         { status: 400 }
       );
     }
 
-    // Prefer remote URL (signed Supabase URL) — avoids multi-MB JSON bodies
-    let imageRef = '';
-    if (imageUrl && /^https?:\/\//i.test(imageUrl)) {
-      imageRef = imageUrl;
-    } else if (imageBase64) {
-      const dataUrl = normalizeImageDataUrl(imageBase64);
-      if (dataUrl.length > MAX_DATA_URL_CHARS) {
-        return NextResponse.json(
-          {
-            error:
-              'Photo is too large for AI rendering. Choose a smaller image or take the photo again at normal resolution.',
-          },
-          { status: 413 }
-        );
-      }
-      imageRef = dataUrl;
-    } else if (imageUrl.startsWith('data:image/')) {
-      if (imageUrl.length > MAX_DATA_URL_CHARS) {
-        return NextResponse.json(
-          { error: 'Photo is too large for AI rendering. Try a smaller image.' },
-          { status: 413 }
-        );
-      }
-      imageRef = imageUrl;
-    } else {
-      return NextResponse.json(
-        { error: 'A site photo is required for the rendering.' },
-        { status: 400 }
-      );
-    }
-
-    const apiKey = getXaiApiKey();
+    const apiKey = getApiKey();
     if (!apiKey) {
       return NextResponse.json(
         {
           error:
-            'GROK_API_KEY is missing. Add it in Vercel → Environment Variables, then redeploy.',
+            'GROK_API_KEY (or XAI_API_KEY) is missing on the server. Add it in Vercel → Settings → Environment Variables → Production, then Redeploy.',
         },
         { status: 500 }
       );
     }
 
+    // Resolve source image on the SERVER (tiny client payload)
+    let imageDataUrl = '';
+    if (storagePathRaw) {
+      const path = extractMediaStoragePath(storagePathRaw) || storagePathRaw;
+      imageDataUrl = await loadStorageImageAsDataUrl(path);
+    } else if (imageUrl.startsWith('http')) {
+      // Server downloads the signed URL — client only sent the URL string
+      const imgRes = await fetch(imageUrl);
+      if (!imgRes.ok) {
+        return NextResponse.json(
+          { error: 'Could not load the site photo URL. Re-select the photo and try again.' },
+          { status: 400 }
+        );
+      }
+      const buf = Buffer.from(await imgRes.arrayBuffer());
+      const mime = imgRes.headers.get('content-type') || 'image/jpeg';
+      imageDataUrl = `data:${mime};base64,${buf.toString('base64')}`;
+    } else if (imageBase64) {
+      imageDataUrl = imageBase64.startsWith('data:image/')
+        ? imageBase64
+        : `data:image/jpeg;base64,${imageBase64}`;
+      if (imageDataUrl.length > 3_500_000) {
+        return NextResponse.json(
+          { error: 'Photo data is too large. Use a photo already uploaded to Site Photos.' },
+          { status: 413 }
+        );
+      }
+    } else {
+      return NextResponse.json(
+        { error: 'No photo provided. Select a Site Photo first.' },
+        { status: 400 }
+      );
+    }
+
+    // Soft shrink: if huge, we still try — xAI accepts data URIs; memory is the risk
+    if (imageDataUrl.length > 6_000_000) {
+      return NextResponse.json(
+        {
+          error:
+            'Photo is too large for AI processing. Re-upload a smaller photo (under ~2 MB) to Site Photos.',
+        },
+        { status: 413 }
+      );
+    }
+
     const model = getXaiImageModel();
     const prompt = buildPrompt(lineDescription, notes);
-    const result = await callImageEdit(apiKey, model, imageRef, prompt);
 
-    if (!result.imageBase64 && !result.imageUrl) {
+    const { buffer, contentType } = await callXaiImageEdit(apiKey, model, imageDataUrl, prompt);
+    if (!buffer?.length) {
       return NextResponse.json(
-        { error: 'AI did not return an image. Try again with a clearer photo.' },
+        { error: 'AI returned an empty image. Try a different photo.' },
         { status: 502 }
       );
     }
 
-    // Prefer returning imageUrl when base64 is huge (keeps response under limits)
-    const payload: Record<string, unknown> = {
-      ok: true,
-      lineDescription,
-      model,
-    };
-    if (result.imageBase64 && result.imageBase64.length < 4_000_000) {
-      payload.imageBase64 = result.imageBase64;
-    }
-    if (result.imageUrl) {
-      payload.imageUrl = result.imageUrl;
-    }
-    if (!payload.imageBase64 && !payload.imageUrl) {
-      payload.imageUrl = result.imageUrl;
-      payload.imageBase64 = result.imageBase64;
+    // Save result server-side — client only gets the path (tiny response)
+    let resultPath: string | null = null;
+    let displayUrl: string | null = null;
+    try {
+      resultPath = await uploadResult(user.id, buffer, contentType);
+      const admin = getSupabaseAdmin();
+      if (admin && resultPath) {
+        const { data: signed } = await admin.storage
+          .from('media')
+          .createSignedUrl(resultPath, 60 * 60 * 24);
+        displayUrl = signed?.signedUrl || null;
+      }
+    } catch (uploadErr: any) {
+      // Still return base64 if storage upload fails so the feature isn't blocked
+      console.error('[job-render] upload failed, returning data URL', uploadErr);
+      const b64 = `data:${contentType};base64,${buffer.toString('base64')}`;
+      if (b64.length < 3_500_000) {
+        return NextResponse.json({
+          ok: true,
+          imageBase64: b64,
+          lineDescription,
+          model,
+          warning: uploadErr?.message || 'Saved in browser only — storage upload failed',
+        });
+      }
+      throw uploadErr;
     }
 
-    return NextResponse.json(payload);
+    return NextResponse.json({
+      ok: true,
+      resultPath,
+      imageUrl: displayUrl,
+      lineDescription,
+      model,
+    });
   } catch (err: any) {
-    console.error('job-render error:', err);
+    console.error('[job-render] error:', err);
     const message = err?.message || 'Could not generate job rendering';
-    const status = /timeout/i.test(message) ? 504 : 500;
-    return NextResponse.json({ error: message }, { status });
+    return NextResponse.json({ error: message }, { status: 500 });
   }
+}
+
+/** Quick health check — confirms route is deployed */
+export async function GET() {
+  return NextResponse.json({
+    ok: true,
+    service: 'job-render',
+    hasGrokKey: Boolean(getApiKey()),
+    hasServiceRole: Boolean(getSupabaseAdmin()),
+    model: getXaiImageModel(),
+  });
 }

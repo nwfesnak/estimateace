@@ -4807,31 +4807,6 @@ export default function Home() {
     if (withDesc) setJobRenderLineId(Number(withDesc.id));
   }, [items, jobRenderLineId]);
 
-  /** Smaller compression for job-render API (avoids Failed to fetch / body limits) */
-  const compressImageForJobRender = async (url: string): Promise<string> => {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error('Could not load source photo');
-    const blob = await res.blob();
-    const file = new File([blob], 'site.jpg', { type: blob.type || 'image/jpeg' });
-    try {
-      const bitmap = await createImageBitmap(file);
-      const maxDim = 1024;
-      const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height, 1));
-      const width = Math.max(1, Math.round(bitmap.width * scale));
-      const height = Math.max(1, Math.round(bitmap.height * scale));
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) throw new Error('Could not prepare image');
-      ctx.drawImage(bitmap, 0, 0, width, height);
-      bitmap.close();
-      return canvas.toDataURL('image/jpeg', 0.72);
-    } catch {
-      return imageUrlToBase64ForAi(url);
-    }
-  };
-
   const generateJobRendering = async () => {
     if (jobRenderBusy) return;
     if (!jobRenderSourcePath) {
@@ -4849,39 +4824,51 @@ export default function Home() {
     setJobRenderBusy(true);
     showMessage('AI is drawing the completed job look… (can take up to a minute)');
     try {
-      const sourceDisplay =
-        jobRenderDisplayMap[jobRenderSourcePath] ||
-        (await resolveMediaDisplayUrl(jobRenderSourcePath, getMediaUrl));
-      if (!sourceDisplay) throw new Error('Could not load source photo');
-
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (supabase) {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-        if (session?.access_token) {
-          headers.Authorization = `Bearer ${session.access_token}`;
-        } else {
-          throw new Error('Please log in again to use AI renderings.');
-        }
+      if (!supabase) throw new Error('Not connected. Refresh and log in again.');
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error('Please log in again to use AI renderings.');
       }
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.access_token}`,
+      };
 
-      // Notes only sent as extra if they are not already the main description
       const notesExtra =
         line && String(line.description || '').trim()
           ? jobRenderNotes.trim() || undefined
           : undefined;
 
-      // Prefer signed HTTPS URL so we don't send multi-MB base64 (fixes Failed to fetch)
-      const payload: Record<string, string> = {
-        lineDescription,
-      };
-      if (notesExtra) payload.notes = notesExtra;
+      // Tiny request: server loads photo from storage (fixes Failed to fetch from huge bodies)
+      const storagePath =
+        extractMediaStoragePath(jobRenderSourcePath) ||
+        (!String(jobRenderSourcePath).startsWith('http') ? jobRenderSourcePath : '');
+      if (!storagePath) {
+        throw new Error('Could not resolve site photo path. Re-upload the photo and try again.');
+      }
 
-      if (/^https?:\/\//i.test(sourceDisplay)) {
-        payload.imageUrl = sourceDisplay;
-      } else {
-        payload.imageBase64 = await compressImageForJobRender(sourceDisplay);
+      // Health check — clear errors for missing env / undeployed route
+      try {
+        const health = await fetch('/api/job-render', { method: 'GET' });
+        if (health.ok) {
+          const h = await health.json().catch(() => ({}));
+          if (h?.hasGrokKey === false) {
+            throw new Error(
+              'GROK_API_KEY (or XAI_API_KEY) is missing on Vercel. Add it under Environment Variables → Production, then Redeploy.'
+            );
+          }
+          if (h?.hasServiceRole === false) {
+            throw new Error(
+              'SUPABASE_SERVICE_ROLE_KEY is missing on Vercel. Add it under Environment Variables → Production, then Redeploy (required for AI render).'
+            );
+          }
+        }
+      } catch (healthErr: any) {
+        if (healthErr?.message && !/Failed to fetch|NetworkError/i.test(healthErr.message)) {
+          throw healthErr;
+        }
       }
 
       let res: Response;
@@ -4889,22 +4876,17 @@ export default function Home() {
         res = await fetch('/api/job-render', {
           method: 'POST',
           headers,
-          body: JSON.stringify(payload),
-        });
-      } catch (netErr: any) {
-        // Retry once with compressed base64 only (some environments block xAI fetching signed URLs)
-        console.warn('job-render first attempt failed, retrying with compressed photo…', netErr);
-        showMessage('Retrying with a smaller photo…');
-        const small = await compressImageForJobRender(sourceDisplay);
-        res = await fetch('/api/job-render', {
-          method: 'POST',
-          headers,
           body: JSON.stringify({
+            storagePath,
             lineDescription,
             notes: notesExtra,
-            imageBase64: small,
           }),
         });
+      } catch (netErr: any) {
+        console.error('job-render network error', netErr);
+        throw new Error(
+          'Network error reaching /api/job-render. Wait for Vercel deploy to finish, hard-refresh, and confirm GROK_API_KEY + SUPABASE_SERVICE_ROLE_KEY are set.'
+        );
       }
 
       const data = await res.json().catch(() => ({}));
@@ -4912,21 +4894,20 @@ export default function Home() {
         throw new Error(data.error || `AI rendering failed (HTTP ${res.status})`);
       }
 
-      let resultBlob: Blob | null = null;
-      if (typeof data.imageBase64 === 'string' && data.imageBase64.startsWith('data:image/')) {
+      let resultPath = typeof data.resultPath === 'string' ? data.resultPath : '';
+      if (!resultPath && typeof data.imageBase64 === 'string' && data.imageBase64.startsWith('data:image/')) {
         const resultRes = await fetch(data.imageBase64);
-        resultBlob = await resultRes.blob();
-      } else if (typeof data.imageUrl === 'string' && data.imageUrl.startsWith('http')) {
+        const resultBlob = await resultRes.blob();
+        resultPath = (await uploadJobRenderBlob(resultBlob, 'result')) || '';
+      } else if (!resultPath && typeof data.imageUrl === 'string' && data.imageUrl.startsWith('http')) {
         const resultRes = await fetch(data.imageUrl);
         if (!resultRes.ok) throw new Error('Could not download the AI rendering');
-        resultBlob = await resultRes.blob();
+        const resultBlob = await resultRes.blob();
+        resultPath = (await uploadJobRenderBlob(resultBlob, 'result')) || '';
       }
-      if (!resultBlob || resultBlob.size < 100) {
-        throw new Error('AI did not return a usable image. Try again with a clearer photo.');
+      if (!resultPath) {
+        throw new Error('AI did not return a saved image. Try again.');
       }
-
-      const resultPath = await uploadJobRenderBlob(resultBlob, 'result');
-      if (!resultPath) throw new Error('Could not save the AI rendering to storage');
 
       const entry: JobRendering = {
         id: `jr-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -4946,16 +4927,16 @@ export default function Home() {
     } catch (err: any) {
       console.error('generateJobRendering failed:', err);
       const msg = err?.message || 'Could not generate rendering';
-      if (/Failed to fetch|NetworkError|Load failed|network/i.test(msg)) {
+      if (/Failed to fetch|NetworkError|Load failed/i.test(msg)) {
         showMessage(
-          '❌ Could not reach the AI render service (network / timeout / photo too large). Try a smaller photo, stay on Wi‑Fi, and confirm GROK_API_KEY is set on Vercel.'
+          '❌ Network error. Wait for Vercel deploy, hard-refresh, set GROK_API_KEY + SUPABASE_SERVICE_ROLE_KEY, try again.'
         );
       } else if (/Rate limit/i.test(msg)) showMessage(`⏳ ${msg}`);
       else if (/Unauthorized|log in/i.test(msg)) showMessage('🔒 Please log in to use AI renderings.');
-      else if (/GROK_API_KEY|API key/i.test(msg))
-        showMessage('🔑 AI key missing. Check GROK_API_KEY on Vercel and redeploy.');
+      else if (/GROK_API_KEY|XAI_API_KEY|API key/i.test(msg)) showMessage(`🔑 ${msg}`);
+      else if (/SERVICE_ROLE/i.test(msg)) showMessage(`🗄️ ${msg}`);
       else if (/too large|413/i.test(msg))
-        showMessage('📷 Photo is too large. Upload a smaller image and try again.');
+        showMessage('📷 Photo is too large. Re-upload a smaller Site Photo and try again.');
       else showMessage(`❌ ${msg}`);
     } finally {
       setJobRenderBusy(false);
