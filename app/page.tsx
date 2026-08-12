@@ -809,12 +809,18 @@ export default function Home() {
     lineItemId: number | null;
     lineDescription: string;
     notes?: string;
+    /** Contractor refine instructions applied over time */
+    refineHistory?: string[];
     createdAt: string;
     status?: 'ready' | 'error';
     error?: string;
   };
   const [jobRenderings, setJobRenderings] = useState<JobRendering[]>([]);
   const [jobRenderBusy, setJobRenderBusy] = useState(false);
+  /** Which rendering is being refined (id) */
+  const [jobRenderRefineBusyId, setJobRenderRefineBusyId] = useState<string | null>(null);
+  /** Per-rendering refine text box values */
+  const [jobRenderRefineDrafts, setJobRenderRefineDrafts] = useState<Record<string, string>>({});
   const [jobRenderSourcePath, setJobRenderSourcePath] = useState('');
   const [jobRenderLineId, setJobRenderLineId] = useState<number | null>(null);
   const [jobRenderNotes, setJobRenderNotes] = useState('');
@@ -4031,6 +4037,9 @@ export default function Home() {
                 lineItemId: r.lineItemId != null ? Number(r.lineItemId) : null,
                 lineDescription: String(r.lineDescription || ''),
                 notes: r.notes ? String(r.notes) : '',
+                refineHistory: Array.isArray(r.refineHistory)
+                  ? r.refineHistory.map((s: any) => String(s || '').trim()).filter(Boolean)
+                  : [],
                 createdAt: String(r.createdAt || new Date().toISOString()),
                 status: r.status === 'error' ? 'error' : 'ready',
                 error: r.error ? String(r.error) : undefined,
@@ -4040,6 +4049,8 @@ export default function Home() {
       setJobRenderSourcePath('');
       setJobRenderLineId(null);
       setJobRenderNotes('');
+      setJobRenderRefineDrafts({});
+      setJobRenderRefineBusyId(null);
     }
     setJobMileageLogs(mileageLogsFromDoc(est));
     setLaborHours(est.laborHours || 0);
@@ -4946,7 +4957,103 @@ export default function Home() {
   const removeJobRendering = (id: string) => {
     const next = jobRenderings.filter((r) => r.id !== id);
     setJobRenderings(next);
+    setJobRenderRefineDrafts((prev) => {
+      const copy = { ...prev };
+      delete copy[id];
+      return copy;
+    });
     void saveToDB({ jobRenderings: next, quiet: true });
+  };
+
+  /**
+   * Refine an existing AI after-photo with the contractor's plain-language changes.
+   * Uses the current result as the source so edits stack.
+   */
+  const refineJobRendering = async (renderingId: string) => {
+    if (jobRenderBusy || jobRenderRefineBusyId) return;
+    const current = jobRenderings.find((r) => r.id === renderingId);
+    if (!current?.resultPath) {
+      showMessage('Generate an after photo first, then describe your changes.');
+      return;
+    }
+    const instruction = String(jobRenderRefineDrafts[renderingId] || '').trim();
+    if (instruction.length < 3) {
+      showMessage('Tell AI how to change the rendering (e.g. “make the roof dark charcoal shingles”).');
+      return;
+    }
+
+    setJobRenderRefineBusyId(renderingId);
+    showMessage('AI is updating the rendering with your changes…');
+    try {
+      if (!supabase) throw new Error('Not connected. Refresh and log in again.');
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error('Please log in again to refine AI renderings.');
+      }
+
+      const storagePath =
+        extractMediaStoragePath(current.resultPath) ||
+        (!String(current.resultPath).startsWith('http') ? current.resultPath : '');
+      if (!storagePath) {
+        throw new Error('Could not find the current rendering. Generate it again first.');
+      }
+
+      const res = await fetch('/api/job-render', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          mode: 'refine',
+          storagePath,
+          refineInstruction: instruction,
+          lineDescription: current.lineDescription,
+          notes: current.notes,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) {
+        throw new Error(data.error || `Refine failed (HTTP ${res.status})`);
+      }
+
+      let resultPath = typeof data.resultPath === 'string' ? data.resultPath : '';
+      if (!resultPath && typeof data.imageBase64 === 'string' && data.imageBase64.startsWith('data:image/')) {
+        const blob = await (await fetch(data.imageBase64)).blob();
+        resultPath = (await uploadJobRenderBlob(blob, 'result')) || '';
+      } else if (!resultPath && typeof data.imageUrl === 'string' && data.imageUrl.startsWith('http')) {
+        const blob = await (await fetch(data.imageUrl)).blob();
+        resultPath = (await uploadJobRenderBlob(blob, 'result')) || '';
+      }
+      if (!resultPath) throw new Error('AI did not return an updated image.');
+
+      const next = jobRenderings.map((r) =>
+        r.id === renderingId
+          ? {
+              ...r,
+              resultPath,
+              refineHistory: [...(r.refineHistory || []), instruction].slice(-20),
+              status: 'ready' as const,
+            }
+          : r
+      );
+      setJobRenderings(next);
+      setJobRenderRefineDrafts((prev) => ({ ...prev, [renderingId]: '' }));
+      await saveToDB({ jobRenderings: next, quiet: false });
+      showMessage('✅ Rendering updated with your changes.');
+    } catch (err: any) {
+      console.error('refineJobRendering failed:', err);
+      const msg = err?.message || 'Could not update rendering';
+      if (/Failed to fetch|NetworkError/i.test(msg)) {
+        showMessage('❌ Network error refining the image. Wait for deploy, hard-refresh, try again.');
+      } else if (/GROK_API_KEY|XAI_API_KEY|API key/i.test(msg)) showMessage(`🔑 ${msg}`);
+      else if (/SERVICE_ROLE/i.test(msg)) showMessage(`🗄️ ${msg}`);
+      else showMessage(`❌ ${msg}`);
+    } finally {
+      setJobRenderRefineBusyId(null);
+    }
   };
 
   const emptyBreakdownMaterial = () => ({
@@ -10515,6 +10622,70 @@ export default function Home() {
                                 )}
                               </div>
                             </div>
+
+                            {/* AI refine box — tell the app exactly how to change the after photo */}
+                            {r.resultPath && (
+                              <div className="mt-4 rounded-xl border-2 border-violet-200 bg-violet-50/60 p-3 sm:p-4 space-y-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-lg" aria-hidden>
+                                    ✨
+                                  </span>
+                                  <div>
+                                    <div className="text-sm font-semibold text-violet-900">
+                                      Tell AI how to change this rendering
+                                    </div>
+                                    <p className="text-[11px] text-violet-800/80">
+                                      Describe exactly what you want — colors, materials, missing
+                                      work, lighting, etc.
+                                    </p>
+                                  </div>
+                                </div>
+                                <Textarea
+                                  value={jobRenderRefineDrafts[r.id] || ''}
+                                  onChange={(e) =>
+                                    setJobRenderRefineDrafts((prev) => ({
+                                      ...prev,
+                                      [r.id]: e.target.value,
+                                    }))
+                                  }
+                                  placeholder='e.g. "Use dark charcoal architectural shingles, white gutters, and remove the old satellite dish"'
+                                  className="min-h-[4.5rem] bg-white text-sm resize-y"
+                                  disabled={jobRenderRefineBusyId === r.id || jobRenderBusy}
+                                />
+                                {!!r.refineHistory?.length && (
+                                  <div className="text-[11px] text-gray-600 space-y-0.5">
+                                    <div className="font-semibold text-gray-700">
+                                      Changes applied:
+                                    </div>
+                                    <ul className="list-disc pl-4 space-y-0.5">
+                                      {r.refineHistory.slice(-5).map((h, hi) => (
+                                        <li key={hi}>{h}</li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => void refineJobRendering(r.id)}
+                                  disabled={
+                                    jobRenderRefineBusyId === r.id ||
+                                    jobRenderBusy ||
+                                    !(jobRenderRefineDrafts[r.id] || '').trim()
+                                  }
+                                  className={`w-full sm:w-auto min-h-[2.75rem] px-4 py-2 rounded-xl text-sm font-semibold shadow transition ${
+                                    jobRenderRefineBusyId === r.id
+                                      ? 'bg-violet-400 text-white cursor-wait'
+                                      : (jobRenderRefineDrafts[r.id] || '').trim()
+                                        ? 'bg-violet-600 hover:bg-violet-700 text-white cursor-pointer'
+                                        : 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                                  }`}
+                                >
+                                  {jobRenderRefineBusyId === r.id
+                                    ? '🤖 Updating rendering…'
+                                    : '✨ Apply my changes'}
+                                </button>
+                              </div>
+                            )}
                           </div>
                         );
                       })}

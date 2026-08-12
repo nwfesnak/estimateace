@@ -73,6 +73,29 @@ Requirements:
 - Photorealistic, not cartoon or illustration. No text watermarks, logos, or price tags.`;
 }
 
+/** Refine an existing AI after-photo using the contractor's plain-language instructions. */
+function buildRefinePrompt(
+  refineInstruction: string,
+  lineDescription?: string,
+  notes?: string
+): string {
+  const scope = lineDescription?.trim()
+    ? `\nOriginal job scope (keep this work complete): ${lineDescription.trim()}`
+    : '';
+  const extra = notes?.trim() ? `\nExtra notes: ${notes.trim()}` : '';
+  return `This image is already an AI "after" rendering of a completed construction / repair job. Edit it so it matches the contractor's directions EXACTLY.
+
+Contractor change request:
+"${refineInstruction.trim()}"
+${scope}${extra}
+
+Requirements:
+- Apply the contractor's change request precisely (colors, materials, finishes, missing work, camera details they ask for).
+- Keep the same camera angle, framing, and overall scene unless they ask to change those.
+- Do not undo completed work unless they ask.
+- Stay photorealistic and professional. No watermarks, logos, or text overlays.`;
+}
+
 /** Load photo from Supabase storage as a data URL (server-side, no client body size issue). */
 async function loadStorageImageAsDataUrl(storagePath: string): Promise<string> {
   const path = extractMediaStoragePath(storagePath) || storagePath.replace(/^\/+/, '');
@@ -244,11 +267,24 @@ export async function POST(request: NextRequest) {
 
     const lineDescription = String(body.lineDescription || body.description || '').trim();
     const notes = String(body.notes || '').trim();
+    const refineInstruction = String(
+      body.refineInstruction || body.instruction || body.changeRequest || ''
+    ).trim();
+    const mode = String(body.mode || '').toLowerCase() === 'refine' || refineInstruction.length >= 3
+      ? 'refine'
+      : 'create';
     const storagePathRaw = String(body.storagePath || body.sourcePath || '').trim();
     const imageUrl = String(body.imageUrl || '').trim();
     const imageBase64 = typeof body.imageBase64 === 'string' ? body.imageBase64.trim() : '';
 
-    if (!lineDescription || lineDescription.length < 3) {
+    if (mode === 'refine') {
+      if (refineInstruction.length < 3) {
+        return NextResponse.json(
+          { error: 'Describe how you want the rendering changed (at least a few words).' },
+          { status: 400 }
+        );
+      }
+    } else if (!lineDescription || lineDescription.length < 3) {
       return NextResponse.json(
         { error: 'Link a description line so AI knows what the finished work should look like.' },
         { status: 400 }
@@ -312,7 +348,10 @@ export async function POST(request: NextRequest) {
     }
 
     const model = getXaiImageModel();
-    const prompt = buildPrompt(lineDescription, notes);
+    const prompt =
+      mode === 'refine'
+        ? buildRefinePrompt(refineInstruction, lineDescription, notes)
+        : buildPrompt(lineDescription, notes);
 
     const { buffer, contentType } = await callXaiImageEdit(apiKey, model, imageDataUrl, prompt);
     if (!buffer?.length) {
@@ -355,6 +394,8 @@ export async function POST(request: NextRequest) {
       resultPath,
       imageUrl: displayUrl,
       lineDescription,
+      refineInstruction: mode === 'refine' ? refineInstruction : undefined,
+      mode,
       model,
     });
   } catch (err: any) {
