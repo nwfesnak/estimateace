@@ -5923,6 +5923,10 @@ export default function Home() {
   const markAsPaidCash = () => openMarkPaidChooser();
 
   const openSendPreview = () => {
+    // Default attachment choices when entering send preview
+    setSendIncludeSitePhotos(photoUrls.length > 0);
+    setSendIncludeVideos(videoUrls.length > 0);
+    setSendIncludeJobRenderings(jobRenderings.length > 0);
     setView('sendPreview');
     // Immediate jump (useEffect also runs after paint for mobile)
     requestAnimationFrame(() => {
@@ -5931,13 +5935,14 @@ export default function Home() {
     });
   };
 
-  /** Open recipient + attachment chooser (defaults: include media that exists) */
+  /** Open recipient chooser — keeps attachment Send / Don't send choices already set on preview */
   const openSendModal = () => {
-    setSelectedEmailsForSend([...emails]);
-    setSelectedPhonesForSend([...phones]);
-    setSendIncludeSitePhotos(photoUrls.length > 0);
-    setSendIncludeVideos(videoUrls.length > 0);
-    setSendIncludeJobRenderings(jobRenderings.length > 0);
+    setSelectedEmailsForSend([...emails.filter((e) => String(e || '').trim())]);
+    setSelectedPhonesForSend([...phones.filter((p) => String(p || '').trim())]);
+    // Only default ON if never chosen yet and media exists; don't wipe user choices from preview
+    if (photoUrls.length === 0) setSendIncludeSitePhotos(false);
+    if (videoUrls.length === 0) setSendIncludeVideos(false);
+    if (jobRenderings.length === 0) setSendIncludeJobRenderings(false);
     setIsSendModalOpen(true);
   };
 
@@ -12859,103 +12864,197 @@ export default function Home() {
                 {documentType === 'invoice' ? '📄 Invoice Preview & Final Payment' : t('sendEstimate') + ' Preview'}
               </h2>
 
-              {/* Clear attachment preview before send — Site Photos / AI / Videos */}
-              <Card className="mb-6 border-2 border-violet-200 bg-violet-50/40">
+              {/* Interactive: choose what to send BEFORE opening the email dialog */}
+              <Card className="mb-6 border-2 border-orange-300 bg-orange-50/50 shadow-md">
                 <CardContent className="p-5 space-y-4">
                   <div>
                     <h3 className="text-lg font-semibold text-[#1e293b]">
-                      What the client can receive
+                      Choose what to send to the client
                     </h3>
                     <p className="text-sm text-gray-600 mt-1">
-                      Preview below includes these sections. When you tap Send, you can turn each
-                      one on or off for that email/text.
+                      Tap <strong>Send</strong> or <strong>Don&apos;t send</strong> for each item.
+                      Your choices apply when you email or text this document.
                     </p>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div className="rounded-xl border bg-white p-3">
-                      <div className="font-semibold text-sm mb-2">📷 Site Photos</div>
-                      {photoUrls.length === 0 ? (
-                        <p className="text-xs text-gray-500">None yet — add in editor</p>
-                      ) : (
-                        <>
-                          <p className="text-xs text-emerald-700 font-medium mb-2">
-                            {photoUrls.length} photo{photoUrls.length === 1 ? '' : 's'} on document
+                  <div className="space-y-3">
+                    {/* Site Photos toggle */}
+                    <div
+                      className={`rounded-xl border-2 bg-white p-4 ${
+                        photoUrls.length === 0
+                          ? 'border-gray-200 opacity-70'
+                          : sendIncludeSitePhotos
+                            ? 'border-emerald-400 ring-1 ring-emerald-200'
+                            : 'border-gray-300'
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="font-semibold text-base">📷 Site Photos</div>
+                          <p className="text-sm text-gray-600 mt-0.5">
+                            {photoUrls.length === 0
+                              ? 'None on this document — add in the editor first'
+                              : `${photoUrls.length} photo${photoUrls.length === 1 ? '' : 's'} available`}
                           </p>
-                          <div className="flex gap-1 flex-wrap">
-                            {photoDisplayUrls.slice(0, 4).map((url, i) => (
-                              <img
-                                key={i}
-                                src={url}
-                                alt=""
-                                className="w-12 h-12 object-cover rounded border"
-                              />
-                            ))}
-                            {photoUrls.length > 4 && (
-                              <span className="w-12 h-12 rounded border bg-gray-50 text-[10px] flex items-center justify-center text-gray-600">
-                                +{photoUrls.length - 4}
-                              </span>
-                            )}
-                          </div>
-                        </>
-                      )}
+                          {photoDisplayUrls.length > 0 && (
+                            <div className="flex gap-1 flex-wrap mt-2">
+                              {photoDisplayUrls.slice(0, 5).map((url, i) => (
+                                <img
+                                  key={i}
+                                  src={url}
+                                  alt=""
+                                  className="w-12 h-12 object-cover rounded border"
+                                />
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex gap-2 shrink-0">
+                          <button
+                            type="button"
+                            disabled={photoUrls.length === 0}
+                            onClick={() => setSendIncludeSitePhotos(true)}
+                            className={`px-4 py-2.5 rounded-xl text-sm font-bold min-w-[5.5rem] transition ${
+                              sendIncludeSitePhotos && photoUrls.length > 0
+                                ? 'bg-emerald-600 text-white shadow'
+                                : 'bg-gray-100 text-gray-600 border border-gray-300'
+                            } disabled:opacity-40 disabled:cursor-not-allowed`}
+                          >
+                            Send
+                          </button>
+                          <button
+                            type="button"
+                            disabled={photoUrls.length === 0}
+                            onClick={() => setSendIncludeSitePhotos(false)}
+                            className={`px-4 py-2.5 rounded-xl text-sm font-bold min-w-[5.5rem] transition ${
+                              !sendIncludeSitePhotos || photoUrls.length === 0
+                                ? 'bg-slate-700 text-white shadow'
+                                : 'bg-gray-100 text-gray-600 border border-gray-300'
+                            } disabled:opacity-40 disabled:cursor-not-allowed`}
+                          >
+                            Don&apos;t send
+                          </button>
+                        </div>
+                      </div>
                     </div>
 
-                    <div className="rounded-xl border bg-white p-3">
-                      <div className="font-semibold text-sm mb-2">✨ AI Job Renderings</div>
-                      {jobRenderings.length === 0 ? (
-                        <p className="text-xs text-gray-500">
-                          None yet — use AI Job Renderings in the editor
-                        </p>
-                      ) : (
-                        <>
-                          <p className="text-xs text-violet-700 font-medium mb-2">
-                            {jobRenderings.length} before/after pair
-                            {jobRenderings.length === 1 ? '' : 's'}
+                    {/* AI Renderings toggle */}
+                    <div
+                      className={`rounded-xl border-2 bg-white p-4 ${
+                        jobRenderings.length === 0
+                          ? 'border-gray-200 opacity-70'
+                          : sendIncludeJobRenderings
+                            ? 'border-violet-400 ring-1 ring-violet-200'
+                            : 'border-gray-300'
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="font-semibold text-base">✨ AI Job Renderings</div>
+                          <p className="text-sm text-gray-600 mt-0.5">
+                            {jobRenderings.length === 0
+                              ? 'None yet — generate in AI Job Renderings in the editor'
+                              : `${jobRenderings.length} before/after rendering${jobRenderings.length === 1 ? '' : 's'}`}
                           </p>
-                          <div className="flex gap-1 flex-wrap">
-                            {jobRenderings.slice(0, 3).map((r) => {
-                              const after = r.resultPath
-                                ? jobRenderDisplayMap[r.resultPath]
-                                : '';
-                              const before = jobRenderDisplayMap[r.sourcePath];
-                              return (
-                                <div key={r.id} className="flex gap-0.5">
-                                  {before && (
-                                    <img
-                                      src={before}
-                                      alt=""
-                                      className="w-10 h-10 object-cover rounded border"
-                                    />
-                                  )}
-                                  {after && (
-                                    <img
-                                      src={after}
-                                      alt=""
-                                      className="w-10 h-10 object-cover rounded border border-violet-300"
-                                    />
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-                          <p className="text-[10px] text-amber-800 mt-2 leading-snug">
-                            AI disclosure is included when these are sent.
-                          </p>
-                        </>
-                      )}
+                          {jobRenderings.length > 0 && (
+                            <p className="text-[11px] text-amber-800 mt-1.5 leading-snug">
+                              AI disclosure is included when these are sent.
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex gap-2 shrink-0">
+                          <button
+                            type="button"
+                            disabled={jobRenderings.length === 0}
+                            onClick={() => setSendIncludeJobRenderings(true)}
+                            className={`px-4 py-2.5 rounded-xl text-sm font-bold min-w-[5.5rem] transition ${
+                              sendIncludeJobRenderings && jobRenderings.length > 0
+                                ? 'bg-violet-600 text-white shadow'
+                                : 'bg-gray-100 text-gray-600 border border-gray-300'
+                            } disabled:opacity-40 disabled:cursor-not-allowed`}
+                          >
+                            Send
+                          </button>
+                          <button
+                            type="button"
+                            disabled={jobRenderings.length === 0}
+                            onClick={() => setSendIncludeJobRenderings(false)}
+                            className={`px-4 py-2.5 rounded-xl text-sm font-bold min-w-[5.5rem] transition ${
+                              !sendIncludeJobRenderings || jobRenderings.length === 0
+                                ? 'bg-slate-700 text-white shadow'
+                                : 'bg-gray-100 text-gray-600 border border-gray-300'
+                            } disabled:opacity-40 disabled:cursor-not-allowed`}
+                          >
+                            Don&apos;t send
+                          </button>
+                        </div>
+                      </div>
                     </div>
 
-                    <div className="rounded-xl border bg-white p-3">
-                      <div className="font-semibold text-sm mb-2">🎥 Videos</div>
-                      {videoUrls.length === 0 ? (
-                        <p className="text-xs text-gray-500">None yet — add in editor</p>
-                      ) : (
-                        <p className="text-xs text-emerald-700 font-medium">
-                          {videoUrls.length} video{videoUrls.length === 1 ? '' : 's'} on document
-                        </p>
-                      )}
+                    {/* Videos toggle */}
+                    <div
+                      className={`rounded-xl border-2 bg-white p-4 ${
+                        videoUrls.length === 0
+                          ? 'border-gray-200 opacity-70'
+                          : sendIncludeVideos
+                            ? 'border-sky-400 ring-1 ring-sky-200'
+                            : 'border-gray-300'
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="font-semibold text-base">🎥 Videos</div>
+                          <p className="text-sm text-gray-600 mt-0.5">
+                            {videoUrls.length === 0
+                              ? 'None yet — add in the editor'
+                              : `${videoUrls.length} video${videoUrls.length === 1 ? '' : 's'} available`}
+                          </p>
+                        </div>
+                        <div className="flex gap-2 shrink-0">
+                          <button
+                            type="button"
+                            disabled={videoUrls.length === 0}
+                            onClick={() => setSendIncludeVideos(true)}
+                            className={`px-4 py-2.5 rounded-xl text-sm font-bold min-w-[5.5rem] transition ${
+                              sendIncludeVideos && videoUrls.length > 0
+                                ? 'bg-sky-600 text-white shadow'
+                                : 'bg-gray-100 text-gray-600 border border-gray-300'
+                            } disabled:opacity-40 disabled:cursor-not-allowed`}
+                          >
+                            Send
+                          </button>
+                          <button
+                            type="button"
+                            disabled={videoUrls.length === 0}
+                            onClick={() => setSendIncludeVideos(false)}
+                            className={`px-4 py-2.5 rounded-xl text-sm font-bold min-w-[5.5rem] transition ${
+                              !sendIncludeVideos || videoUrls.length === 0
+                                ? 'bg-slate-700 text-white shadow'
+                                : 'bg-gray-100 text-gray-600 border border-gray-300'
+                            } disabled:opacity-40 disabled:cursor-not-allowed`}
+                          >
+                            Don&apos;t send
+                          </button>
+                        </div>
+                      </div>
                     </div>
+                  </div>
+
+                  <div className="rounded-lg bg-white border px-3 py-2 text-xs text-slate-600">
+                    <strong className="text-slate-800">Currently selected to send: </strong>
+                    {[
+                      sendIncludeSitePhotos && photoUrls.length > 0
+                        ? `Site Photos (${photoUrls.length})`
+                        : null,
+                      sendIncludeJobRenderings && jobRenderings.length > 0
+                        ? `AI Renderings (${jobRenderings.length})`
+                        : null,
+                      sendIncludeVideos && videoUrls.length > 0
+                        ? `Videos (${videoUrls.length})`
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ') || 'Document only (no media attachments)'}
                   </div>
                 </CardContent>
               </Card>
@@ -13009,7 +13108,7 @@ export default function Home() {
                     openSendModal();
                   }} 
                   className="bg-[#f97316] text-white px-8 py-3 text-lg">
-                  📧 Choose What to Send
+                  📧 Continue to recipients &amp; send
                 </Button>
 
                 <Button 
@@ -13171,8 +13270,8 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* Site Photos — always labeled; only renders images when present */}
-                {(photoUrls.length > 0 || sendIncludeSitePhotos) && photoUrls.length > 0 && (
+                {/* Site Photos — only if user chose to send them */}
+                {sendIncludeSitePhotos && photoUrls.length > 0 && (
                   <div className="mt-12">
                     {renderPhotoGallery({
                       heading: 'Site Photos',
@@ -13182,7 +13281,7 @@ export default function Home() {
                 )}
 
                 {/* AI Job Renderings (with legal disclosure) */}
-                {jobRenderings.length > 0 && (
+                {sendIncludeJobRenderings && jobRenderings.length > 0 && (
                   <div className="mt-12">
                     <h3 className="text-2xl font-semibold mb-3 border-b pb-3">
                       AI Job Renderings (After Completing)
@@ -13241,8 +13340,8 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* Videos */}
-                {videoUrls.length > 0 && (
+                {/* Videos — only if user chose to send them */}
+                {sendIncludeVideos && videoUrls.length > 0 && (
                   <div className="mt-12">
                     <h3 className="text-2xl font-semibold mb-4 border-b pb-3">
                       Videos ({videoUrls.length})
@@ -13346,19 +13445,18 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* Send Modal — preview attachments + recipients */}
+      {/* Send Modal — attachment choices + recipients (wide so options aren't clipped) */}
       <Dialog open={isSendModalOpen} onOpenChange={setIsSendModalOpen}>
-        <DialogContent className="max-w-lg max-h-[90dvh] overflow-y-auto sm:max-w-lg">
+        <DialogContent className="!max-w-xl sm:!max-w-xl max-h-[92dvh] overflow-y-auto w-[calc(100%-1.5rem)]">
           <DialogHeader>
             <DialogTitle>
               📧 Send this {documentType === 'invoice' ? 'Invoice' : 'Estimate'}
             </DialogTitle>
             <DialogDescription>
-              Review what the client will receive, choose what to include, then pick recipients.
+              Confirm attachments (Send / Don&apos;t send), then pick who receives it.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-5">
-            {/* What is being sent */}
             <div className="rounded-xl border bg-slate-50 p-3 space-y-2">
               <h4 className="font-semibold text-sm text-slate-800">Document summary</h4>
               <ul className="text-sm text-slate-600 space-y-1 list-disc pl-5">
@@ -13375,133 +13473,101 @@ export default function Home() {
               </ul>
             </div>
 
-            <div className="rounded-xl border border-violet-200 bg-violet-50/40 p-3 space-y-3">
-              <h4 className="font-semibold text-sm text-slate-800">
-                Attachments for the client
+            <div className="rounded-xl border-2 border-orange-300 bg-orange-50/50 p-3 space-y-3">
+              <h4 className="font-semibold text-sm text-slate-900">
+                What to attach for this send
               </h4>
-              <p className="text-xs text-slate-500">
-                Turn items off if you do not want the client to see them in this send.
+              <p className="text-xs text-slate-600">
+                Use <strong>Send</strong> or <strong>Don&apos;t send</strong> for each. Empty
+                sections stay off.
               </p>
 
-              <label
-                className={`flex items-start gap-3 rounded-lg border bg-white p-3 cursor-pointer ${
-                  photoUrls.length === 0 ? 'opacity-50' : ''
-                }`}
-              >
-                <input
-                  type="checkbox"
-                  className="mt-1 shrink-0"
-                  disabled={photoUrls.length === 0}
-                  checked={sendIncludeSitePhotos && photoUrls.length > 0}
-                  onChange={(e) => setSendIncludeSitePhotos(e.target.checked)}
-                />
-                <span className="min-w-0 flex-1">
-                  <span className="font-medium text-sm block">📷 Site Photos</span>
-                  <span className="text-xs text-slate-500 block mb-2">
-                    {photoUrls.length === 0
-                      ? 'None on this document — add Site Photos in the editor first'
-                      : `${photoUrls.length} photo${photoUrls.length === 1 ? '' : 's'} — uncheck to exclude from this send`}
-                  </span>
-                  {photoDisplayUrls.length > 0 && (
-                    <span className="flex gap-1 flex-wrap">
-                      {photoDisplayUrls.slice(0, 6).map((url, i) => (
-                        <img
-                          key={i}
-                          src={url}
-                          alt=""
-                          className="w-11 h-11 object-cover rounded border"
-                        />
-                      ))}
-                    </span>
-                  )}
-                </span>
-              </label>
-
-              <label
-                className={`flex items-start gap-3 rounded-lg border bg-white p-3 cursor-pointer ${
-                  jobRenderings.length === 0 ? 'opacity-50' : ''
-                }`}
-              >
-                <input
-                  type="checkbox"
-                  className="mt-1 shrink-0"
-                  disabled={jobRenderings.length === 0}
-                  checked={sendIncludeJobRenderings && jobRenderings.length > 0}
-                  onChange={(e) => setSendIncludeJobRenderings(e.target.checked)}
-                />
-                <span className="min-w-0 flex-1">
-                  <span className="font-medium text-sm block">✨ AI Job Renderings</span>
-                  <span className="text-xs text-slate-500 block mb-2">
-                    {jobRenderings.length === 0
-                      ? 'None on this document — generate in AI Job Renderings section of the editor'
-                      : `${jobRenderings.length} before/after rendering${jobRenderings.length === 1 ? '' : 's'}`}
-                  </span>
-                  {jobRenderings.length > 0 && (
-                    <span className="flex flex-col gap-2">
-                      {jobRenderings.slice(0, 3).map((r) => {
-                        const before = jobRenderDisplayMap[r.sourcePath];
-                        const after = r.resultPath ? jobRenderDisplayMap[r.resultPath] : '';
-                        return (
-                          <span key={r.id} className="flex items-center gap-2">
-                            {before && (
-                              <img
-                                src={before}
-                                alt="Before"
-                                className="w-11 h-11 object-cover rounded border"
-                              />
-                            )}
-                            <span className="text-violet-600 text-xs">→</span>
-                            {after && (
-                              <img
-                                src={after}
-                                alt="After AI"
-                                className="w-11 h-11 object-cover rounded border border-violet-300"
-                              />
-                            )}
-                            <span className="text-[10px] text-slate-500 truncate max-w-[8rem]">
-                              {r.lineDescription}
-                            </span>
-                          </span>
-                        );
-                      })}
-                    </span>
-                  )}
-                </span>
-              </label>
+              {(
+                [
+                  {
+                    key: 'photos' as const,
+                    title: '📷 Site Photos',
+                    count: photoUrls.length,
+                    on: sendIncludeSitePhotos,
+                    set: setSendIncludeSitePhotos,
+                    empty: 'None on this document',
+                    colorOn: 'bg-emerald-600',
+                  },
+                  {
+                    key: 'renders' as const,
+                    title: '✨ AI Job Renderings',
+                    count: jobRenderings.length,
+                    on: sendIncludeJobRenderings,
+                    set: setSendIncludeJobRenderings,
+                    empty: 'None on this document',
+                    colorOn: 'bg-violet-600',
+                  },
+                  {
+                    key: 'videos' as const,
+                    title: '🎥 Videos',
+                    count: videoUrls.length,
+                    on: sendIncludeVideos,
+                    set: setSendIncludeVideos,
+                    empty: 'None on this document',
+                    colorOn: 'bg-sky-600',
+                  },
+                ] as const
+              ).map((row) => (
+                <div
+                  key={row.key}
+                  className={`rounded-xl border-2 bg-white p-3 ${
+                    row.count > 0 && row.on
+                      ? 'border-emerald-400'
+                      : 'border-gray-200'
+                  }`}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="font-semibold text-sm">{row.title}</div>
+                      <div className="text-xs text-slate-500">
+                        {row.count === 0
+                          ? row.empty
+                          : `${row.count} on document · ${row.on ? 'WILL be sent' : 'will NOT be sent'}`}
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        disabled={row.count === 0}
+                        onClick={() => row.set(true)}
+                        className={`px-3 py-2 rounded-lg text-xs font-bold ${
+                          row.on && row.count > 0
+                            ? `${row.colorOn} text-white`
+                            : 'bg-gray-100 text-gray-600 border'
+                        } disabled:opacity-40`}
+                      >
+                        Send
+                      </button>
+                      <button
+                        type="button"
+                        disabled={row.count === 0}
+                        onClick={() => row.set(false)}
+                        className={`px-3 py-2 rounded-lg text-xs font-bold ${
+                          !row.on || row.count === 0
+                            ? 'bg-slate-700 text-white'
+                            : 'bg-gray-100 text-gray-600 border'
+                        } disabled:opacity-40`}
+                      >
+                        Don&apos;t send
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
 
               {sendIncludeJobRenderings && jobRenderings.length > 0 && (
                 <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs text-amber-950 leading-relaxed">
                   <strong className="block mb-1">⚠️ AI-generated imagery disclosure</strong>
-                  AI renderings are illustrative previews only. They are computer-generated
-                  visualizations of possible completed work. Actual results may vary due to site
-                  conditions, materials, weather, measurements, code requirements, and final scope.
-                  These images are not a warranty, guarantee, or contractual specification of the
-                  finished job. The written estimate/invoice and Terms &amp; Conditions control the
-                  agreement.
+                  AI renderings are illustrative previews only. Actual results may vary. They are
+                  not a warranty or contractual specification. The written estimate/invoice and
+                  Terms control the agreement.
                 </div>
               )}
-
-              <label
-                className={`flex items-start gap-3 rounded-lg border bg-white p-3 cursor-pointer ${
-                  videoUrls.length === 0 ? 'opacity-50' : ''
-                }`}
-              >
-                <input
-                  type="checkbox"
-                  className="mt-1 shrink-0"
-                  disabled={videoUrls.length === 0}
-                  checked={sendIncludeVideos && videoUrls.length > 0}
-                  onChange={(e) => setSendIncludeVideos(e.target.checked)}
-                />
-                <span className="min-w-0 flex-1">
-                  <span className="font-medium text-sm block">🎥 Videos</span>
-                  <span className="text-xs text-slate-500">
-                    {videoUrls.length === 0
-                      ? 'None on this document — add Videos in the editor first'
-                      : `${videoUrls.length} video${videoUrls.length === 1 ? '' : 's'} will be included as playable links`}
-                  </span>
-                </span>
-              </label>
             </div>
 
             <div>
