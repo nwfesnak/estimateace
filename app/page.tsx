@@ -35,7 +35,7 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { getSupabaseClient, getSupabaseConfigHelpMessage } from '@/lib/supabase/client';
-import { isMediaPdfRef, resolveMediaDisplayUrl } from '@/lib/media-url';
+import { extractMediaStoragePath, isMediaPdfRef, resolveMediaDisplayUrl } from '@/lib/media-url';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { getLineItemUnitOptions, LINE_ITEM_UNITS } from '@/lib/quote-units';
 import {
@@ -1320,6 +1320,10 @@ export default function Home() {
   const [archivesList, setArchivesList] = useState<any[]>([]);
   const [isSendModalOpen, setIsSendModalOpen] = useState(false);
   const [sendDocBusy, setSendDocBusy] = useState(false);
+  /** What media to attach when emailing estimate/invoice to the client */
+  const [sendIncludeSitePhotos, setSendIncludeSitePhotos] = useState(true);
+  const [sendIncludeVideos, setSendIncludeVideos] = useState(true);
+  const [sendIncludeJobRenderings, setSendIncludeJobRenderings] = useState(true);
   const [selectedEmailsForSend, setSelectedEmailsForSend] = useState<string[]>([]);
   const [selectedPhonesForSend, setSelectedPhonesForSend] = useState<string[]>([]);
 
@@ -5558,6 +5562,35 @@ export default function Home() {
       if (mainScrollRef.current) mainScrollRef.current.scrollTop = 0;
       window.scrollTo(0, 0);
     });
+  };
+
+  /** Open recipient + attachment chooser (defaults: include media that exists) */
+  const openSendModal = () => {
+    setSelectedEmailsForSend([...emails]);
+    setSelectedPhonesForSend([...phones]);
+    setSendIncludeSitePhotos(photoUrls.length > 0);
+    setSendIncludeVideos(videoUrls.length > 0);
+    setSendIncludeJobRenderings(jobRenderings.length > 0);
+    setIsSendModalOpen(true);
+  };
+
+  /** Long-lived signed URLs for client email (14 days) */
+  const createEmailMediaUrls = async (paths: string[]): Promise<string[]> => {
+    if (!supabase || !paths.length) return [];
+    const ttl = 60 * 60 * 24 * 14;
+    const urls: string[] = [];
+    for (const raw of paths) {
+      const path = extractMediaStoragePath(raw) || (!raw.startsWith('http') ? raw : null);
+      if (path) {
+        const { data } = await supabase.storage.from('media').createSignedUrl(path, ttl);
+        if (data?.signedUrl) {
+          urls.push(data.signedUrl);
+          continue;
+        }
+      }
+      if (raw.startsWith('http')) urls.push(raw);
+    }
+    return urls;
   };
 
   const mileageRateLocalKey = (uid: string) => `estimateace_mileage_rate_${uid}`;
@@ -12353,12 +12386,10 @@ export default function Home() {
                       setTimeout(() => setTerms(originalTerms), 1000);
                     }
 
-                    setSelectedEmailsForSend([...emails]); 
-                    setSelectedPhonesForSend([...phones]); 
-                    setIsSendModalOpen(true); 
+                    openSendModal();
                   }} 
                   className="bg-[#f97316] text-white px-8 py-3 text-lg">
-                  📧 Choose Recipients & Send
+                  📧 Choose What to Send
                 </Button>
 
                 <Button 
@@ -12600,49 +12631,169 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* Send Modal */}
+      {/* Send Modal — preview attachments + recipients */}
       <Dialog open={isSendModalOpen} onOpenChange={setIsSendModalOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-lg max-h-[90dvh] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>📧 Choose Recipients for this {documentType === 'invoice' ? 'Invoice' : 'Estimate'}</DialogTitle>
+            <DialogTitle>
+              📧 Send this {documentType === 'invoice' ? 'Invoice' : 'Estimate'}
+            </DialogTitle>
             <DialogDescription>
-              Select email addresses and/or phone numbers, then send this {documentType === 'invoice' ? 'invoice' : 'estimate'}.
+              Review what the client will receive, choose what to include, then pick recipients.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-6">
+          <div className="space-y-5">
+            {/* What is being sent */}
+            <div className="rounded-xl border bg-slate-50 p-3 space-y-2">
+              <h4 className="font-semibold text-sm text-slate-800">Document summary</h4>
+              <ul className="text-sm text-slate-600 space-y-1 list-disc pl-5">
+                <li>
+                  {documentType === 'invoice' ? 'Invoice' : 'Estimate'}{' '}
+                  <strong>#{invoiceNumber}</strong> for <strong>{jobName || 'Client'}</strong>
+                </li>
+                <li>
+                  {items.length} line item{items.length === 1 ? '' : 's'} · Grand total{' '}
+                  <strong>${grandTotal.toFixed(2)}</strong>
+                </li>
+                <li>Approve / pay link included in the message</li>
+                {(terms || profile.disclosure) && <li>Terms &amp; Conditions link included</li>}
+              </ul>
+            </div>
+
+            <div className="rounded-xl border border-violet-200 bg-violet-50/40 p-3 space-y-3">
+              <h4 className="font-semibold text-sm text-slate-800">
+                Attachments for the client
+              </h4>
+              <p className="text-xs text-slate-500">
+                Turn items off if you do not want the client to see them in this send.
+              </p>
+
+              <label
+                className={`flex items-start gap-3 rounded-lg border bg-white p-3 cursor-pointer ${
+                  photoUrls.length === 0 ? 'opacity-50' : ''
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  disabled={photoUrls.length === 0}
+                  checked={sendIncludeSitePhotos && photoUrls.length > 0}
+                  onChange={(e) => setSendIncludeSitePhotos(e.target.checked)}
+                />
+                <span className="min-w-0">
+                  <span className="font-medium text-sm block">📷 Site Photos</span>
+                  <span className="text-xs text-slate-500">
+                    {photoUrls.length === 0
+                      ? 'None on this document'
+                      : `${photoUrls.length} photo${photoUrls.length === 1 ? '' : 's'} will be included`}
+                  </span>
+                </span>
+              </label>
+
+              <label
+                className={`flex items-start gap-3 rounded-lg border bg-white p-3 cursor-pointer ${
+                  jobRenderings.length === 0 ? 'opacity-50' : ''
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  disabled={jobRenderings.length === 0}
+                  checked={sendIncludeJobRenderings && jobRenderings.length > 0}
+                  onChange={(e) => setSendIncludeJobRenderings(e.target.checked)}
+                />
+                <span className="min-w-0">
+                  <span className="font-medium text-sm block">✨ AI Job Renderings</span>
+                  <span className="text-xs text-slate-500">
+                    {jobRenderings.length === 0
+                      ? 'None on this document'
+                      : `${jobRenderings.length} before/after rendering${jobRenderings.length === 1 ? '' : 's'}`}
+                  </span>
+                </span>
+              </label>
+
+              {sendIncludeJobRenderings && jobRenderings.length > 0 && (
+                <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs text-amber-950 leading-relaxed">
+                  <strong className="block mb-1">⚠️ AI-generated imagery disclosure</strong>
+                  AI renderings are illustrative previews only. They are computer-generated
+                  visualizations of possible completed work. Actual results may vary due to site
+                  conditions, materials, weather, measurements, code requirements, and final scope.
+                  These images are not a warranty, guarantee, or contractual specification of the
+                  finished job. The written estimate/invoice and Terms &amp; Conditions control the
+                  agreement.
+                </div>
+              )}
+
+              <label
+                className={`flex items-start gap-3 rounded-lg border bg-white p-3 cursor-pointer ${
+                  videoUrls.length === 0 ? 'opacity-50' : ''
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  disabled={videoUrls.length === 0}
+                  checked={sendIncludeVideos && videoUrls.length > 0}
+                  onChange={(e) => setSendIncludeVideos(e.target.checked)}
+                />
+                <span className="min-w-0">
+                  <span className="font-medium text-sm block">🎥 Videos</span>
+                  <span className="text-xs text-slate-500">
+                    {videoUrls.length === 0
+                      ? 'None on this document'
+                      : `${videoUrls.length} video${videoUrls.length === 1 ? '' : 's'} will be included as links`}
+                  </span>
+                </span>
+              </label>
+            </div>
+
             <div>
-              <h4 className="font-semibold mb-2">Select Emails</h4>
-              {emails.map((em, i) => (
-                <label key={i} className="flex items-center gap-2 mb-1">
-                  <input 
-                    type="checkbox" 
-                    checked={selectedEmailsForSend.includes(em)}
-                    onChange={() => {
-                      setSelectedEmailsForSend(prev => prev.includes(em) ? prev.filter(e => e !== em) : [...prev, em]);
-                    }}
-                  />
-                  {em || '(empty)'}
-                </label>
-              ))}
+              <h4 className="font-semibold mb-2 text-sm">Select Emails</h4>
+              {emails.length === 0 ? (
+                <p className="text-xs text-slate-500">No emails on this document — add them in the editor.</p>
+              ) : (
+                emails.map((em, i) => (
+                  <label key={i} className="flex items-center gap-2 mb-1 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={selectedEmailsForSend.includes(em)}
+                      onChange={() => {
+                        setSelectedEmailsForSend((prev) =>
+                          prev.includes(em) ? prev.filter((e) => e !== em) : [...prev, em]
+                        );
+                      }}
+                    />
+                    {em || '(empty)'}
+                  </label>
+                ))
+              )}
             </div>
             <div>
-              <h4 className="font-semibold mb-2">Select Phone Numbers</h4>
-              {phones.map((ph, i) => (
-                <label key={i} className="flex items-center gap-2 mb-1">
-                  <input 
-                    type="checkbox" 
-                    checked={selectedPhonesForSend.includes(ph)}
-                    onChange={() => {
-                      setSelectedPhonesForSend(prev => prev.includes(ph) ? prev.filter(p => p !== ph) : [...prev, ph]);
-                    }}
-                  />
-                  {ph || '(empty)'}
-                </label>
-              ))}
+              <h4 className="font-semibold mb-2 text-sm">Select Phone Numbers</h4>
+              {phones.length === 0 ? (
+                <p className="text-xs text-slate-500">No phones on this document — add them in the editor.</p>
+              ) : (
+                phones.map((ph, i) => (
+                  <label key={i} className="flex items-center gap-2 mb-1 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={selectedPhonesForSend.includes(ph)}
+                      onChange={() => {
+                        setSelectedPhonesForSend((prev) =>
+                          prev.includes(ph) ? prev.filter((p) => p !== ph) : [...prev, ph]
+                        );
+                      }}
+                    />
+                    {ph || '(empty)'}
+                  </label>
+                ))
+              )}
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsSendModalOpen(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setIsSendModalOpen(false)}>
+              Cancel
+            </Button>
             <Button
               className="bg-[#10b981]"
               disabled={sendDocBusy}
@@ -12665,6 +12816,44 @@ export default function Home() {
                     showMessage('Please log in again to send.');
                     return;
                   }
+
+                  // Resolve client-facing media only for toggled-on items
+                  const includePhotos = sendIncludeSitePhotos && photoUrls.length > 0;
+                  const includeVideos = sendIncludeVideos && videoUrls.length > 0;
+                  const includeRenders =
+                    sendIncludeJobRenderings && jobRenderings.length > 0;
+
+                  const sitePhotoUrls = includePhotos
+                    ? await createEmailMediaUrls(photoUrls.slice(0, 24))
+                    : [];
+                  const clientVideoUrls = includeVideos
+                    ? await createEmailMediaUrls(videoUrls.slice(0, 12))
+                    : [];
+                  const clientRenderings = includeRenders
+                    ? await Promise.all(
+                        jobRenderings.slice(0, 12).map(async (r) => {
+                          const beforeUrls = r.sourcePath
+                            ? await createEmailMediaUrls([r.sourcePath])
+                            : [];
+                          const afterUrls = r.resultPath
+                            ? await createEmailMediaUrls([r.resultPath])
+                            : [];
+                          return {
+                            lineDescription: String(r.lineDescription || '').slice(0, 300),
+                            notes: String(r.notes || '').slice(0, 200),
+                            beforeUrl: beforeUrls[0] || '',
+                            afterUrl: afterUrls[0] || '',
+                          };
+                        })
+                      )
+                    : [];
+
+                  // Persist last share choices on the document for future reference
+                  void saveToDB({
+                    quiet: true,
+                    jobRenderings,
+                  }).catch(() => {});
+
                   // Slim payload only — avoid non-serializable / huge fields that break send
                   const emailItems = (items || []).slice(0, 40).map((it: any) => ({
                     description: String(it?.description || '').slice(0, 500),
@@ -12741,6 +12930,12 @@ export default function Home() {
                         showCostBreakdownOnEstimate:
                           !!estimateBreakdownSettings.showCostBreakdownOnEstimate,
                       },
+                      includeSitePhotos: includePhotos,
+                      includeVideos: includeVideos,
+                      includeJobRenderings: includeRenders,
+                      sitePhotoUrls,
+                      videoUrls: clientVideoUrls,
+                      jobRenderings: clientRenderings,
                     }),
                   });
                   const json = await res.json().catch(() => ({}));
@@ -12766,6 +12961,15 @@ export default function Home() {
                   }
                   if (!parts.length) {
                     parts.push('Request completed, but no recipients were confirmed.');
+                  }
+                  const mediaBits: string[] = [];
+                  if (includePhotos) mediaBits.push(`${sitePhotoUrls.length} site photos`);
+                  if (includeRenders) mediaBits.push(`${clientRenderings.length} AI renderings`);
+                  if (includeVideos) mediaBits.push(`${clientVideoUrls.length} videos`);
+                  if (mediaBits.length) {
+                    parts.push(`Included: ${mediaBits.join(', ')}`);
+                  } else {
+                    parts.push('No media attachments included');
                   }
                   showMessage(
                     `✅ ${documentType === 'invoice' ? 'Invoice' : 'Estimate'} sent!\n${parts.join('\n')}`

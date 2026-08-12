@@ -167,7 +167,8 @@ export async function POST(request: NextRequest) {
 
     const subject = `${docLabel} ${invoiceNumber} from ${company}`;
 
-    const text = [
+    // Plain-text body is finalized after optional media sections are built
+    let text = [
       `${company} sent you a ${docLabel.toLowerCase()}.`,
       '',
       `${docLabel} #: ${invoiceNumber}`,
@@ -242,6 +243,107 @@ export async function POST(request: NextRequest) {
   </div>`
       : '';
 
+    // Optional media attachments (contractor chooses what to send)
+    const sitePhotoUrls: string[] = Array.isArray(body.sitePhotoUrls)
+      ? body.sitePhotoUrls.map((u: any) => String(u || '').trim()).filter((u: string) => /^https?:\/\//i.test(u)).slice(0, 24)
+      : [];
+    const clientVideoUrls: string[] = Array.isArray(body.videoUrls)
+      ? body.videoUrls.map((u: any) => String(u || '').trim()).filter((u: string) => /^https?:\/\//i.test(u)).slice(0, 12)
+      : [];
+    const jobRenderings: Array<{
+      lineDescription: string;
+      notes: string;
+      beforeUrl: string;
+      afterUrl: string;
+    }> = Array.isArray(body.jobRenderings)
+      ? body.jobRenderings
+          .slice(0, 12)
+          .map((r: any) => ({
+            lineDescription: String(r?.lineDescription || '').slice(0, 300),
+            notes: String(r?.notes || '').slice(0, 200),
+            beforeUrl: String(r?.beforeUrl || '').trim(),
+            afterUrl: String(r?.afterUrl || '').trim(),
+          }))
+          .filter((r: any) => r.beforeUrl || r.afterUrl)
+      : [];
+
+    const AI_RENDERING_DISCLOSURE =
+      'AI-generated images are illustrative previews only. They are computer-generated visualizations of possible completed work. Actual results may vary due to site conditions, materials, weather, measurements, code requirements, and final scope. These images are not a warranty, guarantee, or contractual specification of the finished job. The written estimate/invoice and Terms & Conditions control the agreement.';
+
+    let mediaHtml = '';
+    let mediaText = '';
+
+    if (sitePhotoUrls.length > 0) {
+      const thumbs = sitePhotoUrls
+        .map(
+          (url) =>
+            `<a href="${escapeHtml(url)}" style="display:inline-block;margin:4px;"><img src="${escapeHtml(url)}" alt="Site photo" width="140" height="140" style="object-fit:cover;border-radius:8px;border:1px solid #e2e8f0;width:140px;height:140px;" /></a>`
+        )
+        .join('');
+      mediaHtml += `
+  <div style="margin:28px 0 0;">
+    <h2 style="font-size:16px;margin:0 0 10px;color:#0f172a;">Site Photos</h2>
+    <div>${thumbs}</div>
+  </div>`;
+      mediaText += `\n\nSite Photos (${sitePhotoUrls.length}):\n${sitePhotoUrls.map((u, i) => `${i + 1}. ${u}`).join('\n')}`;
+    }
+
+    if (jobRenderings.length > 0) {
+      const blocks = jobRenderings
+        .map((r, i) => {
+          const title = escapeHtml(r.lineDescription || `Rendering ${i + 1}`);
+          const notes = r.notes
+            ? `<p style="margin:4px 0 8px;font-size:12px;color:#64748b;">${escapeHtml(r.notes)}</p>`
+            : '';
+          const before = r.beforeUrl
+            ? `<div style="flex:1;min-width:120px;"><div style="font-size:11px;color:#64748b;margin-bottom:4px;">Before</div><a href="${escapeHtml(r.beforeUrl)}"><img src="${escapeHtml(r.beforeUrl)}" alt="Before" width="200" style="max-width:100%;border-radius:8px;border:1px solid #e2e8f0;" /></a></div>`
+            : '';
+          const after = r.afterUrl
+            ? `<div style="flex:1;min-width:120px;"><div style="font-size:11px;color:#6d28d9;margin-bottom:4px;font-weight:600;">After (AI)</div><a href="${escapeHtml(r.afterUrl)}"><img src="${escapeHtml(r.afterUrl)}" alt="AI after rendering" width="200" style="max-width:100%;border-radius:8px;border:1px solid #ddd6fe;" /></a></div>`
+            : '';
+          return `<div style="margin:0 0 18px;padding:12px;background:#faf5ff;border:1px solid #e9d5ff;border-radius:12px;">
+            <div style="font-size:14px;font-weight:600;margin-bottom:4px;">${title}</div>
+            ${notes}
+            <div style="display:flex;flex-wrap:wrap;gap:12px;">${before}${after}</div>
+          </div>`;
+        })
+        .join('');
+      mediaHtml += `
+  <div style="margin:28px 0 0;">
+    <h2 style="font-size:16px;margin:0 0 6px;color:#0f172a;">AI Job Renderings</h2>
+    <div style="margin:0 0 12px;padding:12px 14px;background:#fffbeb;border:1px solid #fcd34d;border-radius:10px;font-size:11px;color:#78350f;line-height:1.45;">
+      <strong>Important — AI-generated imagery:</strong> ${escapeHtml(AI_RENDERING_DISCLOSURE)}
+    </div>
+    ${blocks}
+  </div>`;
+      mediaText += `\n\nAI Job Renderings (illustrative only):\n${AI_RENDERING_DISCLOSURE}\n`;
+      for (const r of jobRenderings) {
+        mediaText += `\n- ${r.lineDescription || 'Rendering'}${r.notes ? ` (${r.notes})` : ''}`;
+        if (r.beforeUrl) mediaText += `\n  Before: ${r.beforeUrl}`;
+        if (r.afterUrl) mediaText += `\n  After (AI): ${r.afterUrl}`;
+      }
+    }
+
+    if (clientVideoUrls.length > 0) {
+      const links = clientVideoUrls
+        .map(
+          (url, i) =>
+            `<li style="margin:0 0 6px;"><a href="${escapeHtml(url)}" style="color:#0f766e;">Video ${i + 1}</a></li>`
+        )
+        .join('');
+      mediaHtml += `
+  <div style="margin:28px 0 0;">
+    <h2 style="font-size:16px;margin:0 0 10px;color:#0f172a;">Videos</h2>
+    <ul style="margin:0;padding-left:18px;font-size:14px;">${links}</ul>
+  </div>`;
+      mediaText += `\n\nVideos (${clientVideoUrls.length}):\n${clientVideoUrls.map((u, i) => `${i + 1}. ${u}`).join('\n')}`;
+    }
+
+    if (mediaText) {
+      // Insert media links before the closing footer
+      text = text.replace('\n— Sent via EstimateAce', `${mediaText}\n\n— Sent via EstimateAce`);
+    }
+
     const ctaHtml = `
   <div style="margin:28px 0;text-align:center;padding:20px;background:#ecfdf5;border:2px dashed #10b981;border-radius:16px;">
     ${
@@ -303,6 +405,7 @@ export async function POST(request: NextRequest) {
     }
   </div>
   ${ctaHtml}
+  ${mediaHtml}
   <p style="margin-top:24px;font-size:14px;color:#475569;">
     Questions? ${companyPhone ? `Call ${escapeHtml(companyPhone)}` : ''}${companyPhone && companyEmail ? ' · ' : ''}${companyEmail ? `Email ${escapeHtml(companyEmail)}` : ''}
   </p>
