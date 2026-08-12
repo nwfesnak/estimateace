@@ -13,6 +13,8 @@
  */
 export const XAI_DEFAULT_CHAT_MODEL = 'grok-4.5-latest';
 export const XAI_DEFAULT_VISION_MODEL = 'grok-4.5-latest';
+/** Grok Imagine — image generation / edit (job renderings). */
+export const XAI_DEFAULT_IMAGE_MODEL = 'grok-imagine-image-quality';
 
 /** Retired xAI model IDs — auto-migrate to current -latest aliases. */
 const DEPRECATED_XAI_MODELS = new Set([
@@ -68,10 +70,18 @@ export function getXaiVisionModel(): string {
   return resolveXaiModel(configured, XAI_DEFAULT_VISION_MODEL, 'vision');
 }
 
+/** Image generation / edit (AI completed-job renderings). */
+export function getXaiImageModel(): string {
+  const configured = process.env.GROK_IMAGE_MODEL?.trim();
+  if (configured) return configured;
+  return XAI_DEFAULT_IMAGE_MODEL;
+}
+
 export function getXaiRuntimeConfig() {
   return {
     chatModel: getXaiChatModel(),
     visionModel: getXaiVisionModel(),
+    imageModel: getXaiImageModel(),
     hasApiKey: Boolean(getXaiApiKey()),
   };
 }

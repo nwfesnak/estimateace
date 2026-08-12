@@ -398,18 +398,28 @@ export default function Home() {
       scanReceipt: "Scan Receipt",
       uploadReceipt: "Upload Receipt",
       labor: "Labor",
-      photos: "Photos",
+      photos: "Site Photos",
       videos: "Videos",
       receipts: "Receipts",
       termsConditionsEditor: "Terms & Conditions",
       saveAsTemplate: "Save as Template",
       loadTemplate: "Load Template...",
       laborButton: "Labor",
-      photosSection: "Photos",
-      photoFolderTitle: "Job Photos",
+      photosSection: "Site Photos",
+      photoFolderTitle: "Site Photos",
       photoFolderClosed: "Click to open photo folder",
       photoFolderOpen: "Close photo folder",
-      photoFolderCount: "{count} photos",
+      photoFolderCount: "{count} site photos",
+      jobRenderSection: "AI Job Renderings",
+      jobRenderHint: "Upload or pick a site photo, link it to a description line, and AI will draw a realistic after photo of the completed work.",
+      jobRenderGenerate: "Generate completed look",
+      jobRenderLinkLine: "Link to description line",
+      jobRenderPickPhoto: "Pick a site photo",
+      jobRenderUpload: "Upload photo",
+      jobRenderNotes: "Extra notes (optional)",
+      jobRenderBefore: "Before (site)",
+      jobRenderAfter: "After (AI rendering)",
+      jobRenderEmpty: "No renderings yet — add a photo and link a line below.",
       receiptFolderTitle: "Receipt folder",
       receiptFolderClosed: "Click to open all receipts",
       receiptFolderOpen: "Close receipt folder",
@@ -528,18 +538,28 @@ export default function Home() {
       scanReceipt: "Escanear Recibo",
       uploadReceipt: "Subir Recibo",
       labor: "Mano de Obra",
-      photos: "Fotos",
+      photos: "Fotos del Sitio",
       videos: "Videos",
       receipts: "Recibos",
       termsConditionsEditor: "Términos y Condiciones",
       saveAsTemplate: "Guardar como Plantilla",
       loadTemplate: "Cargar plantilla...",
       laborButton: "Mano de Obra",
-      photosSection: "Fotos",
-      photoFolderTitle: "Fotos del Trabajo",
+      photosSection: "Fotos del Sitio",
+      photoFolderTitle: "Fotos del Sitio",
       photoFolderClosed: "Clic para abrir la carpeta de fotos",
       photoFolderOpen: "Cerrar carpeta de fotos",
-      photoFolderCount: "{count} fotos",
+      photoFolderCount: "{count} fotos del sitio",
+      jobRenderSection: "Renderizados IA del Trabajo",
+      jobRenderHint: "Sube o elige una foto del sitio, enlázala a una línea de descripción y la IA dibujará cómo se verá el trabajo terminado.",
+      jobRenderGenerate: "Generar aspecto terminado",
+      jobRenderLinkLine: "Enlazar a línea de descripción",
+      jobRenderPickPhoto: "Elegir foto del sitio",
+      jobRenderUpload: "Subir foto",
+      jobRenderNotes: "Notas extra (opcional)",
+      jobRenderBefore: "Antes (sitio)",
+      jobRenderAfter: "Después (render IA)",
+      jobRenderEmpty: "Sin renderizados — agrega una foto y enlaza una línea abajo.",
       receiptFolderTitle: "Carpeta de recibos",
       receiptFolderClosed: "Clic para ver todos los recibos",
       receiptFolderOpen: "Cerrar carpeta de recibos",
@@ -658,18 +678,28 @@ export default function Home() {
       scanReceipt: "Scanner Reçu",
       uploadReceipt: "Importer Reçu",
       labor: "Main d'Œuvre",
-      photos: "Photos",
+      photos: "Photos du chantier",
       videos: "Vidéos",
       receipts: "Reçus",
       termsConditionsEditor: "Conditions Générales",
       saveAsTemplate: "Enregistrer comme Modèle",
       loadTemplate: "Charger modèle...",
       laborButton: "Main d'Œuvre",
-      photosSection: "Photos",
-      photoFolderTitle: "Photos du Chantier",
+      photosSection: "Photos du chantier",
+      photoFolderTitle: "Photos du chantier",
       photoFolderClosed: "Cliquez pour ouvrir le dossier de photos",
       photoFolderOpen: "Fermer le dossier de photos",
-      photoFolderCount: "{count} photos",
+      photoFolderCount: "{count} photos du chantier",
+      jobRenderSection: "Rendus IA du chantier",
+      jobRenderHint: "Téléversez ou choisissez une photo, liez-la à une ligne de description, et l'IA dessine l'aspect une fois le travail terminé.",
+      jobRenderGenerate: "Générer l'aspect terminé",
+      jobRenderLinkLine: "Lier à une ligne de description",
+      jobRenderPickPhoto: "Choisir une photo du chantier",
+      jobRenderUpload: "Téléverser une photo",
+      jobRenderNotes: "Notes supplémentaires (optionnel)",
+      jobRenderBefore: "Avant (chantier)",
+      jobRenderAfter: "Après (rendu IA)",
+      jobRenderEmpty: "Aucun rendu — ajoutez une photo et liez une ligne ci-dessous.",
       receiptFolderTitle: "Dossier des reçus",
       receiptFolderClosed: "Cliquez pour ouvrir tous les reçus",
       receiptFolderOpen: "Fermer le dossier des reçus",
@@ -769,6 +799,25 @@ export default function Home() {
   const [estimateBreakdownSettings, setEstimateBreakdownSettings] = useState(DEFAULT_ESTIMATE_BREAKDOWN);
   const [terms, setTerms] = useState('');
   const [photoUrls, setPhotoUrls] = useState<string[]>([]);   // stores permanent paths (or legacy signed urls)
+  /** AI before→after job renderings linked to description lines (saved on document profile) */
+  type JobRendering = {
+    id: string;
+    sourcePath: string;
+    resultPath?: string;
+    lineItemId: number | null;
+    lineDescription: string;
+    notes?: string;
+    createdAt: string;
+    status?: 'ready' | 'error';
+    error?: string;
+  };
+  const [jobRenderings, setJobRenderings] = useState<JobRendering[]>([]);
+  const [jobRenderBusy, setJobRenderBusy] = useState(false);
+  const [jobRenderSourcePath, setJobRenderSourcePath] = useState('');
+  const [jobRenderLineId, setJobRenderLineId] = useState<number | null>(null);
+  const [jobRenderNotes, setJobRenderNotes] = useState('');
+  const [jobRenderDisplayMap, setJobRenderDisplayMap] = useState<Record<string, string>>({});
+  const jobRenderUploadRef = useRef<HTMLInputElement>(null);
   const [videoUrls, setVideoUrls] = useState<string[]>([]);
   const [receiptUrls, setReceiptUrls] = useState<string[]>([]);
 
@@ -812,6 +861,31 @@ export default function Home() {
     resolveUrls(videoUrls).then(setVideoDisplayUrls);
     resolveUrls(receiptUrls).then(setReceiptDisplayUrls);
   }, [photoUrls, videoUrls, receiptUrls, supabase]);
+
+  // Resolve before/after paths for AI job renderings
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      const paths = new Set<string>();
+      for (const r of jobRenderings) {
+        if (r.sourcePath) paths.add(r.sourcePath);
+        if (r.resultPath) paths.add(r.resultPath);
+      }
+      if (jobRenderSourcePath) paths.add(jobRenderSourcePath);
+      const map: Record<string, string> = {};
+      await Promise.all(
+        Array.from(paths).map(async (p) => {
+          const url = await resolveMediaDisplayUrl(p, getMediaUrl);
+          if (url) map[p] = url;
+        })
+      );
+      if (!cancelled) setJobRenderDisplayMap(map);
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [jobRenderings, jobRenderSourcePath, supabase]);
 
   const [dueDate, setDueDate] = useState('');
   const [paymentStatus, setPaymentStatus] = useState<'pending' | 'paid'>('pending');
@@ -1206,6 +1280,8 @@ export default function Home() {
     },
     // Per-job miles for gas write-off (lives with the document)
     _mileageLogs: mileageForJob,
+    // AI before→after renderings linked to description lines
+    _jobRenderings: jobRenderings,
   });
 
   // Payment modal states
@@ -2698,6 +2774,8 @@ export default function Home() {
     videoUrls?: string[];
     receiptUrls?: string[];
     receiptDetails?: any[];
+    /** AI job renderings (avoids stale state after generate) */
+    jobRenderings?: JobRendering[];
     /** Per-job mileage log (avoids stale state after Add trip) */
     mileageLogs?: MileageLog[];
     /** Suppress error toasts (auto-save) — still shows on hard failure */
@@ -2729,6 +2807,7 @@ export default function Home() {
     const receiptsToSave = options?.receiptUrls ?? receiptUrls;
     const receiptDetailsToSave = options?.receiptDetails ?? receiptDetails;
     const milesToSave = options?.mileageLogs ?? jobMileageLogs;
+    const renderingsToSave = options?.jobRenderings ?? jobRenderings;
     const payload = {
       id: docId,
       user_id: workspaceUserId,
@@ -2743,7 +2822,10 @@ export default function Home() {
       invoiceNumber: docId,
       items: items || [],
       terms: terms || '',
-      profile: getDocumentProfileSnapshot(profileToSave, breakdownToSave, milesToSave),
+      profile: {
+        ...getDocumentProfileSnapshot(profileToSave, breakdownToSave, milesToSave),
+        _jobRenderings: renderingsToSave,
+      },
       documentType: documentType || 'estimate',
       dueDate: dueDate || '',
       paymentStatus: paymentStatus || 'pending',
@@ -3903,6 +3985,29 @@ export default function Home() {
     setVideoUrls(est.videoUrls || []);
     setReceiptUrls(est.receiptUrls || []);
     setReceiptDetails(est.receiptDetails || []);
+    {
+      const raw = (est.profile?._jobRenderings || est._jobRenderings || []) as any[];
+      setJobRenderings(
+        Array.isArray(raw)
+          ? raw
+              .filter((r) => r && (r.sourcePath || r.resultPath))
+              .map((r) => ({
+                id: String(r.id || `jr-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`),
+                sourcePath: String(r.sourcePath || ''),
+                resultPath: r.resultPath ? String(r.resultPath) : undefined,
+                lineItemId: r.lineItemId != null ? Number(r.lineItemId) : null,
+                lineDescription: String(r.lineDescription || ''),
+                notes: r.notes ? String(r.notes) : '',
+                createdAt: String(r.createdAt || new Date().toISOString()),
+                status: r.status === 'error' ? 'error' : 'ready',
+                error: r.error ? String(r.error) : undefined,
+              }))
+          : []
+      );
+      setJobRenderSourcePath('');
+      setJobRenderLineId(null);
+      setJobRenderNotes('');
+    }
     setJobMileageLogs(mileageLogsFromDoc(est));
     setLaborHours(est.laborHours || 0);
     setLaborRate(est.laborRate || 0);
@@ -4097,6 +4202,10 @@ export default function Home() {
     setJobName(''); setAddress(''); setCity(''); setState(''); setZipCode('');
     setPhones(['']); setEmails(['']); setTerms('');
     setPhotoUrls([]); setVideoUrls([]); setReceiptUrls([]); setReceiptDetails([]); setJobMileageLogs([]);
+    setJobRenderings([]);
+    setJobRenderSourcePath('');
+    setJobRenderLineId(null);
+    setJobRenderNotes('');
     setPhotosFolderOpen(false);
     setItems([{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
     setLaborHours(0); setLaborRate(0); setLaborFixedAmount(0); setUseHourlyLabor(true);
@@ -4436,6 +4545,147 @@ export default function Home() {
     } finally {
       setPhotoQuoteImageUrl('');
     }
+  };
+
+  const uploadJobRenderBlob = async (blob: Blob, kind: 'source' | 'result'): Promise<string | null> => {
+    if (!supabase || !workspaceUserId) return null;
+    const ext = blob.type.includes('png') ? 'png' : 'jpg';
+    const contentType = blob.type || (ext === 'png' ? 'image/png' : 'image/jpeg');
+    const filePath = `${workspaceUserId}/render/${kind}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    const { error } = await supabase.storage.from('media').upload(filePath, blob, {
+      upsert: true,
+      contentType,
+      cacheControl: '3600',
+    });
+    if (error) {
+      console.error('job render upload failed:', error);
+      return null;
+    }
+    return filePath;
+  };
+
+  const handleJobRenderSourceUpload = async (files: FileList | null) => {
+    if (!files?.length) return;
+    if (!user || !supabase) {
+      showMessage('Please log in before uploading photos.');
+      return;
+    }
+    showMessage('Uploading photo for rendering…');
+    try {
+      const prepared = await prepareFileForMediaUpload(files[0], 'photo');
+      if (!prepared) {
+        showMessage('Could not read that photo. Try another image.');
+        return;
+      }
+      const path = await uploadJobRenderBlob(prepared.blob, 'source');
+      if (!path) {
+        showMessage('Upload failed. Try again.');
+        return;
+      }
+      // Also keep it in Site Photos so the job has the before shot on file
+      const nextPhotos = [...photoUrls, path];
+      setPhotoUrls(nextPhotos);
+      setJobRenderSourcePath(path);
+      void saveToDB({ photoUrls: nextPhotos, quiet: true });
+      showMessage('Photo ready — link a description line and generate.');
+    } catch (err) {
+      console.error(err);
+      showMessage('Could not upload photo for rendering.');
+    } finally {
+      if (jobRenderUploadRef.current) jobRenderUploadRef.current.value = '';
+    }
+  };
+
+  const generateJobRendering = async () => {
+    if (jobRenderBusy) return;
+    if (!jobRenderSourcePath) {
+      showMessage('Pick or upload a site photo first.');
+      return;
+    }
+    const line =
+      jobRenderLineId != null
+        ? items.find((row) => row.id === jobRenderLineId)
+        : null;
+    const lineDescription = (line?.description || '').trim();
+    if (!lineDescription) {
+      showMessage('Link a description line that relates to this photo (add text on the line first).');
+      return;
+    }
+
+    setJobRenderBusy(true);
+    showMessage('AI is drawing the completed job look…');
+    try {
+      const sourceDisplay =
+        jobRenderDisplayMap[jobRenderSourcePath] ||
+        (await resolveMediaDisplayUrl(jobRenderSourcePath, getMediaUrl));
+      if (!sourceDisplay) throw new Error('Could not load source photo');
+
+      const imageBase64 = await imageUrlToBase64ForAi(sourceDisplay);
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (supabase) {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          headers.Authorization = `Bearer ${session.access_token}`;
+        }
+      }
+
+      const res = await fetch('/api/job-render', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          imageBase64,
+          lineDescription,
+          notes: jobRenderNotes.trim() || undefined,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) {
+        throw new Error(data.error || 'AI rendering failed');
+      }
+
+      const resultDataUrl = String(data.imageBase64 || '');
+      if (!resultDataUrl.startsWith('data:image/')) {
+        throw new Error('AI did not return an image');
+      }
+
+      const resultRes = await fetch(resultDataUrl);
+      const resultBlob = await resultRes.blob();
+      const resultPath = await uploadJobRenderBlob(resultBlob, 'result');
+      if (!resultPath) throw new Error('Could not save the AI rendering');
+
+      const entry: JobRendering = {
+        id: `jr-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        sourcePath: jobRenderSourcePath,
+        resultPath,
+        lineItemId: line?.id ?? null,
+        lineDescription,
+        notes: jobRenderNotes.trim() || '',
+        createdAt: new Date().toISOString(),
+        status: 'ready',
+      };
+      const next = [entry, ...jobRenderings];
+      setJobRenderings(next);
+      setJobRenderNotes('');
+      await saveToDB({ jobRenderings: next, quiet: false });
+      showMessage('✅ AI completed-job rendering saved. Scroll to view before / after.');
+    } catch (err: any) {
+      console.error('generateJobRendering failed:', err);
+      const msg = err?.message || 'Could not generate rendering';
+      if (/Rate limit/i.test(msg)) showMessage(`⏳ ${msg}`);
+      else if (/Unauthorized|log in/i.test(msg)) showMessage('🔒 Please log in to use AI renderings.');
+      else if (/GROK_API_KEY|API key/i.test(msg)) showMessage('🔑 AI key missing. Check GROK_API_KEY on Vercel.');
+      else showMessage(`❌ ${msg}`);
+    } finally {
+      setJobRenderBusy(false);
+    }
+  };
+
+  const removeJobRendering = (id: string) => {
+    const next = jobRenderings.filter((r) => r.id !== id);
+    setJobRenderings(next);
+    void saveToDB({ jobRenderings: next, quiet: true });
   };
 
   const emptyBreakdownMaterial = () => ({
@@ -9702,12 +9952,193 @@ export default function Home() {
                 <CardContent className="p-6">
                   <h3 className="text-xl font-semibold mb-4">{t('photosSection')} ({photoUrls.length})</h3>
                   <p className="text-sm text-gray-500 mb-4">
-                    Use your phone camera to capture job photos. Tap 📷 AI Quote on any photo to price a line item.
+                    Capture site photos for this job. Tap 📷 AI Quote on any photo to price a line item.
                     {photoUrls.length > PHOTO_FOLDER_THRESHOLD
                       ? ' With more than 6 photos, they are kept in a folder — click the folder to view them.'
                       : ''}
                   </p>
                   {renderPhotoGallery({ editable: true })}
+                </CardContent>
+              </Card>
+
+              {/* AI Job Renderings — photo linked to a description line → completed look */}
+              <Card className="mb-8 border-violet-200">
+                <CardContent className="p-6">
+                  <h3 className="text-xl font-semibold mb-2">
+                    ✨ {t('jobRenderSection')} ({jobRenderings.length})
+                  </h3>
+                  <p className="text-sm text-gray-500 mb-5">
+                    {t('jobRenderHint')}
+                  </p>
+
+                  <div className="rounded-xl border border-violet-100 bg-violet-50/50 p-4 mb-6 space-y-4">
+                    <div>
+                      <div className="text-sm font-semibold text-gray-800 mb-2">
+                        1. {t('jobRenderPickPhoto')}
+                      </div>
+                      {photoUrls.length > 0 ? (
+                        <div className="flex gap-2 overflow-x-auto pb-1">
+                          {photoUrls.map((path, i) => {
+                            const url = photoDisplayUrls[i] || jobRenderDisplayMap[path];
+                            const selected = jobRenderSourcePath === path;
+                            return (
+                              <button
+                                key={`${path}-${i}`}
+                                type="button"
+                                onClick={() => setJobRenderSourcePath(path)}
+                                className={`relative shrink-0 w-20 h-20 rounded-lg overflow-hidden border-2 transition ${
+                                  selected
+                                    ? 'border-violet-600 ring-2 ring-violet-300'
+                                    : 'border-gray-200 hover:border-violet-300'
+                                }`}
+                                title={`Site photo ${i + 1}`}
+                              >
+                                {url ? (
+                                  <img src={url} alt="" className="w-full h-full object-cover" />
+                                ) : (
+                                  <div className="w-full h-full bg-gray-200" />
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-gray-500 mb-2">
+                          No site photos yet — upload one below or add photos above first.
+                        </p>
+                      )}
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <input
+                          ref={jobRenderUploadRef}
+                          type="file"
+                          accept="image/*,image/heic,image/heif,.heic,.heif,.jpg,.jpeg,.png,.webp"
+                          className="hidden"
+                          onChange={(e) => void handleJobRenderSourceUpload(e.target.files)}
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => jobRenderUploadRef.current?.click()}
+                          className="text-sm"
+                        >
+                          📁 {t('jobRenderUpload')}
+                        </Button>
+                        {jobRenderSourcePath && (
+                          <span className="text-xs text-violet-700 self-center font-medium">
+                            Photo selected ✓
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-semibold text-gray-800 mb-2 block">
+                        2. {t('jobRenderLinkLine')}
+                      </label>
+                      <select
+                        value={jobRenderLineId ?? ''}
+                        onChange={(e) =>
+                          setJobRenderLineId(e.target.value === '' ? null : Number(e.target.value))
+                        }
+                        className="flex h-10 w-full rounded-lg border border-input bg-white px-3 py-2 text-sm"
+                      >
+                        <option value="">Select a line item…</option>
+                        {items.map((line, i) => (
+                          <option key={line.id} value={line.id}>
+                            Line {i + 1}: {line.description?.trim() || '(empty — add description first)'}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-semibold text-gray-800 mb-2 block">
+                        3. {t('jobRenderNotes')}
+                      </label>
+                      <Input
+                        value={jobRenderNotes}
+                        onChange={(e) => setJobRenderNotes(e.target.value)}
+                        placeholder="e.g. charcoal shingles, white trim, remove old deck"
+                        className="bg-white"
+                      />
+                    </div>
+
+                    <Button
+                      type="button"
+                      onClick={() => void generateJobRendering()}
+                      disabled={jobRenderBusy || !jobRenderSourcePath}
+                      className="bg-violet-600 hover:bg-violet-700 text-white w-full sm:w-auto"
+                    >
+                      {jobRenderBusy ? '🤖 Drawing completed look…' : `✨ ${t('jobRenderGenerate')}`}
+                    </Button>
+                  </div>
+
+                  {jobRenderings.length === 0 ? (
+                    <p className="text-sm text-gray-500">{t('jobRenderEmpty')}</p>
+                  ) : (
+                    <div className="space-y-5">
+                      {jobRenderings.map((r) => {
+                        const beforeUrl = jobRenderDisplayMap[r.sourcePath];
+                        const afterUrl = r.resultPath ? jobRenderDisplayMap[r.resultPath] : '';
+                        return (
+                          <div
+                            key={r.id}
+                            className="rounded-xl border bg-white p-3 sm:p-4 shadow-sm"
+                          >
+                            <div className="flex flex-wrap items-start justify-between gap-2 mb-3">
+                              <div className="min-w-0">
+                                <div className="text-sm font-semibold text-[#1e293b]">
+                                  {r.lineDescription || 'Linked line'}
+                                </div>
+                                {r.notes ? (
+                                  <div className="text-xs text-gray-500 mt-0.5">{r.notes}</div>
+                                ) : null}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => removeJobRendering(r.id)}
+                                className="text-xs font-semibold text-red-600 hover:text-red-700 px-2 py-1"
+                              >
+                                Remove
+                              </button>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              <div>
+                                <div className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold mb-1">
+                                  {t('jobRenderBefore')}
+                                </div>
+                                {beforeUrl ? (
+                                  <img
+                                    src={beforeUrl}
+                                    alt="Before"
+                                    className="w-full h-48 object-cover rounded-lg border"
+                                  />
+                                ) : (
+                                  <div className="w-full h-48 rounded-lg border bg-gray-100" />
+                                )}
+                              </div>
+                              <div>
+                                <div className="text-[11px] uppercase tracking-wide text-violet-700 font-semibold mb-1">
+                                  {t('jobRenderAfter')}
+                                </div>
+                                {afterUrl ? (
+                                  <img
+                                    src={afterUrl}
+                                    alt="AI after rendering"
+                                    className="w-full h-48 object-cover rounded-lg border border-violet-200"
+                                  />
+                                ) : (
+                                  <div className="w-full h-48 rounded-lg border border-dashed border-violet-200 bg-violet-50 flex items-center justify-center text-sm text-violet-600">
+                                    Generating…
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
@@ -10150,10 +10581,54 @@ export default function Home() {
                   <div className="mt-12">
                     {/* Print always expands; on screen, folder when > 6 */}
                     <div className="print:hidden">
-                      {renderPhotoGallery({ heading: 'Attached Photos' })}
+                      {renderPhotoGallery({ heading: 'Site Photos' })}
                     </div>
                     <div className="hidden print:block">
-                      {renderPhotoGallery({ heading: 'Attached Photos', forceExpanded: true })}
+                      {renderPhotoGallery({ heading: 'Site Photos', forceExpanded: true })}
+                    </div>
+                  </div>
+                )}
+
+                {jobRenderings.length > 0 && (
+                  <div className="mt-12">
+                    <h3 className="text-2xl font-semibold mb-4 border-b pb-3">
+                      AI Job Renderings (After Completing)
+                    </h3>
+                    <div className="space-y-8">
+                      {jobRenderings.map((r) => {
+                        const beforeUrl = jobRenderDisplayMap[r.sourcePath];
+                        const afterUrl = r.resultPath ? jobRenderDisplayMap[r.resultPath] : '';
+                        return (
+                          <div key={r.id} className="break-inside-avoid">
+                            <p className="text-sm font-medium text-gray-800 mb-2">
+                              {r.lineDescription}
+                              {r.notes ? ` — ${r.notes}` : ''}
+                            </p>
+                            <div className="grid grid-cols-2 gap-4">
+                              <div>
+                                <div className="text-xs text-gray-500 mb-1">Before</div>
+                                {beforeUrl && (
+                                  <img
+                                    src={beforeUrl}
+                                    alt="Before"
+                                    className="w-full border rounded-xl max-h-64 object-contain"
+                                  />
+                                )}
+                              </div>
+                              <div>
+                                <div className="text-xs text-violet-700 mb-1">After (AI)</div>
+                                {afterUrl && (
+                                  <img
+                                    src={afterUrl}
+                                    alt="After AI rendering"
+                                    className="w-full border rounded-xl max-h-64 object-contain border-violet-200"
+                                  />
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -12047,7 +12522,7 @@ export default function Home() {
 
                 {photoUrls.length > 0 && (
                   <div className="mt-12">
-                    {renderPhotoGallery({ heading: 'Attached Photos' })}
+                    {renderPhotoGallery({ heading: 'Site Photos' })}
                   </div>
                 )}
               </div>
