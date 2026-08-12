@@ -2,11 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { sendEmailNotification, sendSmsNotification } from '@/lib/notifications';
-import {
-  formatItemBreakdownHtml,
-  formatItemBreakdownText,
-  type EmailBreakdownSettings,
-} from '@/lib/email-document-breakdown';
 import { createClientActionToken } from '@/lib/client-action-token';
 import { getAppUrl } from '@/lib/stripe-server';
 
@@ -102,13 +97,6 @@ export async function POST(request: NextRequest) {
     // Example card fee for email (actual fee shown per method on pay page)
     const exampleFee = computeProcessingFee(amountDueNow, { method: 'stripe' });
 
-    const rawBreakdown = body.breakdownSettings || body.estimateBreakdownSettings || {};
-    const breakdownSettings: EmailBreakdownSettings = {
-      showMaterialBreakdownOnEstimate: !!rawBreakdown.showMaterialBreakdownOnEstimate,
-      showLaborBreakdownOnEstimate: !!rawBreakdown.showLaborBreakdownOnEstimate,
-      showCostBreakdownOnEstimate: !!rawBreakdown.showCostBreakdownOnEstimate,
-    };
-
     if (emails.length === 0 && phones.length === 0) {
       return NextResponse.json(
         { error: 'Select at least one email or phone number.' },
@@ -142,113 +130,97 @@ export async function POST(request: NextRequest) {
     const actionUrl = `${appUrl}/client/approve?token=${encodeURIComponent(actionToken)}`;
     const termsUrl = `${appUrl}/client/terms?token=${encodeURIComponent(actionToken)}`;
 
-    const ctaLabel =
+    // Short button labels — full amount shown as "Total due" line above buttons
+    const payButtonLabelHtml =
       documentType === 'estimate'
         ? amountDueNow >= 0.5
-          ? `Approve & pay deposit (${money(amountDueNow)} + fees)`
-          : 'Approve this estimate'
+          ? 'Approve &amp; make payment'
+          : 'Approve estimate'
         : amountDueNow >= 0.5
-          ? amountPaid > 0
-            ? `Pay remaining balance (${money(amountDueNow)} + fees)`
-            : `Pay invoice total (${money(amountDueNow)} + fees)`
-          : 'View invoice & pay';
+          ? 'Make payment'
+          : 'View invoice';
+    const payButtonLabelPlain =
+      documentType === 'estimate'
+        ? amountDueNow >= 0.5
+          ? 'Approve & make payment'
+          : 'Approve estimate'
+        : amountDueNow >= 0.5
+          ? 'Make payment'
+          : 'View invoice';
+
+    const totalDueLabel =
+      documentType === 'estimate' && depositDue >= 0.5
+        ? 'Deposit due'
+        : amountPaid > 0
+          ? 'Balance due'
+          : 'Total due';
+
+    const totalDueAmount =
+      documentType === 'estimate' && depositDue >= 0.5 ? depositDue : amountDueNow;
 
     const location = [address, city, state, zipCode].filter(Boolean).join(', ');
     const lineLines = items
-      .slice(0, 40)
+      .slice(0, 20)
       .map((it, i) => {
-        const desc = String(it.description || 'Line item').slice(0, 200);
+        const desc = String(it.description || 'Line item').slice(0, 120);
         const total = money(Number(it.total) || Number(it.qty || 0) * Number(it.price || 0));
-        const header = `${i + 1}. ${desc} — ${total}`;
-        const breakdown = formatItemBreakdownText(it, breakdownSettings);
-        return breakdown ? `${header}\n${breakdown}` : header;
+        return `${i + 1}. ${desc} — ${total}`;
       })
-      .join('\n\n');
+      .join('\n');
 
     const subject = `${docLabel} ${invoiceNumber} from ${company}`;
 
-    // Plain-text body is finalized after optional media sections are built
+    // Keep plain text short so nothing important is clipped
     let text = [
       `${company} sent you a ${docLabel.toLowerCase()}.`,
-      '',
-      `${docLabel} #: ${invoiceNumber}`,
+      `${docLabel} # ${invoiceNumber}${date ? ` · ${date}` : ''}`,
       `Client: ${jobName}`,
-      date ? `Date: ${date}` : '',
-      location ? `Job address: ${location}` : '',
+      location ? `Job: ${location}` : '',
       '',
-      'Line items:',
-      lineLines || '(see contractor for details)',
-      '',
-      showDiscount ? `Subtotal: ${money(subtotalBeforeDiscount)}` : '',
-      showDiscount
-        ? `Discount (${discountDescription}${
-            discountType === 'percent' && discountValue > 0 ? ` ${discountValue}%` : ''
-          }): -${money(discountAmount)}`
-        : '',
-      showDiscount && taxAmount > 0 ? `Tax: ${money(taxAmount)}` : '',
-      `Grand total: ${money(grandTotal)}`,
-      amountPaid > 0 ? `Amount paid (e.g. deposit): ${money(amountPaid)}` : '',
-      documentType === 'estimate' && depositDue >= 0.5
-        ? `Deposit due now (${depositPercent}%): ${money(depositDue)}`
-        : '',
-      documentType === 'invoice'
-        ? `${payLabel}: ${money(amountDueNow)}`
-        : depositDue < 0.5
-          ? `Amount due: ${money(amountDueNow)}`
-          : '',
+      `${totalDueLabel}: ${money(totalDueAmount)}`,
       amountDueNow >= 0.5
-        ? `Card pay example: ${money(exampleFee.totalAmount)} (includes ~${money(exampleFee.feeAmount)} processing fee)`
+        ? `(Processing fees may apply at checkout. Example card total: ${money(exampleFee.totalAmount)})`
         : '',
       '',
-      `${ctaLabel}:`,
-      actionUrl,
-      '',
+      `Pay / approve: ${actionUrl}`,
       terms ? `Terms & Conditions: ${termsUrl}` : '',
       '',
-      'Questions? Contact:',
+      `Grand total: ${money(grandTotal)}`,
+      amountPaid > 0 ? `Already paid: ${money(amountPaid)}` : '',
+      lineLines ? `\nItems:\n${lineLines}` : '',
+      '',
       companyPhone ? `Phone: ${companyPhone}` : '',
       companyEmail ? `Email: ${companyEmail}` : '',
-      '',
-      '— Sent via EstimateAce',
+      '— EstimateAce',
     ]
       .filter((line) => line !== '')
       .join('\n');
 
+    // Compact line list (no long breakdowns in email — keeps Total due + buttons above Gmail clip)
     const rowsHtml = items
-      .slice(0, 40)
+      .slice(0, 15)
       .map((it) => {
-        const desc = escapeHtml(String(it.description || 'Line item').slice(0, 200));
-        const qty = Number(it.qty) || 0;
-        const total = money(Number(it.total) || qty * Number(it.price || 0));
-        const breakdownHtml = formatItemBreakdownHtml(it, breakdownSettings);
+        const desc = escapeHtml(String(it.description || 'Line item').slice(0, 100));
+        const total = money(Number(it.total) || Number(it.qty || 0) * Number(it.price || 0));
         return `<tr>
-          <td style="padding:8px;border-bottom:1px solid #e2e8f0;vertical-align:top;">
-            <div>${desc}</div>
-            ${breakdownHtml}
-          </td>
-          <td style="padding:8px;border-bottom:1px solid #e2e8f0;text-align:right;vertical-align:top;">${qty}</td>
-          <td style="padding:8px;border-bottom:1px solid #e2e8f0;text-align:right;vertical-align:top;">${total}</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-size:13px;">${desc}</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;text-align:right;font-size:13px;white-space:nowrap;">${total}</td>
         </tr>`;
       })
       .join('');
 
-    const termsDisclosureHtml = terms
-      ? `
-  <div style="margin:18px 0 0;padding:14px 16px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;font-size:14px;color:#334155;text-align:center;">
-    <a href="${escapeHtml(termsUrl)}"
-       style="color:#0f766e;font-weight:700;text-decoration:underline;font-size:15px;">
-      View Terms &amp; Conditions
-    </a>
-    <p style="margin:8px 0 0;font-size:11px;color:#64748b;">Opens full terms in your browser (not pasted below).</p>
-  </div>`
-      : '';
-
-    // Optional media attachments (contractor chooses what to send)
+    // Optional media (kept short — below main CTA so primary actions stay visible)
     const sitePhotoUrls: string[] = Array.isArray(body.sitePhotoUrls)
-      ? body.sitePhotoUrls.map((u: any) => String(u || '').trim()).filter((u: string) => /^https?:\/\//i.test(u)).slice(0, 24)
+      ? body.sitePhotoUrls
+          .map((u: any) => String(u || '').trim())
+          .filter((u: string) => /^https?:\/\//i.test(u))
+          .slice(0, 8)
       : [];
     const clientVideoUrls: string[] = Array.isArray(body.videoUrls)
-      ? body.videoUrls.map((u: any) => String(u || '').trim()).filter((u: string) => /^https?:\/\//i.test(u)).slice(0, 12)
+      ? body.videoUrls
+          .map((u: any) => String(u || '').trim())
+          .filter((u: string) => /^https?:\/\//i.test(u))
+          .slice(0, 6)
       : [];
     const jobRenderings: Array<{
       lineDescription: string;
@@ -257,160 +229,188 @@ export async function POST(request: NextRequest) {
       afterUrl: string;
     }> = Array.isArray(body.jobRenderings)
       ? body.jobRenderings
-          .slice(0, 12)
+          .slice(0, 6)
           .map((r: any) => ({
-            lineDescription: String(r?.lineDescription || '').slice(0, 300),
-            notes: String(r?.notes || '').slice(0, 200),
+            lineDescription: String(r?.lineDescription || '').slice(0, 200),
+            notes: String(r?.notes || '').slice(0, 120),
             beforeUrl: String(r?.beforeUrl || '').trim(),
             afterUrl: String(r?.afterUrl || '').trim(),
           }))
           .filter((r: any) => r.beforeUrl || r.afterUrl)
       : [];
 
-    const AI_RENDERING_DISCLOSURE =
-      'AI-generated images are illustrative previews only. They are computer-generated visualizations of possible completed work. Actual results may vary due to site conditions, materials, weather, measurements, code requirements, and final scope. These images are not a warranty, guarantee, or contractual specification of the finished job. The written estimate/invoice and Terms & Conditions control the agreement.';
-
     let mediaHtml = '';
-    let mediaText = '';
-
     if (sitePhotoUrls.length > 0) {
       const thumbs = sitePhotoUrls
         .map(
           (url) =>
-            `<a href="${escapeHtml(url)}" style="display:inline-block;margin:4px;"><img src="${escapeHtml(url)}" alt="Site photo" width="140" height="140" style="object-fit:cover;border-radius:8px;border:1px solid #e2e8f0;width:140px;height:140px;" /></a>`
+            `<img src="${escapeHtml(url)}" alt="Site photo" width="96" height="96" style="object-fit:cover;border-radius:8px;border:1px solid #e2e8f0;width:96px;height:96px;margin:3px;" />`
         )
         .join('');
-      mediaHtml += `
-  <div style="margin:28px 0 0;">
-    <h2 style="font-size:16px;margin:0 0 10px;color:#0f172a;">Site Photos</h2>
-    <div>${thumbs}</div>
-  </div>`;
-      mediaText += `\n\nSite Photos (${sitePhotoUrls.length}):\n${sitePhotoUrls.map((u, i) => `${i + 1}. ${u}`).join('\n')}`;
+      mediaHtml += `<div style="margin-top:20px;"><p style="font-size:13px;font-weight:600;margin:0 0 8px;">Site photos</p>${thumbs}</div>`;
     }
-
     if (jobRenderings.length > 0) {
       const blocks = jobRenderings
-        .map((r, i) => {
-          const title = escapeHtml(r.lineDescription || `Rendering ${i + 1}`);
-          const notes = r.notes
-            ? `<p style="margin:4px 0 8px;font-size:12px;color:#64748b;">${escapeHtml(r.notes)}</p>`
+        .map((r) => {
+          const after = r.afterUrl
+            ? `<img src="${escapeHtml(r.afterUrl)}" alt="After" width="140" style="max-width:45%;border-radius:8px;border:1px solid #ddd6fe;" />`
             : '';
           const before = r.beforeUrl
-            ? `<div style="flex:1;min-width:120px;"><div style="font-size:11px;color:#64748b;margin-bottom:4px;">Before</div><a href="${escapeHtml(r.beforeUrl)}"><img src="${escapeHtml(r.beforeUrl)}" alt="Before" width="200" style="max-width:100%;border-radius:8px;border:1px solid #e2e8f0;" /></a></div>`
+            ? `<img src="${escapeHtml(r.beforeUrl)}" alt="Before" width="140" style="max-width:45%;border-radius:8px;border:1px solid #e2e8f0;" />`
             : '';
-          const after = r.afterUrl
-            ? `<div style="flex:1;min-width:120px;"><div style="font-size:11px;color:#6d28d9;margin-bottom:4px;font-weight:600;">After (AI)</div><a href="${escapeHtml(r.afterUrl)}"><img src="${escapeHtml(r.afterUrl)}" alt="AI after rendering" width="200" style="max-width:100%;border-radius:8px;border:1px solid #ddd6fe;" /></a></div>`
-            : '';
-          return `<div style="margin:0 0 18px;padding:12px;background:#faf5ff;border:1px solid #e9d5ff;border-radius:12px;">
-            <div style="font-size:14px;font-weight:600;margin-bottom:4px;">${title}</div>
-            ${notes}
-            <div style="display:flex;flex-wrap:wrap;gap:12px;">${before}${after}</div>
-          </div>`;
+          return `<div style="margin:8px 0;">${before}${after}</div>`;
         })
         .join('');
-      mediaHtml += `
-  <div style="margin:28px 0 0;">
-    <h2 style="font-size:16px;margin:0 0 6px;color:#0f172a;">AI Job Renderings</h2>
-    <div style="margin:0 0 12px;padding:12px 14px;background:#fffbeb;border:1px solid #fcd34d;border-radius:10px;font-size:11px;color:#78350f;line-height:1.45;">
-      <strong>Important — AI-generated imagery:</strong> ${escapeHtml(AI_RENDERING_DISCLOSURE)}
-    </div>
-    ${blocks}
-  </div>`;
-      mediaText += `\n\nAI Job Renderings (illustrative only):\n${AI_RENDERING_DISCLOSURE}\n`;
-      for (const r of jobRenderings) {
-        mediaText += `\n- ${r.lineDescription || 'Rendering'}${r.notes ? ` (${r.notes})` : ''}`;
-        if (r.beforeUrl) mediaText += `\n  Before: ${r.beforeUrl}`;
-        if (r.afterUrl) mediaText += `\n  After (AI): ${r.afterUrl}`;
-      }
+      mediaHtml += `<div style="margin-top:16px;"><p style="font-size:13px;font-weight:600;margin:0 0 4px;">AI job renderings</p><p style="font-size:11px;color:#92400e;margin:0 0 8px;">AI previews only — actual results may vary.</p>${blocks}</div>`;
     }
-
     if (clientVideoUrls.length > 0) {
-      const links = clientVideoUrls
-        .map(
-          (url, i) =>
-            `<li style="margin:0 0 6px;"><a href="${escapeHtml(url)}" style="color:#0f766e;">Video ${i + 1}</a></li>`
-        )
-        .join('');
-      mediaHtml += `
-  <div style="margin:28px 0 0;">
-    <h2 style="font-size:16px;margin:0 0 10px;color:#0f172a;">Videos</h2>
-    <ul style="margin:0;padding-left:18px;font-size:14px;">${links}</ul>
-  </div>`;
-      mediaText += `\n\nVideos (${clientVideoUrls.length}):\n${clientVideoUrls.map((u, i) => `${i + 1}. ${u}`).join('\n')}`;
+      mediaHtml += `<div style="margin-top:16px;"><p style="font-size:13px;font-weight:600;margin:0 0 6px;">Videos</p><p style="font-size:12px;color:#475569;margin:0;">${clientVideoUrls.length} video(s) available when you open the payment page.</p></div>`;
     }
 
-    if (mediaText) {
-      // Insert media links before the closing footer
-      text = text.replace('\n— Sent via EstimateAce', `${mediaText}\n\n— Sent via EstimateAce`);
-    }
-
-    const ctaHtml = `
-  <div style="margin:28px 0;text-align:center;padding:20px;background:#ecfdf5;border:2px dashed #10b981;border-radius:16px;">
-    ${
-      documentType === 'estimate' && depositDue >= 0.5
-        ? `<p style="margin:0 0 8px;font-size:15px;color:#065f46;">Deposit due now: <strong>${money(depositDue)}</strong> (${depositPercent}% of ${money(grandTotal)}). Processing fees apply at checkout.</p>`
-        : documentType === 'estimate'
-          ? `<p style="margin:0 0 8px;font-size:15px;color:#065f46;">Ready to move forward? Approve this estimate online.</p>`
-          : amountPaid > 0
-            ? `<p style="margin:0 0 8px;font-size:15px;color:#065f46;">Balance due (total ${money(grandTotal)} − paid ${money(amountPaid)}): <strong>${money(amountDueNow)}</strong>. Processing fees apply at payment.</p>`
-            : `<p style="margin:0 0 8px;font-size:15px;color:#065f46;">Total due: <strong>${money(amountDueNow)}</strong>. Processing fees apply at payment.</p>`
-    }
-    <a href="${escapeHtml(actionUrl)}"
-       style="display:inline-block;background:#10b981;color:#ffffff;text-decoration:none;font-weight:700;font-size:16px;padding:14px 28px;border-radius:12px;margin-top:8px;">
-      ${escapeHtml(ctaLabel)}
-    </a>
-    <p style="margin:12px 0 0;font-size:12px;color:#64748b;">Or open this link:<br/><a href="${escapeHtml(actionUrl)}" style="color:#0f766e;word-break:break-all;">${escapeHtml(actionUrl)}</a></p>
-    ${termsDisclosureHtml}
-  </div>`;
+    /*
+     * Simple email layout:
+     * 1) Header  2) Total due  3) Pay button  4) Terms button
+     * All near the top so Gmail "…" clip is less likely to hide actions.
+     * No raw URL hyperlinks in HTML.
+     */
+    const actionButtonsHtml = `
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 20px;">
+    <tr>
+      <td style="background:#ecfdf5;border:2px solid #10b981;border-radius:16px;padding:20px 16px;text-align:center;">
+        <p style="margin:0 0 4px;font-size:13px;color:#065f46;font-weight:600;text-transform:uppercase;letter-spacing:0.03em;">
+          ${escapeHtml(totalDueLabel)}
+        </p>
+        <p style="margin:0 0 16px;font-size:32px;font-weight:800;color:#064e3b;line-height:1.1;">
+          ${money(totalDueAmount)}
+        </p>
+        ${
+          amountDueNow >= 0.5
+            ? `<p style="margin:0 0 16px;font-size:12px;color:#64748b;">Processing fees may apply at checkout.</p>`
+            : ''
+        }
+        <!--[if mso]>
+        <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="${escapeHtml(actionUrl)}" style="height:48px;v-text-anchor:middle;width:260px;" arcsize="12%" fillcolor="#10b981" stroke="f">
+          <w:anchorlock/>
+          <center style="color:#ffffff;font-family:sans-serif;font-size:16px;font-weight:bold;">${payButtonLabelPlain}</center>
+        </v:roundrect>
+        <![endif]-->
+        <!--[if !mso]><!-- -->
+        <a href="${escapeHtml(actionUrl)}"
+           style="display:inline-block;background:#10b981;color:#ffffff !important;text-decoration:none;font-weight:700;font-size:16px;padding:14px 28px;border-radius:12px;mso-hide:all;">
+          ${payButtonLabelHtml}
+        </a>
+        <!--<![endif]-->
+        ${
+          terms
+            ? `
+        <div style="height:12px;line-height:12px;font-size:12px;">&nbsp;</div>
+        <!--[if mso]>
+        <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="${escapeHtml(termsUrl)}" style="height:44px;v-text-anchor:middle;width:260px;" arcsize="12%" fillcolor="#0f766e" stroke="f">
+          <w:anchorlock/>
+          <center style="color:#ffffff;font-family:sans-serif;font-size:15px;font-weight:bold;">View Terms &amp; Conditions</center>
+        </v:roundrect>
+        <![endif]-->
+        <!--[if !mso]><!-- -->
+        <a href="${escapeHtml(termsUrl)}"
+           style="display:inline-block;background:#0f766e;color:#ffffff !important;text-decoration:none;font-weight:700;font-size:15px;padding:12px 24px;border-radius:12px;mso-hide:all;">
+          View Terms &amp; Conditions
+        </a>
+        <!--<![endif]-->
+        `
+            : ''
+        }
+      </td>
+    </tr>
+  </table>`;
 
     const html = `<!DOCTYPE html>
-<html><body style="font-family:system-ui,Segoe UI,sans-serif;color:#0f172a;line-height:1.5;max-width:640px;margin:0 auto;padding:24px;">
-  <h1 style="font-size:22px;margin:0 0 8px;">${escapeHtml(docLabel)} from ${escapeHtml(company)}</h1>
-  <p style="color:#64748b;margin:0 0 20px;">${escapeHtml(docLabel)} # ${escapeHtml(invoiceNumber)}${date ? ` · ${escapeHtml(date)}` : ''}</p>
-  <p style="margin:0 0 8px;"><strong>Client:</strong> ${escapeHtml(jobName)}</p>
-  ${location ? `<p style="margin:0 0 16px;"><strong>Job address:</strong> ${escapeHtml(location)}</p>` : ''}
-  <table style="width:100%;border-collapse:collapse;margin:16px 0;font-size:14px;">
-    <thead>
-      <tr style="background:#f1f5f9;">
-        <th style="text-align:left;padding:8px;">Description</th>
-        <th style="text-align:right;padding:8px;">Qty</th>
-        <th style="text-align:right;padding:8px;">Total</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${rowsHtml || '<tr><td colspan="3" style="padding:8px;">See contractor for full details</td></tr>'}
-    </tbody>
-  </table>
-  <div style="margin:16px 0 8px;font-size:14px;">
-    ${
-      showDiscount
-        ? `<p style="margin:0 0 4px;color:#475569;">Subtotal: ${money(subtotalBeforeDiscount)}</p>
-    <p style="margin:0 0 4px;color:#b91c1c;font-weight:600;">
-      Discount — ${escapeHtml(discountDescription)}${
-            discountType === 'percent' && discountValue > 0
-              ? ` (${discountValue}%)`
-              : ''
-          }: −${money(discountAmount)}
-    </p>
-    ${taxAmount > 0 ? `<p style="margin:0 0 4px;color:#475569;">Tax: ${money(taxAmount)}</p>` : ''}`
-        : ''
-    }
-    <p style="font-size:18px;font-weight:700;margin:8px 0 4px;">Grand total: ${money(grandTotal)}</p>
-    ${amountPaid > 0 ? `<p style="margin:0 0 4px;">Amount paid (deposit etc.): ${money(amountPaid)}</p>` : ''}
-    ${
-      documentType === 'estimate' && depositDue >= 0.5
-        ? `<p style="margin:0 0 4px;color:#065f46;font-weight:600;">Deposit due now (${depositPercent}%): ${money(depositDue)}</p>
-    <p style="margin:0 0 8px;color:#64748b;font-size:13px;">Remaining after deposit: ${money(Math.max(0, grandTotal - depositDue))}</p>`
-        : `<p style="margin:0 0 8px;">${escapeHtml(payLabel)}: <strong>${money(amountDueNow)}</strong></p>`
-    }
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="x-apple-disable-message-reformatting" />
+  <title>${escapeHtml(docLabel)} ${escapeHtml(invoiceNumber)}</title>
+</head>
+<body style="margin:0;padding:0;background:#f8fafc;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#0f172a;line-height:1.45;">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">
+    ${escapeHtml(totalDueLabel)} ${money(totalDueAmount)} — ${escapeHtml(company)}
   </div>
-  ${ctaHtml}
-  ${mediaHtml}
-  <p style="margin-top:24px;font-size:14px;color:#475569;">
-    Questions? ${companyPhone ? `Call ${escapeHtml(companyPhone)}` : ''}${companyPhone && companyEmail ? ' · ' : ''}${companyEmail ? `Email ${escapeHtml(companyEmail)}` : ''}
-  </p>
-  <p style="font-size:11px;color:#94a3b8;margin-top:32px;">Sent via EstimateAce</p>
-</body></html>`;
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#f8fafc;">
+    <tr>
+      <td style="padding:16px 12px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:16px;border:1px solid #e2e8f0;overflow:hidden;">
+          <tr>
+            <td style="padding:20px 20px 8px;">
+              <p style="margin:0;font-size:13px;color:#64748b;">${escapeHtml(company)}</p>
+              <h1 style="font-size:20px;margin:4px 0 0;font-weight:700;color:#0f172a;">
+                ${escapeHtml(docLabel)} ${escapeHtml(invoiceNumber)}
+              </h1>
+              <p style="margin:6px 0 0;font-size:13px;color:#64748b;">
+                ${escapeHtml(jobName)}${date ? ` · ${escapeHtml(date)}` : ''}
+              </p>
+              ${location ? `<p style="margin:4px 0 0;font-size:12px;color:#94a3b8;">${escapeHtml(location)}</p>` : ''}
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:8px 16px 4px;">
+              ${actionButtonsHtml}
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:4px 20px 16px;">
+              <p style="margin:0 0 6px;font-size:12px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.04em;">Summary</p>
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+                ${
+                  showDiscount
+                    ? `<tr><td style="padding:4px 0;font-size:13px;color:#64748b;">Subtotal</td><td style="padding:4px 0;font-size:13px;text-align:right;">${money(subtotalBeforeDiscount)}</td></tr>
+                <tr><td style="padding:4px 0;font-size:13px;color:#b91c1c;">Discount</td><td style="padding:4px 0;font-size:13px;text-align:right;color:#b91c1c;">−${money(discountAmount)}</td></tr>`
+                    : ''
+                }
+                ${taxAmount > 0 ? `<tr><td style="padding:4px 0;font-size:13px;color:#64748b;">Tax</td><td style="padding:4px 0;font-size:13px;text-align:right;">${money(taxAmount)}</td></tr>` : ''}
+                <tr><td style="padding:6px 0;font-size:15px;font-weight:700;">Grand total</td><td style="padding:6px 0;font-size:15px;font-weight:700;text-align:right;">${money(grandTotal)}</td></tr>
+                ${amountPaid > 0 ? `<tr><td style="padding:4px 0;font-size:13px;color:#64748b;">Already paid</td><td style="padding:4px 0;font-size:13px;text-align:right;">${money(amountPaid)}</td></tr>` : ''}
+                <tr><td style="padding:8px 0 0;font-size:16px;font-weight:800;color:#065f46;">${escapeHtml(totalDueLabel)}</td><td style="padding:8px 0 0;font-size:16px;font-weight:800;color:#065f46;text-align:right;">${money(totalDueAmount)}</td></tr>
+              </table>
+            </td>
+          </tr>
+          ${
+            rowsHtml
+              ? `<tr>
+            <td style="padding:0 20px 16px;">
+              <p style="margin:0 0 6px;font-size:12px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.04em;">Line items</p>
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #e2e8f0;border-radius:8px;">
+                <tr style="background:#f8fafc;">
+                  <th style="text-align:left;padding:8px;font-size:12px;color:#64748b;">Description</th>
+                  <th style="text-align:right;padding:8px;font-size:12px;color:#64748b;">Total</th>
+                </tr>
+                ${rowsHtml}
+              </table>
+            </td>
+          </tr>`
+              : ''
+          }
+          ${
+            mediaHtml
+              ? `<tr><td style="padding:0 20px 16px;">${mediaHtml}</td></tr>`
+              : ''
+          }
+          <tr>
+            <td style="padding:12px 20px 20px;border-top:1px solid #f1f5f9;">
+              <p style="margin:0;font-size:13px;color:#475569;">
+                Questions?
+                ${companyPhone ? ` Call ${escapeHtml(companyPhone)}` : ''}${
+                  companyPhone && companyEmail ? ' · ' : ''
+                }${companyEmail ? `Email ${escapeHtml(companyEmail)}` : ''}
+              </p>
+              <p style="margin:10px 0 0;font-size:11px;color:#94a3b8;">Sent via EstimateAce</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
 
     const replyTo =
       companyEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(companyEmail)
@@ -432,7 +432,7 @@ export async function POST(request: NextRequest) {
       else errors.push(`${email}: ${result.error}`);
     }
 
-    const smsBody = `${company}: ${docLabel} ${invoiceNumber} for ${jobName}. Total ${money(grandTotal)}. ${ctaLabel}: ${actionUrl}${companyPhone ? ` Call ${companyPhone}.` : ''}`;
+    const smsBody = `${company}: ${docLabel} ${invoiceNumber} for ${jobName}. ${totalDueLabel} ${money(totalDueAmount)}. ${payButtonLabelPlain}: ${actionUrl}${companyPhone ? ` Call ${companyPhone}.` : ''}`;
     for (const phone of phones) {
       const result = await sendSmsNotification(phone, smsBody);
       if (result.ok) smsSent.push(phone);
