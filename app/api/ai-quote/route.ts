@@ -19,6 +19,10 @@ import {
   type MarketMaterialLine,
 } from '@/lib/market-material-caps';
 import { formatLowesPriceGuideForPrompt } from '@/lib/lowes-material-prices';
+import {
+  correctMaterialQuantities,
+  ensureCoverageMaterials,
+} from '@/lib/material-quantities';
 import { alignBreakdownToUnitPrice } from '@/lib/breakdown-pricing';
 import {
   applyPriceMemoryToBreakdown,
@@ -432,7 +436,11 @@ function reconcileBuiltUpPrice(
   let laborTotal = roundMoney(lab?.total || 0);
   let builtUp = roundMoney(materialsTotal + laborTotal);
 
-  // AI often returns full-job material $ for qty>1 while unitPrice is per-unit — detect and compress.
+  /*
+   * SF-billed jobs: unitPrice is per SF, but materials must stay FULL-JOB physical counts
+   * (e.g. 7 drywall sheets for 200 SF — NEVER 7/200 = 0.035 sheets).
+   * Only convert DOLLAR totals to per-unit for labor residual math; never divide sheet/ea qty by SF.
+   */
   const looksLikeFullJobBreakdown =
     suggestedQty > 1 &&
     builtUp > (aiUnitPrice || builtUp) * 1.25 &&
@@ -441,20 +449,34 @@ function reconcileBuiltUpPrice(
       : builtUp > suggestedQty * 50);
 
   if (looksLikeFullJobBreakdown) {
-    mats = mats.map(m => {
-      const qtyLooksLikeFullScope = m.qty >= suggestedQty * 0.75;
-      const nextQty = qtyLooksLikeFullScope && m.qty > 1 ? roundMoney(m.qty / suggestedQty) : m.qty;
-      const nextTotal = roundMoney(m.total / suggestedQty);
-      const nextUnitPrice = nextQty > 0 ? roundMoney(nextTotal / nextQty) : nextTotal;
-      return recalcMaterialLine({ ...m, qty: Math.max(nextQty, 0.01), unitPrice: nextUnitPrice, total: nextTotal });
+    const physicalUnit = /sheet|ea|each|bag|bundle|roll|box|pc|piece|gallon|gal|kit|set/i;
+    mats = mats.map((m) => {
+      const isPhysical =
+        physicalUnit.test(m.unit || '') ||
+        /drywall|sheetrock|stud|toilet|faucet|door|window|shingle|paint|gallon/i.test(
+          m.description || ''
+        );
+      if (isPhysical) {
+        // Keep full-job qty + Lowe's unit price; total = qty × unitPrice (full job)
+        return recalcMaterialLine(m);
+      }
+      // Soft goods priced per SF already — optional light pass-through
+      return recalcMaterialLine(m);
     });
-    if (lab) {
-      const scaledLaborTotal = roundMoney(lab.total / suggestedQty);
-      lab = { ...lab, total: scaledLaborTotal };
+    // Labor total may be full-job; convert labor $ to per-unit for unitPrice build-up
+    if (lab && lab.total > (aiUnitPrice || 0) * 1.5) {
+      lab = { ...lab, total: roundMoney(lab.total / suggestedQty) };
     }
-    materialsTotal = sumMaterialTotals(mats);
+    // For unit price, materials share is fullJobMaterials / suggestedQty
+    const fullMat = sumMaterialTotals(mats);
+    const perUnitMat = roundMoney(fullMat / suggestedQty);
+    // Represent as single blended materials lot per SF only for unitPrice math path —
+    // actual line items kept full-job below via correctMaterialQuantities after finalize.
+    // Store per-unit dollars on a shadow scale by reducing totals only for builtUp calc:
+    builtUp = roundMoney(perUnitMat + roundMoney(lab?.total || 0));
+    materialsTotal = fullMat;
     laborTotal = roundMoney(lab?.total || 0);
-    builtUp = roundMoney(materialsTotal + laborTotal);
+    // Keep mats as full-job physical lines (do not replace with fractional qtys)
   }
 
   if (builtUp <= 0 && aiUnitPrice) {
@@ -815,7 +837,13 @@ PRICING METHODOLOGY:
 
 MATERIALS LIST (client-facing — must match the quoted scope):
 - Include ONLY materials directly required to complete the described work. No extras, no "just in case" items.
-- Quantities must fit the actual job size in the description. Do not over-order or assume maximum/worst-case scope.
+- QUANTITY MATH IS CRITICAL (full job counts — NEVER per-sqft fractions of a sheet):
+  * 4×8 drywall/plywood/OSB sheet = 32 sqft. Sheets needed = ceil((job_sqft × 1.10) / 32).
+    Example: 200 sqft ceiling drywall → ceil(200×1.10/32) = 7 sheets (qty: 7, unit: "sheet") — NOT 0.35, NOT 200.
+  * Paint: ~350–400 sqft per gallon per coat → gallons = ceil(job_sqft × coats / 375).
+  * Shingles: ~3 bundles per square (100 sqft) → bundles = ceil((sqft/100) × 3 × 1.10).
+  * Flooring sold per sqft: qty ≈ job_sqft × 1.10 (include waste).
+- materials[].qty must be the FULL JOB count the crew buys at Lowe's (whole sheets/bags/gallons).
 - Do NOT list every fastener, tape, primer, connector, or consumable separately. Group minor items into one line when needed (e.g. "Misc. fasteners & supplies").
 - Do NOT add separate waste-factor or contingency line items; bake normal waste (about 5–10%) into quantities quietly.
 - Typical line items: 3–6 materials. Simple jobs: 2–4. Complex jobs: up to 8 maximum.
@@ -921,6 +949,15 @@ PRICING MATH (strict — numbers must reconcile):
 
     const lineUnit = parsed.unit ? String(parsed.unit).trim() : '';
 
+    // Fix coverage math (drywall sheets, paint gallons, etc.) using job sqft
+    const qtyCtx = {
+      jobDescription,
+      suggestedQty,
+      unit: lineUnit,
+    };
+    materials = ensureCoverageMaterials(materials, qtyCtx, 14.98 * regional.materialMultiplier);
+    materials = correctMaterialQuantities(materials, qtyCtx);
+
     // Always build a labor object when AI omits laborBreakdown — install work always has labor
     const rawLabor = parsed.laborBreakdown || parsed.labor || null;
     let laborBreakdown = normalizeLaborBreakdown(
@@ -1014,6 +1051,51 @@ PRICING MATH (strict — numbers must reconcile):
       if (built > 0) {
         structured.unitPrice = built;
         structured.total = roundMoney(built * structured.suggestedQty);
+      }
+    }
+
+    // Last step: re-assert real sheet/bag counts (align/scale can re-break qtys)
+    {
+      const fixed = correctMaterialQuantities(aligned.materials as MaterialLine[], {
+        jobDescription,
+        suggestedQty: structured.suggestedQty,
+        unit: structured.unit,
+      });
+      const matSum = sumMaterialTotals(fixed);
+      aligned = {
+        ...aligned,
+        materials: fixed,
+        materialsCostTotal: matSum,
+      };
+      // Keep unit price coherent: for SF lines, unitPrice is per SF of materials+labor
+      const labSum = aligned.laborCostTotal || 0;
+      const isSf =
+        structured.suggestedQty > 1 &&
+        /sf|sqft|sq\.?\s*ft|square/i.test(String(structured.unit || ''));
+      if (isSf) {
+        // Materials are full-job; laborCostTotal may be full or per-unit — prefer hours×rate full job
+        const laborFull =
+          aligned.labor && aligned.labor.hours > 0 && aligned.labor.rate > 0
+            ? roundMoney(aligned.labor.hours * aligned.labor.rate)
+            : labSum > matSum
+              ? labSum
+              : roundMoney(labSum * structured.suggestedQty);
+        const jobTotal = roundMoney(matSum + laborFull);
+        structured.total = jobTotal;
+        structured.unitPrice = roundMoney(jobTotal / structured.suggestedQty);
+        if (aligned.labor) {
+          aligned.labor = {
+            ...aligned.labor,
+            total: laborFull,
+          };
+          aligned.laborCostTotal = laborFull;
+        }
+      } else {
+        const jobTotal = roundMoney(matSum + labSum);
+        if (jobTotal > 0) {
+          structured.unitPrice = jobTotal;
+          structured.total = roundMoney(jobTotal * Math.max(1, structured.suggestedQty));
+        }
       }
     }
 
