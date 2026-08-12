@@ -4587,7 +4587,11 @@ export default function Home() {
       msg += `\n\nScope: ${data.breakdown}`;
     }
     if (normalizedBreakdown.materials.length || materialsInput.length) {
-      msg += `\n\n${(normalizedBreakdown.materials.length || materialsInput.length)} materials listed.`;
+      msg += `\n\n${(normalizedBreakdown.materials.length || materialsInput.length)} materials listed`;
+      if (data.materialMarkupPercent) {
+        msg += ` (includes ${data.materialMarkupPercent}% markup)`;
+      }
+      msg += '.';
     }
     if (laborToSave) {
       msg += `\nLabor: ${laborToSave.description || 'Installation'} — ${laborToSave.hours} hrs`;

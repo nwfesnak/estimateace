@@ -13,7 +13,9 @@ import { resolveQuoteLineStructure } from '@/lib/quote-units';
 import { analyzeJobImage, type JobImageAnalysis } from '@/lib/analyze-job-image';
 import { getXaiApiKey, getXaiChatModel } from '@/lib/xai-config';
 import {
+  applyMaterialMarkup,
   calibrateMaterialPrices,
+  DEFAULT_MATERIAL_MARKUP,
   recalcMaterialLine,
   sumMaterialTotals,
   type MarketMaterialLine,
@@ -770,9 +772,13 @@ export async function POST(request: NextRequest) {
         unitPrice: anchoredQuote.unitPrice,
         total: anchoredQuote.total,
       });
+      const markedMaterials = applyMaterialMarkup(
+        anchoredQuote.materials as MaterialLine[],
+        DEFAULT_MATERIAL_MARKUP
+      );
       const { aligned, appliedMaterialCount, appliedLaborRate, unitPrice: memUnitPrice } =
         applyMemoryAndAlign(
-          anchoredQuote.materials,
+          markedMaterials,
           anchoredQuote.laborBreakdown,
           jobDescription,
           structured.unitPrice,
@@ -802,6 +808,8 @@ export async function POST(request: NextRequest) {
           materials: appliedMaterialCount,
           laborRate: appliedLaborRate,
         },
+        materialMarkup: DEFAULT_MATERIAL_MARKUP,
+        materialMarkupPercent: Math.round((DEFAULT_MATERIAL_MARKUP - 1) * 100),
         pricingRegion: {
           label: regional.label,
           source: regional.source,
@@ -989,6 +997,9 @@ PRICING MATH (strict — numbers must reconcile):
     materials = ensureCoverageMaterials(materials, qtyCtx, 14.98 * regional.materialMultiplier);
     materials = correctMaterialQuantities(materials, qtyCtx);
 
+    // Contractor markup on materials purchased for the job (cost → sell)
+    materials = applyMaterialMarkup(materials, DEFAULT_MATERIAL_MARKUP);
+
     // Always build a labor object when AI omits laborBreakdown — install work always has labor
     const rawLabor = parsed.laborBreakdown || parsed.labor || null;
     let laborBreakdown = normalizeLaborBreakdown(
@@ -1173,6 +1184,8 @@ PRICING MATH (strict — numbers must reconcile):
         materials: finalMem.appliedMaterialCount,
         laborRate: finalMem.appliedLaborRate,
       },
+      materialMarkup: DEFAULT_MATERIAL_MARKUP,
+      materialMarkupPercent: Math.round((DEFAULT_MATERIAL_MARKUP - 1) * 100),
       pricingRegion: {
         label: regional.label,
         source: regional.source,

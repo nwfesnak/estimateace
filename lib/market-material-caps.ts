@@ -63,4 +63,27 @@ export function sumMaterialTotals(materials: MarketMaterialLine[]): number {
   return roundMoney(materials.reduce((sum, m) => sum + (Number(m.total) || 0), 0));
 }
 
+/** Default contractor markup on materials purchased for the job (cost → sell). */
+export const DEFAULT_MATERIAL_MARKUP = 1.2; // 20%
+
+/**
+ * Apply a markup to material unit prices (e.g. 1.2 = +20% over purchase cost).
+ * Totals are recalculated as qty × marked-up unit price.
+ */
+export function applyMaterialMarkup<T extends MarketMaterialLine>(
+  materials: T[],
+  markup: number = DEFAULT_MATERIAL_MARKUP
+): T[] {
+  const m = Number(markup);
+  if (!Number.isFinite(m) || m <= 0 || Math.abs(m - 1) < 0.0001) {
+    return materials.map((row) => recalcMaterialLine(row));
+  }
+  return materials.map((row) =>
+    recalcMaterialLine({
+      ...row,
+      unitPrice: roundMoney((Number(row.unitPrice) || 0) * m),
+    })
+  );
+}
+
 export { findLowesPriceGuide, applyLowesMaterialPrices };
