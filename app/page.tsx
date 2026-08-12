@@ -3374,8 +3374,19 @@ export default function Home() {
   };
 
   const removeMedia = (type: 'photo' | 'video' | 'receipt', index: number) => {
-    if (type === 'photo') setPhotoUrls(prev => prev.filter((_, i) => i !== index));
-    else if (type === 'video') setVideoUrls(prev => prev.filter((_, i) => i !== index));
+    if (type === 'photo') {
+      const removedPath = photoUrls[index];
+      const nextPhotos = photoUrls.filter((_, i) => i !== index);
+      setPhotoUrls(nextPhotos);
+      // Clear job-rendering selection if that photo was chosen
+      if (removedPath && jobRenderSourcePath === removedPath) {
+        setJobRenderSourcePath('');
+      }
+      void saveToDB({ photoUrls: nextPhotos, quiet: true });
+      showMessage('Photo removed from this estimate.');
+      return;
+    }
+    if (type === 'video') setVideoUrls(prev => prev.filter((_, i) => i !== index));
     else if (type === 'receipt') {
       const path = receiptUrls[index];
       const nextUrls = receiptUrls.filter((_, i) => i !== index);
@@ -3391,7 +3402,23 @@ export default function Home() {
     }
     saveToDB();
     if (type === 'video') showMessage('Video removed from this estimate.');
-    else if (type === 'photo') showMessage('Photo removed from this estimate.');
+  };
+
+  /** Delete a photo from the job-rendering picker (also removes it from Site Photos). */
+  const removeJobRenderSourcePhoto = (index: number) => {
+    if (index < 0 || index >= photoUrls.length) return;
+    if (
+      typeof window !== 'undefined' &&
+      !window.confirm('Delete this photo? It will be removed from Site Photos and job rendering.')
+    ) {
+      return;
+    }
+    removeMedia('photo', index);
+  };
+
+  /** Clear the currently selected job-rendering photo without deleting it. */
+  const clearJobRenderSourceSelection = () => {
+    setJobRenderSourcePath('');
   };
 
   const confirmRemoveVideo = (index: number) => {
@@ -10015,23 +10042,43 @@ export default function Home() {
                             const url = photoDisplayUrls[i] || jobRenderDisplayMap[path];
                             const selected = jobRenderSourcePath === path;
                             return (
-                              <button
+                              <div
                                 key={`${path}-${i}`}
-                                type="button"
-                                onClick={() => setJobRenderSourcePath(path)}
                                 className={`relative shrink-0 w-20 h-20 rounded-lg overflow-hidden border-2 transition ${
                                   selected
                                     ? 'border-violet-600 ring-2 ring-violet-300'
-                                    : 'border-gray-200 hover:border-violet-300'
+                                    : 'border-gray-200'
                                 }`}
-                                title={`Site photo ${i + 1}`}
                               >
-                                {url ? (
-                                  <img src={url} alt="" className="w-full h-full object-cover" />
-                                ) : (
-                                  <div className="w-full h-full bg-gray-200" />
-                                )}
-                              </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setJobRenderSourcePath(path)}
+                                  className="absolute inset-0 w-full h-full"
+                                  title={`Select site photo ${i + 1}`}
+                                >
+                                  {url ? (
+                                    <img
+                                      src={url}
+                                      alt=""
+                                      className="w-full h-full object-cover"
+                                    />
+                                  ) : (
+                                    <div className="w-full h-full bg-gray-200" />
+                                  )}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    removeJobRenderSourcePhoto(i);
+                                  }}
+                                  className="absolute top-0.5 right-0.5 z-10 w-6 h-6 rounded-full bg-red-600 hover:bg-red-700 text-white text-sm font-bold leading-none flex items-center justify-center shadow"
+                                  title="Delete this photo"
+                                  aria-label={`Delete photo ${i + 1}`}
+                                >
+                                  ×
+                                </button>
+                              </div>
                             );
                           })}
                         </div>
@@ -10040,7 +10087,7 @@ export default function Home() {
                           No site photos yet — upload one below or add photos above first.
                         </p>
                       )}
-                      <div className="mt-2 flex flex-wrap gap-2">
+                      <div className="mt-2 flex flex-wrap gap-2 items-center">
                         <input
                           ref={jobRenderUploadRef}
                           type="file"
@@ -10057,9 +10104,28 @@ export default function Home() {
                           📁 {t('jobRenderUpload')}
                         </Button>
                         {jobRenderSourcePath && (
-                          <span className="text-xs text-violet-700 self-center font-medium">
-                            Photo selected ✓
-                          </span>
+                          <>
+                            <span className="text-xs text-violet-700 self-center font-medium">
+                              Photo selected ✓
+                            </span>
+                            <button
+                              type="button"
+                              onClick={clearJobRenderSourceSelection}
+                              className="text-xs font-semibold text-slate-600 hover:text-slate-900 underline"
+                            >
+                              Clear selection
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const idx = photoUrls.indexOf(jobRenderSourcePath);
+                                if (idx >= 0) removeJobRenderSourcePhoto(idx);
+                              }}
+                              className="text-xs font-semibold text-red-600 hover:text-red-700 underline"
+                            >
+                              Delete selected photo
+                            </button>
+                          </>
                         )}
                       </div>
                     </div>
