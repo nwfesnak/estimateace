@@ -18,6 +18,7 @@ import {
   sumMaterialTotals,
   type MarketMaterialLine,
 } from '@/lib/market-material-caps';
+import { formatLowesPriceGuideForPrompt } from '@/lib/lowes-material-prices';
 import { alignBreakdownToUnitPrice } from '@/lib/breakdown-pricing';
 import {
   applyPriceMemoryToBreakdown,
@@ -783,11 +784,13 @@ ${priceMemoryPrompt ? `\n${priceMemoryPrompt}\n` : ''}
 
 ACCURACY RULES (critical — quotes are often too high or too low when ignored):
 1) Scope lock: Price ONLY the described task. If they say "replace toilet", do not include bathroom remodel, tile, or vanity.
-2) Think: materials at big-box/supply-house retail + labor hours a competent tech needs × local hourly rate.
+2) MATERIALS = Lowe's.com mid-grade shelf prices (what a homeowner pays walking into Lowe's). LABOR is separate hours × rate.
 3) unitPrice for Unit jobs = FULL job total the customer pays for that one task (materials + labor). For SF jobs = price PER square foot installed.
 4) Prefer realistic mid-market installed prices. If unsure, stay near typical homeowner-facing contractor pricing for 2025–2026.
 
-TYPICAL INSTALLED TOTALS (Unit jobs — adjust ±15–25% for the regional factors above):
+${formatLowesPriceGuideForPrompt()}
+
+TYPICAL INSTALLED TOTALS (Unit jobs = Lowe's materials + labor — adjust ±15–25% for the regional factors above):
 - Screen/storm door handle or door knob/latch: $150–$400 | single outlet/switch/GFCI: $150–$450
 - Faucet repair/cartridge: $150–$450 | new faucet install: $220–$550 | toilet replace: $350–$750
 - Garbage disposal: $300–$650 | ceiling fan: $220–$550 | light fixture swap: $160–$450
@@ -804,17 +807,11 @@ LABOR HOURS (total crew-hours for the WHOLE task — not per sqft unless SF bill
 - NEVER assign 8–20 hours to a single toilet, faucet, handle, or outlet.
 
 PRICING METHODOLOGY:
-- Mid-grade retail materials (Home Depot / Lowe's / supply house). No luxury brands unless described.
-- Do NOT add overhead, profit pad, contingency, or permits into unitPrice — direct materials + direct labor only.
+- Material unitPrice MUST match Lowe's.com mid-grade (Good/Better aisle), NOT Home Depot Pro, NOT specialty showroom, NOT installed package prices.
+- Do NOT add contractor material markup into materials[] — materials are pure retail shelf cost; profit is only in the labor rate if at all.
+- Do NOT add overhead, profit pad, contingency, or permits into unitPrice — direct Lowe's materials + direct labor only.
 - laborBreakdown.hours = TOTAL crew-hours for the entire scope described.
 - Do not under-quote large area work (roof, whole-house paint, full flooring).
-
-MATERIAL PRICE ANCHORS (per unit, mid-grade retail — scale up/down for the job region vs US average):
-- Drywall sheet 4x8: $12–16 | 2x4x8 stud: $3.50–5 | Interior paint gallon: $28–38
-- LVP/laminate flooring: $1.75–3.50/sqft | Ceramic tile: $2.50–5/sqft | Hardwood: $4–7/sqft
-- Concrete mix bag 80lb: $6–12 | Thinset/grout bag: $8–15 | Shingles/bundle: $28–38
-- PVC/PEX pipe: $0.60–4/lf | Outlet/switch: $1.50–4 ea | Interior door prehung: $120–180
-- Faucet: $90–160 | Toilet: $180–280 | Vanity (single): $250–450
 
 MATERIALS LIST (client-facing — must match the quoted scope):
 - Include ONLY materials directly required to complete the described work. No extras, no "just in case" items.
@@ -822,8 +819,9 @@ MATERIALS LIST (client-facing — must match the quoted scope):
 - Do NOT list every fastener, tape, primer, connector, or consumable separately. Group minor items into one line when needed (e.g. "Misc. fasteners & supplies").
 - Do NOT add separate waste-factor or contingency line items; bake normal waste (about 5–10%) into quantities quietly.
 - Typical line items: 3–6 materials. Simple jobs: 2–4. Complex jobs: up to 8 maximum.
-- Each material line needs: description (specific name/size), qty, unit, unitPrice, total.
+- Each material line needs: description (specific name/size as sold at Lowe's), qty, unit, unitPrice (Lowe's shelf), total.
 - Skip materials that are negligible cost or not meaningful to show the client.
+- Name materials the way Lowe's labels them when possible (e.g. "1/2 in. x 4 ft. x 8 ft. Drywall Sheet", "Architectural Shingles Bundle").
 
 PRICING MATH (strict — numbers must reconcile):
 - BILLING MODE (critical): If the job can be measured in square feet (paint, roof, flooring, drywall, siding, stucco, insulation), set suggestedQty = total sqft, unit = "SF", unitPrice = mid-market local installed $/sqft. All other jobs (fixtures, small installs, lump-sum): suggestedQty = 1, unit = "Unit", unitPrice = full job total.
