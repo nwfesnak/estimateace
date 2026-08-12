@@ -4538,6 +4538,17 @@ export default function Home() {
     } else {
       msg += `\n⚠️ Labor breakdown missing — open Edit Breakdown to add labor.`;
     }
+    if (data.industryLabor?.trade) {
+      msg += `\nTrade engine: ${data.industryLabor.trade}`;
+      if (data.industryLabor.notes) msg += ` — ${data.industryLabor.notes}`;
+      if (Array.isArray(data.industryLabor.phases) && data.industryLabor.phases.length) {
+        const phaseBits = data.industryLabor.phases
+          .slice(0, 6)
+          .map((p: any) => `${p.label} ${Number(p.hours).toFixed(1)}h`)
+          .join('; ');
+        msg += `\nPhases: ${phaseBits}`;
+      }
+    }
     if (normalizedBreakdown.materials.length || laborToSave) {
       const mat = normalizedBreakdown.materialsCostTotal.toFixed(2);
       const labTotal = Number(laborToSave?.total ?? normalizedBreakdown.laborCostTotal ?? 0);

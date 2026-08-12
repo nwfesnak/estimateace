@@ -23,6 +23,10 @@ import {
   correctMaterialQuantities,
   ensureCoverageMaterials,
 } from '@/lib/material-quantities';
+import {
+  estimateIndustryLabor,
+  formatIndustryLaborPrompt,
+} from '@/lib/industry-labor-engine';
 import { alignBreakdownToUnitPrice } from '@/lib/breakdown-pricing';
 import {
   applyPriceMemoryToBreakdown,
@@ -109,7 +113,6 @@ function estimateJobLaborHours(
   suggestedQty: number,
   unit = ''
 ): JobLaborGuide {
-  const text = description.toLowerCase();
   const scope = parseJobScope(description, suggestedQty, unit);
   const isMultiUnit = suggestedQty > 1 || scope.scopeQty > 1;
   const { maxHoursPerUnit } = detectLaborRateCap(description);
@@ -126,111 +129,13 @@ function estimateJobLaborHours(
     isMultiUnit,
   });
 
-  if (scope.measure === 'sqft') {
-    const sqft = Math.max(1, scope.scopeQty);
-    const squares = sqft / 100;
-
-    const wholeHomePaint = detectWholeHomeInteriorPaint(description);
-    if (wholeHomePaint) {
-      const paintableSqft = estimateInteriorPaintableSqft(
-        wholeHomePaint.floorSqft,
-        wholeHomePaint.ceilingFt
-      );
-      const coats = wholeHomePaint.coats;
-      // Realistic painter production (not superhero rates)
-      const production = coats === 1 ? 110 : coats === 2 ? 75 : 55;
-      return finish(
-        paintableSqft / (production * 1.15),
-        paintableSqft / production,
-        paintableSqft / (production * 0.8)
-      );
-    }
-
-    if (/roof|shingle|re-?roof|tear[\s-]?off/i.test(text)) {
-      // ~2–4 crew-hours per square with tear-off; more with steep/complex
-      return finish(squares * 2, squares * 3.2, squares * 5);
-    }
-
-    /*
-     * DRYWALL — check BEFORE paint. Descriptions often include "prime and paint"
-     * after hang/tape; matching paint first used ~175 SF/hr and produced absurd
-     * times like 1.67 hrs for 200 SF of demo+hang+finish+paint.
-     *
-     * Rates are total CREW-HOURS for a typical residential crew (production SF/hr
-     * is conservative so solo or careful finish work is covered).
-     */
-    if (/drywall|sheetrock|gypsum|hang\s*rock|\bmud\b|tape\s*(?:and|&)?\s*(?:mud|finish)|skim\s*coat/i.test(text)) {
-      const ceiling = /ceiling|overhead/i.test(text);
-      const hasDemo = /demo|remov|tear\s*out|take\s*down|ripped?|damaged|tear[\s-]?off/i.test(text);
-      const hasHang = /hang|install|new\s*drywall|replace|board|sheetrock|gypsum/i.test(text);
-      const hasFinish =
-        /tape|mud|finish|sand|texture|skim|float|joint\s*compound|3\s*coat|three\s*coat/i.test(text) ||
-        hasHang; // hang almost always needs finish for a complete job
-      const hasPaint = /paint|primer|prime\b|recoat/i.test(text);
-
-      // Phase production (sqft of area finished per crew-hour). Ceiling is slower.
-      let hours = 0;
-      if (hasDemo) {
-        hours += sqft / (ceiling ? 45 : 65); // pull down, haul debris
-      }
-      if (hasHang || (!hasDemo && !hasFinish && !hasPaint)) {
-        hours += sqft / (ceiling ? 28 : 40); // measure, cut, screw
-      }
-      if (hasFinish) {
-        // Tape + 2–3 coats + sand — usually the longest phase
-        hours += sqft / (ceiling ? 18 : 24);
-      }
-      if (hasPaint) {
-        hours += sqft / (ceiling ? 100 : 130); // prime + finish coat(s)
-      }
-      // Bare "drywall 200 sf" with no phases → hang + finish
-      if (hours <= 0) {
-        hours = sqft / (ceiling ? 12 : 16);
-      }
-
-      // Floor: even a small ceiling patch job is rarely under ~3–4 hrs once you mobilize
-      const minFloor = sqft >= 100 ? (ceiling ? 8 : 6) : sqft >= 40 ? 4 : 2;
-      const expected = Math.max(minFloor, hours);
-      return finish(expected * 0.78, expected, expected * 1.45);
-    }
-
-    // Paint-only (no drywall hang/finish in scope)
-    if (/paint|primer|coat/i.test(text)) {
-      const ceiling = /ceiling/i.test(text);
-      // Cut, roll, two coats typical interior
-      const prod = ceiling ? 90 : 120;
-      return finish(sqft / (prod * 1.2), sqft / prod, sqft / (prod * 0.75));
-    }
-    if (/floor|tile|laminate|hardwood|lvp|vinyl|carpet/i.test(text)) {
-      // Demo old + underlayment + install
-      const hasDemo = /demo|remov|tear|pull\s*up/i.test(text);
-      const prod = hasDemo ? 18 : 25;
-      return finish(sqft / (prod * 1.25), sqft / prod, sqft / (prod * 0.7));
-    }
-    if (/siding|stucco|exterior/i.test(text)) {
-      return finish(sqft / 35, sqft / 22, sqft / 14);
-    }
-    // Generic area work — don't assume lightning production
-    return finish(sqft / 40, sqft / 25, sqft / 15);
-  }
-
-  if (scope.measure === 'lf') {
-    const lf = scope.scopeQty;
-    if (/fence/i.test(text)) return finish(lf / 12, lf / 8, lf / 5);
-    if (/gutter/i.test(text)) return finish(lf / 20, lf / 14, lf / 9);
-    if (/pipe|wire|conduit/i.test(text)) return finish(lf / 25, lf / 16, lf / 10);
-    return finish(lf / 15, lf / 10, lf / 6);
-  }
-
-  // Unit / each jobs — use task-specific hours (NOT trade-day maxHoursPerUnit).
-  // Old bug: toilet/faucet used 5–20 hrs because maxHoursPerUnit was treated as expected.
+  // 1) Specific unit tasks first (toilet, outlet, faucet, door handle, …)
   const qty = Math.max(1, scope.scopeQty);
   const unitGuide = estimateUnitJobLaborHours(description);
   if (unitGuide) {
     const minH = unitGuide.minHours * Math.min(qty, 4);
     const expH = unitGuide.expectedHours * Math.min(qty, 4);
     const maxH = unitGuide.maxHours * Math.min(qty, 6);
-    // For 5+ identical units, add diminishing hours beyond the first few
     if (qty > 4) {
       const extra = (qty - 4) * unitGuide.expectedHours * 0.75;
       return finish(minH + extra * 0.6, expH + extra, maxH + extra * 1.1);
@@ -238,7 +143,38 @@ function estimateJobLaborHours(
     return finish(minH, expH, maxH);
   }
 
-  // Fallback: modest handyman-scale hours (never multi-day trade max as "expected")
+  // 2) Multi-industry phase engine (drywall, paint, roof, floor, fence, …)
+  const industry = estimateIndustryLabor(description, suggestedQty, unit);
+  if (industry) {
+    return finish(industry.minHours, industry.expectedHours, industry.maxHours);
+  }
+
+  // 3) Whole-home interior paint (floor sqft → paintable area)
+  const wholeHomePaint = detectWholeHomeInteriorPaint(description);
+  if (wholeHomePaint) {
+    const paintableSqft = estimateInteriorPaintableSqft(
+      wholeHomePaint.floorSqft,
+      wholeHomePaint.ceilingFt
+    );
+    const coats = wholeHomePaint.coats;
+    const production = coats === 1 ? 110 : coats === 2 ? 75 : 55;
+    return finish(
+      paintableSqft / (production * 1.15),
+      paintableSqft / production,
+      paintableSqft / (production * 0.8)
+    );
+  }
+
+  // Fallback by measure
+  if (scope.measure === 'sqft') {
+    const sqft = Math.max(1, scope.scopeQty);
+    return finish(sqft / 40, sqft / 25, sqft / 15);
+  }
+  if (scope.measure === 'lf') {
+    const lf = scope.scopeQty;
+    return finish(lf / 15, lf / 10, lf / 6);
+  }
+
   if (qty <= 4) {
     return finish(1, Math.min(4, maxHoursPerUnit * 0.35), Math.min(10, maxHoursPerUnit * 0.75));
   }
@@ -254,6 +190,15 @@ function detectLaborRateCap(
   laborMultiplier = 1
 ): { maxRate: number; typicalRate: number; maxHoursPerUnit: number } {
   const scale = (n: number) => roundMoney(n * laborMultiplier);
+  // Prefer industry engine rates when trade is known
+  const industry = estimateIndustryLabor(description, 1, '');
+  if (industry) {
+    return {
+      maxRate: scale(industry.maxRate),
+      typicalRate: scale(industry.typicalRate),
+      maxHoursPerUnit: Math.max(8, industry.maxHours),
+    };
+  }
   const text = description.toLowerCase();
   if (/electrical|electrician|panel|wiring|outlet|circuit/i.test(text)) {
     return { maxRate: scale(95), typicalRate: scale(78), maxHoursPerUnit: 12 };
@@ -870,20 +815,7 @@ TYPICAL INSTALLED TOTALS (Unit jobs = Lowe's materials + labor — adjust ±15�
 - Drywall small patch: $175–$500 | water heater (tank): $1,200–$2,800
 - Dishwasher install: $250–$550 | vanity install: $450–$1,400
 
-LABOR HOURS (total CREW-HOURS for the WHOLE task — be realistic, not optimistic):
-- Small hardware / outlet / fixture swap: 0.75–3 hrs
-- Toilet, faucet install, disposal, fan: 1.5–4 hrs
-- Small drywall patch (hand-size): 1.5–5 hrs. Interior door: 1.5–5 hrs
-- Entry door / water heater: 3–10 hrs
-- DRYWALL AREA (critical — do NOT under-hour):
-  * Hang only ~25–40 SF/hr (ceiling slower than walls)
-  * Tape/mud/sand 2–3 coats often takes AS LONG OR LONGER than hang (~18–28 SF/hr)
-  * Demo old board ~40–65 SF/hr
-  * Prime+paint ceiling after finish ~90–120 SF/hr
-  * Example: 200 SF ceiling demo + hang + tape/finish + prime/paint ≈ 14–22 crew-hours (NOT 1–3 hrs)
-- Roof: ~2–4 hrs per square (100 sqft) with tear-off. Flooring install ~18–30 SF/hr with prep.
-- NEVER assign 8–20 hours to a single toilet, faucet, handle, or outlet.
-- NEVER assign under 8 hours to 100+ SF of ceiling drywall that includes demo, hang, finish, and paint.
+${formatIndustryLaborPrompt()}
 
 PRICING METHODOLOGY:
 - Material unitPrice MUST match Lowe's.com mid-grade (Good/Better aisle), NOT Home Depot Pro, NOT specialty showroom, NOT installed package prices.
@@ -1156,6 +1088,12 @@ PRICING MATH (strict — numbers must reconcile):
       }
     }
 
+    const industryMeta = estimateIndustryLabor(
+      jobDescription,
+      structured.suggestedQty,
+      structured.unit
+    );
+
     return NextResponse.json({
       unitPrice: structured.unitPrice,
       unit: structured.unit,
@@ -1170,6 +1108,17 @@ PRICING MATH (strict — numbers must reconcile):
       laborBreakdown: aligned.labor,
       analyzedScope: imageAnalysis?.scopeDescription,
       imageAnalysis,
+      industryLabor: industryMeta
+        ? {
+            trade: industryMeta.tradeLabel,
+            tradeId: industryMeta.tradeId,
+            measure: industryMeta.measure,
+            quantity: industryMeta.quantity,
+            expectedHours: industryMeta.expectedHours,
+            phases: industryMeta.phases,
+            notes: industryMeta.notes,
+          }
+        : null,
       priceMemoryApplied: {
         materials: finalMem.appliedMaterialCount,
         laborRate: finalMem.appliedLaborRate,
