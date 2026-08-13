@@ -83,18 +83,68 @@ function scoreHit(hit: any, query: string): number {
   const q = query.toLowerCase();
   const name = String(hit.original_name || hit.name || '').toLowerCase();
   const cat = String(hit.classification?.section || hit.classification?.department || '').toLowerCase();
+  const blob = `${name} ${cat}`;
   let s = 0;
-  if (/paint|painting|primer|coat/.test(q) && /paint|painting|finish|plaster|wall/.test(name + cat)) s += 40;
-  if (/exterior|outside/.test(q) && /exterior|outside|facade|façade/.test(name + cat)) s += 20;
-  if (/interior|inside/.test(q) && /interior|inside|indoor|room/.test(name + cat)) s += 20;
-  if (/drywall|sheetrock|plaster/.test(q) && /drywall|plaster|gypsum|sheetrock/.test(name + cat)) s += 35;
-  if (/roof|shingle/.test(q) && /roof|shingle/.test(name + cat)) s += 35;
-  if (/floor|tile|lvp|vinyl/.test(q) && /floor|tile|vinyl|laminate/.test(name + cat)) s += 30;
+  if (/paint|painting|primer|coat/.test(q) && /paint|painting|finish|plaster|wall|emulsion/.test(blob)) s += 40;
+  if (/exterior|outside/.test(q) && /exterior|outside|facade|façade/.test(blob)) s += 20;
+  if (/interior|inside/.test(q) && /interior|inside|indoor|room|plaster|prefab/.test(blob)) s += 20;
+  if (/drywall|sheetrock|plaster/.test(q) && /drywall|plaster|gypsum|sheetrock/.test(blob)) s += 35;
+  if (/roof|shingle/.test(q) && /roof|shingle/.test(blob)) s += 35;
+  if (/floor|tile|lvp|vinyl/.test(q) && /floor|tile|vinyl|laminate/.test(blob)) s += 30;
   if (isAreaUnit(String(hit.unit || ''), String(hit.raw_unit || ''))) s += 10;
-  // Prefer painting over plaster leveling when query is paint
-  if (/paint/.test(q) && /leveling|plastering up to|mortar mixtures/.test(name)) s -= 15;
-  if (/paint/.test(q) && /painting|paint work|recoat|coat/.test(name + cat)) s += 25;
+  // Prefer residential wall paint emulsions over metal/trim/industrial
+  if (/paint/.test(q)) {
+    if (/water-?emulsion|polyvinyl|acrylic|latex|wall|plaster and prefabricated|textured compound/.test(blob)) {
+      s += 45;
+    }
+    if (/high-?quality|improved|dual|two\s*coat/.test(blob)) s += 15;
+    if (/simple[, ]|economy/.test(blob) && !/high-?quality|improved/.test(blob)) s -= 8;
+    if (/painting|paint work|recoat|coat/.test(blob)) s += 20;
+    if (/leveling|plastering up to|mortar mixtures/.test(name)) s -= 25;
+    if (/metal|cornice|firewall|steel|iron|pipe|radiator|fence|grille/.test(blob)) s -= 60;
+    if (/oil-based compounds of previously painted metal/.test(name)) s -= 80;
+  }
   return s;
+}
+
+/** Focused BuildCalculator queries — generic "interior painting" returns metal trim rates. */
+function buildSearchQueries(jobDescription: string): string[] {
+  const q = String(jobDescription || '').trim();
+  const queries: string[] = [];
+  if (/paint|painting|primer/i.test(q)) {
+    if (/exterior/i.test(q) && /interior/i.test(q)) {
+      queries.push(
+        'high-quality painting polyvinyl acetate water-emulsion interiors',
+        'painting walls exteriors emulsion residential',
+        'interior and exterior painting walls dual coat residential'
+      );
+    } else if (/exterior|outside/i.test(q)) {
+      queries.push(
+        'painting exterior walls facade emulsion residential',
+        'exterior painting walls residential'
+      );
+    } else {
+      queries.push(
+        'painting of walls interiors water emulsion',
+        'high-quality painting polyvinyl acetate water-emulsion',
+        'painting with polyvinyl acetate water-emulsion compounds improved',
+        'interior painting walls dual coat residential'
+      );
+    }
+  } else if (/drywall|sheetrock/i.test(q)) {
+    queries.push('drywall gypsum board installation walls', 'gypsum board ceilings walls');
+  } else if (/roof|shingle/i.test(q)) {
+    queries.push('roofing asphalt shingles residential', 'roof covering installation');
+  } else if (/floor|lvp|vinyl|tile|hardwood|carpet/i.test(q)) {
+    queries.push('flooring installation residential', 'floor covering vinyl tile laminate');
+  } else {
+    queries.push(q.slice(0, 120));
+  }
+  // Always try a short raw snippet last
+  if (q.length >= 3 && !queries.includes(q.slice(0, 120))) {
+    queries.push(q.slice(0, 120));
+  }
+  return queries.slice(0, 4);
 }
 
 function normalizeHit(raw: any, query: string): BuildCalcHit {
@@ -216,28 +266,34 @@ export async function buildCalculatorQuoteAnchor(
   const query = String(jobDescription || '').trim().slice(0, 200);
   if (query.length < 3) return null;
 
-  // Prefer a focused search query for better matches
-  let searchQ = query;
-  if (/paint|painting/i.test(query)) {
-    if (/exterior/i.test(query) && /interior/i.test(query)) {
-      searchQ = 'interior and exterior painting walls dual coat residential';
-    } else if (/exterior|outside/i.test(query)) {
-      searchQ = 'exterior painting walls residential';
-    } else {
-      searchQ = 'interior painting walls dual coat residential';
+  const searchQueries = buildSearchQueries(query);
+  const searchQ = searchQueries[0] || query;
+
+  // Parallel search a few focused queries; merge + re-score so metal-paint junk loses
+  const hitBatches = await Promise.all(
+    searchQueries.map((sq) => searchBuildCalculator(sq, { top: 6, timeoutMs: 7000 }))
+  );
+  const byCode = new Map<string, BuildCalcHit>();
+  for (const batch of hitBatches) {
+    for (const h of batch) {
+      const key = h.rateCode || `${h.originalName}|${h.totalPerUnit}`;
+      const prev = byCode.get(key);
+      if (!prev || h.score > prev.score) byCode.set(key, h);
     }
   }
+  const hits = Array.from(byCode.values()).sort((a, b) => b.score - a.score);
+  if (!hits.length) return null;
 
-  const hits = await searchBuildCalculator(searchQ, { top: 8 });
-  if (!hits.length) {
-    // Fallback: raw description
-    const fallback = await searchBuildCalculator(query, { top: 5 });
-    if (!fallback.length) return null;
-    hits.push(...fallback);
-  }
-
+  // Prefer area rates that look like installed wall/floor work (not industrial extremes)
   const best =
-    hits.find((h) => h.totalPerSfUsd != null && h.totalPerSfUsd > 0.5 && h.totalPerSfUsd < 40) ||
+    hits.find(
+      (h) =>
+        h.totalPerSfUsd != null &&
+        h.totalPerSfUsd > 0.35 &&
+        h.totalPerSfUsd < 25 &&
+        h.score >= 30
+    ) ||
+    hits.find((h) => h.totalPerSfUsd != null && h.totalPerSfUsd > 0.35 && h.totalPerSfUsd < 40) ||
     hits[0] ||
     null;
 

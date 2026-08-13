@@ -56,6 +56,11 @@ import {
   estimateUnitJobLaborHours,
 } from '@/lib/task-market-pricing';
 
+/** BC + EP lookups + grok-4.6 need more than the default serverless budget */
+export const maxDuration = 120;
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 // Simple in-memory rate limiter (per-user, resets on server restart)
 // For production: use Redis / Upstash / Vercel KV with proper middleware
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
@@ -820,28 +825,52 @@ export async function POST(request: NextRequest) {
 
     const epMult = epMultiplier?.multiplier || epTradeCosts?.multiplier || 1;
     const epLaborBand = pickPaintLaborBand(epTradeCosts, jobDescription);
+
+    // Resolve SF/qty even when description has no number — so BC×EP still produces a range
+    const lineQty = Number(lineContext?.qty) > 0 ? Number(lineContext?.qty) : 0;
+    const descSf = parseSqftFromDescription(jobDescription) || 0;
+    const billingQty = Math.max(
+      1,
+      bcAnchor?.billingQuantity || 0,
+      descSf,
+      lineQty >= 50 || /sf|sq\s*ft|sqft/i.test(String(lineContext?.unit || ''))
+        ? lineQty
+        : 0
+    );
+
     let priceRange: PriceRange | null = null;
-    if (bcAnchor?.baseUnitCostUsd != null && bcAnchor.billingQuantity != null) {
+    if (bcAnchor?.baseUnitCostUsd != null && billingQty > 0) {
       priceRange = applyEpMultiplierToBuildCalcBase({
         baseUnitCostUsd: bcAnchor.baseUnitCostUsd,
-        quantity: bcAnchor.billingQuantity,
+        quantity: billingQty,
         epMultiplier: epMult,
         epLaborPerSf: epLaborBand,
         unitLabel: 'SF',
         spread: 0.18,
       });
-    } else if (epLaborBand && bcAnchor?.billingQuantity) {
+    } else if (epLaborBand && billingQty > 1) {
       // Fallback: EstimationPro labor band only
-      const qty = bcAnchor.billingQuantity;
+      const qty = billingQty;
+      const alreadyRegional = !!epTradeCosts?.items?.some((i) => i.regionallyAdjusted);
+      const adj = alreadyRegional ? 1 : epMult > 0 ? epMult : 1;
       priceRange = {
-        low: Math.round(epLaborBand.low * qty * 100) / 100,
-        typical: Math.round(epLaborBand.typical * qty * 100) / 100,
-        high: Math.round(epLaborBand.high * qty * 100) / 100,
-        perSf: epLaborBand,
+        low: Math.round(epLaborBand.low * adj * qty * 100) / 100,
+        typical: Math.round(epLaborBand.typical * adj * qty * 100) / 100,
+        high: Math.round(epLaborBand.high * adj * qty * 100) / 100,
+        perSf: {
+          low: Math.round(epLaborBand.low * adj * 100) / 100,
+          typical: Math.round(epLaborBand.typical * adj * 100) / 100,
+          high: Math.round(epLaborBand.high * adj * 100) / 100,
+        },
         unit: 'SF',
         quantity: qty,
-        label: `$${Math.round(epLaborBand.low * qty)} – $${Math.round(epLaborBand.high * qty)} (typical $${Math.round(epLaborBand.typical * qty)})`,
-        sources: ['EstimationPro.ai regional labor rates'],
+        label: `$${Math.round(epLaborBand.low * adj * qty)} – $${Math.round(epLaborBand.high * adj * qty)} (typical $${Math.round(epLaborBand.typical * adj * qty)})`,
+        sources: [
+          'EstimationPro.ai regional labor rates',
+          epMultiplier
+            ? `EstimationPro.ai multiplier ×${epMult.toFixed(2)} (${epMultiplier.label || epMultiplier.location})`
+            : 'EstimationPro.ai national band',
+        ],
       };
     }
 
@@ -870,7 +899,14 @@ export async function POST(request: NextRequest) {
     );
 
     const quoteModel = getXaiQuoteModel();
-    const response = await fetch('https://api.x.ai/v1/chat/completions', {
+    // grok-4.6 defaults to reasoning_effort "high" which often exceeds Vercel timeouts.
+    // "low" keeps SuperGrok-class quality for structured JSON quotes with much lower latency.
+    const quoteReasoningEffort =
+      (process.env.GROK_QUOTE_REASONING_EFFORT || 'low').trim().toLowerCase() || 'low';
+
+    let response: Response;
+    try {
+      response = await fetch('https://api.x.ai/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -879,6 +915,7 @@ export async function POST(request: NextRequest) {
       body: JSON.stringify({
         model: quoteModel,
         temperature: 0.2,
+        reasoning_effort: quoteReasoningEffort,
         messages: [
           {
             role: 'system',
@@ -975,23 +1012,16 @@ PRICING MATH (strict — numbers must reconcile):
           },
           { role: 'user', content: userMessage }
         ],
-        max_tokens: 1800,
+        // Reasoning tokens count against this budget — leave room for the JSON answer
+        max_tokens: 4000,
       }),
     });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      return NextResponse.json({ error: `xAI API Error: ${errorText}` }, { status: response.status });
-    }
-
-    const data = await response.json();
-    const aiText = data.choices?.[0]?.message?.content || '';
-
-    const jsonMatch = aiText.match(/\{[\s\S]*\}/);
-    const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
-
-    if (!parsed) {
-      return NextResponse.json({ error: 'AI returned invalid format' }, { status: 500 });
+    } catch (xaiNetErr: any) {
+      // Network/timeout to xAI — fall through to BC×EP synthetic quote when available
+      console.error('xAI fetch failed:', xaiNetErr?.message || xaiNetErr);
+      response = new Response(JSON.stringify({ error: xaiNetErr?.message || 'xAI network error' }), {
+        status: 502,
+      });
     }
 
     /** AI often returns numbers as strings — coerce safely */
@@ -1003,6 +1033,137 @@ PRICING MATH (strict — numbers must reconcile):
       }
       return fallback;
     };
+
+    const buildBcEpFallbackParsed = (): any | null => {
+      if (!priceRange || !(priceRange.typical > 0)) return null;
+      const qty = Math.max(1, priceRange.quantity || billingQty || 1);
+      const total = roundMoney(priceRange.typical);
+      const unitPrice = roundMoney(total / qty);
+      const laborHrs = Math.min(
+        120,
+        Math.max(
+          8,
+          bcAnchor?.suggestedLaborHours
+            ? bcAnchor.suggestedLaborHours * (epMultiplier?.laborMultiplier || epMult || 1)
+            : qty / 20
+        )
+      );
+      const laborRate = preferredLaborRate && preferredLaborRate >= 10 ? preferredLaborRate : 65;
+      const laborTotal = roundMoney(laborHrs * laborRate);
+      // Rough materials = remainder of job total (clamped)
+      const matTotal = roundMoney(Math.max(total * 0.15, Math.min(total * 0.45, total - laborTotal * 0.5)));
+      const isPaint = /paint|painting/i.test(jobDescription);
+      const materials = isPaint
+        ? [
+            {
+              description: 'Interior latex paint (gallon)',
+              qty: Math.max(1, Math.ceil((qty * 3) / 375)),
+              unit: 'gallons',
+              unitPrice: 42,
+              total: 0,
+            },
+            {
+              description: 'Primer / prep supplies',
+              qty: 1,
+              unit: 'lot',
+              unitPrice: Math.max(45, matTotal * 0.2),
+              total: 0,
+            },
+          ].map((m) => ({
+            ...m,
+            unitPrice: roundMoney(m.unitPrice),
+            total: roundMoney(m.qty * m.unitPrice),
+          }))
+        : [
+            {
+              description: 'Job materials (allowance)',
+              qty: 1,
+              unit: 'lot',
+              unitPrice: matTotal,
+              total: matTotal,
+            },
+          ];
+      return {
+        unitPrice,
+        unit: 'SF',
+        suggestedQty: qty,
+        total,
+        breakdown: `BuildCalculator.io base × EstimationPro.ai regional (fallback — model unavailable)`,
+        confidence: 'medium',
+        materialsCostTotal: materials.reduce((s: number, m: any) => s + m.total, 0),
+        laborCostTotal: laborTotal,
+        materials,
+        laborBreakdown: {
+          description: 'Installation labor',
+          hours: roundMoney(laborHrs),
+          rate: laborRate,
+          total: laborTotal,
+        },
+        _fromBcEpFallback: true,
+      };
+    };
+
+    let parsed: any = null;
+    if (response.ok) {
+      const data = await response.json();
+      const message = data.choices?.[0]?.message || {};
+      const aiText = String(message.content || message.reasoning_content || '').trim();
+      try {
+        const jsonMatch = aiText.match(/\{[\s\S]*\}/);
+        parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+      } catch {
+        parsed = null;
+      }
+    } else {
+      const errorText = await response.text().catch(() => '');
+      console.error('xAI API error', response.status, errorText.slice(0, 400));
+    }
+
+    if (!parsed) {
+      parsed = buildBcEpFallbackParsed();
+    }
+
+    if (!parsed) {
+      if (!response.ok) {
+        const errorText = 'xAI request failed and no BuildCalculator/EstimationPro range was available';
+        return NextResponse.json(
+          {
+            error: `AI quote failed. ${errorText}. Add job sqft + ZIP, check GROK_API_KEY, and try again.`,
+          },
+          { status: 502 }
+        );
+      }
+      return NextResponse.json(
+        {
+          error:
+            'AI returned invalid format and no BuildCalculator/EstimationPro price range was available. Include sqft in the description and a job ZIP, then try again.',
+        },
+        { status: 500 }
+      );
+    }
+
+    // Harden materials list shape (name/quantity aliases from model)
+    if (!Array.isArray(parsed.materials) && Array.isArray(parsed.materialBreakdown)) {
+      parsed.materials = parsed.materialBreakdown;
+    }
+    if (Array.isArray(parsed.materials)) {
+      parsed.materials = parsed.materials
+        .map((m: any) => {
+          if (!m || typeof m !== 'object') return null;
+          const description = String(m.description || m.name || m.item || '').trim();
+          if (!description) return null;
+          const qty = num(m.qty ?? m.quantity, 1) || 1;
+          const unitPrice = num(m.unitPrice ?? m.price, 0);
+          return {
+            description,
+            qty,
+            unit: String(m.unit || 'ea').trim() || 'ea',
+            unitPrice,
+            total: num(m.total, 0) || qty * unitPrice,
+          };
+        })
+        .filter(Boolean);
+    }
 
     const aiTargetUnitPrice = (() => {
       const n = num(parsed.unitPrice, 0);
@@ -1348,11 +1509,13 @@ PRICING MATH (strict — numbers must reconcile):
       billingMode: structured.billingMode,
       breakdown: parsed.breakdown,
       confidence: parsed.confidence,
-      pricingMethod: priceRange
-        ? 'buildcalculator+estimationpro'
-        : bcAnchor
-          ? 'supergrok+buildcalculator'
-          : 'supergrok',
+      pricingMethod: parsed?._fromBcEpFallback
+        ? 'buildcalculator+estimationpro-fallback'
+        : priceRange
+          ? 'buildcalculator+estimationpro'
+          : bcAnchor
+            ? 'supergrok+buildcalculator'
+            : 'supergrok',
       quoteModel,
       /** Primary customer-facing bid = typical; always include low–high when available */
       priceRange: priceRange
