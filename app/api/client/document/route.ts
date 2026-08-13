@@ -182,12 +182,15 @@ export async function GET(request: NextRequest) {
 
     const invoiceNumber = row.invoiceNumber || row.invoicenumber || inv;
     const company = profile.company || 'Your contractor';
+    // Only companies that opt in charge processing fees (Zelle / mail check never do)
+    const chargeFees = profile.chargeCCFee === true;
     const feePercent =
-      profile.chargeCCFee !== false && Number(profile.ccFeePercentage) > 0
+      chargeFees && Number(profile.ccFeePercentage) > 0
         ? Number(profile.ccFeePercentage)
-        : 2.9;
+        : chargeFees
+          ? 2.9
+          : 0;
 
-    // All methods the contractor enabled — each total includes processing fee
     const { buildClientPaymentOptions } = await import('@/lib/client-payment-options');
     const paymentOptions = buildClientPaymentOptions({
       paymentSettings: profile.paymentSettings || {},
@@ -196,6 +199,7 @@ export async function GET(request: NextRequest) {
       company,
       label: due.payLabel,
       feePercentRate: feePercent,
+      chargeFees,
     });
 
     // Certificate of Insurance — signed URL for client view (only if uploaded)
@@ -255,7 +259,7 @@ export async function GET(request: NextRequest) {
       payLabel: due.payLabel,
       paymentStatus: row.paymentStatus || row.payment_status || 'unpaid',
       terms: String(row.terms || profile.disclosure || '').slice(0, 8000),
-      chargeCCFee: profile.chargeCCFee !== false,
+      chargeCCFee: chargeFees,
       ccFeePercentage: feePercent,
       paymentOptions,
       hasCertificate,

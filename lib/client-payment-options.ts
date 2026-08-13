@@ -1,6 +1,8 @@
 /**
  * Build public client payment options from contractor profile.paymentSettings.
- * Each option includes base amount + processing fee + total (fee always charged to client).
+ * Processing fees apply only when the contractor enables chargeCCFee, and only
+ * for fee-bearing methods (card / Venmo / PayPal). Zelle and mail check never
+ * include a processing fee.
  */
 import {
   buildPayPalPayUrl,
@@ -14,7 +16,7 @@ import {
   hasZelleSetup,
   type PaymentMethodSettings,
 } from '@/lib/payment-links';
-import { computeProcessingFee } from '@/lib/stripe-fees';
+import { computeProcessingFee, methodHasProcessingFee } from '@/lib/stripe-fees';
 
 export type ClientPayOption = {
   method: string;
@@ -30,7 +32,7 @@ export type ClientPayOption = {
   /** Job amount (deposit or invoice balance) */
   baseAmount: number;
   feeAmount: number;
-  /** What client should send/pay including fee */
+  /** What client should send/pay including fee (if any) */
   totalAmount: number;
   feeLabel: string;
   feeDescription: string;
@@ -65,38 +67,37 @@ const META: Record<
     label: 'Card · Apple Pay · eCheck / ACH',
     description: 'Pay securely with Stripe Checkout',
     howItWorks:
-      'Opens Stripe Checkout. Card is always available. Apple Pay / Google Pay appear when your device supports them. US bank eCheck/ACH appears when enabled on the contractor’s Stripe account. Processing fee is added so the contractor receives the job amount.',
+      'Opens Stripe Checkout. Card is always available. Apple Pay / Google Pay appear when your device supports them. US bank eCheck/ACH appears when enabled on the contractor’s Stripe account.',
     clickToPay: true,
   },
   venmo: {
     icon: '📱',
     label: 'Venmo',
-    description: 'Pay in the Venmo app (includes processing fee)',
-    howItWorks:
-      'Opens Venmo with amount + fee and invoice note. Complete payment in Venmo.',
+    description: 'Pay in the Venmo app',
+    howItWorks: 'Opens Venmo with the amount and invoice note. Complete payment in Venmo.',
     clickToPay: true,
   },
   paypal: {
     icon: '💰',
     label: 'PayPal',
-    description: 'PayPal balance, bank, or card (includes processing fee)',
-    howItWorks: 'Opens PayPal with amount + fee filled in.',
+    description: 'PayPal balance, bank, or card',
+    howItWorks: 'Opens PayPal with the amount filled in.',
     clickToPay: true,
   },
   zelle: {
     icon: '🏦',
     label: 'Zelle',
-    description: 'Bank-to-bank transfer (includes processing fee)',
+    description: 'Bank-to-bank transfer — no processing fee',
     howItWorks:
-      'Send the total shown (job amount + fee) via your bank’s Zelle. Put the invoice # in the memo.',
+      'Send the amount shown via your bank’s Zelle. Put the invoice # in the memo. No processing fee.',
     clickToPay: false,
   },
   mailcheck: {
     icon: '✉️',
     label: 'Mail a check',
-    description: 'Paper check by mail (includes processing fee)',
+    description: 'Paper check by mail — no processing fee',
     howItWorks:
-      'Mail a check for the total shown (job amount + fee). Write the invoice number on the memo line.',
+      'Mail a check for the amount shown. Write the invoice number on the memo line. No processing fee.',
     clickToPay: false,
   },
 };
@@ -104,14 +105,15 @@ const META: Record<
 function withFee(
   method: string,
   baseAmount: number,
-  feePercentOverride?: number
+  opts: { chargeFees: boolean; feePercentOverride?: number }
 ): Pick<
   ClientPayOption,
   'baseAmount' | 'feeAmount' | 'totalAmount' | 'feeLabel' | 'feeDescription'
 > {
   const fee = computeProcessingFee(baseAmount, {
     method,
-    percentRate: feePercentOverride,
+    chargeFees: opts.chargeFees && methodHasProcessingFee(method),
+    percentRate: opts.feePercentOverride,
   });
   return {
     baseAmount: fee.baseAmount,
@@ -122,10 +124,42 @@ function withFee(
   };
 }
 
+function metaFor(method: string, chargeFees: boolean) {
+  const m = META[method];
+  if (!m) return m;
+  if (!chargeFees || !methodHasProcessingFee(method)) {
+    return m;
+  }
+  // Clarify that fee-bearing methods include a fee when contractor charges it
+  if (method === 'stripe') {
+    return {
+      ...m,
+      howItWorks:
+        m.howItWorks +
+        ' A processing fee is added so the contractor receives the full job amount.',
+    };
+  }
+  if (method === 'venmo') {
+    return {
+      ...m,
+      description: 'Pay in the Venmo app (includes processing fee)',
+      howItWorks: 'Opens Venmo with amount + fee and invoice note. Complete payment in Venmo.',
+    };
+  }
+  if (method === 'paypal') {
+    return {
+      ...m,
+      description: 'PayPal balance, bank, or card (includes processing fee)',
+      howItWorks: 'Opens PayPal with amount + fee filled in.',
+    };
+  }
+  return m;
+}
+
 /**
  * List enabled payment options for a public client pay page.
  * amount = job amount due now (deposit on estimate, balance on invoice).
- * Every option includes processing fee in totalAmount / payUrl.
+ * Fees only when chargeFees is true, and never for Zelle / mail check.
  */
 export function buildClientPaymentOptions(input: {
   paymentSettings?: Record<string, PaymentMethodSettings> | null;
@@ -135,20 +169,22 @@ export function buildClientPaymentOptions(input: {
   label?: string;
   /** Override fee % (e.g. contractor profile ccFeePercentage) */
   feePercentRate?: number;
+  /**
+   * When true, card/Venmo/PayPal include processing fee.
+   * When false, all methods are base amount only.
+   * Default false — only companies that opt in charge fees.
+   */
+  chargeFees?: boolean;
 }): ClientPayOption[] {
   const settings = mergeSettings(input.paymentSettings);
   const baseAmount = Math.max(0, Number(input.amount) || 0);
-  const feePct = input.feePercentRate;
+  const chargeFees = input.chargeFees === true;
+  const feePct = chargeFees ? input.feePercentRate : 0;
   const options: ClientPayOption[] = [];
 
   if (settings.stripe?.enabled !== false) {
-    const m = META.stripe;
-    const fee = withFee('stripe', baseAmount, feePct);
-    const note = buildPaymentTrackingNote(
-      input.invoiceNumber || '',
-      input.label || 'Payment',
-      input.company
-    );
+    const m = metaFor('stripe', chargeFees);
+    const fee = withFee('stripe', baseAmount, { chargeFees, feePercentOverride: feePct });
     options.push({
       method: 'stripe',
       label: m.label,
@@ -163,11 +199,11 @@ export function buildClientPaymentOptions(input: {
 
   if (settings.venmo?.enabled && hasVenmoSetup(settings.venmo)) {
     const handle = cleanVenmoHandle(settings.venmo.handle || '');
-    const m = META.venmo;
-    const fee = withFee('venmo', baseAmount, feePct);
+    const m = metaFor('venmo', chargeFees);
+    const fee = withFee('venmo', baseAmount, { chargeFees, feePercentOverride: feePct });
     const note = buildPaymentTrackingNote(
       input.invoiceNumber || '',
-      `${input.label || 'Payment'} + fee`,
+      fee.feeAmount > 0 ? `${input.label || 'Payment'} + fee` : input.label || 'Payment',
       input.company
     );
     options.push({
@@ -178,7 +214,6 @@ export function buildClientPaymentOptions(input: {
       howItWorks: m.howItWorks,
       ready: true,
       handle: `@${handle}`,
-      // Client pays base + fee in Venmo
       payUrl: buildVenmoPayUrl(handle, fee.totalAmount, note),
       clickToPay: true,
       ...fee,
@@ -187,11 +222,11 @@ export function buildClientPaymentOptions(input: {
 
   if (settings.paypal?.enabled && hasPayPalSetup(settings.paypal)) {
     const handle = cleanPayPalHandle(settings.paypal.handle || '');
-    const m = META.paypal;
-    const fee = withFee('paypal', baseAmount, feePct);
+    const m = metaFor('paypal', chargeFees);
+    const fee = withFee('paypal', baseAmount, { chargeFees, feePercentOverride: feePct });
     const note = buildPaymentTrackingNote(
       input.invoiceNumber || '',
-      `${input.label || 'Payment'} + fee`,
+      fee.feeAmount > 0 ? `${input.label || 'Payment'} + fee` : input.label || 'Payment',
       input.company
     );
     options.push({
@@ -210,8 +245,8 @@ export function buildClientPaymentOptions(input: {
 
   if (settings.zelle?.enabled && hasZelleSetup(settings.zelle)) {
     const handle = cleanZelleHandle(settings.zelle.handle || '');
-    const m = META.zelle;
-    const fee = withFee('zelle', baseAmount, feePct);
+    const m = metaFor('zelle', false);
+    const fee = withFee('zelle', baseAmount, { chargeFees: false });
     options.push({
       method: 'zelle',
       label: m.label,
@@ -227,8 +262,8 @@ export function buildClientPaymentOptions(input: {
   }
 
   if (settings.mailcheck?.enabled && String(settings.mailcheck.handle || '').trim()) {
-    const m = META.mailcheck;
-    const fee = withFee('mailcheck', baseAmount, feePct);
+    const m = metaFor('mailcheck', false);
+    const fee = withFee('mailcheck', baseAmount, { chargeFees: false });
     options.push({
       method: 'mailcheck',
       label: m.label,
@@ -243,8 +278,8 @@ export function buildClientPaymentOptions(input: {
   }
 
   if (options.length === 0) {
-    const m = META.stripe;
-    const fee = withFee('stripe', baseAmount, feePct);
+    const m = metaFor('stripe', chargeFees);
+    const fee = withFee('stripe', baseAmount, { chargeFees, feePercentOverride: feePct });
     options.push({
       method: 'stripe',
       label: m.label,

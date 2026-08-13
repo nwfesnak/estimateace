@@ -83,6 +83,10 @@ export async function POST(request: NextRequest) {
     const showDiscount = discountAmount > 0.005;
     const depositPercent = Math.max(0, Number(body.depositPercent) || 0);
     const showDepositOnApproval = body.showDepositOnApproval !== false;
+    // Only companies that charge processing fees get fee language in the email
+    const chargeCCFee = body.chargeCCFee === true;
+    const ccFeePercentage =
+      chargeCCFee && Number(body.ccFeePercentage) > 0 ? Number(body.ccFeePercentage) : 2.9;
     const { resolveAmountDue, computeProcessingFee } = await import('@/lib/stripe-fees');
     const due = resolveAmountDue({
       documentType,
@@ -94,8 +98,13 @@ export async function POST(request: NextRequest) {
     const depositDue = due.depositDue;
     const amountDueNow = due.amountDueNow;
     const payLabel = due.payLabel;
-    // Example card fee for email (actual fee shown per method on pay page)
-    const exampleFee = computeProcessingFee(amountDueNow, { method: 'stripe' });
+    // Example card fee only when company charges fees (Zelle / mail check never have fees)
+    const exampleFee = computeProcessingFee(amountDueNow, {
+      method: 'stripe',
+      chargeFees: chargeCCFee,
+      percentRate: chargeCCFee ? ccFeePercentage : 0,
+      fixedFee: chargeCCFee ? undefined : 0,
+    });
 
     if (emails.length === 0 && phones.length === 0) {
       return NextResponse.json(
@@ -194,8 +203,8 @@ export async function POST(request: NextRequest) {
       location ? `Job: ${location}` : '',
       '',
       `${totalDueLabel}: ${money(totalDueAmount)}`,
-      amountDueNow >= 0.5
-        ? `(Processing fees may apply at checkout. Example card total: ${money(exampleFee.totalAmount)})`
+      amountDueNow >= 0.5 && chargeCCFee && exampleFee.feeAmount > 0
+        ? `(Card payments may include a processing fee. Example card total: ${money(exampleFee.totalAmount)}. Zelle and mail check have no processing fee.)`
         : '',
       '',
       `Pay / approve: ${actionUrl}`,
@@ -301,8 +310,8 @@ export async function POST(request: NextRequest) {
           ${money(totalDueAmount)}
         </p>
         ${
-          amountDueNow >= 0.5
-            ? `<p style="margin:0 0 16px;font-size:12px;color:#64748b;">Processing fees may apply at checkout.</p>`
+          amountDueNow >= 0.5 && chargeCCFee && exampleFee.feeAmount > 0
+            ? `<p style="margin:0 0 16px;font-size:12px;color:#64748b;">Card / Venmo / PayPal may include a processing fee at checkout. Zelle and mail check have no processing fee.</p>`
             : ''
         }
         <!--[if mso]>

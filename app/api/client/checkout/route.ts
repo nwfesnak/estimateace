@@ -88,12 +88,14 @@ export async function POST(request: NextRequest) {
     const invoiceId = String(row?.id || inv);
     const jobName = String(row?.jobName || row?.jobname || body.jobName || '');
 
-    // Always pass processing fee to payee (separate Checkout line)
-    const chargeCCFee = profile.chargeCCFee !== false;
+    // Only pass processing fee when contractor opted in to charge it
+    const chargeCCFee = profile.chargeCCFee === true;
     const feePercentRate =
       chargeCCFee && Number(profile.ccFeePercentage) > 0
         ? Number(profile.ccFeePercentage)
-        : 2.9;
+        : chargeCCFee
+          ? 2.9
+          : 0;
 
     const appUrl = getAppUrl(request.url);
     const returnBase = `${appUrl}/client/approve?token=${encodeURIComponent(token)}`;
@@ -110,7 +112,7 @@ export async function POST(request: NextRequest) {
       paymentKind: due.payKind,
       successUrl: `${returnBase}&paid=1`,
       cancelUrl: `${returnBase}&paid=0`,
-      passProcessingFee: true,
+      passProcessingFee: chargeCCFee,
       feePercentRate,
     });
 

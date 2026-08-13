@@ -8632,12 +8632,12 @@ export default function Home() {
         return;
       }
       const clientEmail = (emails || []).map((e) => String(e || '').trim()).find(Boolean) || '';
-      const feePercent =
-        profile.chargeCCFee !== false
-          ? Number(profile.ccFeePercentage) > 0
-            ? Number(profile.ccFeePercentage)
-            : 2.9
-          : 2.9;
+      const chargeFees = profile.chargeCCFee === true;
+      const feePercent = chargeFees
+        ? Number(profile.ccFeePercentage) > 0
+          ? Number(profile.ccFeePercentage)
+          : 2.9
+        : 0;
       const res = await fetch('/api/payments/job-checkout', {
         method: 'POST',
         headers: {
@@ -8651,7 +8651,7 @@ export default function Home() {
           documentType,
           jobName,
           clientEmail,
-          passProcessingFee: true,
+          passProcessingFee: chargeFees,
           feePercentRate: feePercent,
         }),
       });
@@ -13903,6 +13903,8 @@ export default function Home() {
                       taxAmount,
                       depositPercent: Number(profile.depositPercentage) || 0,
                       showDepositOnApproval: profile.showDepositOnApproval !== false,
+                      chargeCCFee: profile.chargeCCFee === true,
+                      ccFeePercentage: Number(profile.ccFeePercentage) || 0,
                       breakdownSettings: {
                         showMaterialBreakdownOnEstimate:
                           !!estimateBreakdownSettings.showMaterialBreakdownOnEstimate,
@@ -14684,15 +14686,17 @@ export default function Home() {
           <div className="py-2 space-y-5">
             <div className="text-center rounded-2xl bg-emerald-50 border border-emerald-100 p-5">
               {(() => {
-                const rate =
-                  profile.chargeCCFee !== false
-                    ? Number(profile.ccFeePercentage) > 0
-                      ? Number(profile.ccFeePercentage)
-                      : STRIPE_CARD_PERCENT
-                    : STRIPE_CARD_PERCENT;
+                const chargeFees = profile.chargeCCFee === true;
+                const rate = chargeFees
+                  ? Number(profile.ccFeePercentage) > 0
+                    ? Number(profile.ccFeePercentage)
+                    : STRIPE_CARD_PERCENT
+                  : 0;
                 const fee = computeStripeCardFee(paymentAmount, {
                   percentRate: rate,
-                  fixedFee: STRIPE_CARD_FIXED_USD,
+                  fixedFee: chargeFees ? STRIPE_CARD_FIXED_USD : 0,
+                  chargeFees,
+                  method: 'stripe',
                 });
                 const isDepositPay = paymentType === 'deposit';
                 return (
@@ -14701,10 +14705,17 @@ export default function Home() {
                       ${fee.totalAmount.toFixed(2)}
                     </div>
                     <p className="text-sm text-gray-600 mt-1">
-                      {isDepositPay ? 'Deposit' : documentType === 'invoice' ? 'Invoice total due' : 'Amount due'}{' '}
-                      + processing fee · {profile.company || 'the contractor'}
+                      {isDepositPay ? 'Deposit' : documentType === 'invoice' ? 'Invoice total due' : 'Amount due'}
+                      {fee.feeAmount > 0 ? ' + processing fee (card/Venmo/PayPal)' : ''}
+                      {' · '}
+                      {profile.company || 'the contractor'}
                       {invoiceNumber ? ` · #${invoiceNumber}` : ''}
                     </p>
+                    {fee.feeAmount <= 0 && (
+                      <p className="text-xs text-emerald-800 mt-1">
+                        Zelle and mail check have no processing fee
+                      </p>
+                    )}
                     <div className="mt-3 text-left text-xs sm:text-sm space-y-1 max-w-xs mx-auto text-gray-700">
                       <div className="flex justify-between gap-3">
                         <span>
@@ -14716,19 +14727,27 @@ export default function Home() {
                         </span>
                         <span className="font-semibold">${fee.baseAmount.toFixed(2)}</span>
                       </div>
-                      <div className="flex justify-between gap-3 text-amber-800">
-                        <span>
-                          Processing fee ({fee.percentRate}% + ${fee.fixedFee.toFixed(2)})
-                        </span>
-                        <span className="font-semibold">${fee.feeAmount.toFixed(2)}</span>
-                      </div>
+                      {fee.feeAmount > 0 && (
+                        <div className="flex justify-between gap-3 text-amber-800">
+                          <span>
+                            Processing fee ({fee.percentRate}% + ${fee.fixedFee.toFixed(2)})
+                          </span>
+                          <span className="font-semibold">${fee.feeAmount.toFixed(2)}</span>
+                        </div>
+                      )}
                       <div className="flex justify-between gap-3 pt-1 border-t border-emerald-200 font-bold text-emerald-900">
-                        <span>Client pays (any method)</span>
+                        <span>
+                          {fee.feeAmount > 0
+                            ? 'Client pays (card / Venmo / PayPal)'
+                            : 'Client pays'}
+                        </span>
                         <span>${fee.totalAmount.toFixed(2)}</span>
                       </div>
                     </div>
                     <p className="text-[11px] text-gray-500 mt-2">
-                      Fee applies to Stripe, Venmo, PayPal, Zelle, and check so you receive the full job amount.
+                      {fee.feeAmount > 0
+                        ? 'Fee applies only when you charge processing fees — and only on card, Venmo, and PayPal. Zelle and mail check have no processing fee.'
+                        : 'No processing fee added. Turn on “Charge customers a credit card processing fee” in Profile if you want card/Venmo/PayPal to include a fee. Zelle and mail check never have a fee.'}
                     </p>
                     {stripeConnectStatus?.isTest && (
                       <p className="text-[11px] text-amber-700 font-medium mt-1">

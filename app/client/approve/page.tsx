@@ -365,9 +365,11 @@ function ApprovePayInner() {
                   Job total {money(grandTotal)} − deposit/payments {money(amountPaid)} = balance due.
                 </p>
               )}
-              <p className="text-[11px] text-amber-800 pt-1">
-                A processing fee is added on every payment method so your contractor receives the full job amount.
-              </p>
+              {doc?.chargeCCFee && (
+                <p className="text-[11px] text-amber-800 pt-1">
+                  Card, Venmo, and PayPal may include a processing fee. Zelle and mail check have no processing fee.
+                </p>
+              )}
             </div>
           )}
 
@@ -522,7 +524,16 @@ function ApprovePayInner() {
                 >
                   {busy
                     ? 'Starting…'
-                    : `Pay with Stripe (${money(computeStripeCardFee(basePay).totalAmount)})`}
+                    : `Pay with Stripe (${money(
+                        computeStripeCardFee(basePay, {
+                          chargeFees: doc?.chargeCCFee === true,
+                          percentRate:
+                            doc?.chargeCCFee === true && Number(doc?.ccFeePercentage) > 0
+                              ? Number(doc.ccFeePercentage)
+                              : undefined,
+                          fixedFee: doc?.chargeCCFee === true ? STRIPE_CARD_FIXED_USD : 0,
+                        }).totalAmount
+                      )})`}
                 </Button>
               )}
             </div>

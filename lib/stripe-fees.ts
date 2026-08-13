@@ -1,13 +1,15 @@
 /**
- * Processing fees passed to the client (payee) for every payment method.
- * Default matches typical US online card rates (2.9% + $0.30).
- * Same fee model is used for Venmo/PayPal/Zelle/mail unless overridden.
+ * Processing fees passed to the client (payee) only when the contractor
+ * enables "charge processing fee" — and only for methods that have fees.
+ *
+ * No fee methods: Zelle, mail a check, cash (free bank/mail transfer).
+ * Fee methods (when enabled): Card/Stripe, Venmo, PayPal (default 2.9% + $0.30).
  */
 
 export const STRIPE_CARD_PERCENT = 2.9;
 export const STRIPE_CARD_FIXED_USD = 0.3;
 
-/** Default % for non-card apps (Venmo, PayPal, Zelle, check) — same as card unless customized */
+/** Default % for fee-bearing apps (Venmo, PayPal) — same as card unless customized */
 export const DEFAULT_METHOD_FEE_PERCENT = 2.9;
 export const DEFAULT_METHOD_FEE_FIXED = 0.3;
 
@@ -27,11 +29,37 @@ function roundMoney(n: number) {
 }
 
 /**
- * Fee schedule per method (can tune later).
- * All methods charge the client a processing fee by default.
+ * Methods that never add a processing fee (even if contractor charges card fees).
+ */
+export function methodHasProcessingFee(method: string): boolean {
+  const m = (method || '').toLowerCase().replace(/[\s-]+/g, '_');
+  if (
+    m === 'zelle' ||
+    m === 'mailcheck' ||
+    m === 'mail_check' ||
+    m === 'check' ||
+    m === 'cash' ||
+    m === 'money_order'
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Fee schedule per method.
+ * Zelle / mail check / cash: always $0.
+ * Card / Venmo / PayPal: rates apply only when contractor enables chargeCCFee (caller passes rates).
  */
 export function feeRatesForMethod(method: string): { percentRate: number; fixedFee: number; feeLabel: string } {
   const m = (method || 'stripe').toLowerCase();
+  if (!methodHasProcessingFee(m)) {
+    return {
+      percentRate: 0,
+      fixedFee: 0,
+      feeLabel: 'No processing fee',
+    };
+  }
   if (m === 'stripe' || m === 'card' || m === 'apple_pay' || m === 'ach' || m === 'us_bank_account') {
     return {
       percentRate: STRIPE_CARD_PERCENT,
@@ -53,20 +81,6 @@ export function feeRatesForMethod(method: string): { percentRate: number; fixedF
       feeLabel: 'Venmo processing fee',
     };
   }
-  if (m === 'zelle') {
-    return {
-      percentRate: DEFAULT_METHOD_FEE_PERCENT,
-      fixedFee: DEFAULT_METHOD_FEE_FIXED,
-      feeLabel: 'Payment processing fee',
-    };
-  }
-  if (m === 'mailcheck' || m === 'check') {
-    return {
-      percentRate: DEFAULT_METHOD_FEE_PERCENT,
-      fixedFee: DEFAULT_METHOD_FEE_FIXED,
-      feeLabel: 'Payment processing fee',
-    };
-  }
   return {
     percentRate: DEFAULT_METHOD_FEE_PERCENT,
     fixedFee: DEFAULT_METHOD_FEE_FIXED,
@@ -78,16 +92,38 @@ export function feeRatesForMethod(method: string): { percentRate: number; fixedF
  * Compute processing fee on a base charge (job amount due).
  * @param baseAmount dollars owed for the job portion
  * @param options.method payment method key
- * @param options.percentRate override %
- * @param options.fixedFee override fixed $
+ * @param options.percentRate override % (0 disables %)
+ * @param options.fixedFee override fixed $ (0 disables fixed)
+ * @param options.chargeFees when false, fee is always $0 (contractor absorbs fees)
  */
 export function computeProcessingFee(
   baseAmount: number,
-  options?: { method?: string; percentRate?: number; fixedFee?: number }
+  options?: {
+    method?: string;
+    percentRate?: number;
+    fixedFee?: number;
+    /** If false, never add a fee (company does not charge processing fees). Default true for backward compat when method has rates. */
+    chargeFees?: boolean;
+  }
 ): StripeFeeBreakdown {
   const method = options?.method || 'stripe';
   const rates = feeRatesForMethod(method);
   const base = roundMoney(baseAmount);
+
+  // Company opted out, or method is free (Zelle / mail check)
+  if (options?.chargeFees === false || !methodHasProcessingFee(method)) {
+    return {
+      baseAmount: base,
+      percentRate: 0,
+      fixedFee: 0,
+      feeAmount: 0,
+      totalAmount: base,
+      feeLabel: 'No processing fee',
+      feeDescription: 'No processing fee for this payment method',
+      method,
+    };
+  }
+
   const percentRate =
     options?.percentRate != null && Number.isFinite(options.percentRate)
       ? Math.max(0, Number(options.percentRate))
@@ -96,6 +132,20 @@ export function computeProcessingFee(
     options?.fixedFee != null && Number.isFinite(options.fixedFee)
       ? Math.max(0, Number(options.fixedFee))
       : rates.fixedFee;
+
+  // Both zero → no fee line
+  if (percentRate <= 0 && fixedFee <= 0) {
+    return {
+      baseAmount: base,
+      percentRate: 0,
+      fixedFee: 0,
+      feeAmount: 0,
+      totalAmount: base,
+      feeLabel: 'No processing fee',
+      feeDescription: 'No processing fee for this payment method',
+      method,
+    };
+  }
 
   const feeAmount = roundMoney(base * (percentRate / 100) + fixedFee);
   const totalAmount = roundMoney(base + feeAmount);
@@ -122,16 +172,22 @@ export function computeProcessingFee(
 /** @deprecated use computeProcessingFee — kept for existing imports */
 export function computeStripeCardFee(
   baseAmount: number,
-  options?: { percentRate?: number; fixedFee?: number }
+  options?: {
+    percentRate?: number;
+    fixedFee?: number;
+    chargeFees?: boolean;
+    method?: string;
+  }
 ): StripeFeeBreakdown {
   return computeProcessingFee(baseAmount, {
-    method: 'stripe',
+    method: options?.method || 'stripe',
     percentRate: options?.percentRate,
     fixedFee: options?.fixedFee,
+    chargeFees: options?.chargeFees,
   });
 }
 
-/** Whether to pass fees to the customer (default true). */
+/** Whether env allows passing fees to the customer (default true). Company setting still required. */
 export function shouldPassProcessingFeeToPayee(): boolean {
   const v = String(process.env.STRIPE_PASS_FEES_TO_CUSTOMER || 'true').toLowerCase();
   return v !== 'false' && v !== '0' && v !== 'no';
