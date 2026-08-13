@@ -1210,8 +1210,12 @@ PRICING MATH (strict — numbers must reconcile):
     materials = ensureCoverageMaterials(materials, qtyCtx, 14.98 * regional.materialMultiplier);
     materials = correctMaterialQuantities(materials, qtyCtx);
 
-    // Contractor markup on materials purchased for the job (cost → sell)
-    materials = applyMaterialMarkup(materials, DEFAULT_MATERIAL_MARKUP);
+    // Only markup pure shelf materials when we do NOT have an installed BC×EP total.
+    // Installed unit rates already include contractor margin — stacking +20% made
+    // successive quotes drift upward when memory re-applied marked-up prices.
+    if (!priceRange || !(priceRange.typical > 0)) {
+      materials = applyMaterialMarkup(materials, DEFAULT_MATERIAL_MARKUP);
+    }
 
     // Labor: trust SuperGrok-style model hours when they look real; only force-engine if missing/absurd
     const rawLabor = parsed.laborBreakdown || parsed.labor || null;
@@ -1265,11 +1269,25 @@ PRICING MATH (strict — numbers must reconcile):
       );
     }
 
-    // Apply contractor-edited preferred prices before reconciling totals
+    // Apply contractor-edited preferred prices before reconciling totals.
+    // When BC×EP sets the installed bid, only keep the preferred labor *rate*
+    // (hours still follow this job) — do not overwrite material shelf costs that
+    // will be scaled to the locked total (prevents ratchet-up on re-quote).
     {
-      const applied = applyPriceMemoryToBreakdown(materials, laborBreakdown, priceMemory);
-      materials = applied.materials as MaterialLine[];
-      laborBreakdown = applied.labor;
+      if (priceRange && priceRange.typical > 0) {
+        if (laborBreakdown && preferredLaborRate && preferredLaborRate >= 10) {
+          const hours = Math.max(0.25, Number(laborBreakdown.hours) || 0);
+          laborBreakdown = {
+            ...laborBreakdown,
+            rate: preferredLaborRate,
+            total: roundMoney(hours * preferredLaborRate),
+          };
+        }
+      } else {
+        const applied = applyPriceMemoryToBreakdown(materials, laborBreakdown, priceMemory);
+        materials = applied.materials as MaterialLine[];
+        laborBreakdown = applied.labor;
+      }
     }
 
     const reconciled = reconcileBuiltUpPrice(materials, laborBreakdown, {
@@ -1343,34 +1361,41 @@ PRICING MATH (strict — numbers must reconcile):
       preferredLaborRate
     );
 
-    // Final pass: lock contractor-preferred material unit prices + labor rate into the response
-    const finalMem = applyPriceMemoryToBreakdown(
-      aligned.materials,
-      aligned.labor,
-      priceMemory
-    );
-    if (finalMem.appliedMaterialCount > 0 || finalMem.appliedLaborRate) {
-      const matSum = sumMaterialTotals(finalMem.materials);
-      const labSum = finalMem.labor?.total || 0;
-      const built = roundMoney(matSum + labSum);
-      aligned = {
-        ...aligned,
-        materials: finalMem.materials as MaterialLine[],
-        labor: finalMem.labor,
-        materialsCostTotal: matSum,
-        laborCostTotal: labSum,
-      };
-      if (built > 0) {
-        // Never assign full-job $ as unitPrice when suggestedQty is area SF
-        const perUnit =
-          structured.suggestedQty > 1
-            ? roundMoney(built / structured.suggestedQty)
-            : built;
-        structured.unitPrice = coercePerUnitPrice(perUnit, structured.suggestedQty, {
-          marketUnitPrice: structured.unitPrice,
-          description: jobDescription,
-        });
-        structured.total = roundMoney(structured.unitPrice * structured.suggestedQty);
+    // Final memory pass — only when we are NOT locked to a BC×EP installed total
+    let finalMem = {
+      materials: aligned.materials,
+      labor: aligned.labor,
+      appliedMaterialCount: 0,
+      appliedLaborRate: false,
+    };
+    if (!priceRange || !(priceRange.typical > 0)) {
+      finalMem = applyPriceMemoryToBreakdown(
+        aligned.materials,
+        aligned.labor,
+        priceMemory
+      );
+      if (finalMem.appliedMaterialCount > 0 || finalMem.appliedLaborRate) {
+        const matSum = sumMaterialTotals(finalMem.materials);
+        const labSum = finalMem.labor?.total || 0;
+        const built = roundMoney(matSum + labSum);
+        aligned = {
+          ...aligned,
+          materials: finalMem.materials as MaterialLine[],
+          labor: finalMem.labor,
+          materialsCostTotal: matSum,
+          laborCostTotal: labSum,
+        };
+        if (built > 0) {
+          const perUnit =
+            structured.suggestedQty > 1
+              ? roundMoney(built / structured.suggestedQty)
+              : built;
+          structured.unitPrice = coercePerUnitPrice(perUnit, structured.suggestedQty, {
+            marketUnitPrice: structured.unitPrice,
+            description: jobDescription,
+          });
+          structured.total = roundMoney(structured.unitPrice * structured.suggestedQty);
+        }
       }
     }
 
@@ -1399,34 +1424,42 @@ PRICING MATH (strict — numbers must reconcile):
         labor: lab,
         laborCostTotal: labSum,
       };
-      // Keep unit price coherent: for SF lines, unitPrice is per SF of materials+labor
+      // Only rebuild structured from mat+labor when we lack a BC×EP installed range.
+      // Rebuilding after every pass caused totals to climb on each re-quote.
       const isSf =
         structured.suggestedQty > 1 &&
         /sf|sqft|sq\.?\s*ft|square/i.test(String(structured.unit || ''));
-      if (isSf) {
+      if (!priceRange || !(priceRange.typical > 0)) {
+        if (isSf) {
+          const laborFull =
+            lab && lab.hours > 0 && lab.rate > 0
+              ? roundMoney(lab.hours * lab.rate)
+              : labSum;
+          const jobTotal = roundMoney(matSum + laborFull);
+          structured.total = jobTotal;
+          structured.unitPrice = roundMoney(jobTotal / structured.suggestedQty);
+          if (lab) {
+            aligned.labor = { ...lab, total: laborFull };
+            aligned.laborCostTotal = laborFull;
+          }
+        } else {
+          const jobTotal = roundMoney(matSum + labSum);
+          if (jobTotal > 0) {
+            structured.unitPrice = jobTotal;
+            structured.total = roundMoney(jobTotal * Math.max(1, structured.suggestedQty));
+          }
+        }
+      } else if (lab) {
+        // Keep full-job labor dollars for display; do not overwrite BC×EP total
         const laborFull =
-          lab && lab.hours > 0 && lab.rate > 0
-            ? roundMoney(lab.hours * lab.rate)
-            : labSum;
-        const jobTotal = roundMoney(matSum + laborFull);
-        structured.total = jobTotal;
-        structured.unitPrice = roundMoney(jobTotal / structured.suggestedQty);
-        if (lab) {
-          aligned.labor = { ...lab, total: laborFull };
-          aligned.laborCostTotal = laborFull;
-        }
-      } else {
-        const jobTotal = roundMoney(matSum + labSum);
-        if (jobTotal > 0) {
-          structured.unitPrice = jobTotal;
-          structured.total = roundMoney(jobTotal * Math.max(1, structured.suggestedQty));
-        }
+          lab.hours > 0 && lab.rate > 0 ? roundMoney(lab.hours * lab.rate) : labSum;
+        aligned.labor = { ...lab, total: laborFull };
+        aligned.laborCostTotal = laborFull;
       }
     }
 
-    // Authority: BuildCalculator base × EstimationPro multiplier (typical), show low–high range
+    // Authority: BuildCalculator base × EstimationPro multiplier — STABLE typical
     {
-      const modelTotal = num(parsed.total, 0);
       const qty = Math.max(
         1,
         priceRange?.quantity ||
@@ -1437,33 +1470,51 @@ PRICING MATH (strict — numbers must reconcile):
       const isPaint = /paint|painting/i.test(jobDescription);
 
       if (priceRange && priceRange.typical > 0) {
-        // Prefer BC×EP typical; soft-blend model only if inside the published range
-        let finalTotal = priceRange.typical;
-        if (
-          modelTotal >= priceRange.low * 0.9 &&
-          modelTotal <= priceRange.high * 1.1
-        ) {
-          finalTotal = roundMoney(priceRange.typical * 0.7 + modelTotal * 0.3);
-        }
-        // Clamp into range
-        finalTotal = Math.min(priceRange.high, Math.max(priceRange.low, finalTotal));
+        // Always use the published TYPICAL (same inputs → same bid every click).
+        // Do not soft-blend the model upward — that made re-quotes keep climbing.
+        const finalTotal = roundMoney(priceRange.typical);
         structured.suggestedQty = qty;
-        // QuoteLineStructure.unit is only "SF" | "Unit" (priceRange.unit is a free string)
         structured.unit = /unit|ea|each|job|lot/i.test(String(priceRange.unit || ''))
           ? 'Unit'
           : 'SF';
         structured.billingMode = structured.unit === 'SF' ? 'sqft' : 'unit';
-        structured.total = roundMoney(finalTotal);
+        structured.total = finalTotal;
         structured.unitPrice = roundMoney(finalTotal / qty);
-      } else if (modelTotal > 50 && modelTotal < 50000 && qty <= 20) {
-        if (Math.abs(modelTotal - structured.total) / modelTotal > 0.35) {
-          structured.total = roundMoney(modelTotal);
-          structured.unitPrice = roundMoney(modelTotal / Math.max(1, qty));
+
+        // Scale materials + labor to match the locked total (breakdown follows bid)
+        const matSum = sumMaterialTotals(aligned.materials as MaterialLine[]);
+        let lab = aligned.labor;
+        let labFull = roundMoney(
+          lab && lab.hours > 0 && lab.rate > 0
+            ? lab.hours * lab.rate
+            : lab?.total || 0
+        );
+        const built = roundMoney(matSum + labFull);
+        if (built > 0.01 && Math.abs(built - finalTotal) > 1) {
+          const scale = finalTotal / built;
+          aligned.materials = (aligned.materials as MaterialLine[]).map((m) => {
+            const unitPrice = roundMoney((Number(m.unitPrice) || 0) * scale);
+            const q = Number(m.qty) || 0;
+            return {
+              ...m,
+              unitPrice,
+              total: roundMoney(q > 0 ? q * unitPrice : unitPrice),
+            };
+          });
+          if (lab) {
+            const hours = Math.max(0.25, Number(lab.hours) || 0);
+            const rate = roundMoney((Number(lab.rate) || 62) * scale);
+            labFull = roundMoney(hours * rate);
+            lab = { ...lab, rate, total: labFull };
+            aligned.labor = lab;
+            aligned.laborCostTotal = labFull;
+          }
+          aligned.materialsCostTotal = sumMaterialTotals(aligned.materials as MaterialLine[]);
         }
       }
 
-      // Labor hours: BC hours × soft EP labor mult, then model if sane
-      if (aligned.labor) {
+      // Labor hours: BC hours × soft EP labor mult (display only — total stays locked)
+      if (aligned.labor && !(priceRange && priceRange.typical > 0)) {
         let hrs = Number(aligned.labor.hours) || 0;
         const laborMult = epMultiplier?.laborMultiplier || epMult || 1;
         if (bcAnchor?.suggestedLaborHours && bcAnchor.suggestedLaborHours > 0) {
@@ -1486,10 +1537,7 @@ PRICING MATH (strict — numbers must reconcile):
           ...aligned.labor,
           hours: roundMoney(hrs),
           rate: roundMoney(rate),
-          total:
-            structured.suggestedQty > 1 && /sf|sqft/i.test(String(structured.unit || ''))
-              ? roundMoney(fullLabor / structured.suggestedQty)
-              : fullLabor,
+          total: fullLabor,
         };
         aligned.laborCostTotal = fullLabor;
       }

@@ -188,20 +188,26 @@ export function applyEpMultiplierToBuildCalcBase(input: {
   const spread = input.spread != null ? Math.min(0.4, Math.max(0.08, input.spread)) : 0.18;
   const base = Math.max(0, Number(input.baseUnitCostUsd) || 0);
 
-  // Base from BuildCalculator, then regionalize with EstimationPro
+  // Base from BuildCalculator (already converted to billing $/SF), then regionalize once.
+  // Do NOT re-multiply EP labor bands by the regional multiplier when blending —
+  // EstimationPro /costs items are often already regionally adjusted.
   let typicalPer = roundMoney(base * mult);
   let lowPer = roundMoney(typicalPer * (1 - spread));
   let highPer = roundMoney(typicalPer * (1 + spread));
 
-  // If EstimationPro gives labor bands per SF, blend range shape (keep BC as center)
   const ep = input.epLaborPerSf;
   if (ep && ep.typical > 0) {
     const epLowRatio = ep.low / ep.typical;
     const epHighRatio = ep.high / ep.typical;
-    lowPer = roundMoney(typicalPer * Math.min(0.95, Math.max(0.55, epLowRatio)));
-    highPer = roundMoney(typicalPer * Math.max(1.05, Math.min(2.2, epHighRatio)));
-    // Soft-blend center toward EP typical when both exist
-    typicalPer = roundMoney(typicalPer * 0.65 + ep.typical * mult * 0.35);
+    // Shape the range from EP labor spread, but keep BC×mult as the center of gravity
+    lowPer = roundMoney(typicalPer * Math.min(0.92, Math.max(0.65, epLowRatio)));
+    highPer = roundMoney(typicalPer * Math.max(1.08, Math.min(1.55, epHighRatio)));
+    // Light blend only — EP labor is labor-only $/SF, BC base is full installed $/SF
+    // so we must NOT treat ep.typical as a full-job installed rate.
+    const epAsInstalledHint = roundMoney(ep.typical * mult * 1.35); // labor → rough installed
+    if (epAsInstalledHint > typicalPer * 0.5 && epAsInstalledHint < typicalPer * 1.4) {
+      typicalPer = roundMoney(typicalPer * 0.85 + epAsInstalledHint * 0.15);
+    }
     lowPer = Math.min(lowPer, typicalPer);
     highPer = Math.max(highPer, typicalPer);
   }

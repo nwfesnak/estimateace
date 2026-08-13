@@ -284,18 +284,26 @@ export async function buildCalculatorQuoteAnchor(
   const hits = Array.from(byCode.values()).sort((a, b) => b.score - a.score);
   if (!hits.length) return null;
 
-  // Prefer area rates that look like installed wall/floor work (not industrial extremes)
-  const best =
-    hits.find(
-      (h) =>
-        h.totalPerSfUsd != null &&
-        h.totalPerSfUsd > 0.35 &&
-        h.totalPerSfUsd < 25 &&
-        h.score >= 30
-    ) ||
-    hits.find((h) => h.totalPerSfUsd != null && h.totalPerSfUsd > 0.35 && h.totalPerSfUsd < 40) ||
-    hits[0] ||
-    null;
+  // Prefer area rates that look like installed wall/floor work (not industrial extremes).
+  // Use the median of top good hits so successive searches don't flip between cheap/expensive lines.
+  const goodHits = hits.filter(
+    (h) =>
+      h.totalPerSfUsd != null &&
+      h.totalPerSfUsd > 0.35 &&
+      h.totalPerSfUsd < 25 &&
+      h.score >= 30
+  );
+  const pool =
+    goodHits.length > 0
+      ? goodHits
+      : hits.filter((h) => h.totalPerSfUsd != null && h.totalPerSfUsd > 0.35 && h.totalPerSfUsd < 40);
+  let best: BuildCalcHit | null = pool[0] || hits[0] || null;
+  if (pool.length >= 3) {
+    const sorted = [...pool]
+      .filter((h) => h.totalPerSfUsd != null)
+      .sort((a, b) => (a.totalPerSfUsd || 0) - (b.totalPerSfUsd || 0));
+    best = sorted[Math.floor(sorted.length / 2)] || best;
+  }
 
   const floorSf = parseSfFromText(query);
   // Surface multiplier for whole-home paint int+ext dual coat vs floor SF

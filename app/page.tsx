@@ -4620,6 +4620,8 @@ export default function Home() {
         }))
       : [];
 
+    // Keep the API total authoritative. Do NOT re-align/rebuild (that was making
+    // every successive AI quote click climb higher than the last).
     const normalizedBreakdown = normalizeStoredCostBreakdown({
       description: quoteDescription,
       qty: nextQty,
@@ -4632,8 +4634,17 @@ export default function Home() {
       typicalLaborRate: 62,
       maxLaborRate: 75,
       expectedLaborHours: laborInput?.hours || undefined,
+      preferStored: true,
     });
-    const { linePricing, billing } = normalizedBreakdown;
+    const { billing } = normalizedBreakdown;
+
+    // Force line math to the server quote (BC×EP / Grok) — never the rebuilt sum
+    const linePricing = {
+      qty: nextQty,
+      unit: (nextUnit || billing.unit || 'SF').trim() || 'SF',
+      price: nextPrice,
+      total: nextTotal,
+    };
 
     // Guarantee labor is stored on the line item (align can still leave null on $0 lines)
     let laborToSave = normalizedBreakdown.labor;
