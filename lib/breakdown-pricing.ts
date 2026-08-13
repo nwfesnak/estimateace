@@ -308,11 +308,21 @@ export function alignBreakdownToUnitPrice(
    * low unit price. Old bug: $242 job − materials left ~$68 labor → 1.67 hrs
    * even when the work (demo+hang+tape+paint 200 SF ceiling) needs ~15–20 hrs.
    */
+  // Cap hours to production reality — residual $ from a wrong jobTarget must not
+  // invent 2,000+ hours (e.g. $3M mistaken total / $75/hr).
+  const hoursCap = Math.max(
+    expectedHours * 1.35,
+    Math.min(240, Math.max(expectedHours * 1.5, 16))
+  );
+
   let hours = roundMoney(Number(labor?.hours) || expectedHours);
   if (hours <= 0) hours = expectedHours;
   // Never collapse long jobs below ~70% of expected crew-hours
   if (expectedHours >= 3 && hours < expectedHours * 0.7) {
     hours = roundMoney(expectedHours);
+  }
+  if (hours > hoursCap) {
+    hours = roundMoney(Math.min(hours, hoursCap, expectedHours > 0 ? expectedHours * 1.35 : hoursCap));
   }
 
   // Prefer AI-provided rate when it looks sane; otherwise typical local rate
@@ -332,20 +342,34 @@ export function alignBreakdownToUnitPrice(
     laborTotal = hoursDrivenLabor;
   } else if (jobTarget > 0) {
     const residual = roundMoney(Math.max(0, jobTarget - materialsTotal));
-    // Use the larger of residual and hours-driven labor (never shrink hours for a cheap residual)
-    if (residual > laborTotal * 1.1 && residual > 0) {
+    // Only expand labor $ via residual when it implies realistic hours (not 1000s)
+    const residualHours = residual > 0 && rate > 0 ? residual / rate : 0;
+    if (
+      residual > laborTotal * 1.1 &&
+      residual > 0 &&
+      residualHours <= hoursCap * 1.15
+    ) {
       laborTotal = residual;
       if (hours > 0) rate = roundMoney(laborTotal / hours);
       if (rate > maxRate) {
         rate = maxRate;
-        hours = roundMoney(Math.max(expectedHours * 0.7, laborTotal / rate));
+        hours = roundMoney(
+          Math.min(hoursCap, Math.max(expectedHours * 0.7, laborTotal / rate))
+        );
         laborTotal = roundMoney(hours * rate);
       }
       if (rate < 45) {
         rate = roundMoney(Math.max(55, typicalRate));
-        hours = Math.max(hours, roundMoney(laborTotal / rate));
+        hours = Math.min(
+          hoursCap,
+          Math.max(hours, roundMoney(laborTotal / rate))
+        );
         laborTotal = roundMoney(hours * rate);
       }
+    } else if (residualHours > hoursCap) {
+      // jobTarget is absurd (double-counted SF total) — trust production hours, not residual
+      hours = roundMoney(Math.min(hours, expectedHours > 0 ? expectedHours : hoursCap));
+      laborTotal = roundMoney(hours * rate);
     }
   }
 

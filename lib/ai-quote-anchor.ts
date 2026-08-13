@@ -103,14 +103,19 @@ function buildWholeHomeInteriorPaintQuote(
   ].filter(m => m.total > 0);
 
   const productionSqftPerHour = coats === 1 ? 145 : coats === 2 ? 95 : 70;
-  const hours = roundMoney(Math.max(8, paintableSqft / productionSqftPerHour));
+  // Cap hours: 1,200 SF home dual-coat interior is typically ~25–50 crew-hrs, not 2,000+
+  const rawHours = Math.max(8, paintableSqft / productionSqftPerHour);
+  const hours = roundMoney(Math.min(rawHours, Math.max(16, floorSqft / 18)));
   const { typicalRate } = paintLaborRates(regional);
 
   const laborBreakdown: AnchorLaborBreakdown = {
     description: `Interior painting labor (${paintableSqft.toLocaleString()} sq ft surfaces)`,
     hours,
     rate: typicalRate,
-    total: laborJobTotal,
+    // Prefer hours × rate when residual labor $ from SF total is unrealistic
+    total: roundMoney(
+      Math.min(laborJobTotal, Math.max(hours * typicalRate, laborJobTotal * 0.5))
+    ),
   };
 
   return {

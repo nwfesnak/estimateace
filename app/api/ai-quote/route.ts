@@ -165,11 +165,14 @@ function estimateJobLaborHours(
     );
     const coats = wholeHomePaint.coats;
     const production = coats === 1 ? 110 : coats === 2 ? 75 : 55;
-    return finish(
-      paintableSqft / (production * 1.15),
-      paintableSqft / production,
-      paintableSqft / (production * 0.8)
-    );
+    let exp = paintableSqft / production;
+    // Int+ext of same home — more surface, not infinite
+    if (/exterior/i.test(description) && /interior/i.test(description)) {
+      exp *= 1.45;
+    }
+    // Absolute residential cap (crew-hours)
+    exp = Math.min(exp, Math.max(24, wholeHomePaint.floorSqft / 15));
+    return finish(exp * 0.8, exp, Math.min(exp * 1.35, 160));
   }
 
   // Fallback by measure
@@ -269,6 +272,11 @@ function buildLaborFromGuide(
 
   if (hours < guide.minHours) hours = guide.expectedHours;
   if (hours > guide.maxHours) hours = guide.maxHours;
+  // Absolute guard: never allow fantasy multi-thousand hour paint jobs
+  const absHourCap = /paint|painting/i.test(jobDescription)
+    ? Math.min(180, Math.max(guide.maxHours, 48))
+    : Math.min(500, Math.max(guide.maxHours * 1.2, 80));
+  if (hours > absHourCap) hours = absHourCap;
   if (rate <= 0) rate = typicalRate;
   if (rate > maxRate) rate = maxRate;
   if (rate < 40) rate = typicalRate;

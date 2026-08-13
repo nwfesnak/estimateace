@@ -598,10 +598,31 @@ function pickQuantityForTrade(
 
   if (industry.id === 'paint') {
     // Prefer largest area (full ceiling match paint), not the small patch
-    if (areas.length) return Math.max(...areas);
-    if (parsedSqft && parsedSqft >= 40) return parsedSqft;
-    if (suggestedQty >= 40) return suggestedQty;
-    return Math.max(parsedSqft || 0, suggestedQty || 0, 1);
+    let paintQty = 0;
+    if (areas.length) paintQty = Math.max(...areas);
+    else if (parsedSqft && parsedSqft >= 40) paintQty = parsedSqft;
+    else if (suggestedQty >= 40) paintQty = suggestedQty;
+    else paintQty = Math.max(parsedSqft || 0, suggestedQty || 0, 1);
+
+    // Whole-home floor SF is NOT wall+ceiling area. Expand only for interior whole-home language.
+    // Exterior + interior of an N sqft home ≈ ~2.8–3.5× floor for interior + exterior walls (not 20×).
+    const wholeHome =
+      /home|house|residence|ranch|whole|entire/i.test(text) && paintQty >= 400;
+    const dual =
+      /exterior\s*\/\s*interior|interior\s*\/\s*exterior|exterior\s*(?:and|&|\+)\s*interior|interior\s*(?:and|&|\+)\s*exterior/i.test(
+        text
+      );
+    if (wholeHome && dual) {
+      // Interior surfaces ~3.15× floor + exterior walls ~1.1× floor ≈ 4.25× (rough residential)
+      paintQty = Math.round(paintQty * 4.25);
+    } else if (wholeHome && /interior|inside/i.test(text) && !/exterior|outside/i.test(text)) {
+      paintQty = Math.round(paintQty * 3.15);
+    } else if (wholeHome && /exterior|outside/i.test(text) && !/interior|inside/i.test(text)) {
+      paintQty = Math.round(paintQty * 1.35);
+    }
+    // Dual coat slows production but should not multiply area again (handled by phase rates)
+    // Hard cap: never treat a residential home as > 25k SF of paint surface
+    return Math.min(paintQty, 25000);
   }
 
   if (industry.id === 'drywall') {
@@ -719,6 +740,27 @@ function computeOneIndustry(
     hours: mob,
   });
 
+  // Dual / multi-coat slows production slightly (do not re-multiply area)
+  const coatMult = /three\s*coat|3\s*coat/i.test(description)
+    ? 1.25
+    : /two\s*coat|2\s*coat|dual[\s-]*coat|double[\s-]*coat/i.test(description)
+      ? 1.15
+      : 1;
+  totalHours *= coatMult;
+
+  // Residential paint absolute ceiling (crew-hours). A 1,200 SF home int+ext dual coat
+  // is typically ~40–90 crew-hrs — never thousands.
+  if (industry.id === 'paint') {
+    const floorHint = parseSqftFromDescription(description) || 0;
+    const homeCap =
+      floorHint >= 400
+        ? Math.min(100, Math.max(28, floorHint / 14))
+        : quantity >= 2000
+          ? Math.min(100, quantity / 55)
+          : Math.min(80, quantity / 45 + 6);
+    totalHours = Math.min(totalHours, homeCap);
+  }
+
   const expected = Math.max(industry.minJobHours, totalHours);
   return {
     tradeId: industry.id,
@@ -727,7 +769,7 @@ function computeOneIndustry(
     quantity,
     minHours: roundMoney(expected * 0.8),
     expectedHours: roundMoney(expected),
-    maxHours: roundMoney(expected * 1.35),
+    maxHours: roundMoney(Math.min(expected * 1.35, industry.id === 'paint' ? 180 : expected * 1.35)),
     typicalRate: industry.typicalRate,
     maxRate: industry.maxRate,
     phases,
