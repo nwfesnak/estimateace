@@ -975,7 +975,6 @@ PRICING MATH (strict — numbers must reconcile):
           },
           { role: 'user', content: userMessage }
         ],
-        temperature: 0,
         max_tokens: 1800,
       }),
     });
