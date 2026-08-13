@@ -1287,8 +1287,11 @@ PRICING MATH (strict — numbers must reconcile):
         // Clamp into range
         finalTotal = Math.min(priceRange.high, Math.max(priceRange.low, finalTotal));
         structured.suggestedQty = qty;
-        structured.unit = priceRange.unit || 'SF';
-        structured.billingMode = 'sqft';
+        // QuoteLineStructure.unit is only "SF" | "Unit" (priceRange.unit is a free string)
+        structured.unit = /unit|ea|each|job|lot/i.test(String(priceRange.unit || ''))
+          ? 'Unit'
+          : 'SF';
+        structured.billingMode = structured.unit === 'SF' ? 'sqft' : 'unit';
         structured.total = roundMoney(finalTotal);
         structured.unitPrice = roundMoney(finalTotal / qty);
       } else if (modelTotal > 50 && modelTotal < 50000 && qty <= 20) {

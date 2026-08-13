@@ -176,7 +176,6 @@ export async function searchBuildCalculator(
       method: 'GET',
       headers: { Accept: 'application/json' },
       signal: controller.signal,
-      // @ts-expect-error next/node
       next: { revalidate: 0 },
     });
     if (!res.ok) {
