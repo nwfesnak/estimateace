@@ -46,6 +46,37 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Crew member not found on your account.' }, { status: 404 });
     }
 
+    // Cancel Stripe crew seat at period end (they keep access until paid month ends)
+    // if owner is removing immediately, cancel subscription now and delete access
+    try {
+      const { getStripe } = await import('@/lib/stripe-server');
+      const { upsertCrewSeatFromStripe } = await import('@/lib/crew-billing');
+      const stripe = getStripe();
+      let subId = row.stripe_subscription_id as string | null;
+      if (!subId) {
+        const { data: seat } = await admin
+          .from('crew_seat_subscriptions')
+          .select('stripe_subscription_id')
+          .eq('owner_user_id', user.id)
+          .eq('crew_email', row.email)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        subId = seat?.stripe_subscription_id || null;
+      }
+      if (stripe && subId) {
+        try {
+          // Immediate cancel when removing login — owner chose delete
+          const canceled = await stripe.subscriptions.cancel(subId);
+          await upsertCrewSeatFromStripe(canceled);
+        } catch (subErr) {
+          console.warn('crew remove: stripe cancel', subErr);
+        }
+      }
+    } catch (e) {
+      console.warn('crew remove: seat billing cleanup', e);
+    }
+
     await admin.from('crew_members').delete().eq('id', row.id);
 
     // Delete auth user if they were created as crew-only

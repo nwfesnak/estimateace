@@ -1569,6 +1569,23 @@ export default function Home() {
   const [crewEmailInput, setCrewEmailInput] = useState('');
   const [crewPasswordInput, setCrewPasswordInput] = useState('');
   const [crewInviteBusy, setCrewInviteBusy] = useState(false);
+  /** $14.99/mo crew seat confirm popup before invite + Stripe */
+  const [isCrewSeatConfirmOpen, setIsCrewSeatConfirmOpen] = useState(false);
+  const [crewSeats, setCrewSeats] = useState<
+    Array<{
+      id: string;
+      crewEmail: string;
+      status: string;
+      currentPeriodEnd: string | null;
+      cancelAtPeriodEnd: boolean;
+      amountDisplay: string;
+      stripeSubscriptionId: string | null;
+      hasAccess: boolean;
+      label: string;
+    }>
+  >([]);
+  const [crewSeatsLoading, setCrewSeatsLoading] = useState(false);
+  const [crewSeatCancelBusy, setCrewSeatCancelBusy] = useState<string | null>(null);
   const [deleteAccountBusy, setDeleteAccountBusy] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const SUPPORT_EMAIL =
@@ -2312,6 +2329,13 @@ export default function Home() {
     void loadLatestProfile();
   }, [workspaceUserId, crewResolved, supabase]);
 
+  // Load crew seat subscriptions when Manage plan is open
+  useEffect(() => {
+    if (profileTab === 'billing' && billingPanel === 'manage' && user?.id && !currentCrew) {
+      void refreshCrewSeats();
+    }
+  }, [profileTab, billingPanel, user?.id, currentCrew]);
+
   // Stripe Connect / job paid / trial return deep-links
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -2330,6 +2354,7 @@ export default function Home() {
       url.searchParams.delete('stripe_connect');
       url.searchParams.delete('job_paid');
       url.searchParams.delete('invoice');
+      url.searchParams.delete('crew');
       window.history.replaceState({}, '', url.pathname + url.search);
     };
 
@@ -2387,6 +2412,21 @@ export default function Home() {
         await refreshBillingStatus();
         showMessage('✅ Billing status refreshed. Open Profile → Plan / Billing if needed.');
       })();
+    } else if (billingParam === 'crew_seat_success') {
+      const crew = params.get('crew') || 'crew member';
+      showMessage(
+        `✅ Crew seat paid for ${crew} ($14.99/mo). They can log in with the email and password you set.`
+      );
+      setProfileTab('billing');
+      setBillingPanel('manage');
+      void refreshBillingStatus();
+      void refreshCrewSeats();
+    } else if (billingParam === 'crew_seat_cancel') {
+      showMessage(
+        'Crew seat payment canceled. The login may still exist — remove them under Manage billing if you do not want to keep the seat.'
+      );
+      setProfileTab('billing');
+      setBillingPanel('manage');
     } else if (billingParam === 'cancel') {
       showMessage('Checkout canceled — you can subscribe anytime.');
     }
@@ -6255,6 +6295,29 @@ export default function Home() {
     }
   };
 
+  const refreshCrewSeats = async () => {
+    if (!supabase || !user || currentCrew) return;
+    setCrewSeatsLoading(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) return;
+      const res = await fetch('/api/crew/seats', {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && Array.isArray(json.seats)) {
+        setCrewSeats(json.seats);
+      }
+    } catch (e) {
+      console.warn('refreshCrewSeats', e);
+    } finally {
+      setCrewSeatsLoading(false);
+    }
+  };
+
+  /** Step 1: validate inputs and open $14.99/mo confirm popup */
   const addCrewMember = async () => {
     if (currentCrew) {
       return showMessage('Crew accounts cannot invite other crew.');
@@ -6272,8 +6335,18 @@ export default function Home() {
       return showMessage('That email is already on your crew list');
     }
     if (!supabase || !user) return showMessage('Please log in first');
+    setIsCrewSeatConfirmOpen(true);
+  };
+
+  /** Step 2: after user confirms $14.99/mo — create login then Stripe subscription checkout */
+  const confirmCrewSeatAndPay = async () => {
+    if (currentCrew) return;
+    const email = crewEmailInput.trim().toLowerCase();
+    const password = crewPasswordInput;
+    if (!supabase || !user) return showMessage('Please log in first');
 
     setCrewInviteBusy(true);
+    setIsCrewSeatConfirmOpen(false);
     try {
       const { data: sessionData } = await supabase.auth.getSession();
       const token = sessionData.session?.access_token;
@@ -6309,16 +6382,86 @@ export default function Home() {
         ...prev,
         teammates: [...(prev.teammates || []), newCrew],
       }));
+      setTimeout(() => saveToDB(), 100);
+
+      // Stripe Checkout for $14.99/mo seat
+      const payRes = await fetch('/api/crew/seat-checkout', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          crewEmail: email,
+          crewUserId: json.crew?.userId,
+          crewMemberId: json.crew?.id,
+        }),
+      });
+      const payJson = await payRes.json().catch(() => ({}));
+      if (!payRes.ok || !payJson.url) {
+        showMessage(
+          payJson.error ||
+            'Crew login was created, but Stripe checkout failed. Open Manage billing to add the $14.99 seat or remove the crew member.'
+        );
+        setCrewEmailInput('');
+        setCrewPasswordInput('');
+        void refreshCrewSeats();
+        return;
+      }
+
       setCrewEmailInput('');
       setCrewPasswordInput('');
-      showMessage(
-        `✅ Crew login created for ${email}. They sign in on the main login page with that email and password.`
-      );
-      setTimeout(() => saveToDB(), 100);
+      window.location.href = payJson.url;
     } catch {
-      showMessage('Network error creating crew login.');
+      showMessage('Network error creating crew login / seat.');
     } finally {
       setCrewInviteBusy(false);
+    }
+  };
+
+  const cancelCrewSeatSubscription = async (seat: {
+    id: string;
+    crewEmail: string;
+    stripeSubscriptionId: string | null;
+  }) => {
+    if (!supabase) return;
+    if (
+      !confirm(
+        `Cancel crew seat for ${seat.crewEmail}?\n\nThey keep access until the end of the month already paid. After that, the $14.99 charge stops.`
+      )
+    ) {
+      return;
+    }
+    setCrewSeatCancelBusy(seat.id);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) return showMessage('Please log in again.');
+      const res = await fetch('/api/crew/seat-cancel', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          subscriptionId: seat.stripeSubscriptionId,
+          crewEmail: seat.crewEmail,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showMessage(json.error || 'Could not cancel seat');
+        return;
+      }
+      showMessage(
+        json.message ||
+          '✅ Seat canceled at period end. Crew keeps access until the paid month ends.'
+      );
+      void refreshCrewSeats();
+    } catch {
+      showMessage('Network error canceling seat.');
+    } finally {
+      setCrewSeatCancelBusy(null);
     }
   };
 
@@ -11534,6 +11677,7 @@ export default function Home() {
                         onClick={() => {
                           setBillingPanel('manage');
                           setDeleteConfirmText('');
+                          void refreshCrewSeats();
                         }}
                       >
                         Manage billing
@@ -11588,11 +11732,84 @@ export default function Home() {
                     <CardContent className="p-6 space-y-4">
                       <h3 className="text-xl font-semibold text-[#1e293b]">Manage plan &amp; payment</h3>
                       <p className="text-sm text-gray-500">
-                        Status: <strong className="capitalize">{billing.status}</strong>
-                        {billing.currentPeriodEnd
-                          ? ` · Period ends ${formatPeriodEnd(billing.currentPeriodEnd)}`
-                          : ''}
+                        All subscriptions you pay for on EstimateAce — software plan and crew seats.
                       </p>
+
+                      {/* Your subscriptions list */}
+                      <div className="rounded-xl border border-slate-200 overflow-hidden">
+                        <div className="bg-slate-50 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                          Your subscriptions
+                        </div>
+                        <ul className="divide-y divide-slate-100">
+                          <li className="p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                            <div>
+                              <div className="font-semibold text-[#1e293b]">EstimateAce software</div>
+                              <div className="text-sm text-gray-500">
+                                Status: <span className="capitalize font-medium">{billing.status}</span>
+                                {billing.cancelAtPeriodEnd ? ' · Cancels at period end' : ''}
+                                {billing.currentPeriodEnd
+                                  ? ` · Period ends ${formatPeriodEnd(billing.currentPeriodEnd)}`
+                                  : ''}
+                              </div>
+                            </div>
+                            <div className="text-sm font-semibold text-emerald-700">Main plan</div>
+                          </li>
+                          {crewSeatsLoading && (
+                            <li className="p-4 text-sm text-gray-500">Loading crew seats…</li>
+                          )}
+                          {!crewSeatsLoading && crewSeats.length === 0 && (
+                            <li className="p-4 text-sm text-gray-500">
+                              No crew seats yet. Add a crew member below — each seat is{' '}
+                              <strong>$14.99/month</strong>.
+                            </li>
+                          )}
+                          {crewSeats.map((seat) => (
+                            <li
+                              key={seat.id}
+                              className="p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
+                            >
+                              <div className="min-w-0">
+                                <div className="font-semibold text-[#1e293b] break-all">
+                                  Crew seat — {seat.crewEmail}
+                                </div>
+                                <div className="text-sm text-gray-500">
+                                  {seat.amountDisplay}/month ·{' '}
+                                  <span className="capitalize">{seat.status}</span>
+                                  {seat.cancelAtPeriodEnd ? ' · Cancels at period end' : ''}
+                                  {seat.currentPeriodEnd
+                                    ? ` · Access through ${formatPeriodEnd(seat.currentPeriodEnd)}`
+                                    : ''}
+                                </div>
+                                {seat.cancelAtPeriodEnd && (
+                                  <p className="text-xs text-amber-800 mt-1">
+                                    Canceled — they keep access until the paid period ends.
+                                  </p>
+                                )}
+                              </div>
+                              <div className="flex flex-wrap gap-2 shrink-0">
+                                {!seat.cancelAtPeriodEnd &&
+                                  seat.stripeSubscriptionId &&
+                                  ['active', 'trialing', 'past_due'].includes(
+                                    String(seat.status).toLowerCase()
+                                  ) && (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="border-amber-400 text-amber-900"
+                                      disabled={crewSeatCancelBusy === seat.id}
+                                      onClick={() => void cancelCrewSeatSubscription(seat)}
+                                    >
+                                      {crewSeatCancelBusy === seat.id
+                                        ? 'Canceling…'
+                                        : 'Cancel seat'}
+                                    </Button>
+                                  )}
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+
                       <div className="flex flex-wrap gap-2">
                         <Button
                           className="bg-[#10b981] text-white"
@@ -11633,12 +11850,20 @@ export default function Home() {
                               if (!res.ok) showMessage(data.error || 'Sync failed');
                               else showMessage(`✅ Synced — ${data.status || 'updated'}`);
                               await refreshBillingStatus();
+                              await refreshCrewSeats();
                             } finally {
                               setBillingBusy(false);
                             }
                           }}
                         >
                           Sync from Stripe
+                        </Button>
+                        <Button
+                          variant="outline"
+                          disabled={crewSeatsLoading}
+                          onClick={() => void refreshCrewSeats()}
+                        >
+                          Refresh seats
                         </Button>
                       </div>
                     </CardContent>
@@ -11652,6 +11877,11 @@ export default function Home() {
                         you, with the email and password you set here. Share those credentials with them
                         securely. They can use “Forgot your password?” on the main login if they need a reset.
                       </p>
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 text-amber-950 text-sm p-3">
+                        <strong>Each additional crew member is $14.99/month</strong> (month-to-month). You will
+                        confirm and pay before the seat is active. Cancel anytime under Your subscriptions —
+                        they keep access until the end of the paid month.
+                      </div>
                       <div className="rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-900 text-xs p-3">
                         Crew logins are real accounts. After you add someone, they sign in at app.estimateace.com
                         with that email and password (no separate crew login form).
@@ -15273,13 +15503,49 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* Crew pay modal retired (Phase A) — kept closed */}
-      <Dialog open={false} onOpenChange={() => setIsCrewPayModalOpen(false)}>
+      {/* Confirm $14.99/mo crew seat before creating login + Stripe Checkout */}
+      <Dialog open={isCrewSeatConfirmOpen} onOpenChange={setIsCrewSeatConfirmOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Crew billing</DialogTitle>
+            <DialogTitle>Add crew member — $14.99/month</DialogTitle>
           </DialogHeader>
-          <p className="text-sm text-gray-600">Crew seat billing moves to Phase B.</p>
+          <div className="space-y-3 text-sm text-slate-700 py-1">
+            <p>
+              You are adding{' '}
+              <strong className="break-all">{crewEmailInput.trim().toLowerCase() || 'this person'}</strong>{' '}
+              as a crew login.
+            </p>
+            <div className="rounded-xl border-2 border-emerald-300 bg-emerald-50 p-4 text-center">
+              <div className="text-3xl font-bold text-emerald-800">$14.99</div>
+              <div className="text-sm text-emerald-900 mt-1">per month · month-to-month</div>
+            </div>
+            <ul className="list-disc pl-5 space-y-1 text-slate-600">
+              <li>Billed monthly on the card you use at checkout</li>
+              <li>Cancel anytime under Manage plan &amp; payment</li>
+              <li>
+                After you cancel, they keep access until the end of the month already paid
+              </li>
+              <li>You can add more crew seats anytime at the same rate</li>
+            </ul>
+          </div>
+          <DialogFooter className="flex flex-col sm:flex-row gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setIsCrewSeatConfirmOpen(false)}
+              disabled={crewInviteBusy}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              className="bg-[#10b981] hover:bg-[#059669] text-white"
+              disabled={crewInviteBusy}
+              onClick={() => void confirmCrewSeatAndPay()}
+            >
+              {crewInviteBusy ? 'Working…' : 'Confirm & pay $14.99/mo'}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

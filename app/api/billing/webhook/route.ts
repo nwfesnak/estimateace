@@ -4,6 +4,11 @@ import { getStripe } from '@/lib/stripe-server';
 import { upsertSubscriptionFromStripe } from '@/lib/billing-sync';
 import { markDocumentPaidFromJobCheckout } from '@/lib/job-payments';
 import { markRecurringActiveFromCheckout } from '@/lib/recurring-services';
+import {
+  CREW_SEAT_PURPOSE,
+  isCrewSeatSubscription,
+  upsertCrewSeatFromStripe,
+} from '@/lib/crew-billing';
 
 export const runtime = 'nodejs';
 
@@ -51,8 +56,21 @@ export async function POST(request: NextRequest) {
           break;
         }
 
+        // Crew seat ($14.99/mo) — separate from EstimateAce SaaS plan
+        if (session.metadata?.purpose === CREW_SEAT_PURPOSE) {
+          if (session.subscription) {
+            const subId =
+              typeof session.subscription === 'string'
+                ? session.subscription
+                : session.subscription.id;
+            const sub = await stripe.subscriptions.retrieve(subId);
+            const result = await upsertCrewSeatFromStripe(sub);
+            if (!result.ok) console.error('webhook crew seat:', result.error);
+          }
+          break;
+        }
+
         // SaaS subscription checkout only (EstimateAce monthly/yearly)
-        // Skip if explicitly marked as client recurring
         if (session.metadata?.saas_billing === 'false') {
           break;
         }
@@ -64,8 +82,12 @@ export async function POST(request: NextRequest) {
               ? session.subscription
               : session.subscription.id;
           const sub = await stripe.subscriptions.retrieve(subId);
-          // Client recurring subs carry purpose in subscription metadata
           if (sub.metadata?.purpose === 'client_recurring_subscription') {
+            break;
+          }
+          if (isCrewSeatSubscription(sub)) {
+            const result = await upsertCrewSeatFromStripe(sub);
+            if (!result.ok) console.error('webhook crew seat:', result.error);
             break;
           }
           const result = await upsertSubscriptionFromStripe(sub, userId || null);
@@ -77,8 +99,12 @@ export async function POST(request: NextRequest) {
       case 'customer.subscription.updated':
       case 'customer.subscription.deleted': {
         const sub = event.data.object as Stripe.Subscription;
-        // Never mix client service subs into EstimateAce SaaS table
         if (sub.metadata?.purpose === 'client_recurring_subscription') {
+          break;
+        }
+        if (isCrewSeatSubscription(sub)) {
+          const result = await upsertCrewSeatFromStripe(sub);
+          if (!result.ok) console.error('webhook crew seat sub:', result.error);
           break;
         }
         const result = await upsertSubscriptionFromStripe(sub);
@@ -94,6 +120,11 @@ export async function POST(request: NextRequest) {
         const subId = typeof subRef === 'string' ? subRef : subRef.id;
         const sub = await stripe.subscriptions.retrieve(subId);
         if (sub.metadata?.purpose === 'client_recurring_subscription') {
+          break;
+        }
+        if (isCrewSeatSubscription(sub)) {
+          const result = await upsertCrewSeatFromStripe(sub);
+          if (!result.ok) console.error('webhook crew seat invoice:', result.error);
           break;
         }
         const result = await upsertSubscriptionFromStripe(sub);
