@@ -87,14 +87,10 @@ const DEFAULT_PAYMENT_SETTINGS = {
   venmo: { enabled: true, connected: false },
   zelle: { enabled: true, connected: false },
   mailcheck: { enabled: true, connected: false },
-  nowpayments: { enabled: false, connected: false },
-  coinbase_commerce: { enabled: false, connected: false },
 };
 
-/** Removed as a standalone method — ACH/eCheck is part of Stripe Checkout */
-const HIDDEN_PAYMENT_METHODS = new Set(['echeck']);
-
-const CRYPTO_PAYMENT_METHODS = new Set(['nowpayments', 'coinbase_commerce']);
+/** Removed methods (not offered as payment options) */
+const HIDDEN_PAYMENT_METHODS = new Set(['echeck', 'nowpayments', 'coinbase_commerce']);
 
 const getPaymentMethodMeta = (method: string) => {
   const meta: Record<
@@ -104,7 +100,7 @@ const getPaymentMethodMeta = (method: string) => {
       label: string;
       description: string;
       howItWorks: string;
-      category: 'traditional' | 'crypto';
+      category: 'traditional';
       /** Opens an app / payment page with amount (when set up) */
       clickToPay: boolean;
     }
@@ -152,24 +148,6 @@ const getPaymentMethodMeta = (method: string) => {
       howItWorks:
         'Mail a check for the amount due to the address shown. Write the invoice number on the memo line. The contractor marks the invoice paid when the check clears.',
       category: 'traditional',
-      clickToPay: false,
-    },
-    nowpayments: {
-      icon: '₿',
-      label: 'NOWPayments (Crypto)',
-      description: 'Bitcoin and other crypto',
-      howItWorks:
-        'Crypto payments use the contractor’s NOWPayments account. Ask them for a payment link if this option is offered.',
-      category: 'crypto',
-      clickToPay: false,
-    },
-    coinbase_commerce: {
-      icon: '🪙',
-      label: 'Coinbase Commerce',
-      description: 'Crypto via Coinbase',
-      howItWorks:
-        'Crypto checkout via Coinbase Commerce. The contractor provides a payment link when you choose this method.',
-      category: 'crypto',
       clickToPay: false,
     },
   };
@@ -7857,7 +7835,7 @@ export default function Home() {
 
     // Stripe Checkout covers card + Apple Pay + eCheck/ACH (no separate echeck method)
     const orderClick = ['stripe', 'venmo', 'paypal', 'zelle'];
-    const orderOther = ['mailcheck', 'nowpayments', 'coinbase_commerce'];
+    const orderOther = ['mailcheck'];
     const stripeConfigured = stripeConnectStatus?.stripeConfigured !== false;
 
     const pushIfReady = (method: string) => {
@@ -8905,11 +8883,7 @@ export default function Home() {
     }
 
     const meta = getPaymentMethodMeta(method);
-    const providerUrls: { [key: string]: string } = {
-      nowpayments: 'https://account.nowpayments.io/create-account',
-      coinbase_commerce: 'https://commerce.coinbase.com/signup',
-    };
-    window.open(providerUrls[method] || `https://${method}.com`, '_blank', 'noopener,noreferrer');
+    window.open(`https://${method}.com`, '_blank', 'noopener,noreferrer');
 
     setTimeout(() => {
       const nextProfile = {
@@ -12767,21 +12741,8 @@ export default function Home() {
                     </h3>
                     <div className="space-y-3 sm:space-y-4 w-full max-w-full min-w-0">
                       {Object.entries(mergePaymentSettings(profile.paymentSettings))
-                        .filter(([method]) => !CRYPTO_PAYMENT_METHODS.has(method))
+                        .filter(([method]) => !HIDDEN_PAYMENT_METHODS.has(method))
                         .map(([method, settings]) => renderPaymentMethodRow(method, settings))}
-                    </div>
-
-                    <div className="mt-8 sm:mt-10 pt-6 sm:pt-8 border-t w-full max-w-full min-w-0">
-                      <h4 className="font-semibold text-base sm:text-lg mb-1 flex items-center gap-2 min-w-0">
-                        <span className="shrink-0">₿</span>
-                        <span className="break-words">{t('cryptoPayments')}</span>
-                      </h4>
-                      <p className="text-sm text-gray-500 mb-4 break-words">{t('cryptoPaymentsHelp')}</p>
-                      <div className="space-y-3 sm:space-y-4 w-full max-w-full min-w-0">
-                        {Object.entries(mergePaymentSettings(profile.paymentSettings))
-                          .filter(([method]) => CRYPTO_PAYMENT_METHODS.has(method))
-                          .map(([method, settings]) => renderPaymentMethodRow(method, settings))}
-                      </div>
                     </div>
 
                     {/* Credit Card Processing Fee Toggle */}

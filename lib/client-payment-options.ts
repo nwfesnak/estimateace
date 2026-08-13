@@ -44,8 +44,6 @@ const DEFAULTS: Record<string, PaymentMethodSettings> = {
   zelle: { enabled: false, connected: false, handle: '', qrUrl: '' },
   stripe: { enabled: true, connected: false },
   mailcheck: { enabled: false, connected: false, handle: '' },
-  nowpayments: { enabled: false, connected: false, handle: '' },
-  coinbase_commerce: { enabled: false, connected: false, handle: '' },
 };
 
 function mergeSettings(
