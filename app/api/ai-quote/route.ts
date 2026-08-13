@@ -1,6 +1,11 @@
 // app/api/ai-quote/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+
+/** grok-4.6 reasoning + BC/EP lookups can exceed the default 10–15s serverless limit */
+export const maxDuration = 120;
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 import {
   buildQuoteUserMessage,
   buildRegionalPromptSection,
@@ -870,6 +875,10 @@ export async function POST(request: NextRequest) {
     );
 
     const quoteModel = getXaiQuoteModel();
+    // grok-4.6 defaults to reasoning_effort "high" (~30s+ and huge token use).
+    // "low" keeps SuperGrok-class quality for structured pricing with far lower latency.
+    const quoteReasoningEffort =
+      (process.env.GROK_QUOTE_REASONING_EFFORT || 'low').trim().toLowerCase() || 'low';
     const response = await fetch('https://api.x.ai/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -879,6 +888,8 @@ export async function POST(request: NextRequest) {
       body: JSON.stringify({
         model: quoteModel,
         temperature: 0.2,
+        // Chat Completions accepts top-level reasoning_effort for grok-4.5/4.6
+        reasoning_effort: quoteReasoningEffort,
         messages: [
           {
             role: 'system',
@@ -975,23 +986,50 @@ PRICING MATH (strict — numbers must reconcile):
           },
           { role: 'user', content: userMessage }
         ],
-        max_tokens: 1800,
+        // Reasoning tokens count against the budget — leave room for the JSON answer
+        max_tokens: 4000,
       }),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      return NextResponse.json({ error: `xAI API Error: ${errorText}` }, { status: response.status });
+      let friendly = errorText;
+      try {
+        const j = JSON.parse(errorText);
+        friendly = j?.error?.message || j?.error || errorText;
+      } catch {
+        /* keep raw */
+      }
+      return NextResponse.json(
+        { error: `xAI API Error: ${String(friendly).slice(0, 500)}` },
+        { status: response.status >= 400 && response.status < 600 ? response.status : 502 }
+      );
     }
 
     const data = await response.json();
-    const aiText = data.choices?.[0]?.message?.content || '';
+    const message = data.choices?.[0]?.message || {};
+    // Prefer final answer content; some responses put partial JSON only in content
+    const aiText = String(message.content || message.reasoning_content || '').trim();
 
-    const jsonMatch = aiText.match(/\{[\s\S]*\}/);
-    const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+    let parsed: any = null;
+    try {
+      const jsonMatch = aiText.match(/\{[\s\S]*\}/);
+      parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+    } catch {
+      parsed = null;
+    }
 
     if (!parsed) {
-      return NextResponse.json({ error: 'AI returned invalid format' }, { status: 500 });
+      const finish = data.choices?.[0]?.finish_reason || 'unknown';
+      return NextResponse.json(
+        {
+          error:
+            finish === 'length'
+              ? 'AI ran out of output tokens before finishing the quote. Try a shorter description, or raise max tokens.'
+              : 'AI returned invalid format. Try again with a clearer description (include sqft or quantity when known).',
+        },
+        { status: 500 }
+      );
     }
 
     /** AI often returns numbers as strings — coerce safely */
@@ -1016,19 +1054,22 @@ PRICING MATH (strict — numbers must reconcile):
         : [];
 
     const parsedMaterials: MaterialLine[] = rawMaterials
-      .filter((m: { description?: string }) => m?.description?.trim())
-      .map((m: { description?: string; qty?: number; unit?: string; unitPrice?: number; total?: number }) => {
-        const qty = num(m.qty, 1) || 1;
-        const unitPrice = num(m.unitPrice, 0);
+      .map((m: any) => {
+        if (!m || typeof m !== 'object') return null;
+        const description = String(m.description || m.name || m.item || '').trim();
+        if (!description) return null;
+        const qty = num(m.qty ?? m.quantity, 1) || 1;
+        const unitPrice = num(m.unitPrice ?? m.price, 0);
         const total = num(m.total, 0) || qty * unitPrice;
         return {
-          description: String(m.description).trim(),
+          description,
           qty,
           unit: m.unit ? String(m.unit).trim() : 'ea',
           unitPrice,
           total,
-        };
-      });
+        } as MaterialLine;
+      })
+      .filter(Boolean) as MaterialLine[];
 
     const suggestedQty = (() => {
       const n = num(parsed.suggestedQty, 1);

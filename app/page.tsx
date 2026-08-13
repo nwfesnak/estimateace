@@ -4785,6 +4785,9 @@ export default function Home() {
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.access_token) {
           headers.Authorization = `Bearer ${session.access_token}`;
+        } else {
+          showMessage('🔒 Please log in to use AI Price Quote.');
+          return;
         }
       }
 
@@ -4808,17 +4811,27 @@ export default function Home() {
         }),
       });
 
-      const data = await res.json();
+      let data: any = null;
+      try {
+        data = await res.json();
+      } catch {
+        if (res.status === 504 || res.status === 408) {
+          showMessage('⏳ AI quote timed out. Wait a moment and try again — long jobs can take up to a minute.');
+          return;
+        }
+        showMessage(`❌ AI quote failed (HTTP ${res.status}). Try again.`);
+        return;
+      }
       if (!res.ok || data.error) {
-        const errMsg = data.error || 'AI quote error';
+        const errMsg = String(data?.error || 'AI quote error');
         if (errMsg.includes('Rate limit')) {
           showMessage(`⏳ ${errMsg}`);
-        } else if (errMsg.includes('Unauthorized') || errMsg.includes('missing')) {
+        } else if (errMsg.includes('Unauthorized') || errMsg.includes('Authorization')) {
           showMessage('🔒 Please log in with a main account to use AI features.');
         } else if (errMsg.includes('API key') || errMsg.includes('Incorrect') || errMsg.includes('GROK_API_KEY')) {
           showMessage('🔑 AI service key issue. Check Vercel env vars and redeploy.');
-        } else if (errMsg.includes('invalid format')) {
-          showMessage('⚠️ AI returned invalid data. Try a different description or photo.');
+        } else if (errMsg.includes('invalid format') || errMsg.includes('output tokens')) {
+          showMessage('⚠️ AI returned incomplete data. Try a shorter or clearer description.');
         } else if (errMsg.includes('Vision') || errMsg.includes('photo') || errMsg.includes('image')) {
           showMessage(`📷 ${errMsg}`);
         } else {
@@ -4828,9 +4841,14 @@ export default function Home() {
       }
 
       applyAiQuoteData(item.id, data, { fromPhoto: options?.fromPhoto });
-    } catch (err) {
+    } catch (err: any) {
       console.error('AI Quote call failed:', err);
-      showMessage('⚠️ Network error. Could not reach AI quote service. Check your connection or console.');
+      const msg = String(err?.message || err || '');
+      if (/abort|timeout|network|Failed to fetch|Load failed/i.test(msg)) {
+        showMessage('⏳ AI quote took too long or the network dropped. Try again — wait for the green success message.');
+      } else {
+        showMessage('⚠️ Network error. Could not reach AI quote service. Check your connection.');
+      }
     } finally {
       setAiQuoteLoadingId(null);
     }
