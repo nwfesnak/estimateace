@@ -991,7 +991,25 @@ export default function Home() {
     return (translations as any)[currentLang]?.[key] || (translations as any)['en']?.[key] || key;
   };
 
-  const [profileTab, setProfileTab] = useState<'info' | 'payments' | 'paidInvoices' | 'billing'>('info');
+  const [profileTab, setProfileTab] = useState<
+    'info' | 'payments' | 'paidInvoices' | 'billing' | 'tutorials'
+  >('info');
+  const [tutorials, setTutorials] = useState<
+    Array<{
+      id: string;
+      title: string;
+      description: string;
+      videoUrl?: string;
+      fileName?: string;
+      createdAt?: string;
+    }>
+  >([]);
+  const [tutorialsCanManage, setTutorialsCanManage] = useState(false);
+  const [tutorialsLoading, setTutorialsLoading] = useState(false);
+  const [tutorialUploadBusy, setTutorialUploadBusy] = useState(false);
+  const [tutorialTitle, setTutorialTitle] = useState('');
+  const [tutorialDescription, setTutorialDescription] = useState('');
+  const tutorialFileRef = useRef<HTMLInputElement>(null);
   /** Skip profile auto-save while hydrating from server/local cache */
   const profileHydratingRef = useRef(false);
   const profileAutoSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2270,6 +2288,104 @@ export default function Home() {
       void refreshCrewSeats();
     }
   }, [profileTab, billingPanel, user?.id, currentCrew]);
+
+  const refreshTutorials = async () => {
+    if (!supabase || !user) return;
+    setTutorialsLoading(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) return;
+      const res = await fetch('/api/tutorials', {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setTutorials(Array.isArray(json.videos) ? json.videos : []);
+        setTutorialsCanManage(!!json.canManage);
+      } else {
+        console.warn('tutorials load:', json.error);
+      }
+    } catch (e) {
+      console.warn('refreshTutorials', e);
+    } finally {
+      setTutorialsLoading(false);
+    }
+  };
+
+  const uploadTutorialVideo = async (file: File | null) => {
+    if (!file || !supabase || !user) return;
+    if (!tutorialsCanManage) {
+      showMessage('Only the EstimateAce owner can upload tutorial videos.');
+      return;
+    }
+    setTutorialUploadBusy(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) {
+        showMessage('Please log in again.');
+        return;
+      }
+      const form = new FormData();
+      form.append('file', file);
+      form.append('title', tutorialTitle.trim() || file.name.replace(/\.[^.]+$/, ''));
+      form.append('description', tutorialDescription.trim());
+      const res = await fetch('/api/tutorials', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: form,
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showMessage(json.error || 'Upload failed');
+        return;
+      }
+      setTutorialTitle('');
+      setTutorialDescription('');
+      if (tutorialFileRef.current) tutorialFileRef.current.value = '';
+      showMessage('✅ Tutorial video uploaded — all users can watch it under Video Tutorials.');
+      await refreshTutorials();
+    } catch {
+      showMessage('Network error uploading tutorial.');
+    } finally {
+      setTutorialUploadBusy(false);
+    }
+  };
+
+  const deleteTutorialVideo = async (id: string, title: string) => {
+    if (!supabase || !tutorialsCanManage) return;
+    if (!confirm(`Remove tutorial “${title}”? Users will no longer see it.`)) return;
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) return;
+      const res = await fetch('/api/tutorials', {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ id }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showMessage(json.error || 'Could not delete tutorial');
+        return;
+      }
+      showMessage('Tutorial removed.');
+      await refreshTutorials();
+    } catch {
+      showMessage('Network error deleting tutorial.');
+    }
+  };
+
+  useEffect(() => {
+    if (view === 'profileView' && profileTab === 'tutorials' && user?.id) {
+      void refreshTutorials();
+    }
+  }, [view, profileTab, user?.id]);
 
   // Stripe Connect / job paid / trial return deep-links
   useEffect(() => {
@@ -11600,6 +11716,15 @@ export default function Home() {
                     </span>
                   )}
                 </button>
+                <button
+                  onClick={() => {
+                    setProfileTab('tutorials');
+                    void refreshTutorials();
+                  }}
+                  className={`flex-1 min-w-[8rem] py-4 text-center font-semibold ${profileTab === 'tutorials' ? 'border-b-4 border-[#10b981] text-[#10b981]' : 'text-gray-500'}`}
+                >
+                  🎥 Video Tutorials
+                </button>
               </div>
 
               {profileTab === 'billing' && billingPanel === 'overview' && (
@@ -12736,6 +12861,136 @@ export default function Home() {
                     </div>
 
 
+                  </CardContent>
+                </Card>
+              )}
+
+              {profileTab === 'tutorials' && (
+                <Card className="mb-8">
+                  <CardContent className="p-6 sm:p-8 space-y-6">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <h3 className="text-xl font-semibold flex items-center gap-2">
+                          <span>🎥</span>
+                          <span>Video Tutorials</span>
+                        </h3>
+                        <p className="text-sm text-gray-500 mt-1">
+                          Watch short videos from EstimateAce on how to use the app — estimates, invoices,
+                          payments, AI quote, and more.
+                        </p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={tutorialsLoading}
+                        onClick={() => void refreshTutorials()}
+                      >
+                        {tutorialsLoading ? 'Loading…' : 'Refresh'}
+                      </Button>
+                    </div>
+
+                    {tutorialsCanManage && (
+                      <div className="rounded-xl border-2 border-emerald-300 bg-emerald-50/60 p-4 space-y-3">
+                        <h4 className="font-semibold text-emerald-900">Upload (EstimateAce owner)</h4>
+                        <p className="text-xs text-emerald-800">
+                          Videos you upload here are available to all users under this tab. MP4 / WebM / MOV,
+                          up to 200 MB.
+                        </p>
+                        <Input
+                          placeholder="Video title (e.g. How to send an estimate)"
+                          value={tutorialTitle}
+                          onChange={(e) => setTutorialTitle(e.target.value)}
+                          className="bg-white"
+                        />
+                        <Textarea
+                          placeholder="Short description (optional)"
+                          value={tutorialDescription}
+                          onChange={(e) => setTutorialDescription(e.target.value)}
+                          rows={2}
+                          className="bg-white"
+                        />
+                        <input
+                          ref={tutorialFileRef}
+                          type="file"
+                          accept="video/*,.mp4,.webm,.mov,.m4v"
+                          className="block w-full text-sm text-gray-600"
+                          disabled={tutorialUploadBusy}
+                          onChange={(e) => {
+                            const f = e.target.files?.[0] || null;
+                            void uploadTutorialVideo(f);
+                          }}
+                        />
+                        {tutorialUploadBusy && (
+                          <p className="text-sm font-medium text-emerald-800">Uploading… please wait.</p>
+                        )}
+                      </div>
+                    )}
+
+                    {!tutorialsCanManage && (
+                      <p className="text-xs text-gray-500 rounded-lg border bg-slate-50 p-3">
+                        Tutorials are published by EstimateAce. Check back here for new how-to videos.
+                      </p>
+                    )}
+
+                    <div className="space-y-6">
+                      {tutorialsLoading && tutorials.length === 0 && (
+                        <p className="text-sm text-gray-500 text-center py-8">Loading tutorials…</p>
+                      )}
+                      {!tutorialsLoading && tutorials.length === 0 && (
+                        <div className="border border-dashed rounded-lg p-8 text-center text-sm text-gray-500 bg-gray-50">
+                          No video tutorials yet.
+                          {tutorialsCanManage
+                            ? ' Upload your first help video above.'
+                            : ' The EstimateAce owner can add videos for all users.'}
+                        </div>
+                      )}
+                      {tutorials.map((vid) => (
+                        <div
+                          key={vid.id}
+                          className="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm"
+                        >
+                          <div className="p-4 border-b bg-slate-50 flex flex-wrap items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <h4 className="font-semibold text-[#1e293b]">{vid.title}</h4>
+                              {vid.description ? (
+                                <p className="text-sm text-gray-600 mt-1 whitespace-pre-wrap">
+                                  {vid.description}
+                                </p>
+                              ) : null}
+                              {vid.createdAt ? (
+                                <p className="text-[11px] text-gray-400 mt-1">
+                                  Added {new Date(vid.createdAt).toLocaleDateString()}
+                                </p>
+                              ) : null}
+                            </div>
+                            {tutorialsCanManage && (
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                onClick={() => void deleteTutorialVideo(vid.id, vid.title)}
+                              >
+                                Delete
+                              </Button>
+                            )}
+                          </div>
+                          {vid.videoUrl ? (
+                            <video
+                              controls
+                              playsInline
+                              preload="metadata"
+                              className="w-full max-h-[70vh] bg-black"
+                              src={vid.videoUrl}
+                            >
+                              Your browser does not support video playback.
+                            </video>
+                          ) : (
+                            <p className="p-6 text-sm text-gray-500 text-center">
+                              Video unavailable — try Refresh.
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   </CardContent>
                 </Card>
               )}
