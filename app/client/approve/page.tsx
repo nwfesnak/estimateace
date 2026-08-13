@@ -3,7 +3,29 @@
 import { useEffect, useMemo, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { computeStripeCardFee, STRIPE_CARD_FIXED_USD, STRIPE_CARD_PERCENT } from '@/lib/stripe-fees';
+import {
+  computeStripeCardFee,
+  methodHasProcessingFee,
+  STRIPE_CARD_FIXED_USD,
+} from '@/lib/stripe-fees';
+
+type PayOption = {
+  method: string;
+  label: string;
+  icon: string;
+  description: string;
+  howItWorks: string;
+  ready: boolean;
+  handle?: string;
+  qrUrl?: string;
+  payUrl?: string;
+  clickToPay: boolean;
+  baseAmount?: number;
+  feeAmount?: number;
+  totalAmount?: number;
+  feeLabel?: string;
+  feeDescription?: string;
+};
 
 type DocPayload = {
   ok?: boolean;
@@ -32,27 +54,65 @@ type DocPayload = {
   payLabel?: string;
   paymentStatus?: string;
   terms?: string;
+  chargeCCFee?: boolean;
+  ccFeePercentage?: number;
   items?: Array<{ description: string; qty: number; total: number }>;
-  paymentOptions?: Array<{
-    method: string;
-    label: string;
-    icon: string;
-    description: string;
-    howItWorks: string;
-    ready: boolean;
-    handle?: string;
-    qrUrl?: string;
-    payUrl?: string;
-    clickToPay: boolean;
-    baseAmount?: number;
-    feeAmount?: number;
-    totalAmount?: number;
-    feeLabel?: string;
-    feeDescription?: string;
-  }>;
+  paymentOptions?: PayOption[];
   message?: string;
   error?: string;
 };
+
+/** Force free methods to $0 fee and strip stale “includes processing fee” copy. */
+function sanitizePayOptions(
+  raw: PayOption[] | undefined,
+  basePay: number,
+  companyChargesFees: boolean
+): PayOption[] {
+  return (raw || []).map((opt) => {
+    const method = String(opt.method || '').toLowerCase();
+    const base =
+      Number(opt.baseAmount) > 0 ? Number(opt.baseAmount) : Math.max(0, Number(basePay) || 0);
+    const freeMethod = !methodHasProcessingFee(method);
+    // Only card / Venmo / PayPal get fees, and only if contractor opted in
+    if (freeMethod || !companyChargesFees) {
+      let description = String(opt.description || '');
+      description = description
+        .replace(/\s*\(includes processing fee\)/gi, '')
+        .replace(/\s*—?\s*includes processing fee/gi, '')
+        .trim();
+      if (method === 'zelle') {
+        description = 'Bank-to-bank transfer — no processing fee';
+      } else if (method === 'mailcheck' || method === 'check') {
+        description = 'Paper check by mail — no processing fee';
+      }
+      return {
+        ...opt,
+        description,
+        howItWorks: freeMethod
+          ? method === 'zelle'
+            ? 'Send the amount shown via your bank’s Zelle. Put the invoice # in the memo. No processing fee.'
+            : method === 'mailcheck' || method === 'check'
+              ? 'Mail a check for the amount shown. Write the invoice number on the memo line. No processing fee.'
+              : opt.howItWorks
+          : opt.howItWorks,
+        baseAmount: base,
+        feeAmount: 0,
+        totalAmount: base,
+        feeLabel: 'No processing fee',
+        feeDescription: 'No processing fee for this payment method',
+      };
+    }
+    // Fee-bearing method with company opted in — keep API totals if valid
+    const feeAmt = Math.max(0, Number(opt.feeAmount) || 0);
+    const total = Number(opt.totalAmount) > 0 ? Number(opt.totalAmount) : base + feeAmt;
+    return {
+      ...opt,
+      baseAmount: base,
+      feeAmount: feeAmt,
+      totalAmount: total,
+    };
+  });
+}
 
 
 function money(n: number) {
@@ -127,7 +187,11 @@ function ApprovePayInner() {
       : amountPaid > 0
         ? 'Balance due (after deposit)'
         : 'Total due');
-  const paymentOptions = doc?.paymentOptions || [];
+  const companyChargesFees = doc?.chargeCCFee === true;
+  const paymentOptions = useMemo(
+    () => sanitizePayOptions(doc?.paymentOptions, basePay, companyChargesFees),
+    [doc?.paymentOptions, basePay, companyChargesFees]
+  );
   const canPay = basePay >= 0.5;
   const hasTerms = Boolean(String(doc?.terms || '').trim());
   /** Block approve/pay until client confirms they read terms (only when terms exist) */
@@ -365,9 +429,14 @@ function ApprovePayInner() {
                   Job total {money(grandTotal)} − deposit/payments {money(amountPaid)} = balance due.
                 </p>
               )}
-              {doc?.chargeCCFee && (
+              {companyChargesFees ? (
                 <p className="text-[11px] text-amber-800 pt-1">
-                  Card, Venmo, and PayPal may include a processing fee. Zelle and mail check have no processing fee.
+                  Card, Venmo, and PayPal may include a processing fee. Zelle and mail check have no
+                  processing fee.
+                </p>
+              ) : (
+                <p className="text-[11px] text-emerald-800 pt-1">
+                  No processing fee on any payment method for this contractor.
                 </p>
               )}
             </div>
@@ -497,10 +566,15 @@ function ApprovePayInner() {
                             <span>{payLabel}</span>
                             <span>{money(Number(opt.baseAmount) || basePay)}</span>
                           </div>
-                          {feeAmt > 0 && (
+                          {feeAmt > 0 ? (
                             <div className="flex justify-between gap-2 text-amber-800">
                               <span>{opt.feeLabel || 'Processing fee'}</span>
                               <span>{money(feeAmt)}</span>
+                            </div>
+                          ) : (
+                            <div className="flex justify-between gap-2 text-emerald-700 font-medium">
+                              <span>Processing fee</span>
+                              <span>None</span>
                             </div>
                           )}
                         </div>

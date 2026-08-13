@@ -183,7 +183,11 @@ export async function GET(request: NextRequest) {
     const invoiceNumber = row.invoiceNumber || row.invoicenumber || inv;
     const company = profile.company || 'Your contractor';
     // Only companies that opt in charge processing fees (Zelle / mail check never do)
-    const chargeFees = profile.chargeCCFee === true;
+    const chargeFees =
+      profile.chargeCCFee === true ||
+      profile.chargeCCFee === 'true' ||
+      profile.chargeCCFee === 1 ||
+      profile.chargeCCFee === '1';
     const feePercent =
       chargeFees && Number(profile.ccFeePercentage) > 0
         ? Number(profile.ccFeePercentage)

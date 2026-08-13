@@ -102,6 +102,10 @@ const META: Record<
   },
 };
 
+function roundMoney(n: number) {
+  return Math.round(Math.max(0, Number(n) || 0) * 100) / 100;
+}
+
 function withFee(
   method: string,
   baseAmount: number,
@@ -110,9 +114,20 @@ function withFee(
   ClientPayOption,
   'baseAmount' | 'feeAmount' | 'totalAmount' | 'feeLabel' | 'feeDescription'
 > {
-  const fee = computeProcessingFee(baseAmount, {
+  const base = roundMoney(baseAmount);
+  // Zelle, mail check, cash — never charge a processing fee
+  if (!methodHasProcessingFee(method) || !opts.chargeFees) {
+    return {
+      baseAmount: base,
+      feeAmount: 0,
+      totalAmount: base,
+      feeLabel: 'No processing fee',
+      feeDescription: 'No processing fee for this payment method',
+    };
+  }
+  const fee = computeProcessingFee(base, {
     method,
-    chargeFees: opts.chargeFees && methodHasProcessingFee(method),
+    chargeFees: true,
     percentRate: opts.feePercentOverride,
   });
   return {
