@@ -76,6 +76,13 @@ export type MfaSettings = {
 
 /** Load 2FA settings from SETTINGS profile + auth metadata */
 export async function loadMfaSettings(userId: string, metaPhone?: string | null): Promise<MfaSettings> {
+  // Soft launch: SMS two-step is disabled until phone / Twilio line is active.
+  // Re-enable by restoring the SETTINGS profile check below.
+  void userId;
+  void metaPhone;
+  return { enabled: false, phone: null };
+
+  /*
   const admin = getSupabaseAdmin();
   let enabled = false;
   let phone: string | null = null;
@@ -102,6 +109,7 @@ export async function loadMfaSettings(userId: string, metaPhone?: string | null)
     return { enabled: false, phone: normalized };
   }
   return { enabled: true, phone: normalized };
+  */
 }
 
 export async function storeLoginOtp(userId: string, code: string): Promise<void> {

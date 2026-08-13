@@ -1213,7 +1213,8 @@ export default function Home() {
     showDiscountOnEstimate: full.showDiscountOnEstimate === true,
     taxesEnabled: full.taxesEnabled !== false,
     paymentSettings: mergePaymentSettings(full.paymentSettings),
-    twoFactorEnabled: full.twoFactorEnabled === true,
+    // SMS 2FA forced off until phone line is active
+    twoFactorEnabled: false,
     twoFactorPhone: String(full.twoFactorPhone || '').trim(),
     aiPriceMemory: normalizeAiPriceMemory(full.aiPriceMemory),
     // deliberately omit: teammates, ccFee*, crewSubscriptionActive, etc.
@@ -2155,71 +2156,21 @@ export default function Home() {
     </div>
   );
 
-  /** After password login: require SMS code when 2FA is enabled on the account */
+  /** After password login: SMS 2FA is currently disabled (phone line not active). */
   const mfaGateRef = useRef<string | null>(null);
   const completeLoginWithOptional2FA = async (authUser: any) => {
     if (!supabase || !authUser) return;
-    // Prevent double SMS when both login() and onAuthStateChange fire
+    // Prevent double handling when both login() and onAuthStateChange fire
     if (mfaGateRef.current === authUser.id) return;
     mfaGateRef.current = authUser.id;
-    setMfaChecking(true);
+    setMfaChecking(false);
+    setRequires2FA(false);
+    setTwoFactorPhone('');
+    setTwoFactorCode('');
     setTwoFactorError('');
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token;
-      if (!token) {
-        setUser(authUser);
-        setRequires2FA(false);
-        setShowLogin(false);
-        return;
-      }
-
-      const statusRes = await fetch('/api/auth/2fa/status', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const status = await statusRes.json().catch(() => ({}));
-
-      if (!statusRes.ok || !status.required || status.verified) {
-        setRequires2FA(false);
-        setTwoFactorPhone('');
-        setUser(authUser);
-        setShowLogin(false);
-        mfaGateRef.current = authUser.id; // stay locked to skip re-send on refresh path
-        showMessage('Login successful!');
-        return;
-      }
-
-      // 2FA required — keep session in Supabase but do not open the app yet
-      setUser(null);
-      setRequires2FA(true);
-      setShowLogin(false);
-      setTwoFactorPhone(status.phoneMasked || 'your phone');
-
-      const sendRes = await fetch('/api/auth/2fa/send', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const sendJson = await sendRes.json().catch(() => ({}));
-      if (!sendRes.ok) {
-        setTwoFactorError(sendJson.error || 'Could not send verification text.');
-        showMessage(sendJson.error || 'Could not send verification text.');
-      } else if (sendJson.phoneMasked) {
-        setTwoFactorPhone(sendJson.phoneMasked);
-        showMessage(`Text message sent to ${sendJson.phoneMasked}`);
-      } else if (sendJson.verified) {
-        setRequires2FA(false);
-        setUser(authUser);
-        showMessage('Login successful!');
-      }
-    } catch {
-      // Fail open to login if 2FA service is down (user still authenticated)
-      setRequires2FA(false);
-      setUser(authUser);
-      setShowLogin(false);
-      showMessage('Login successful (2FA check skipped — network error).');
-    } finally {
-      setMfaChecking(false);
-    }
+    setUser(authUser);
+    setShowLogin(false);
+    showMessage('Login successful!');
   };
 
   useEffect(() => {
@@ -4235,8 +4186,8 @@ export default function Home() {
               ),
             },
           }),
-          twoFactorEnabled:
-            (s as any).twoFactorEnabled === true || (l as any).twoFactorEnabled === true,
+          // SMS 2FA forced off until phone line is active
+          twoFactorEnabled: false,
           twoFactorPhone: pickFilled(
             (s as any).twoFactorPhone,
             (l as any).twoFactorPhone,
@@ -12245,35 +12196,23 @@ export default function Home() {
 
                     <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
                       <h3 className="text-sm font-semibold text-[#1e293b]">🔐 Two-step verification (SMS)</h3>
-                      <p className="text-xs text-gray-500 leading-relaxed">
-                        When enabled, logging in requires your password <strong>and</strong> a code texted
-                        to this phone (Twilio). Turn this on for extra account security.
+                      <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2 leading-relaxed">
+                        <strong>Currently off.</strong> SMS two-step is disabled until your phone line /
+                        Twilio is ready. Login only needs your email and password.
                       </p>
-                      <label className="flex items-center gap-2 cursor-pointer text-sm">
+                      <p className="text-xs text-gray-500 leading-relaxed">
+                        When enabled later, logging in will require your password <strong>and</strong> a code
+                        texted to this phone (Twilio).
+                      </p>
+                      <label className="flex items-center gap-2 cursor-not-allowed text-sm opacity-60">
                         <input
                           type="checkbox"
                           className="w-4 h-4 accent-[#10b981]"
-                          checked={!!profile.twoFactorEnabled}
-                          onChange={(e) => {
-                            const on = e.target.checked;
-                            const next = {
-                              ...profileRef.current,
-                              twoFactorEnabled: on,
-                              twoFactorPhone:
-                                profileRef.current.twoFactorPhone ||
-                                profileRef.current.phone ||
-                                '',
-                            };
-                            setProfile(next);
-                            void saveProfileSettings(next, { quiet: true });
-                            showMessage(
-                              on
-                                ? '✅ SMS 2-step on — next login will text a code'
-                                : 'SMS 2-step verification turned off'
-                            );
-                          }}
+                          checked={false}
+                          disabled
+                          readOnly
                         />
-                        <span>Require text code at login</span>
+                        <span>Require text code at login (unavailable until phone is active)</span>
                       </label>
                       <div>
                         <label className="block text-xs font-medium text-gray-500 mb-1">
