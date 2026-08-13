@@ -1962,6 +1962,16 @@ export default function Home() {
             <div className={`text-right font-bold ${totalClass}`}>
               Total: ${grandTotal.toFixed(2)}
             </div>
+            {amountPaid > 0.009 && (
+              <>
+                <div className={`text-right font-semibold text-emerald-700 ${textClass}`}>
+                  Deposit / paid: −${Number(amountPaid).toFixed(2)}
+                </div>
+                <div className={`text-right font-bold text-amber-700 ${textClass}`}>
+                  Balance due: ${Math.max(0, grandTotal - Number(amountPaid)).toFixed(2)}
+                </div>
+              </>
+            )}
           </>
         ) : (
           <div className="text-right text-lg text-gray-500">Financial details restricted</div>
@@ -2790,6 +2800,11 @@ export default function Home() {
     jobRenderings?: JobRendering[];
     /** Per-job mileage log (avoids stale state after Add trip) */
     mileageLogs?: MileageLog[];
+    /** Override payment fields when state may still be stale (e.g. reverse deposit) */
+    amountPaid?: number;
+    paymentStatus?: 'pending' | 'paid';
+    paymentMethod?: string;
+    documentType?: 'estimate' | 'invoice';
     /** Suppress error toasts (auto-save) — still shows on hard failure */
     quiet?: boolean;
   }): Promise<{ ok: boolean; error?: string; id?: string }> => {
@@ -2838,11 +2853,13 @@ export default function Home() {
         ...getDocumentProfileSnapshot(profileToSave, breakdownToSave, milesToSave),
         _jobRenderings: renderingsToSave,
       },
-      documentType: documentType || 'estimate',
+      documentType: options?.documentType || documentType || 'estimate',
       dueDate: dueDate || '',
-      paymentStatus: paymentStatus || 'pending',
-      amountPaid: amountPaid || 0,
-      paymentMethod: paymentMethod || '',
+      paymentStatus: options?.paymentStatus ?? paymentStatus ?? 'pending',
+      amountPaid:
+        options?.amountPaid !== undefined ? Number(options.amountPaid) || 0 : amountPaid || 0,
+      paymentMethod:
+        options?.paymentMethod !== undefined ? options.paymentMethod : paymentMethod || '',
       photoUrls: photosToSave || [],
       videoUrls: videosToSave || [],
       receiptUrls: receiptsToSave || [],
@@ -5921,6 +5938,54 @@ export default function Home() {
 
   /** @deprecated use openMarkPaidChooser / markAsPaidWithMethod */
   const markAsPaidCash = () => openMarkPaidChooser();
+
+  /**
+   * Clear a deposit/payment amount recorded by mistake (e.g. convert-to-invoice
+   * carried deposit forward but money was never received). Use before sending.
+   */
+  const reverseRecordedDeposit = async () => {
+    const paid = Math.max(0, Number(amountPaid) || 0);
+    if (paid < 0.01) {
+      showMessage('No deposit or payment is recorded on this document.');
+      return;
+    }
+    if (paymentStatus === 'paid' && paid >= grandTotal - 0.009) {
+      showMessage(
+        'This document is fully marked paid. Use Paid Invoices → Retrieve if you need to reopen it, then reverse the payment.'
+      );
+      return;
+    }
+    if (
+      !confirm(
+        `Remove the recorded deposit/payment of $${paid.toFixed(2)}?\n\n` +
+          `Use this only if the money was never actually received.\n` +
+          `Balance due will go back to the full total ($${grandTotal.toFixed(2)}).`
+      )
+    ) {
+      return;
+    }
+
+    setAmountPaid(0);
+    setPaymentStatus('pending');
+    // Keep paymentMethod empty so invoice no longer implies a deposit was taken
+    setPaymentMethod('');
+
+    const result = await saveToDB({
+      amountPaid: 0,
+      paymentStatus: 'pending',
+      paymentMethod: '',
+    });
+    if (result.ok) {
+      showMessage(
+        `✅ Deposit of $${paid.toFixed(2)} removed. Balance due is now $${grandTotal.toFixed(2)}. You can send the invoice.`
+      );
+      void refreshSavedList();
+    } else {
+      showMessage(
+        `❌ Could not save deposit removal: ${result.error || 'save failed'}. Try again or check connection.`
+      );
+    }
+  };
 
   const openSendPreview = () => {
     // Default attachment choices when entering send preview
@@ -10280,6 +10345,36 @@ export default function Home() {
                         Grand Total: <span className="text-[#10b981] ml-4">${grandTotal.toFixed(2)}</span>
                       </div>
 
+                      {amountPaid > 0.009 && (
+                        <div className="mt-4 rounded-xl border-2 border-amber-300 bg-amber-50 p-4 text-right space-y-2">
+                          <div className="text-lg font-semibold text-amber-900">
+                            Deposit / amount recorded as paid:{' '}
+                            <span className="text-[#10b981]">${Number(amountPaid).toFixed(2)}</span>
+                          </div>
+                          <div className="text-xl font-bold text-amber-950">
+                            Balance due:{' '}
+                            <span className="text-[#f59e0b]">
+                              ${Math.max(0, grandTotal - Number(amountPaid)).toFixed(2)}
+                            </span>
+                          </div>
+                          <p className="text-sm text-amber-800 text-left">
+                            If this deposit was never actually received, remove it before you send the invoice so the
+                            client is not undercharged.
+                          </p>
+                          <div className="flex flex-wrap justify-end gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="border-red-400 text-red-700 hover:bg-red-50 font-semibold"
+                              onClick={() => void reverseRecordedDeposit()}
+                              title="Clear the recorded deposit if it was entered by mistake"
+                            >
+                              Remove recorded deposit
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+
                       {profile.chargeCCFee && (
                         <div className="flex justify-end text-sm mt-2 text-gray-600">
                           + Credit card processing fee ({ccFeePercent}%): <span className="font-medium ml-1">${ccFeeAmount.toFixed(2)}</span>
@@ -10298,6 +10393,17 @@ export default function Home() {
               {documentType === 'invoice' ? (
                 <div className="flex flex-wrap gap-3 mb-8">
                   <Button onClick={printDocument} className="bg-[#3b82f6]">{t('printPreview')}</Button>
+                  {amountPaid > 0.009 && paymentStatus !== 'paid' && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="border-red-400 text-red-700 hover:bg-red-50"
+                      onClick={() => void reverseRecordedDeposit()}
+                      title="Clear deposit if it was never actually received"
+                    >
+                      Remove deposit
+                    </Button>
+                  )}
                   <Button
                     type="button"
                     onClick={openMarkPaidChooser}
@@ -12864,6 +12970,43 @@ export default function Home() {
                 {documentType === 'invoice' ? '📄 Invoice Preview & Final Payment' : t('sendEstimate') + ' Preview'}
               </h2>
 
+              {/* Reverse mistaken deposit before sending invoice */}
+              {documentType === 'invoice' && amountPaid > 0.009 && paymentStatus !== 'paid' && (
+                <Card className="mb-6 border-2 border-red-300 bg-red-50 shadow-md">
+                  <CardContent className="p-5 space-y-3">
+                    <h3 className="text-lg font-semibold text-red-900">
+                      Deposit recorded on this invoice
+                    </h3>
+                    <p className="text-sm text-red-800">
+                      This invoice shows <strong>${Number(amountPaid).toFixed(2)}</strong> already paid
+                      (usually a deposit from the estimate). Balance due would be{' '}
+                      <strong>${Math.max(0, grandTotal - Number(amountPaid)).toFixed(2)}</strong>.
+                    </p>
+                    <p className="text-sm text-red-800">
+                      If that money was <strong>never actually received</strong>, remove it before you send so the
+                      client is billed the full amount.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        className="bg-red-600 hover:bg-red-700 text-white font-semibold"
+                        onClick={() => void reverseRecordedDeposit()}
+                      >
+                        Remove recorded deposit
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="border-red-300 text-red-800"
+                        onClick={() => setView('editor')}
+                      >
+                        Back to editor
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
               {/* Interactive: choose what to send BEFORE opening the email dialog */}
               <Card className="mb-6 border-2 border-orange-300 bg-orange-50/50 shadow-md">
                 <CardContent className="p-5 space-y-4">
@@ -13190,8 +13333,21 @@ export default function Home() {
                   <div className="mt-10 p-8 border-4 border-dashed border-[#f59e0b] rounded-3xl bg-amber-50">
                     <h3 className="text-3xl font-bold text-center text-[#f59e0b]">💰 Invoice Payment Section</h3>
                     <p className="text-center text-xl mt-3">
-                      Deposit paid on estimate: <strong>{profile.depositPercentage}%</strong><br />
-                      Remainder due: <strong>{100 - (profile.depositPercentage || 0)}%</strong> = <span className="font-bold text-2xl"> ${(grandTotal * (100 - (profile.depositPercentage || 0)) / 100).toFixed(2)}</span>
+                      {amountPaid > 0.009 ? (
+                        <>
+                          Deposit / paid so far: <strong>${Number(amountPaid).toFixed(2)}</strong>
+                          <br />
+                          Balance due:{' '}
+                          <span className="font-bold text-2xl">
+                            ${Math.max(0, grandTotal - Number(amountPaid)).toFixed(2)}
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          Full invoice total due:{' '}
+                          <span className="font-bold text-2xl">${grandTotal.toFixed(2)}</span>
+                        </>
+                      )}
                       {profile.chargeCCFee && (
                         <span className="block text-sm mt-1 text-amber-700">
                           + {profile.ccFeePercentage || 3}% CC processing fee applied at checkout
@@ -13199,7 +13355,8 @@ export default function Home() {
                       )}
                     </p>
                     {(() => {
-                      let remainder = grandTotal * (100 - (profile.depositPercentage || 0)) / 100;
+                      let remainder = Math.max(0, grandTotal - Number(amountPaid));
+                      if (remainder < 0.01) remainder = Math.max(0, grandTotal);
                       if (profile.chargeCCFee) {
                         remainder = remainder * (1 + (profile.ccFeePercentage || 3) / 100);
                       }
