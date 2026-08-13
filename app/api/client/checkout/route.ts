@@ -88,10 +88,18 @@ export async function POST(request: NextRequest) {
     const invoiceId = String(row?.id || inv);
     const jobName = String(row?.jobName || row?.jobname || body.jobName || '');
 
-    // Stripe Checkout always adds processing fee so contractor nets job amount.
-    // Zelle / mail check are handled outside Stripe and never include a fee.
-    const feePercentRate =
-      Number(profile.ccFeePercentage) > 0 ? Number(profile.ccFeePercentage) : 2.9;
+    // Pass processing fee to client only when contractor opted in (Profile → Client payments).
+    // Zelle / mail check are outside Stripe and never include a fee.
+    const chargeFees =
+      profile.chargeCCFee === true ||
+      profile.chargeCCFee === 'true' ||
+      profile.chargeCCFee === 1 ||
+      profile.chargeCCFee === '1';
+    const feePercentRate = chargeFees
+      ? Number(profile.ccFeePercentage) > 0
+        ? Number(profile.ccFeePercentage)
+        : 2.9
+      : 0;
 
     const appUrl = getAppUrl(request.url);
     const returnBase = `${appUrl}/client/approve?token=${encodeURIComponent(token)}`;
@@ -108,7 +116,7 @@ export async function POST(request: NextRequest) {
       paymentKind: due.payKind,
       successUrl: `${returnBase}&paid=1`,
       cancelUrl: `${returnBase}&paid=0`,
-      passProcessingFee: true,
+      passProcessingFee: chargeFees,
       feePercentRate,
     });
 

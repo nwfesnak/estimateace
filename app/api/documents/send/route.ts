@@ -83,10 +83,14 @@ export async function POST(request: NextRequest) {
     const showDiscount = discountAmount > 0.005;
     const depositPercent = Math.max(0, Number(body.depositPercent) || 0);
     const showDepositOnApproval = body.showDepositOnApproval !== false;
-    // Card payments always may include a processing fee; Zelle / mail never do
-    const chargeCCFee = true;
+    // Fee language only when contractor charges CC fees; Zelle / mail never do
+    const chargeCCFee = body.chargeCCFee === true;
     const ccFeePercentage =
-      Number(body.ccFeePercentage) > 0 ? Number(body.ccFeePercentage) : 2.9;
+      chargeCCFee && Number(body.ccFeePercentage) > 0
+        ? Number(body.ccFeePercentage)
+        : chargeCCFee
+          ? 2.9
+          : 0;
     const { resolveAmountDue, computeProcessingFee } = await import('@/lib/stripe-fees');
     const due = resolveAmountDue({
       documentType,

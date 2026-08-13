@@ -8826,9 +8826,13 @@ export default function Home() {
         return;
       }
       const clientEmail = (emails || []).map((e) => String(e || '').trim()).find(Boolean) || '';
-      // Stripe always passes processing fee so contractor nets full job amount
-      const feePercent =
-        Number(profile.ccFeePercentage) > 0 ? Number(profile.ccFeePercentage) : 2.9;
+      // Pass processing fee only when Profile → Charge credit card processing fee is on
+      const chargeFees = profile.chargeCCFee === true;
+      const feePercent = chargeFees
+        ? Number(profile.ccFeePercentage) > 0
+          ? Number(profile.ccFeePercentage)
+          : 2.9
+        : 0;
       const res = await fetch('/api/payments/job-checkout', {
         method: 'POST',
         headers: {
@@ -8842,7 +8846,7 @@ export default function Home() {
           documentType,
           jobName,
           clientEmail,
-          passProcessingFee: true,
+          passProcessingFee: chargeFees,
           feePercentRate: feePercent,
         }),
       });
@@ -12760,7 +12764,12 @@ export default function Home() {
                         />
                         <div>
                           <div className="font-medium">{t('chargeCCFee')}</div>
-                          <div className="text-sm text-gray-500">When enabled, the fee is added automatically when clients pay by card (Stripe / PayPal).</div>
+                          <div className="text-sm text-gray-500">
+                            When <strong>on</strong>, clients pay job amount + card processing fee on Stripe /
+                            PayPal / Venmo (use the rate below, typically matching card processor cost). When{' '}
+                            <strong>off</strong>, no processing fee is added — you absorb card fees. Zelle and
+                            mail check never include a fee.
+                          </div>
                         </div>
                       </label>
 
@@ -15103,15 +15112,17 @@ export default function Home() {
           <div className="py-2 space-y-5">
             <div className="text-center rounded-2xl bg-emerald-50 border border-emerald-100 p-5">
               {(() => {
-                // Card / Venmo / PayPal show fee; Zelle & mail are separate no-fee paths
-                const rate =
-                  Number(profile.ccFeePercentage) > 0
+                // Fee only when Profile → Charge credit card processing fee is on
+                const chargeFees = profile.chargeCCFee === true;
+                const rate = chargeFees
+                  ? Number(profile.ccFeePercentage) > 0
                     ? Number(profile.ccFeePercentage)
-                    : STRIPE_CARD_PERCENT;
+                    : STRIPE_CARD_PERCENT
+                  : 0;
                 const fee = computeStripeCardFee(paymentAmount, {
                   percentRate: rate,
-                  fixedFee: STRIPE_CARD_FIXED_USD,
-                  chargeFees: true,
+                  fixedFee: chargeFees ? STRIPE_CARD_FIXED_USD : 0,
+                  chargeFees,
                   method: 'stripe',
                 });
                 const isDepositPay = paymentType === 'deposit';
@@ -15129,7 +15140,9 @@ export default function Home() {
                     </p>
                     {fee.feeAmount <= 0 && (
                       <p className="text-xs text-emerald-800 mt-1">
-                        Zelle and mail check have no processing fee
+                        {chargeFees
+                          ? 'Zelle and mail check have no processing fee'
+                          : 'No processing fee added (turned off in Client payments)'}
                       </p>
                     )}
                     <div className="mt-3 text-left text-xs sm:text-sm space-y-1 max-w-xs mx-auto text-gray-700">

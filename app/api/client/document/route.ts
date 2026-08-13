@@ -182,11 +182,18 @@ export async function GET(request: NextRequest) {
 
     const invoiceNumber = row.invoiceNumber || row.invoicenumber || inv;
     const company = profile.company || 'Your contractor';
-    // Stripe / Venmo / PayPal always pass processing fee to client.
+    // Processing fee only when contractor enables "Charge credit card processing fee".
     // Zelle and mail check never get a fee (enforced in buildClientPaymentOptions).
-    const chargeFees = true;
-    const feePercent =
-      Number(profile.ccFeePercentage) > 0 ? Number(profile.ccFeePercentage) : 2.9;
+    const chargeFees =
+      profile.chargeCCFee === true ||
+      profile.chargeCCFee === 'true' ||
+      profile.chargeCCFee === 1 ||
+      profile.chargeCCFee === '1';
+    const feePercent = chargeFees
+      ? Number(profile.ccFeePercentage) > 0
+        ? Number(profile.ccFeePercentage)
+        : 2.9
+      : 0;
 
     const { buildClientPaymentOptions } = await import('@/lib/client-payment-options');
     const paymentOptions = buildClientPaymentOptions({
@@ -256,8 +263,7 @@ export async function GET(request: NextRequest) {
       payLabel: due.payLabel,
       paymentStatus: row.paymentStatus || row.payment_status || 'unpaid',
       terms: String(row.terms || profile.disclosure || '').slice(0, 8000),
-      // Client pay page: card fees always on; free methods still $0
-      chargeCCFee: true,
+      chargeCCFee: chargeFees,
       ccFeePercentage: feePercent,
       paymentOptions,
       hasCertificate,
