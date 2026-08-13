@@ -18,6 +18,7 @@ import {
 } from '@/lib/quote-units';
 import { analyzeJobImage, type JobImageAnalysis } from '@/lib/analyze-job-image';
 import { getXaiApiKey, getXaiQuoteModel } from '@/lib/xai-config';
+import { buildCalculatorQuoteAnchor } from '@/lib/buildcalculator';
 import {
   applyMaterialMarkup,
   calibrateMaterialPrices,
@@ -789,9 +790,13 @@ export async function POST(request: NextRequest) {
       };
     };
 
-    // SuperGrok-style path: always call flagship Grok for estimates (same class as SuperGrok).
-    // Local deterministic engines are only a light safety net after the model answers —
-    // they must not invent multi-thousand hour paint jobs or $millions for a house.
+    // BuildCalculator.io Pricing Search API — ground estimates in real construction cost data
+    const bcAnchor = await buildCalculatorQuoteAnchor(jobDescription, {
+      regionalUsdBlend: regional.laborMultiplier * 0.55 + regional.materialMultiplier * 0.45,
+    });
+
+    // SuperGrok-style path + BuildCalculator cost database.
+    // Local engines are only a light safety net after the model answers.
 
     const regionalPrompt = buildRegionalPromptSection(regional);
     const userMessage = buildQuoteUserMessage(
@@ -824,18 +829,21 @@ Return ONLY valid JSON (no markdown).
 
 ${regionalPrompt}
 
+${bcAnchor?.promptBlock ? `\n${bcAnchor.promptBlock}\n` : ''}
+
 ${priceMemoryPrompt ? `\n${priceMemoryPrompt}\n` : ''}
 
-SUPERGROK-STYLE REALITY CHECKS (critical):
+SUPERGROK + BUILDCALCULATOR RULES (critical):
 1) Scope lock: Price ONLY the described task.
-2) Whole-home paint (e.g. 1,200 SF home, interior and/or exterior, 1–2 coats):
-   - Typical INSTALLED total is often roughly $3,000–$12,000 depending on region, coats, exterior vs interior.
-   - Labor is usually on the order of ~25–90 CREW-HOURS for a 1,000–1,500 SF home (not hundreds or thousands).
-   - unit = "SF", suggestedQty = home floor sqft (e.g. 1200), unitPrice = total ÷ suggestedQty (about $2.50–$8/SF installed is common, not $2,000+/SF).
-3) MATERIALS = Lowe's mid-grade shelf prices. LABOR = hours × crew rate (typically $50–$85/hr).
-4) unitPrice for Unit jobs = FULL job total. For SF jobs = price PER square foot (NOT full job total).
-5) total MUST equal unitPrice × suggestedQty.
-6) laborBreakdown.hours = TOTAL crew-hours for the whole job (full scope, not per SF).
+2) When BuildCalculator.io data is provided above, use it as the primary cost anchor (converted to USD). Blend with local mid-market judgment — do not ignore it.
+3) Whole-home paint (e.g. 1,200 SF home, interior and/or exterior, 1–2 coats):
+   - Prefer BuildCalculator-derived total when present; otherwise ~$3,000–$12,000 installed is typical.
+   - Labor ~25–90 CREW-HOURS for a 1,000–1,500 SF home (not hundreds or thousands).
+   - unit = "SF", suggestedQty = home floor sqft, unitPrice = total ÷ suggestedQty (~$2.50–$8/SF installed).
+4) MATERIALS = Lowe's mid-grade shelf prices. LABOR = hours × crew rate (typically $50–$85/hr).
+5) unitPrice for Unit jobs = FULL job total. For SF jobs = price PER square foot (NOT full job total).
+6) total MUST equal unitPrice × suggestedQty.
+7) laborBreakdown.hours = TOTAL crew-hours for the whole job (full scope, not per SF).
 
 ${formatLowesPriceGuideForPrompt()}
 
@@ -1193,48 +1201,83 @@ PRICING MATH (strict — numbers must reconcile):
       }
     }
 
-    // Prefer SuperGrok/model TOTAL when it is in a sane band (don't let engines rewrite a good bid)
+    // Prefer BuildCalculator anchor, then SuperGrok model total, when sane
     {
       const modelTotal = num(parsed.total, 0);
       const qty = Math.max(1, structured.suggestedQty);
       const sqft = parseSqftFromDescription(jobDescription) || (qty >= 50 ? qty : 0);
       const isPaint = /paint|painting/i.test(jobDescription);
-      if (modelTotal > 0 && sqft >= 400 && isPaint) {
-        // Typical installed house paint: roughly $2–$12 / SF of floor area (int and/or ext)
+      const bcTotal = bcAnchor?.suggestedJobTotalUsd || 0;
+      const bcPerSf = bcAnchor?.suggestedPerSfUsd || 0;
+
+      if (bcTotal > 0 && sqft >= 200 && isPaint) {
+        // Blend BuildCalculator (60%) with model when model is also sane
+        let finalTotal = bcTotal;
+        if (modelTotal >= sqft * 1.5 && modelTotal <= sqft * 16) {
+          finalTotal = roundMoney(bcTotal * 0.55 + modelTotal * 0.45);
+        }
+        structured.total = finalTotal;
+        structured.unitPrice = roundMoney(finalTotal / qty);
+        structured.suggestedQty = qty;
+        if (!/sf|sqft|square/i.test(String(structured.unit || ''))) {
+          structured.unit = 'SF';
+          structured.billingMode = 'sqft';
+        }
+      } else if (bcPerSf > 0 && sqft >= 50 && !isPaint) {
+        structured.unitPrice = coercePerUnitPrice(bcPerSf, qty, {
+          marketUnitPrice: bcPerSf,
+          description: jobDescription,
+        });
+        structured.total = roundMoney(structured.unitPrice * qty);
+      } else if (modelTotal > 0 && sqft >= 400 && isPaint) {
         const minT = sqft * 1.8;
         const maxT = sqft * 14;
         if (modelTotal >= minT && modelTotal <= maxT) {
           structured.total = roundMoney(modelTotal);
           structured.unitPrice = roundMoney(modelTotal / qty);
           structured.suggestedQty = qty;
-          if (/sf|sqft|square/i.test(String(structured.unit || '')) === false) {
+          if (!/sf|sqft|square/i.test(String(structured.unit || ''))) {
             structured.unit = 'SF';
             structured.billingMode = 'sqft';
           }
         }
       } else if (modelTotal > 50 && modelTotal < 50000 && qty <= 20) {
-        // Unit jobs: trust SuperGrok total when reasonable
         if (Math.abs(modelTotal - structured.total) / modelTotal > 0.35) {
           structured.total = roundMoney(modelTotal);
           structured.unitPrice = roundMoney(modelTotal / Math.max(1, qty));
         }
       }
-    }
 
-    // Re-sync labor hours display to SuperGrok hours when we kept them
-    if (modelHoursLookReal && laborBreakdown && aligned.labor) {
-      aligned.labor = {
-        ...aligned.labor,
-        hours: laborBreakdown.hours,
-        rate: laborBreakdown.rate,
-        description: laborBreakdown.description || aligned.labor.description,
-      };
-      const fullLabor = roundMoney(laborBreakdown.hours * laborBreakdown.rate);
-      aligned.laborCostTotal = fullLabor;
-      aligned.labor.total =
-        structured.suggestedQty > 1 && /sf|sqft/i.test(String(structured.unit || ''))
-          ? roundMoney(fullLabor / structured.suggestedQty)
-          : fullLabor;
+      // Labor hours: prefer BuildCalculator, then model, capped for paint
+      if (aligned.labor) {
+        let hrs = Number(aligned.labor.hours) || 0;
+        if (bcAnchor?.suggestedLaborHours && bcAnchor.suggestedLaborHours > 0) {
+          const bcH = bcAnchor.suggestedLaborHours;
+          if (!modelHoursLookReal || Math.abs(hrs - bcH) / bcH > 0.4) {
+            hrs = bcH;
+          } else {
+            hrs = roundMoney(hrs * 0.45 + bcH * 0.55);
+          }
+        } else if (modelHoursLookReal) {
+          hrs = laborBreakdown?.hours || hrs;
+        }
+        if (isPaint) hrs = Math.min(120, Math.max(8, hrs));
+        const rate =
+          preferredLaborRate && preferredLaborRate >= 10
+            ? preferredLaborRate
+            : Math.max(50, Number(aligned.labor.rate) || 62);
+        const fullLabor = roundMoney(hrs * rate);
+        aligned.labor = {
+          ...aligned.labor,
+          hours: roundMoney(hrs),
+          rate: roundMoney(rate),
+          total:
+            structured.suggestedQty > 1 && /sf|sqft/i.test(String(structured.unit || ''))
+              ? roundMoney(fullLabor / structured.suggestedQty)
+              : fullLabor,
+        };
+        aligned.laborCostTotal = fullLabor;
+      }
     }
 
     const industryMeta = estimateIndustryLabor(
@@ -1251,8 +1294,24 @@ PRICING MATH (strict — numbers must reconcile):
       billingMode: structured.billingMode,
       breakdown: parsed.breakdown,
       confidence: parsed.confidence,
-      pricingMethod: 'supergrok',
+      pricingMethod: bcAnchor ? 'supergrok+buildcalculator' : 'supergrok',
       quoteModel,
+      buildCalculator: bcAnchor
+        ? {
+            query: bcAnchor.query,
+            suggestedJobTotalUsd: bcAnchor.suggestedJobTotalUsd,
+            suggestedPerSfUsd: bcAnchor.suggestedPerSfUsd,
+            suggestedLaborHours: bcAnchor.suggestedLaborHours,
+            bestMatch: bcAnchor.best
+              ? {
+                  name: bcAnchor.best.originalName,
+                  totalPerSfUsd: bcAnchor.best.totalPerSfUsd,
+                  section: bcAnchor.best.section,
+                }
+              : null,
+            source: 'https://buildcalculator.io/api-docs/',
+          }
+        : null,
       materials: aligned.materials,
       materialsCostTotal: aligned.materialsCostTotal,
       laborCostTotal: aligned.laborCostTotal,
