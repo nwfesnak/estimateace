@@ -973,9 +973,14 @@ export default function Home() {
     teammates: [] as {
       email: string;
       userId?: string;
+      memberId?: string;
       role: 'full' | 'limited';
       canSeePricing: boolean;
       canSeeEstimatesAndFinancials: boolean;
+      seatStatus?: string;
+      seatPeriodEnd?: string | null;
+      needsSeatPayment?: boolean;
+      stripeSubscriptionId?: string | null;
     }[],
     crewSubscriptionActive: false,
     chargeCCFee: false,
@@ -2329,9 +2334,10 @@ export default function Home() {
     void loadLatestProfile();
   }, [workspaceUserId, crewResolved, supabase]);
 
-  // Load crew seat subscriptions when Manage plan is open
+  // Load crew list + seats when Manage plan is open (DB is source of truth)
   useEffect(() => {
     if (profileTab === 'billing' && billingPanel === 'manage' && user?.id && !currentCrew) {
+      void refreshCrewMembers();
       void refreshCrewSeats();
     }
   }, [profileTab, billingPanel, user?.id, currentCrew]);
@@ -6317,6 +6323,79 @@ export default function Home() {
     }
   };
 
+  /** Load crew from DB (source of truth) — fixes “already on list” but not shown in UI */
+  const refreshCrewMembers = async () => {
+    if (!supabase || !user || currentCrew) return;
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) return;
+      const res = await fetch('/api/crew/list', {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !Array.isArray(json.crew)) return;
+
+      const fromDb = json.crew.map((c: any) => ({
+        email: String(c.email || '').toLowerCase(),
+        userId: c.userId as string | undefined,
+        memberId: c.id as string | undefined,
+        role: (c.role === 'full' ? 'full' : 'limited') as 'full' | 'limited',
+        canSeePricing: !!c.canSeePricing,
+        canSeeEstimatesAndFinancials: !!c.canSeeEstimatesAndFinancials,
+        seatStatus: c.seatStatus as string | undefined,
+        seatPeriodEnd: c.seatPeriodEnd as string | null | undefined,
+        needsSeatPayment: !!c.needsSeatPayment,
+        stripeSubscriptionId: c.stripeSubscriptionId as string | null | undefined,
+      }));
+
+      setProfile((prev) => ({
+        ...prev,
+        teammates: fromDb,
+      }));
+      // Persist so profile cache matches DB
+      setTimeout(() => saveToDB({ quiet: true }), 200);
+    } catch (e) {
+      console.warn('refreshCrewMembers', e);
+    }
+  };
+
+  const startCrewSeatCheckout = async (opts: {
+    email: string;
+    userId?: string;
+    memberId?: string;
+  }) => {
+    if (!supabase) return;
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    if (!token) {
+      showMessage('Please log in again.');
+      return;
+    }
+    const payRes = await fetch('/api/crew/seat-checkout', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        crewEmail: opts.email,
+        crewUserId: opts.userId,
+        crewMemberId: opts.memberId,
+      }),
+    });
+    const payJson = await payRes.json().catch(() => ({}));
+    if (!payRes.ok || !payJson.url) {
+      showMessage(
+        payJson.error ||
+          'Could not open Stripe for the $14.99 crew seat. Try again or check Stripe is configured.'
+      );
+      return;
+    }
+    window.location.href = payJson.url;
+  };
+
   /** Step 1: validate inputs and open $14.99/mo confirm popup */
   const addCrewMember = async () => {
     if (currentCrew) {
@@ -6331,14 +6410,22 @@ export default function Home() {
     if (password.length < 6) {
       return showMessage('Set a password (at least 6 characters) for this crew login');
     }
-    if ((profile.teammates || []).some((t) => t.email.toLowerCase() === email)) {
-      return showMessage('That email is already on your crew list');
-    }
     if (!supabase || !user) return showMessage('Please log in first');
+
+    // If already in DB but missing payment, open pay flow instead of blocking
+    const existing = (profile.teammates || []).find(
+      (t) => t.email.toLowerCase() === email
+    ) as any;
+    if (existing && !existing.needsSeatPayment) {
+      return showMessage(
+        'That email is already on your crew list (shown below). Remove them first if you want to re-add, or use Pay seat if payment is still needed.'
+      );
+    }
+
     setIsCrewSeatConfirmOpen(true);
   };
 
-  /** Step 2: after user confirms $14.99/mo — create login then Stripe subscription checkout */
+  /** Step 2: after user confirms $14.99/mo — create/reuse login then Stripe subscription checkout */
   const confirmCrewSeatAndPay = async () => {
     if (currentCrew) return;
     const email = crewEmailInput.trim().toLowerCase();
@@ -6371,47 +6458,24 @@ export default function Home() {
         return showMessage(json.error || 'Could not create crew login');
       }
 
-      const newCrew = {
-        email,
-        userId: json.crew?.userId as string | undefined,
-        role: 'limited' as 'full' | 'limited',
-        canSeePricing: false,
-        canSeeEstimatesAndFinancials: false,
-      };
-      setProfile((prev) => ({
-        ...prev,
-        teammates: [...(prev.teammates || []), newCrew],
-      }));
-      setTimeout(() => saveToDB(), 100);
-
-      // Stripe Checkout for $14.99/mo seat
-      const payRes = await fetch('/api/crew/seat-checkout', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          crewEmail: email,
-          crewUserId: json.crew?.userId,
-          crewMemberId: json.crew?.id,
-        }),
-      });
-      const payJson = await payRes.json().catch(() => ({}));
-      if (!payRes.ok || !payJson.url) {
+      if (json.alreadyExisted) {
         showMessage(
-          payJson.error ||
-            'Crew login was created, but Stripe checkout failed. Open Manage billing to add the $14.99 seat or remove the crew member.'
+          json.message ||
+            'Found existing crew login for this email. Opening payment for the $14.99/mo seat…'
         );
-        setCrewEmailInput('');
-        setCrewPasswordInput('');
-        void refreshCrewSeats();
-        return;
       }
+
+      await refreshCrewMembers();
+      await refreshCrewSeats();
+
+      await startCrewSeatCheckout({
+        email,
+        userId: json.crew?.userId,
+        memberId: json.crew?.id,
+      });
 
       setCrewEmailInput('');
       setCrewPasswordInput('');
-      window.location.href = payJson.url;
     } catch {
       showMessage('Network error creating crew login / seat.');
     } finally {
@@ -11917,9 +11981,21 @@ export default function Home() {
                           >
                             {crewInviteBusy ? 'Creating…' : 'Add crew'}
                           </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => {
+                              void refreshCrewMembers();
+                              void refreshCrewSeats();
+                              showMessage('Crew list refreshed from server.');
+                            }}
+                          >
+                            Refresh list
+                          </Button>
                         </div>
                         <p className="text-[11px] text-gray-500">
                           Password must be at least 6 characters. Tell the crew member both email and password.
+                          If someone “already exists” but is missing here, tap Refresh list.
                         </p>
                       </div>
                       <div className="space-y-3">
@@ -11931,8 +12007,38 @@ export default function Home() {
                               key={`${crew.email}-${index}`}
                               className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border p-4 rounded-lg"
                             >
-                              <div className="font-medium break-all">{crew.email}</div>
+                              <div className="min-w-0">
+                                <div className="font-medium break-all">{crew.email}</div>
+                                <div className="text-xs text-gray-500 mt-0.5">
+                                  Seat:{' '}
+                                  <span className="capitalize font-medium">
+                                    {(crew as any).seatStatus || 'unknown'}
+                                  </span>
+                                  {(crew as any).needsSeatPayment ? (
+                                    <span className="text-amber-700 font-semibold">
+                                      {' '}
+                                      · Payment needed ($14.99/mo)
+                                    </span>
+                                  ) : null}
+                                </div>
+                              </div>
                               <div className="flex flex-wrap items-center gap-4">
+                                {(crew as any).needsSeatPayment && (
+                                  <Button
+                                    size="sm"
+                                    className="bg-amber-500 hover:bg-amber-600 text-white"
+                                    disabled={crewInviteBusy}
+                                    onClick={() =>
+                                      void startCrewSeatCheckout({
+                                        email: crew.email,
+                                        userId: crew.userId,
+                                        memberId: (crew as any).memberId,
+                                      })
+                                    }
+                                  >
+                                    Pay $14.99 seat
+                                  </Button>
+                                )}
                                 <div className="flex items-center gap-2 text-sm">
                                   <span>Full</span>
                                   <label className="relative inline-flex items-center cursor-pointer">

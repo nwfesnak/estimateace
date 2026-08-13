@@ -61,15 +61,44 @@ export async function POST(request: NextRequest) {
 
     const { data: existingLink } = await admin
       .from('crew_members')
-      .select('id, owner_user_id')
+      .select(
+        'id, owner_user_id, crew_user_id, role, can_see_pricing, can_see_estimates_and_financials, email'
+      )
       .eq('email', email)
       .maybeSingle();
     if (existingLink) {
       if (existingLink.owner_user_id === user.id) {
-        return NextResponse.json(
-          { error: 'That email is already on your crew list.' },
-          { status: 409 }
-        );
+        // Already on this owner's crew (often after failed Stripe checkout / UI desync).
+        // Reset password if provided and return existing row so UI can re-list + re-pay seat.
+        if (existingLink.crew_user_id && password.length >= 6) {
+          try {
+            await admin.auth.admin.updateUserById(existingLink.crew_user_id, {
+              password,
+              email_confirm: true,
+              app_metadata: {
+                is_crew: true,
+                owner_user_id: user.id,
+              },
+            });
+          } catch (e) {
+            console.warn('crew invite: password update on existing', e);
+          }
+        }
+        return NextResponse.json({
+          ok: true,
+          alreadyExisted: true,
+          crew: {
+            email,
+            userId: existingLink.crew_user_id,
+            role: existingLink.role === 'full' ? 'full' : 'limited',
+            canSeePricing: existingLink.can_see_pricing === true,
+            canSeeEstimatesAndFinancials:
+              existingLink.can_see_estimates_and_financials === true,
+            id: existingLink.id,
+          },
+          message:
+            'That email was already on your crew (may have been hidden after a failed payment). Use Pay seat or open Manage billing to finish.',
+        });
       }
       return NextResponse.json(
         { error: 'That email is already a crew member on another account.' },
