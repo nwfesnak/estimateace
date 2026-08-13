@@ -4296,6 +4296,15 @@ export default function Home() {
     }
   };
 
+  /** Open an estimate or invoice from dashboard / lists (clickable links). */
+  const openDocumentFromList = async (est: any) => {
+    if (!est) return;
+    await loadSelectedEstimate(est);
+    setSelectedIds([]);
+    setView('editor');
+    if (mainScrollRef.current) mainScrollRef.current.scrollTop = 0;
+  };
+
   const openNewDocument = async (type: 'estimate' | 'invoice') => {
     setDocumentType(type);
     await newEstimate();
@@ -9362,25 +9371,81 @@ export default function Home() {
 
               <Card className="mb-8">
                 <CardContent className="p-6">
-                  <h3 className="font-semibold mb-4 flex items-center gap-2">
-                    📋 {t('estimates')} (Not Archived)
-                  </h3>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-3/4">{t('metric')}</TableHead>
-                        <TableHead className="text-right">{t('count')}</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      <TableRow>
-                        <TableCell className="font-medium">{t('activeEstimates')}</TableCell>
-                        <TableCell className="text-right text-4xl font-bold text-[#10b981]">
-                          {estimatesCount}
-                        </TableCell>
-                      </TableRow>
-                    </TableBody>
-                  </Table>
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+                    <h3 className="font-semibold flex items-center gap-2">
+                      📋 {t('estimates')} (Not Archived)
+                    </h3>
+                    <span className="text-sm text-gray-500">
+                      {estimatesCount} active
+                    </span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Estimate #</TableHead>
+                          <TableHead>{t('jobName')}</TableHead>
+                          <TableHead className="text-right">{t('amountDue')}</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredEstimatesList.length === 0 ? (
+                          <TableRow>
+                            <TableCell colSpan={3} className="text-center py-8 text-gray-500">
+                              No active estimates
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          filteredEstimatesList.map((est) => (
+                            <TableRow
+                              key={est.id}
+                              className="hover:bg-emerald-50/60 cursor-pointer"
+                              onClick={() => void openDocumentFromList(est)}
+                            >
+                              <TableCell className="font-medium">
+                                <button
+                                  type="button"
+                                  className="text-[#0f766e] font-semibold underline underline-offset-2 hover:text-emerald-800 text-left"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    void openDocumentFromList(est);
+                                  }}
+                                >
+                                  {est.invoiceNumber || est.id || 'Estimate'}
+                                </button>
+                              </TableCell>
+                              <TableCell>
+                                <button
+                                  type="button"
+                                  className="text-[#0f766e] underline underline-offset-2 hover:text-emerald-800 text-left"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    void openDocumentFromList(est);
+                                  }}
+                                >
+                                  {est.jobName || 'Untitled'}
+                                </button>
+                              </TableCell>
+                              <TableCell className="text-right font-semibold">
+                                {canSeeFinancials
+                                  ? `$${calculateGrandTotal(est).toFixed(2)}`
+                                  : '—'}
+                              </TableCell>
+                            </TableRow>
+                          ))
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  {estimatesCount > 0 && (
+                    <button
+                      type="button"
+                      className="mt-3 text-sm font-medium text-[#0f766e] underline underline-offset-2 hover:text-emerald-800"
+                      onClick={() => setView('estimatesList')}
+                    >
+                      View all estimates →
+                    </button>
+                  )}
                 </CardContent>
               </Card>
 
@@ -9407,11 +9472,39 @@ export default function Home() {
                           </TableRow>
                         ) : (
                           outstandingInvoices.map((inv) => (
-                            <TableRow key={inv.id}>
-                              <TableCell className="font-medium">{inv.invoiceNumber}</TableCell>
-                              <TableCell>{inv.jobName || 'Untitled'}</TableCell>
+                            <TableRow
+                              key={inv.id}
+                              className="hover:bg-amber-50/60 cursor-pointer"
+                              onClick={() => void openDocumentFromList(inv)}
+                            >
+                              <TableCell className="font-medium">
+                                <button
+                                  type="button"
+                                  className="text-[#0f766e] font-semibold underline underline-offset-2 hover:text-emerald-800 text-left"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    void openDocumentFromList(inv);
+                                  }}
+                                >
+                                  {inv.invoiceNumber || inv.id || 'Invoice'}
+                                </button>
+                              </TableCell>
+                              <TableCell>
+                                <button
+                                  type="button"
+                                  className="text-[#0f766e] underline underline-offset-2 hover:text-emerald-800 text-left"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    void openDocumentFromList(inv);
+                                  }}
+                                >
+                                  {inv.jobName || 'Untitled'}
+                                </button>
+                              </TableCell>
                               <TableCell className="text-right font-semibold">
-                                ${calculateGrandTotal(inv).toFixed(2)}
+                                {canSeeFinancials
+                                  ? `$${calculateGrandTotal(inv).toFixed(2)}`
+                                  : '—'}
                               </TableCell>
                             </TableRow>
                           ))
@@ -9611,15 +9704,29 @@ export default function Home() {
                         className="shrink-0"
                       />
                       <div className="min-w-0">
-                        <div className="font-medium break-words">{est.jobName || 'Untitled'}</div>
+                        <button
+                          type="button"
+                          className="font-medium break-words text-left text-[#0f766e] underline underline-offset-2 hover:text-emerald-800"
+                          onClick={() => void openDocumentFromList(est)}
+                        >
+                          {est.jobName || 'Untitled'}
+                        </button>
                         <div className="text-sm text-gray-500 break-words">
-                          {est.invoiceNumber} • {est.date}
+                          <button
+                            type="button"
+                            className="font-medium text-[#0f766e] underline underline-offset-2 hover:text-emerald-800"
+                            onClick={() => void openDocumentFromList(est)}
+                          >
+                            {est.invoiceNumber}
+                          </button>
+                          {' • '}
+                          {est.date}
                           {(est.address || est.city) ? ` • ${[est.address, est.city, est.state].filter(Boolean).join(', ')}` : ''}
                         </div>
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-2 sm:gap-3 shrink-0">
-                      <Button size="sm" onClick={async () => { await loadSelectedEstimate(est); setView('editor'); setSelectedIds([]); }}>{t('open')}</Button>
+                      <Button size="sm" onClick={() => void openDocumentFromList(est)}>{t('open')}</Button>
                       <Button size="sm" variant="outline" onClick={() => archiveEstimate(est.id)}>{t('archive')}</Button>
                       <Button size="sm" variant="destructive" onClick={() => deleteSelectedEstimate(est.id)}>{t('delete')}</Button>
                     </div>
@@ -9689,12 +9796,28 @@ export default function Home() {
                         }}
                       />
                       <div>
-                        <div className="font-medium">{est.jobName || 'Untitled'}</div>
-                        <div className="text-sm text-gray-500">{est.invoiceNumber} • {est.date}</div>
+                        <button
+                          type="button"
+                          className="font-medium text-left text-[#0f766e] underline underline-offset-2 hover:text-emerald-800"
+                          onClick={() => void openDocumentFromList(est)}
+                        >
+                          {est.jobName || 'Untitled'}
+                        </button>
+                        <div className="text-sm text-gray-500">
+                          <button
+                            type="button"
+                            className="font-medium text-[#0f766e] underline underline-offset-2 hover:text-emerald-800"
+                            onClick={() => void openDocumentFromList(est)}
+                          >
+                            {est.invoiceNumber}
+                          </button>
+                          {' • '}
+                          {est.date}
+                        </div>
                       </div>
                     </div>
                     <div className="flex items-center gap-4">
-                      <Button size="sm" onClick={async () => { await loadSelectedEstimate(est); setView('editor'); setSelectedIds([]); }}>{t('open')}</Button>
+                      <Button size="sm" onClick={() => void openDocumentFromList(est)}>{t('open')}</Button>
                       <Button size="sm" variant="outline" onClick={() => archiveEstimate(est.id)}>{t('archive')}</Button>
                       <Button size="sm" variant="destructive" onClick={() => deleteSelectedEstimate(est.id)}>{t('delete')}</Button>
                     </div>
