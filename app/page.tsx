@@ -12765,10 +12765,10 @@ export default function Home() {
                         <div>
                           <div className="font-medium">{t('chargeCCFee')}</div>
                           <div className="text-sm text-gray-500">
-                            When <strong>on</strong>, clients pay job amount + card processing fee on Stripe /
-                            PayPal / Venmo (use the rate below, typically matching card processor cost). When{' '}
-                            <strong>off</strong>, no processing fee is added — you absorb card fees. Zelle and
-                            mail check never include a fee.
+                            When <strong>on</strong>, clients pay job amount + card processing fee on Stripe and
+                            PayPal (use the rate below, typically matching card processor cost). When{' '}
+                            <strong>off</strong>, no processing fee is added — you absorb card fees. Venmo, Zelle,
+                            and mail check never include a fee.
                           </div>
                         </div>
                       </label>
@@ -15133,7 +15133,7 @@ export default function Home() {
                     </div>
                     <p className="text-sm text-gray-600 mt-1">
                       {isDepositPay ? 'Deposit' : documentType === 'invoice' ? 'Invoice total due' : 'Amount due'}
-                      {fee.feeAmount > 0 ? ' + processing fee (card/Venmo/PayPal)' : ''}
+                      {fee.feeAmount > 0 ? ' + processing fee (card/PayPal)' : ''}
                       {' · '}
                       {profile.company || 'the contractor'}
                       {invoiceNumber ? ` · #${invoiceNumber}` : ''}
@@ -15141,7 +15141,7 @@ export default function Home() {
                     {fee.feeAmount <= 0 && (
                       <p className="text-xs text-emerald-800 mt-1">
                         {chargeFees
-                          ? 'Zelle and mail check have no processing fee'
+                          ? 'Venmo, Zelle, and mail check have no processing fee'
                           : 'No processing fee added (turned off in Client payments)'}
                       </p>
                     )}
@@ -15167,7 +15167,7 @@ export default function Home() {
                       <div className="flex justify-between gap-3 pt-1 border-t border-emerald-200 font-bold text-emerald-900">
                         <span>
                           {fee.feeAmount > 0
-                            ? 'Client pays (card / Venmo / PayPal)'
+                            ? 'Client pays (card / PayPal)'
                             : 'Client pays'}
                         </span>
                         <span>${fee.totalAmount.toFixed(2)}</span>
@@ -15175,8 +15175,8 @@ export default function Home() {
                     </div>
                     <p className="text-[11px] text-gray-500 mt-2">
                       {fee.feeAmount > 0
-                        ? 'Fee applies only when you charge processing fees — and only on card, Venmo, and PayPal. Zelle and mail check have no processing fee.'
-                        : 'No processing fee added. Turn on “Charge customers a credit card processing fee” in Profile if you want card/Venmo/PayPal to include a fee. Zelle and mail check never have a fee.'}
+                        ? 'Fee applies only when you charge processing fees — and only on card and PayPal. Venmo, Zelle, and mail check have no processing fee.'
+                        : 'No processing fee added. Turn on “Charge customers a credit card processing fee” in Profile if you want card/PayPal to include a fee. Venmo, Zelle, and mail check never have a fee.'}
                     </p>
                     {stripeConnectStatus?.isTest && (
                       <p className="text-[11px] text-amber-700 font-medium mt-1">

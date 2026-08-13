@@ -29,12 +29,14 @@ function roundMoney(n: number) {
 }
 
 /**
- * Methods that never add a processing fee (even if contractor charges card fees).
+ * Methods that can include a processing fee when chargeCCFee is on.
+ * Venmo, Zelle, mail check, cash: never charged a processing fee.
  */
 export function methodHasProcessingFee(method: string): boolean {
   const m = (method || '').toLowerCase().replace(/[\s-]+/g, '_');
   if (
     m === 'zelle' ||
+    m === 'venmo' ||
     m === 'mailcheck' ||
     m === 'mail_check' ||
     m === 'check' ||
@@ -43,13 +45,24 @@ export function methodHasProcessingFee(method: string): boolean {
   ) {
     return false;
   }
-  return true;
+  // Stripe card / PayPal (and similar) only
+  if (
+    m === 'stripe' ||
+    m === 'card' ||
+    m === 'apple_pay' ||
+    m === 'ach' ||
+    m === 'us_bank_account' ||
+    m === 'paypal'
+  ) {
+    return true;
+  }
+  return false;
 }
 
 /**
  * Fee schedule per method.
- * Zelle / mail check / cash: always $0.
- * Card / Venmo / PayPal: rates apply only when contractor enables chargeCCFee (caller passes rates).
+ * Venmo / Zelle / mail check / cash: always $0.
+ * Card / PayPal: rates apply only when contractor enables chargeCCFee.
  */
 export function feeRatesForMethod(method: string): { percentRate: number; fixedFee: number; feeLabel: string } {
   const m = (method || 'stripe').toLowerCase();
@@ -72,13 +85,6 @@ export function feeRatesForMethod(method: string): { percentRate: number; fixedF
       percentRate: DEFAULT_METHOD_FEE_PERCENT,
       fixedFee: DEFAULT_METHOD_FEE_FIXED,
       feeLabel: 'PayPal processing fee',
-    };
-  }
-  if (m === 'venmo') {
-    return {
-      percentRate: DEFAULT_METHOD_FEE_PERCENT,
-      fixedFee: DEFAULT_METHOD_FEE_FIXED,
-      feeLabel: 'Venmo processing fee',
     };
   }
   return {

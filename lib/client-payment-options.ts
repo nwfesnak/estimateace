@@ -1,8 +1,7 @@
 /**
  * Build public client payment options from contractor profile.paymentSettings.
- * Processing fees apply to fee-bearing methods (card / Venmo / PayPal) when
- * chargeFees is true (default on client pay). Zelle and mail check never
- * include a processing fee.
+ * Processing fees apply to fee-bearing methods (card / PayPal) when
+ * chargeFees is true. Venmo, Zelle, and mail check never include a fee.
  */
 import {
   buildPayPalPayUrl,
@@ -152,13 +151,6 @@ function metaFor(method: string, chargeFees: boolean) {
         ' A processing fee is added so the contractor receives the full job amount.',
     };
   }
-  if (method === 'venmo') {
-    return {
-      ...m,
-      description: 'Pay in the Venmo app (includes processing fee)',
-      howItWorks: 'Opens Venmo with amount + fee and invoice note. Complete payment in Venmo.',
-    };
-  }
   if (method === 'paypal') {
     return {
       ...m,
@@ -183,9 +175,9 @@ export function buildClientPaymentOptions(input: {
   /** Override fee % (e.g. contractor profile ccFeePercentage) */
   feePercentRate?: number;
   /**
-   * When true, card/Venmo/PayPal include processing fee.
+   * When true, card/PayPal include processing fee.
    * When false, all methods are base amount only.
-   * Default false — only companies that opt in charge fees.
+   * Venmo never includes a fee.
    */
   chargeFees?: boolean;
 }): ClientPayOption[] {
@@ -212,19 +204,20 @@ export function buildClientPaymentOptions(input: {
 
   if (settings.venmo?.enabled && hasVenmoSetup(settings.venmo)) {
     const handle = cleanVenmoHandle(settings.venmo.handle || '');
-    const m = metaFor('venmo', chargeFees);
-    const fee = withFee('venmo', baseAmount, { chargeFees, feePercentOverride: feePct });
+    const m = metaFor('venmo', false);
+    // Venmo never has a processing fee
+    const fee = withFee('venmo', baseAmount, { chargeFees: false });
     const note = buildPaymentTrackingNote(
       input.invoiceNumber || '',
-      fee.feeAmount > 0 ? `${input.label || 'Payment'} + fee` : input.label || 'Payment',
+      input.label || 'Payment',
       input.company
     );
     options.push({
       method: 'venmo',
       label: m.label,
       icon: m.icon,
-      description: m.description,
-      howItWorks: m.howItWorks,
+      description: 'Pay in the Venmo app — no processing fee',
+      howItWorks: 'Opens Venmo with the amount and invoice note. Complete payment in Venmo. No processing fee.',
       ready: true,
       handle: `@${handle}`,
       payUrl: buildVenmoPayUrl(handle, fee.totalAmount, note),

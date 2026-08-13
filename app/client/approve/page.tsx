@@ -65,7 +65,7 @@ type DocPayload = {
 
 /**
  * Zelle / mail check always $0 fee.
- * Card / Venmo / PayPal: fee only when contractor enabled chargeCCFee.
+ * Card / PayPal: fee only when contractor enabled chargeCCFee. Venmo never.
  */
 function sanitizePayOptions(
   raw: PayOption[] | undefined,
@@ -112,7 +112,7 @@ function sanitizePayOptions(
       };
     }
 
-    // Stripe / Venmo / PayPal — fee when contractor opted in
+    // Stripe / PayPal — fee when contractor opted in
     let feeAmt = Math.max(0, Number(opt.feeAmount) || 0);
     let total = Number(opt.totalAmount) > 0 ? Number(opt.totalAmount) : 0;
     if (feeAmt < 0.01) {
@@ -137,7 +137,7 @@ function sanitizePayOptions(
         method === 'stripe'
           ? opt.description || 'Pay securely with Stripe Checkout'
           : method === 'venmo'
-            ? 'Pay in the Venmo app (includes processing fee)'
+            ? 'Pay in the Venmo app — no processing fee'
             : method === 'paypal'
               ? 'PayPal balance, bank, or card (includes processing fee)'
               : opt.description,
@@ -468,7 +468,7 @@ function ApprovePayInner() {
               )}
               {chargeFees ? (
                 <p className="text-[11px] text-amber-800 pt-1">
-                  Card, Venmo, and PayPal may include a processing fee. Zelle and mail check have no
+                  Card and PayPal may include a processing fee. Venmo, Zelle, and mail check have no
                   processing fee.
                 </p>
               ) : (

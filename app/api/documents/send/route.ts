@@ -315,7 +315,7 @@ export async function POST(request: NextRequest) {
         </p>
         ${
           amountDueNow >= 0.5 && chargeCCFee && exampleFee.feeAmount > 0
-            ? `<p style="margin:0 0 16px;font-size:12px;color:#64748b;">Card / Venmo / PayPal may include a processing fee at checkout. Zelle and mail check have no processing fee.</p>`
+            ? `<p style="margin:0 0 16px;font-size:12px;color:#64748b;">Card / PayPal may include a processing fee at checkout. Venmo, Zelle, and mail check have no processing fee.</p>`
             : ''
         }
         <!--[if mso]>
