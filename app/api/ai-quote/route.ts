@@ -8,15 +8,16 @@ import {
   type QuoteLineContext,
   type QuoteLocationInput,
 } from '@/lib/ai-quote-region';
-import { computePricingAnchor, detectWholeHomeInteriorPaint, estimateInteriorPaintableSqft } from '@/lib/ai-quote-anchor';
+import { detectWholeHomeInteriorPaint, estimateInteriorPaintableSqft } from '@/lib/ai-quote-anchor';
 import {
   coercePerUnitPrice,
   getMarketSqftUnitPrice,
   detectSqftBillingContext,
   resolveQuoteLineStructure,
+  parseSqftFromDescription,
 } from '@/lib/quote-units';
 import { analyzeJobImage, type JobImageAnalysis } from '@/lib/analyze-job-image';
-import { getXaiApiKey, getXaiChatModel } from '@/lib/xai-config';
+import { getXaiApiKey, getXaiQuoteModel } from '@/lib/xai-config';
 import {
   applyMaterialMarkup,
   calibrateMaterialPrices,
@@ -788,65 +789,9 @@ export async function POST(request: NextRequest) {
       };
     };
 
-    const anchoredQuote = computePricingAnchor(jobDescription, regional);
-    if (anchoredQuote) {
-      const structured = resolveQuoteLineStructure(jobDescription, regional, {
-        suggestedQty: anchoredQuote.suggestedQty,
-        unit: anchoredQuote.unit,
-        unitPrice: anchoredQuote.unitPrice,
-        total: anchoredQuote.total,
-      });
-      const markedMaterials = applyMaterialMarkup(
-        anchoredQuote.materials as MaterialLine[],
-        DEFAULT_MATERIAL_MARKUP
-      );
-      const { aligned, appliedMaterialCount, appliedLaborRate, unitPrice: memUnitPrice } =
-        applyMemoryAndAlign(
-          markedMaterials,
-          anchoredQuote.laborBreakdown,
-          jobDescription,
-          structured.unitPrice,
-          structured.suggestedQty,
-          structured.unit
-        );
-      let finalUnit = memUnitPrice > 0 ? memUnitPrice : structured.unitPrice;
-      finalUnit = coercePerUnitPrice(finalUnit, structured.suggestedQty, {
-        marketUnitPrice: structured.unitPrice,
-        description: jobDescription,
-      });
-      const finalTotal = roundMoney(finalUnit * structured.suggestedQty);
-      return NextResponse.json({
-        unitPrice: finalUnit,
-        unit: structured.unit,
-        suggestedQty: structured.suggestedQty,
-        total: finalTotal,
-        billingMode: structured.billingMode,
-        breakdown: anchoredQuote.breakdown,
-        confidence: anchoredQuote.confidence,
-        materials: aligned.materials,
-        materialsCostTotal: aligned.materialsCostTotal,
-        laborCostTotal: aligned.laborCostTotal,
-        laborBreakdown: aligned.labor,
-        pricingMethod: 'deterministic',
-        jobMaterialsTotal: aligned.materialsCostTotal,
-        jobLaborTotal: aligned.laborCostTotal,
-        analyzedScope: imageAnalysis?.scopeDescription,
-        imageAnalysis,
-        priceMemoryApplied: {
-          materials: appliedMaterialCount,
-          laborRate: appliedLaborRate,
-        },
-        materialMarkup: DEFAULT_MATERIAL_MARKUP,
-        materialMarkupPercent: Math.round((DEFAULT_MATERIAL_MARKUP - 1) * 100),
-        pricingRegion: {
-          label: regional.label,
-          source: regional.source,
-          costTier: regional.costTier,
-          materialMultiplier: regional.materialMultiplier,
-          laborMultiplier: regional.laborMultiplier,
-        },
-      });
-    }
+    // SuperGrok-style path: always call flagship Grok for estimates (same class as SuperGrok).
+    // Local deterministic engines are only a light safety net after the model answers —
+    // they must not invent multi-thousand hour paint jobs or $millions for a house.
 
     const regionalPrompt = buildRegionalPromptSection(regional);
     const userMessage = buildQuoteUserMessage(
@@ -856,6 +801,7 @@ export async function POST(request: NextRequest) {
       jobLocation
     );
 
+    const quoteModel = getXaiQuoteModel();
     const response = await fetch('https://api.x.ai/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -863,25 +809,33 @@ export async function POST(request: NextRequest) {
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: getXaiChatModel(),
+        model: quoteModel,
+        temperature: 0.2,
         messages: [
           {
             role: 'system',
-            content: `You are a professional residential contractor estimator. Your quotes must match what a real local contractor would charge a homeowner for the EXACT task described — competitive mid-market, not luxury and not a giveaway.
+            content: `You are Grok — the same caliber of estimator a SuperGrok user gets when they ask for a contractor bid. Give a REALISTIC residential contractor price a homeowner would actually pay in the US mid-market (adjust for the region below).
+
+Think like SuperGrok chat: sensible totals first, then back into materials + labor. Never invent fantasy numbers (e.g. 2,000+ hours for painting a 1,200 SF home, or multi-million dollar paint jobs).
 
 PRICING ONLY — do not rewrite the customer-facing description. Price only what is written (no extras, no "while we're there" work).
 
-Return ONLY valid JSON.
+Return ONLY valid JSON (no markdown).
 
 ${regionalPrompt}
 
 ${priceMemoryPrompt ? `\n${priceMemoryPrompt}\n` : ''}
 
-ACCURACY RULES (critical — quotes are often too high or too low when ignored):
-1) Scope lock: Price ONLY the described task. If they say "replace toilet", do not include bathroom remodel, tile, or vanity.
-2) MATERIALS = Lowe's.com mid-grade shelf prices (what a homeowner pays walking into Lowe's). LABOR is separate hours × rate.
-3) unitPrice for Unit jobs = FULL job total the customer pays for that one task (materials + labor). For SF jobs = price PER square foot installed.
-4) Prefer realistic mid-market installed prices. If unsure, stay near typical homeowner-facing contractor pricing for 2025–2026.
+SUPERGROK-STYLE REALITY CHECKS (critical):
+1) Scope lock: Price ONLY the described task.
+2) Whole-home paint (e.g. 1,200 SF home, interior and/or exterior, 1–2 coats):
+   - Typical INSTALLED total is often roughly $3,000–$12,000 depending on region, coats, exterior vs interior.
+   - Labor is usually on the order of ~25–90 CREW-HOURS for a 1,000–1,500 SF home (not hundreds or thousands).
+   - unit = "SF", suggestedQty = home floor sqft (e.g. 1200), unitPrice = total ÷ suggestedQty (about $2.50–$8/SF installed is common, not $2,000+/SF).
+3) MATERIALS = Lowe's mid-grade shelf prices. LABOR = hours × crew rate (typically $50–$85/hr).
+4) unitPrice for Unit jobs = FULL job total. For SF jobs = price PER square foot (NOT full job total).
+5) total MUST equal unitPrice × suggestedQty.
+6) laborBreakdown.hours = TOTAL crew-hours for the whole job (full scope, not per SF).
 
 ${formatLowesPriceGuideForPrompt()}
 
@@ -1028,21 +982,57 @@ PRICING MATH (strict — numbers must reconcile):
     // Contractor markup on materials purchased for the job (cost → sell)
     materials = applyMaterialMarkup(materials, DEFAULT_MATERIAL_MARKUP);
 
-    // Always build a labor object when AI omits laborBreakdown — install work always has labor
+    // Labor: trust SuperGrok-style model hours when they look real; only force-engine if missing/absurd
     const rawLabor = parsed.laborBreakdown || parsed.labor || null;
-    let laborBreakdown = normalizeLaborBreakdown(
-      {
+    const modelHours = num(rawLabor?.hours, 0);
+    const modelRate = num(rawLabor?.rate, 0);
+    const modelLaborTotal = num(rawLabor?.total, 0);
+    const paintJob = /paint|painting/i.test(jobDescription);
+    const modelHoursLookReal =
+      modelHours >= 4 &&
+      modelHours <= (paintJob ? 120 : 400) &&
+      !(paintJob && modelHours > 100 && suggestedQty <= 2000);
+
+    let laborBreakdown: LaborBreakdown | null;
+    if (modelHoursLookReal) {
+      let hours = modelHours;
+      let rate =
+        modelRate >= 45 && modelRate <= 120
+          ? modelRate
+          : preferredLaborRate && preferredLaborRate >= 10
+            ? preferredLaborRate
+            : 62 * regional.laborMultiplier;
+      if (preferredLaborRate && preferredLaborRate >= 10) rate = preferredLaborRate;
+      let total =
+        modelLaborTotal > 0 && modelLaborTotal < hours * rate * 2.5
+          ? modelLaborTotal
+          : roundMoney(hours * rate);
+      // Per-SF billing: labor.total is share of one unit if needed by UI — keep full-job hours
+      laborBreakdown = {
         description: String(rawLabor?.description || 'Labor').trim() || 'Labor',
-        hours: num(rawLabor?.hours, 0),
-        rate: num(rawLabor?.rate, 0),
-        total: num(rawLabor?.total, 0),
-      },
-      jobDescription,
-      suggestedQty,
-      regional.laborMultiplier,
-      lineUnit,
-      preferredLaborRate
-    );
+        hours: roundMoney(hours),
+        rate: roundMoney(rate),
+        total: roundMoney(
+          suggestedQty > 1 && /sf|sqft/i.test(lineUnit)
+            ? total / Math.max(1, suggestedQty)
+            : total
+        ),
+      };
+    } else {
+      laborBreakdown = normalizeLaborBreakdown(
+        {
+          description: String(rawLabor?.description || 'Labor').trim() || 'Labor',
+          hours: modelHours,
+          rate: modelRate,
+          total: modelLaborTotal,
+        },
+        jobDescription,
+        suggestedQty,
+        regional.laborMultiplier,
+        lineUnit,
+        preferredLaborRate
+      );
+    }
 
     // Apply contractor-edited preferred prices before reconciling totals
     {
@@ -1203,6 +1193,50 @@ PRICING MATH (strict — numbers must reconcile):
       }
     }
 
+    // Prefer SuperGrok/model TOTAL when it is in a sane band (don't let engines rewrite a good bid)
+    {
+      const modelTotal = num(parsed.total, 0);
+      const qty = Math.max(1, structured.suggestedQty);
+      const sqft = parseSqftFromDescription(jobDescription) || (qty >= 50 ? qty : 0);
+      const isPaint = /paint|painting/i.test(jobDescription);
+      if (modelTotal > 0 && sqft >= 400 && isPaint) {
+        // Typical installed house paint: roughly $2–$12 / SF of floor area (int and/or ext)
+        const minT = sqft * 1.8;
+        const maxT = sqft * 14;
+        if (modelTotal >= minT && modelTotal <= maxT) {
+          structured.total = roundMoney(modelTotal);
+          structured.unitPrice = roundMoney(modelTotal / qty);
+          structured.suggestedQty = qty;
+          if (/sf|sqft|square/i.test(String(structured.unit || '')) === false) {
+            structured.unit = 'SF';
+            structured.billingMode = 'sqft';
+          }
+        }
+      } else if (modelTotal > 50 && modelTotal < 50000 && qty <= 20) {
+        // Unit jobs: trust SuperGrok total when reasonable
+        if (Math.abs(modelTotal - structured.total) / modelTotal > 0.35) {
+          structured.total = roundMoney(modelTotal);
+          structured.unitPrice = roundMoney(modelTotal / Math.max(1, qty));
+        }
+      }
+    }
+
+    // Re-sync labor hours display to SuperGrok hours when we kept them
+    if (modelHoursLookReal && laborBreakdown && aligned.labor) {
+      aligned.labor = {
+        ...aligned.labor,
+        hours: laborBreakdown.hours,
+        rate: laborBreakdown.rate,
+        description: laborBreakdown.description || aligned.labor.description,
+      };
+      const fullLabor = roundMoney(laborBreakdown.hours * laborBreakdown.rate);
+      aligned.laborCostTotal = fullLabor;
+      aligned.labor.total =
+        structured.suggestedQty > 1 && /sf|sqft/i.test(String(structured.unit || ''))
+          ? roundMoney(fullLabor / structured.suggestedQty)
+          : fullLabor;
+    }
+
     const industryMeta = estimateIndustryLabor(
       jobDescription,
       structured.suggestedQty,
@@ -1217,6 +1251,8 @@ PRICING MATH (strict — numbers must reconcile):
       billingMode: structured.billingMode,
       breakdown: parsed.breakdown,
       confidence: parsed.confidence,
+      pricingMethod: 'supergrok',
+      quoteModel,
       materials: aligned.materials,
       materialsCostTotal: aligned.materialsCostTotal,
       laborCostTotal: aligned.laborCostTotal,

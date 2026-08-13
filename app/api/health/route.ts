@@ -35,9 +35,11 @@ export async function GET(request: NextRequest) {
     },
     xai: {
       chatModel: xai.chatModel,
+      quoteModel: (xai as any).quoteModel,
       visionModel: xai.visionModel,
       apiKeyConfigured: xai.hasApiKey,
-      modelPolicy: 'Uses xAI -latest aliases; override via GROK_MODEL / GROK_CHAT_MODEL / GROK_VISION_MODEL',
+      modelPolicy:
+        'AI Quote uses SuperGrok-class flagship (grok-4.6). Override via GROK_QUOTE_MODEL / GROK_CHAT_MODEL / GROK_MODEL.',
     },
     addressAutocomplete: {
       googlePlacesConfigured: isGooglePlacesConfigured(),
