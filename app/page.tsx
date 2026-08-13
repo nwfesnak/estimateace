@@ -807,10 +807,15 @@ export default function Home() {
   const [videoUrls, setVideoUrls] = useState<string[]>([]);
   const [receiptUrls, setReceiptUrls] = useState<string[]>([]);
 
-  // Resolved display URLs (fresh signed URLs)
+  // Resolved display URLs (fresh signed URLs) — same length/order as source path arrays
   const [photoDisplayUrls, setPhotoDisplayUrls] = useState<string[]>([]);
   const [videoDisplayUrls, setVideoDisplayUrls] = useState<string[]>([]);
   const [receiptDisplayUrls, setReceiptDisplayUrls] = useState<string[]>([]);
+  /** Full-screen watch dialog for a saved job video (owner + crew) */
+  const [videoViewerOpen, setVideoViewerOpen] = useState(false);
+  const [videoViewerIndex, setVideoViewerIndex] = useState(0);
+  const [videoViewerSrc, setVideoViewerSrc] = useState('');
+  const [videoViewerLoading, setVideoViewerLoading] = useState(false);
   const [logoDisplayUrl, setLogoDisplayUrl] = useState('');
   const [certificateDisplayUrl, setCertificateDisplayUrl] = useState('');
   const [zelleQrDisplayUrl, setZelleQrDisplayUrl] = useState('');
@@ -834,18 +839,28 @@ export default function Home() {
   const [photoQuoteImageUrl, setPhotoQuoteImageUrl] = useState('');
   const [photoQuoteLineId, setPhotoQuoteLineId] = useState<number | null>(null);
 
-  // Resolve storage paths (and legacy signed URLs) to fresh signed URLs for display
+  // Resolve storage paths (and legacy signed URLs) to fresh signed URLs for display.
+  // Keep one entry per path (including '') so indexes stay aligned for open/delete.
   useEffect(() => {
+    let cancelled = false;
     const resolveUrls = async (paths: string[]) => {
-      const resolved = await Promise.all(
-        paths.map((p) => resolveMediaDisplayUrl(p, getMediaUrl))
-      );
-      return resolved.filter(Boolean);
+      return Promise.all(paths.map((p) => resolveMediaDisplayUrl(p, getMediaUrl)));
     };
 
-    resolveUrls(photoUrls).then(setPhotoDisplayUrls);
-    resolveUrls(videoUrls).then(setVideoDisplayUrls);
-    resolveUrls(receiptUrls).then(setReceiptDisplayUrls);
+    void (async () => {
+      const [photos, videos, receipts] = await Promise.all([
+        resolveUrls(photoUrls),
+        resolveUrls(videoUrls),
+        resolveUrls(receiptUrls),
+      ]);
+      if (cancelled) return;
+      setPhotoDisplayUrls(photos);
+      setVideoDisplayUrls(videos);
+      setReceiptDisplayUrls(receipts);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [photoUrls, videoUrls, receiptUrls, supabase]);
 
   // Resolve before/after paths for AI job renderings
@@ -3157,18 +3172,21 @@ export default function Home() {
     };
   };
 
-  const handleMediaUpload = async (files: FileList | null, type: 'photo' | 'video' | 'receipt') => {
+  const handleMediaUpload = async (
+    files: FileList | null,
+    type: 'photo' | 'video' | 'receipt'
+  ): Promise<{ count: number; paths: string[]; nextVideos?: string[] }> => {
     if (!files?.length) {
       showMessage('No file selected.');
-      return 0;
+      return { count: 0, paths: [] };
     }
     if (!user) {
       showMessage('Please log in before uploading photos.');
-      return 0;
+      return { count: 0, paths: [] };
     }
     if (!supabase) {
       showMessage(getSupabaseConfigHelpMessage());
-      return 0;
+      return { count: 0, paths: [] };
     }
 
     showMessage(type === 'photo' ? 'Uploading photo…' : type === 'video' ? 'Uploading video…' : 'Uploading…');
@@ -3216,7 +3234,7 @@ export default function Home() {
       }
     }
 
-    if (newUrls.length === 0) return 0;
+    if (newUrls.length === 0) return { count: 0, paths: [] as string[] };
 
     // Build next media lists synchronously so saveToDB does not write stale empty photoUrls
     const nextPhotos = type === 'photo' ? [...photoUrls, ...newUrls] : photoUrls;
@@ -3293,7 +3311,11 @@ export default function Home() {
       receiptUrls: nextReceipts,
     });
 
-    return newUrls.length;
+    return {
+      count: newUrls.length,
+      paths: newUrls,
+      nextVideos: type === 'video' ? nextVideos : undefined,
+    };
   };
 
   /** Sum of all receipt amounts in this job's folder */
@@ -3502,8 +3524,18 @@ export default function Home() {
       showMessage('Photo removed from this estimate.');
       return;
     }
-    if (type === 'video') setVideoUrls(prev => prev.filter((_, i) => i !== index));
-    else if (type === 'receipt') {
+    if (type === 'video') {
+      const nextVideos = videoUrls.filter((_, i) => i !== index);
+      setVideoUrls(nextVideos);
+      if (videoViewerOpen && videoViewerIndex === index) {
+        setVideoViewerOpen(false);
+        setVideoViewerSrc('');
+      }
+      void saveToDB({ videoUrls: nextVideos, quiet: true });
+      showMessage('Video removed from this estimate.');
+      return;
+    }
+    if (type === 'receipt') {
       const path = receiptUrls[index];
       const nextUrls = receiptUrls.filter((_, i) => i !== index);
       const nextDetails = (receiptDetails || []).filter(
@@ -3516,8 +3548,49 @@ export default function Home() {
       showMessage('Receipt removed from folder.');
       return;
     }
-    saveToDB();
-    if (type === 'video') showMessage('Video removed from this estimate.');
+  };
+
+  /** Open a saved job video in a full player (owner or crew with workspace access). */
+  const openSavedVideo = async (indexOrPath: number | string, pathList?: string[]) => {
+    const list = pathList || videoUrls;
+    const index =
+      typeof indexOrPath === 'number'
+        ? indexOrPath
+        : Math.max(0, list.findIndex((p) => p === indexOrPath));
+    const path = typeof indexOrPath === 'string' ? indexOrPath : list[index];
+    if (!path) {
+      showMessage('Video file is missing from this estimate.');
+      return;
+    }
+    setVideoViewerIndex(index >= 0 ? index : 0);
+    setVideoViewerOpen(true);
+    setVideoViewerLoading(true);
+    setVideoViewerSrc('');
+    try {
+      // Prefer cached display URL, then mint a fresh signed URL (24h) for playback
+      let src =
+        index >= 0 && videoDisplayUrls[index] ? videoDisplayUrls[index] : '';
+      const fresh = await resolveMediaDisplayUrl(path, getMediaUrl);
+      if (fresh) src = fresh;
+      if (!src) {
+        showMessage(
+          'Could not open video. Check your connection, or re-login if you are on a crew account.'
+        );
+        setVideoViewerOpen(false);
+        return;
+      }
+      setVideoViewerSrc(src);
+      if (index >= 0) {
+        setVideoDisplayUrls((prev) => {
+          const next = [...prev];
+          while (next.length <= index) next.push('');
+          next[index] = src;
+          return next;
+        });
+      }
+    } finally {
+      setVideoViewerLoading(false);
+    }
   };
 
   /** Delete a photo from the job-rendering picker (also removes it from Site Photos). */
@@ -3614,8 +3687,8 @@ export default function Home() {
   const handlePhotoGalleryChange = async (files: FileList | null) => {
     try {
       const saved = await handleMediaUpload(files, 'photo');
-      if (saved > 0) {
-        showMessage(`✅ ${saved} photo${saved === 1 ? '' : 's'} saved to this estimate.`);
+      if (saved.count > 0) {
+        showMessage(`✅ ${saved.count} photo${saved.count === 1 ? '' : 's'} saved to this estimate.`);
       } else if (files?.length) {
         // handleMediaUpload already showed a specific error
       }
@@ -3630,8 +3703,14 @@ export default function Home() {
   const handleVideoGalleryChange = async (files: FileList | null) => {
     try {
       const saved = await handleMediaUpload(files, 'video');
-      if (saved > 0) {
-        showMessage(`✅ ${saved} video${saved === 1 ? '' : 's'} saved to this estimate.`);
+      if (saved.count > 0) {
+        showMessage(
+          `✅ ${saved.count} video${saved.count === 1 ? '' : 's'} saved — tap Watch to play anytime.`
+        );
+        const lastPath = saved.paths[saved.paths.length - 1];
+        if (lastPath) {
+          void openSavedVideo(lastPath, saved.nextVideos);
+        }
       }
     } catch (err) {
       console.error(err);
@@ -3646,7 +3725,7 @@ export default function Home() {
     dt.items.add(file);
     const asReceipt = deviceCameraPhotoTarget === 'receipt';
     const saved = await handleMediaUpload(dt.files, asReceipt ? 'receipt' : 'photo');
-    if (saved > 0) {
+    if (saved.count > 0) {
       showMessage(
         asReceipt
           ? '✅ Receipt photo saved. Enter vendor & amount if needed.'
@@ -3659,17 +3738,21 @@ export default function Home() {
     const dt = new DataTransfer();
     dt.items.add(file);
     const saved = await handleMediaUpload(dt.files, 'video');
-    if (saved > 0) {
-      showMessage('✅ Video saved to this estimate.');
+    if (saved.count > 0) {
+      showMessage('✅ Video saved — tap Watch anytime to play it again.');
+      const lastPath = saved.paths[saved.paths.length - 1];
+      if (lastPath) {
+        void openSavedVideo(lastPath, saved.nextVideos);
+      }
     }
   };
 
   const handleReceiptGalleryChange = async (files: FileList | null) => {
     try {
       const saved = await handleMediaUpload(files, 'receipt');
-      if (saved > 0) {
+      if (saved.count > 0) {
         showMessage(
-          `✅ ${saved} receipt photo${saved === 1 ? '' : 's'} uploaded. Enter vendor & amount if needed.`
+          `✅ ${saved.count} receipt photo${saved.count === 1 ? '' : 's'} uploaded. Enter vendor & amount if needed.`
         );
       }
     } catch (err) {
@@ -11271,37 +11354,69 @@ export default function Home() {
                 <CardContent className="p-6">
                   <h3 className="text-xl font-semibold mb-4">{t('videosSection')} ({videoUrls.length})</h3>
                   <p className="text-sm text-gray-500 mb-4">
-                    Record with your phone camera or upload an existing video. Videos save to this estimate automatically.
-                    Use <span className="font-medium text-gray-700">Delete</span> on any video to remove it after saving.
+                    Record or upload a video — it saves on this estimate. You and crew can open and watch any saved
+                    video anytime. Tap <span className="font-medium text-gray-700">Watch</span> to play full screen.
                   </p>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    {videoDisplayUrls.map((url, i) => (
-                      <div key={i} className="relative group rounded-lg border bg-gray-50 overflow-hidden">
-                        <video
-                          src={url}
-                          controls
-                          playsInline
-                          className="w-full h-40 object-cover bg-black"
-                        />
-                        {/* Always visible on mobile (hover-only was easy to miss) */}
-                        <button
-                          type="button"
-                          onClick={() => confirmRemoveVideo(i)}
-                          className="absolute top-2 right-2 z-10 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white text-sm font-semibold w-10 h-10 flex items-center justify-center rounded-2xl shadow-xl"
-                          aria-label={`Delete video ${i + 1}`}
-                          title="Delete video"
+                    {videoUrls.map((path, i) => {
+                      const url = videoDisplayUrls[i] || '';
+                      return (
+                        <div
+                          key={path || `video-${i}`}
+                          className="relative group rounded-lg border bg-gray-50 overflow-hidden flex flex-col"
                         >
-                          ×
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => confirmRemoveVideo(i)}
-                          className="w-full py-2 text-sm font-semibold text-red-700 bg-red-50 hover:bg-red-100 border-t border-red-100"
-                        >
-                          Delete video
-                        </button>
-                      </div>
-                    ))}
+                          <button
+                            type="button"
+                            onClick={() => void openSavedVideo(i)}
+                            className="relative w-full h-40 bg-black flex items-center justify-center text-left"
+                            aria-label={`Watch video ${i + 1}`}
+                          >
+                            {url ? (
+                              <video
+                                src={url}
+                                muted
+                                playsInline
+                                preload="metadata"
+                                className="w-full h-40 object-cover pointer-events-none"
+                              />
+                            ) : (
+                              <div className="text-white text-sm px-3 text-center">
+                                Video {i + 1}
+                                <div className="text-xs text-white/70 mt-1">Tap to load &amp; watch</div>
+                              </div>
+                            )}
+                            <span className="absolute inset-0 flex items-center justify-center bg-black/35 group-hover:bg-black/45 transition">
+                              <span className="bg-white/95 text-[#1e293b] font-semibold text-sm px-4 py-2 rounded-full shadow-lg">
+                                ▶ Watch
+                              </span>
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void openSavedVideo(i)}
+                            className="w-full py-2 text-sm font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border-t border-emerald-100"
+                          >
+                            Open &amp; watch
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => confirmRemoveVideo(i)}
+                            className="absolute top-2 right-2 z-10 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white text-sm font-semibold w-10 h-10 flex items-center justify-center rounded-2xl shadow-xl"
+                            aria-label={`Delete video ${i + 1}`}
+                            title="Delete video"
+                          >
+                            ×
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => confirmRemoveVideo(i)}
+                            className="w-full py-2 text-sm font-semibold text-red-700 bg-red-50 hover:bg-red-100 border-t border-red-100"
+                          >
+                            Delete video
+                          </button>
+                        </div>
+                      );
+                    })}
                     <button
                       type="button"
                       onClick={openDeviceVideoCamera}
@@ -15922,6 +16037,76 @@ export default function Home() {
         onPhoto={handleDeviceCameraPhoto}
         onVideo={handleDeviceCameraVideo}
       />
+
+      {/* Watch saved job video (owner + crew) */}
+      <Dialog
+        open={videoViewerOpen}
+        onOpenChange={(open) => {
+          setVideoViewerOpen(open);
+          if (!open) {
+            setVideoViewerSrc('');
+            setVideoViewerLoading(false);
+          }
+        }}
+      >
+        <DialogContent className="max-w-3xl w-[95vw] p-0 overflow-hidden bg-black border-slate-800">
+          <DialogHeader className="px-4 pt-4 pb-2 bg-slate-900">
+            <DialogTitle className="text-white text-base">
+              Job video {videoUrls.length ? `${videoViewerIndex + 1} of ${videoUrls.length}` : ''}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="bg-black min-h-[240px] flex items-center justify-center px-2 pb-2">
+            {videoViewerLoading && (
+              <div className="text-white/80 text-sm py-16">Loading video…</div>
+            )}
+            {!videoViewerLoading && videoViewerSrc && (
+              <video
+                key={videoViewerSrc}
+                src={videoViewerSrc}
+                controls
+                autoPlay
+                playsInline
+                className="w-full max-h-[70vh] rounded-md bg-black"
+              />
+            )}
+            {!videoViewerLoading && !videoViewerSrc && (
+              <div className="text-white/80 text-sm py-16 px-4 text-center">
+                Video could not be loaded. Try again or re-open this estimate.
+              </div>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-2 px-4 py-3 bg-slate-900 border-t border-slate-800">
+            <Button
+              type="button"
+              variant="outline"
+              className="bg-white text-slate-900"
+              disabled={videoViewerIndex <= 0}
+              onClick={() => void openSavedVideo(videoViewerIndex - 1)}
+            >
+              Previous
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="bg-white text-slate-900"
+              disabled={videoViewerIndex >= videoUrls.length - 1}
+              onClick={() => void openSavedVideo(videoViewerIndex + 1)}
+            >
+              Next
+            </Button>
+            <Button
+              type="button"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white ml-auto"
+              onClick={() => {
+                setVideoViewerOpen(false);
+                setVideoViewerSrc('');
+              }}
+            >
+              Close
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Media picker — device-style camera or gallery upload */}
       <Dialog open={isPhotoPickerOpen} onOpenChange={setIsPhotoPickerOpen}>
