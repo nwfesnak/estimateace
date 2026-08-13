@@ -8632,12 +8632,9 @@ export default function Home() {
         return;
       }
       const clientEmail = (emails || []).map((e) => String(e || '').trim()).find(Boolean) || '';
-      const chargeFees = profile.chargeCCFee === true;
-      const feePercent = chargeFees
-        ? Number(profile.ccFeePercentage) > 0
-          ? Number(profile.ccFeePercentage)
-          : 2.9
-        : 0;
+      // Stripe always passes processing fee so contractor nets full job amount
+      const feePercent =
+        Number(profile.ccFeePercentage) > 0 ? Number(profile.ccFeePercentage) : 2.9;
       const res = await fetch('/api/payments/job-checkout', {
         method: 'POST',
         headers: {
@@ -8651,7 +8648,7 @@ export default function Home() {
           documentType,
           jobName,
           clientEmail,
-          passProcessingFee: chargeFees,
+          passProcessingFee: true,
           feePercentRate: feePercent,
         }),
       });
@@ -14686,16 +14683,15 @@ export default function Home() {
           <div className="py-2 space-y-5">
             <div className="text-center rounded-2xl bg-emerald-50 border border-emerald-100 p-5">
               {(() => {
-                const chargeFees = profile.chargeCCFee === true;
-                const rate = chargeFees
-                  ? Number(profile.ccFeePercentage) > 0
+                // Card / Venmo / PayPal show fee; Zelle & mail are separate no-fee paths
+                const rate =
+                  Number(profile.ccFeePercentage) > 0
                     ? Number(profile.ccFeePercentage)
-                    : STRIPE_CARD_PERCENT
-                  : 0;
+                    : STRIPE_CARD_PERCENT;
                 const fee = computeStripeCardFee(paymentAmount, {
                   percentRate: rate,
-                  fixedFee: chargeFees ? STRIPE_CARD_FIXED_USD : 0,
-                  chargeFees,
+                  fixedFee: STRIPE_CARD_FIXED_USD,
+                  chargeFees: true,
                   method: 'stripe',
                 });
                 const isDepositPay = paymentType === 'deposit';

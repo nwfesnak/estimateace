@@ -7,6 +7,7 @@ import {
   computeStripeCardFee,
   methodHasProcessingFee,
   STRIPE_CARD_FIXED_USD,
+  STRIPE_CARD_PERCENT,
 } from '@/lib/stripe-fees';
 
 type PayOption = {
@@ -62,19 +63,20 @@ type DocPayload = {
   error?: string;
 };
 
-/** Force free methods to $0 fee and strip stale “includes processing fee” copy. */
+/** Zelle / mail check always $0 fee. Card / Venmo / PayPal keep (or recompute) processing fee. */
 function sanitizePayOptions(
   raw: PayOption[] | undefined,
   basePay: number,
-  companyChargesFees: boolean
+  feePercent: number
 ): PayOption[] {
   return (raw || []).map((opt) => {
     const method = String(opt.method || '').toLowerCase();
     const base =
       Number(opt.baseAmount) > 0 ? Number(opt.baseAmount) : Math.max(0, Number(basePay) || 0);
     const freeMethod = !methodHasProcessingFee(method);
-    // Only card / Venmo / PayPal get fees, and only if contractor opted in
-    if (freeMethod || !companyChargesFees) {
+
+    // Zelle / mail check / cash — never a processing fee
+    if (freeMethod) {
       let description = String(opt.description || '');
       description = description
         .replace(/\s*\(includes processing fee\)/gi, '')
@@ -88,13 +90,12 @@ function sanitizePayOptions(
       return {
         ...opt,
         description,
-        howItWorks: freeMethod
-          ? method === 'zelle'
+        howItWorks:
+          method === 'zelle'
             ? 'Send the amount shown via your bank’s Zelle. Put the invoice # in the memo. No processing fee.'
             : method === 'mailcheck' || method === 'check'
               ? 'Mail a check for the amount shown. Write the invoice number on the memo line. No processing fee.'
-              : opt.howItWorks
-          : opt.howItWorks,
+              : opt.howItWorks,
         baseAmount: base,
         feeAmount: 0,
         totalAmount: base,
@@ -102,14 +103,36 @@ function sanitizePayOptions(
         feeDescription: 'No processing fee for this payment method',
       };
     }
-    // Fee-bearing method with company opted in — keep API totals if valid
-    const feeAmt = Math.max(0, Number(opt.feeAmount) || 0);
-    const total = Number(opt.totalAmount) > 0 ? Number(opt.totalAmount) : base + feeAmt;
+
+    // Stripe / Venmo / PayPal — always include processing fee
+    let feeAmt = Math.max(0, Number(opt.feeAmount) || 0);
+    let total = Number(opt.totalAmount) > 0 ? Number(opt.totalAmount) : 0;
+    if (feeAmt < 0.01) {
+      const recomputed = computeStripeCardFee(base, {
+        chargeFees: true,
+        method,
+        percentRate: feePercent > 0 ? feePercent : undefined,
+        fixedFee: STRIPE_CARD_FIXED_USD,
+      });
+      feeAmt = recomputed.feeAmount;
+      total = recomputed.totalAmount;
+    }
+    if (!(total > 0)) total = Math.round((base + feeAmt) * 100) / 100;
+
     return {
       ...opt,
       baseAmount: base,
       feeAmount: feeAmt,
       totalAmount: total,
+      feeLabel: opt.feeLabel || 'Processing fee',
+      description:
+        method === 'stripe'
+          ? opt.description || 'Pay securely with Stripe Checkout'
+          : method === 'venmo'
+            ? 'Pay in the Venmo app (includes processing fee)'
+            : method === 'paypal'
+              ? 'PayPal balance, bank, or card (includes processing fee)'
+              : opt.description,
     };
   });
 }
@@ -187,10 +210,12 @@ function ApprovePayInner() {
       : amountPaid > 0
         ? 'Balance due (after deposit)'
         : 'Total due');
-  const companyChargesFees = doc?.chargeCCFee === true;
+  const feePercent =
+    Number(doc?.ccFeePercentage) > 0 ? Number(doc?.ccFeePercentage) : STRIPE_CARD_PERCENT;
+  // Card / Venmo / PayPal always charge fee; Zelle / mail never (sanitizePayOptions)
   const paymentOptions = useMemo(
-    () => sanitizePayOptions(doc?.paymentOptions, basePay, companyChargesFees),
-    [doc?.paymentOptions, basePay, companyChargesFees]
+    () => sanitizePayOptions(doc?.paymentOptions, basePay, feePercent),
+    [doc?.paymentOptions, basePay, feePercent]
   );
   const canPay = basePay >= 0.5;
   const hasTerms = Boolean(String(doc?.terms || '').trim());
@@ -429,16 +454,10 @@ function ApprovePayInner() {
                   Job total {money(grandTotal)} − deposit/payments {money(amountPaid)} = balance due.
                 </p>
               )}
-              {companyChargesFees ? (
-                <p className="text-[11px] text-amber-800 pt-1">
-                  Card, Venmo, and PayPal may include a processing fee. Zelle and mail check have no
-                  processing fee.
-                </p>
-              ) : (
-                <p className="text-[11px] text-emerald-800 pt-1">
-                  No processing fee on any payment method for this contractor.
-                </p>
-              )}
+              <p className="text-[11px] text-amber-800 pt-1">
+                Card, Venmo, and PayPal include a processing fee. Zelle and mail check have no
+                processing fee.
+              </p>
             </div>
           )}
 
@@ -600,12 +619,9 @@ function ApprovePayInner() {
                     ? 'Starting…'
                     : `Pay with Stripe (${money(
                         computeStripeCardFee(basePay, {
-                          chargeFees: doc?.chargeCCFee === true,
-                          percentRate:
-                            doc?.chargeCCFee === true && Number(doc?.ccFeePercentage) > 0
-                              ? Number(doc.ccFeePercentage)
-                              : undefined,
-                          fixedFee: doc?.chargeCCFee === true ? STRIPE_CARD_FIXED_USD : 0,
+                          chargeFees: true,
+                          percentRate: feePercent,
+                          fixedFee: STRIPE_CARD_FIXED_USD,
                         }).totalAmount
                       )})`}
                 </Button>

@@ -1,7 +1,7 @@
 /**
  * Build public client payment options from contractor profile.paymentSettings.
- * Processing fees apply only when the contractor enables chargeCCFee, and only
- * for fee-bearing methods (card / Venmo / PayPal). Zelle and mail check never
+ * Processing fees apply to fee-bearing methods (card / Venmo / PayPal) when
+ * chargeFees is true (default on client pay). Zelle and mail check never
  * include a processing fee.
  */
 import {
