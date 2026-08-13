@@ -9039,7 +9039,7 @@ export default function Home() {
   }, [archivesList]);
 
   /**
-   * All mileage trips across active estimates/invoices + archives (for Reports → Profit).
+   * All mileage trips across active estimates/invoices + archives (for Reports → Tax).
    * Archive wins over active for same id. Open editor job uses live jobMileageLogs.
    */
   const allJobsMileageLogs = useMemo(() => {
@@ -13145,20 +13145,6 @@ export default function Home() {
                     <p className="text-sm text-gray-500">Profit details are restricted for your crew access level.</p>
                   ) : (
                     <>
-                  {/* Total business miles (write-off) — from all jobs */}
-                  <section className="mb-12">
-                    <MileageTracker
-                      summaryOnly
-                      title="🚗 Total business miles"
-                      logs={allJobsMileageLogs}
-                      ratePerMile={mileageRatePerMile}
-                      onChangeLogs={() => {}}
-                      onChangeRate={setMileageRatePerMile}
-                      onSave={saveMileageRate}
-                      saving={mileageSaving}
-                    />
-                  </section>
-
                   {/* Archived invoices by month / year of invoice date */}
                   <section className="mb-12">
                     <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
@@ -13407,6 +13393,20 @@ export default function Home() {
                   ) : (
                     <>
                       <h3 className="font-semibold mb-6 text-xl">🧾 Tax Reports</h3>
+
+                      {/* Total business miles (write-off) — from all jobs */}
+                      <section className="mb-8">
+                        <MileageTracker
+                          summaryOnly
+                          title="🚗 Total business miles"
+                          logs={allJobsMileageLogs}
+                          ratePerMile={mileageRatePerMile}
+                          onChangeLogs={() => {}}
+                          onChangeRate={setMileageRatePerMile}
+                          onSave={saveMileageRate}
+                          saving={mileageSaving}
+                        />
+                      </section>
 
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                         <Card>
