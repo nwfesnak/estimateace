@@ -20,6 +20,14 @@ import { analyzeJobImage, type JobImageAnalysis } from '@/lib/analyze-job-image'
 import { getXaiApiKey, getXaiQuoteModel } from '@/lib/xai-config';
 import { buildCalculatorQuoteAnchor } from '@/lib/buildcalculator';
 import {
+  applyEpMultiplierToBuildCalcBase,
+  detectEstimationProTrade,
+  fetchEstimationProMultiplier,
+  fetchEstimationProTradeCosts,
+  pickPaintLaborBand,
+  type PriceRange,
+} from '@/lib/estimationpro';
+import {
   applyMaterialMarkup,
   calibrateMaterialPrices,
   DEFAULT_MATERIAL_MARKUP,
@@ -790,13 +798,68 @@ export async function POST(request: NextRequest) {
       };
     };
 
-    // BuildCalculator.io Pricing Search API — ground estimates in real construction cost data
-    const bcAnchor = await buildCalculatorQuoteAnchor(jobDescription, {
-      regionalUsdBlend: regional.laborMultiplier * 0.55 + regional.materialMultiplier * 0.45,
-    });
+    // BuildCalculator unit costs (base) + EstimationPro regional multiplier → low/typical/high
+    const zipForEp =
+      String(jobLocation?.zipCode || companyLocation?.zipCode || '').replace(/\D/g, '').slice(0, 5) ||
+      '';
+    const stateForEp = String(jobLocation?.state || companyLocation?.state || '')
+      .trim()
+      .toUpperCase()
+      .slice(0, 2);
 
-    // SuperGrok-style path + BuildCalculator cost database.
-    // Local engines are only a light safety net after the model answers.
+    const [bcAnchor, epMultiplier, epTradeCosts] = await Promise.all([
+      // Do NOT bake regional into BC — EstimationPro multiplier is applied next
+      buildCalculatorQuoteAnchor(jobDescription, { regionalUsdBlend: 1 }),
+      fetchEstimationProMultiplier({ zipCode: zipForEp, state: stateForEp }),
+      fetchEstimationProTradeCosts({
+        trade: detectEstimationProTrade(jobDescription),
+        zipCode: zipForEp,
+        state: stateForEp,
+      }),
+    ]);
+
+    const epMult = epMultiplier?.multiplier || epTradeCosts?.multiplier || 1;
+    const epLaborBand = pickPaintLaborBand(epTradeCosts, jobDescription);
+    let priceRange: PriceRange | null = null;
+    if (bcAnchor?.baseUnitCostUsd != null && bcAnchor.billingQuantity != null) {
+      priceRange = applyEpMultiplierToBuildCalcBase({
+        baseUnitCostUsd: bcAnchor.baseUnitCostUsd,
+        quantity: bcAnchor.billingQuantity,
+        epMultiplier: epMult,
+        epLaborPerSf: epLaborBand,
+        unitLabel: 'SF',
+        spread: 0.18,
+      });
+    } else if (epLaborBand && bcAnchor?.billingQuantity) {
+      // Fallback: EstimationPro labor band only
+      const qty = bcAnchor.billingQuantity;
+      priceRange = {
+        low: Math.round(epLaborBand.low * qty * 100) / 100,
+        typical: Math.round(epLaborBand.typical * qty * 100) / 100,
+        high: Math.round(epLaborBand.high * qty * 100) / 100,
+        perSf: epLaborBand,
+        unit: 'SF',
+        quantity: qty,
+        label: `$${Math.round(epLaborBand.low * qty)} – $${Math.round(epLaborBand.high * qty)} (typical $${Math.round(epLaborBand.typical * qty)})`,
+        sources: ['EstimationPro.ai regional labor rates'],
+      };
+    }
+
+    const epPromptBlock = [
+      'ESTIMATIONPRO.AI REGIONAL MULTIPLIER (apply to BuildCalculator base unit costs):',
+      epMultiplier
+        ? `Location: ${epMultiplier.label || epMultiplier.location} · multiplier ×${epMult.toFixed(2)} (labor ×${(epMultiplier.laborMultiplier || epMult).toFixed(2)})`
+        : `No ZIP/state resolved — using national average multiplier ×1.00`,
+      priceRange
+        ? `PRICE RANGE after BC base × EP multiplier: LOW $${priceRange.low.toFixed(0)} · TYPICAL $${priceRange.typical.toFixed(0)} · HIGH $${priceRange.high.toFixed(0)}${priceRange.perSf ? ` (≈ $${priceRange.perSf.typical.toFixed(2)}/SF typical)` : ''}`
+        : '',
+      'Your unitPrice × suggestedQty (total) should land near the TYPICAL value, within the LOW–HIGH band.',
+      'Attribution: BuildCalculator.io unit costs + EstimationPro.ai regional multipliers.',
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    // SuperGrok-style path + BuildCalculator base + EstimationPro regional range.
 
     const regionalPrompt = buildRegionalPromptSection(regional);
     const userMessage = buildQuoteUserMessage(
@@ -831,19 +894,19 @@ ${regionalPrompt}
 
 ${bcAnchor?.promptBlock ? `\n${bcAnchor.promptBlock}\n` : ''}
 
+${epPromptBlock ? `\n${epPromptBlock}\n` : ''}
+
 ${priceMemoryPrompt ? `\n${priceMemoryPrompt}\n` : ''}
 
-SUPERGROK + BUILDCALCULATOR RULES (critical):
-1) Scope lock: Price ONLY the described task.
-2) When BuildCalculator.io data is provided above, use it as the primary cost anchor (converted to USD). Blend with local mid-market judgment — do not ignore it.
-3) Whole-home paint (e.g. 1,200 SF home, interior and/or exterior, 1–2 coats):
-   - Prefer BuildCalculator-derived total when present; otherwise ~$3,000–$12,000 installed is typical.
-   - Labor ~25–90 CREW-HOURS for a 1,000–1,500 SF home (not hundreds or thousands).
-   - unit = "SF", suggestedQty = home floor sqft, unitPrice = total ÷ suggestedQty (~$2.50–$8/SF installed).
-4) MATERIALS = Lowe's mid-grade shelf prices. LABOR = hours × crew rate (typically $50–$85/hr).
-5) unitPrice for Unit jobs = FULL job total. For SF jobs = price PER square foot (NOT full job total).
-6) total MUST equal unitPrice × suggestedQty.
-7) laborBreakdown.hours = TOTAL crew-hours for the whole job (full scope, not per SF).
+PRICING FORMULA (critical — follow exactly):
+1) BASE unit cost = BuildCalculator.io (converted to USD).
+2) Apply EstimationPro.ai regional multiplier to that base for the job ZIP/state.
+3) Your total (typical) should be near the TYPICAL of the LOW–HIGH range above.
+4) Scope lock: price ONLY the described task.
+5) Whole-home paint: unit="SF", suggestedQty = home floor sqft; unitPrice = typical total ÷ suggestedQty.
+6) laborBreakdown.hours = TOTAL crew-hours (usually 25–90 for a 1,000–1,500 SF home paint job — never thousands).
+7) MATERIALS = Lowe's mid-grade shelf. LABOR = hours × rate ($50–$85/hr typical).
+8) total MUST equal unitPrice × suggestedQty.
 
 ${formatLowesPriceGuideForPrompt()}
 
@@ -1201,46 +1264,34 @@ PRICING MATH (strict — numbers must reconcile):
       }
     }
 
-    // Prefer BuildCalculator anchor, then SuperGrok model total, when sane
+    // Authority: BuildCalculator base × EstimationPro multiplier (typical), show low–high range
     {
       const modelTotal = num(parsed.total, 0);
-      const qty = Math.max(1, structured.suggestedQty);
-      const sqft = parseSqftFromDescription(jobDescription) || (qty >= 50 ? qty : 0);
+      const qty = Math.max(
+        1,
+        priceRange?.quantity ||
+          structured.suggestedQty ||
+          parseSqftFromDescription(jobDescription) ||
+          1
+      );
       const isPaint = /paint|painting/i.test(jobDescription);
-      const bcTotal = bcAnchor?.suggestedJobTotalUsd || 0;
-      const bcPerSf = bcAnchor?.suggestedPerSfUsd || 0;
 
-      if (bcTotal > 0 && sqft >= 200 && isPaint) {
-        // Blend BuildCalculator (60%) with model when model is also sane
-        let finalTotal = bcTotal;
-        if (modelTotal >= sqft * 1.5 && modelTotal <= sqft * 16) {
-          finalTotal = roundMoney(bcTotal * 0.55 + modelTotal * 0.45);
+      if (priceRange && priceRange.typical > 0) {
+        // Prefer BC×EP typical; soft-blend model only if inside the published range
+        let finalTotal = priceRange.typical;
+        if (
+          modelTotal >= priceRange.low * 0.9 &&
+          modelTotal <= priceRange.high * 1.1
+        ) {
+          finalTotal = roundMoney(priceRange.typical * 0.7 + modelTotal * 0.3);
         }
-        structured.total = finalTotal;
-        structured.unitPrice = roundMoney(finalTotal / qty);
+        // Clamp into range
+        finalTotal = Math.min(priceRange.high, Math.max(priceRange.low, finalTotal));
         structured.suggestedQty = qty;
-        if (!/sf|sqft|square/i.test(String(structured.unit || ''))) {
-          structured.unit = 'SF';
-          structured.billingMode = 'sqft';
-        }
-      } else if (bcPerSf > 0 && sqft >= 50 && !isPaint) {
-        structured.unitPrice = coercePerUnitPrice(bcPerSf, qty, {
-          marketUnitPrice: bcPerSf,
-          description: jobDescription,
-        });
-        structured.total = roundMoney(structured.unitPrice * qty);
-      } else if (modelTotal > 0 && sqft >= 400 && isPaint) {
-        const minT = sqft * 1.8;
-        const maxT = sqft * 14;
-        if (modelTotal >= minT && modelTotal <= maxT) {
-          structured.total = roundMoney(modelTotal);
-          structured.unitPrice = roundMoney(modelTotal / qty);
-          structured.suggestedQty = qty;
-          if (!/sf|sqft|square/i.test(String(structured.unit || ''))) {
-            structured.unit = 'SF';
-            structured.billingMode = 'sqft';
-          }
-        }
+        structured.unit = priceRange.unit || 'SF';
+        structured.billingMode = 'sqft';
+        structured.total = roundMoney(finalTotal);
+        structured.unitPrice = roundMoney(finalTotal / qty);
       } else if (modelTotal > 50 && modelTotal < 50000 && qty <= 20) {
         if (Math.abs(modelTotal - structured.total) / modelTotal > 0.35) {
           structured.total = roundMoney(modelTotal);
@@ -1248,15 +1299,16 @@ PRICING MATH (strict — numbers must reconcile):
         }
       }
 
-      // Labor hours: prefer BuildCalculator, then model, capped for paint
+      // Labor hours: BC hours × soft EP labor mult, then model if sane
       if (aligned.labor) {
         let hrs = Number(aligned.labor.hours) || 0;
+        const laborMult = epMultiplier?.laborMultiplier || epMult || 1;
         if (bcAnchor?.suggestedLaborHours && bcAnchor.suggestedLaborHours > 0) {
-          const bcH = bcAnchor.suggestedLaborHours;
-          if (!modelHoursLookReal || Math.abs(hrs - bcH) / bcH > 0.4) {
+          const bcH = roundMoney(bcAnchor.suggestedLaborHours * laborMult);
+          if (!modelHoursLookReal || Math.abs(hrs - bcH) / Math.max(bcH, 1) > 0.4) {
             hrs = bcH;
           } else {
-            hrs = roundMoney(hrs * 0.45 + bcH * 0.55);
+            hrs = roundMoney(hrs * 0.4 + bcH * 0.6);
           }
         } else if (modelHoursLookReal) {
           hrs = laborBreakdown?.hours || hrs;
@@ -1294,13 +1346,41 @@ PRICING MATH (strict — numbers must reconcile):
       billingMode: structured.billingMode,
       breakdown: parsed.breakdown,
       confidence: parsed.confidence,
-      pricingMethod: bcAnchor ? 'supergrok+buildcalculator' : 'supergrok',
+      pricingMethod: priceRange
+        ? 'buildcalculator+estimationpro'
+        : bcAnchor
+          ? 'supergrok+buildcalculator'
+          : 'supergrok',
       quoteModel,
+      /** Primary customer-facing bid = typical; always include low–high when available */
+      priceRange: priceRange
+        ? {
+            low: priceRange.low,
+            typical: priceRange.typical,
+            high: priceRange.high,
+            perSf: priceRange.perSf,
+            unit: priceRange.unit,
+            quantity: priceRange.quantity,
+            label: priceRange.label,
+            sources: priceRange.sources,
+          }
+        : null,
+      estimationPro: epMultiplier
+        ? {
+            location: epMultiplier.label || epMultiplier.location,
+            multiplier: epMult,
+            laborMultiplier: epMultiplier.laborMultiplier,
+            region: epMultiplier.region,
+            source: 'https://estimationpro.ai/api',
+          }
+        : null,
       buildCalculator: bcAnchor
         ? {
             query: bcAnchor.query,
-            suggestedJobTotalUsd: bcAnchor.suggestedJobTotalUsd,
-            suggestedPerSfUsd: bcAnchor.suggestedPerSfUsd,
+            baseUnitCostUsd: bcAnchor.baseUnitCostUsd,
+            billingQuantity: bcAnchor.billingQuantity,
+            suggestedJobTotalUsd: priceRange?.typical ?? bcAnchor.suggestedJobTotalUsd,
+            suggestedPerSfUsd: priceRange?.perSf?.typical ?? bcAnchor.suggestedPerSfUsd,
             suggestedLaborHours: bcAnchor.suggestedLaborHours,
             bestMatch: bcAnchor.best
               ? {

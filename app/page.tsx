@@ -4695,9 +4695,16 @@ export default function Home() {
       );
     }
 
-    const regionLabel = data.pricingRegion?.label;
+    const regionLabel =
+      data.estimationPro?.location || data.pricingRegion?.label;
     const regionNote = regionLabel
-      ? `\nPriced for: ${regionLabel}${data.pricingRegion?.source === 'company' ? ' (from company profile — add job ZIP for best accuracy)' : ''}`
+      ? `\nPriced for: ${regionLabel}${
+          data.estimationPro?.multiplier
+            ? ` · EstimationPro multiplier ×${Number(data.estimationPro.multiplier).toFixed(2)}`
+            : data.pricingRegion?.source === 'company'
+              ? ' (from company profile — add job ZIP for best accuracy)'
+              : ''
+        }`
       : '';
     const billingLabel = billing.perSqft
       ? `${linePricing.qty.toLocaleString()} SF × $${linePricing.price.toFixed(2)}/SF`
@@ -4708,6 +4715,13 @@ export default function Home() {
       ? `✅ AI quote from photo applied!${regionNote}`
       : `✅ AI Price Quote applied!${regionNote}`;
     msg += `\n\n${billingLabel} = $${linePricing.total.toFixed(2)}\nConfidence: ${data.confidence}`;
+    if (data.priceRange && Number(data.priceRange.low) > 0 && Number(data.priceRange.high) > 0) {
+      msg += `\n\nRange (BuildCalculator base × EstimationPro regional):`;
+      msg += `\n  Low $${Number(data.priceRange.low).toFixed(0)}  ·  Typical $${Number(data.priceRange.typical).toFixed(0)}  ·  High $${Number(data.priceRange.high).toFixed(0)}`;
+      if (data.priceRange.perSf?.typical) {
+        msg += `\n  Per SF: $${Number(data.priceRange.perSf.low).toFixed(2)} – $${Number(data.priceRange.perSf.high).toFixed(2)} (typical $${Number(data.priceRange.perSf.typical).toFixed(2)})`;
+      }
+    }
     if (scopeFromPhoto && options?.fromPhoto) {
       msg += `\n\nScope from photo: ${scopeFromPhoto}`;
     }

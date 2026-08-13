@@ -45,8 +45,17 @@ export type BuildCalcQuoteAnchor = {
   suggestedJobTotalUsd: number | null;
   /** Suggested crew-hours for full job */
   suggestedLaborHours: number | null;
-  /** $/SF floor or surface (USD) for installed work */
+  /** $/SF floor or surface (USD) for installed work — after optional regional blend */
   suggestedPerSfUsd: number | null;
+  /**
+   * Raw BuildCalculator unit cost in USD per billing SF (home floor when whole-home paint),
+   * BEFORE EstimationPro / regional multipliers. Use as the true base cost.
+   */
+  baseUnitCostUsd: number | null;
+  /** Quantity for billing (floor SF when available) */
+  billingQuantity: number | null;
+  surfaceSf: number | null;
+  floorSf: number | null;
   promptBlock: string;
 };
 
@@ -246,28 +255,29 @@ export async function buildCalculatorQuoteAnchor(
   const surfaceSf = floorSf ? Math.round(floorSf * surfaceMult) : null;
   const regional = options?.regionalUsdBlend && options.regionalUsdBlend > 0 ? options.regionalUsdBlend : 1;
 
-  let suggestedPerSfUsd: number | null = best?.totalPerSfUsd
-    ? roundMoney(best.totalPerSfUsd * regional)
-    : null;
-  // For whole-home floor billing, convert surface $/SF to floor $/SF
-  let floorBillingPerSf: number | null = null;
-  if (suggestedPerSfUsd != null && floorSf && surfaceSf && surfaceSf > floorSf) {
-    floorBillingPerSf = roundMoney((suggestedPerSfUsd * surfaceSf) / floorSf);
-  } else {
-    floorBillingPerSf = suggestedPerSfUsd;
+  // RAW base unit cost (USD) before EstimationPro / regional multipliers
+  let baseSurfacePerSf: number | null =
+    best?.totalPerSfUsd != null && best.totalPerSfUsd > 0 ? roundMoney(best.totalPerSfUsd) : null;
+  let baseFloorPerSf: number | null = baseSurfacePerSf;
+  if (baseSurfacePerSf != null && floorSf && surfaceSf && surfaceSf > floorSf) {
+    // Convert surface installed $/SF → home floor $/SF for line billing
+    baseFloorPerSf = roundMoney((baseSurfacePerSf * surfaceSf) / floorSf);
   }
+
+  // Optional legacy blend (prefer applying EstimationPro multiplier outside instead)
+  let suggestedPerSfUsd: number | null =
+    baseFloorPerSf != null ? roundMoney(baseFloorPerSf * regional) : null;
 
   let suggestedJobTotalUsd: number | null = null;
   let suggestedLaborHours: number | null = null;
-  if (surfaceSf && best?.totalPerSfUsd) {
-    suggestedJobTotalUsd = roundMoney(best.totalPerSfUsd * surfaceSf * regional);
+  if (surfaceSf && baseSurfacePerSf != null) {
+    suggestedJobTotalUsd = roundMoney(baseSurfacePerSf * surfaceSf * regional);
   }
   if (surfaceSf && best?.hoursPerSf != null && best.hoursPerSf > 0) {
     suggestedLaborHours = roundMoney(
-      Math.min(120, Math.max(8, surfaceSf * best.hoursPerSf * regional))
+      Math.min(120, Math.max(8, surfaceSf * best.hoursPerSf))
     );
   } else if (floorSf && /paint/i.test(query)) {
-    // Fallback production if API hours missing
     suggestedLaborHours = roundMoney(Math.min(100, Math.max(24, floorSf / 16)));
   }
 
@@ -275,20 +285,19 @@ export async function buildCalculatorQuoteAnchor(
   const lines = top.map((h, i) => {
     const perSf =
       h.totalPerSfUsd != null
-        ? `~$${h.totalPerSfUsd.toFixed(2)}/SF (from €${h.totalPerUnit.toFixed(2)}/${h.unit})`
+        ? `~$${h.totalPerSfUsd.toFixed(2)}/SF surface (from €${h.totalPerUnit.toFixed(2)}/${h.unit})`
         : `€${h.totalPerUnit.toFixed(2)}/${h.unit}`;
     return `${i + 1}. ${h.originalName.slice(0, 120)} — ${perSf}; labor ~${h.laborHoursPerUnit.toFixed(3)} hrs per ${h.unit}`;
   });
 
   const promptBlock = [
-    'BUILDCALCULATOR.IO PRICING DATA (authoritative cost database — use to ground your bid):',
+    'BUILDCALCULATOR.IO UNIT COSTS (BASE — before regional multiplier):',
     `Search: "${searchQ}"`,
     ...lines,
-    best && floorBillingPerSf != null
-      ? `Recommended anchor for this job: about $${floorBillingPerSf.toFixed(2)} per SF of HOME FLOOR area (installed), full job total ≈ $${(suggestedJobTotalUsd || 0).toFixed(0)}${suggestedLaborHours ? `, labor ≈ ${suggestedLaborHours} crew-hours` : ''}.`
+    baseFloorPerSf != null
+      ? `Base unit cost (USD): $${baseFloorPerSf.toFixed(2)} per SF of home floor (from BuildCalculator). Apply EstimationPro regional multiplier next for local market.`
       : '',
-    'Convert metric/EUR database rates into a realistic US homeowner-facing contractor price. Prefer this data over inventing rates.',
-    'For SF billing: suggestedQty = home floor sqft from the description; unitPrice = total ÷ suggestedQty; total = unitPrice × suggestedQty.',
+    'For SF billing: suggestedQty = home floor sqft; unitPrice = regionalized total ÷ qty; total = unitPrice × qty.',
   ]
     .filter(Boolean)
     .join('\n');
@@ -301,7 +310,11 @@ export async function buildCalculatorQuoteAnchor(
     best,
     suggestedJobTotalUsd,
     suggestedLaborHours,
-    suggestedPerSfUsd: floorBillingPerSf,
+    suggestedPerSfUsd,
+    baseUnitCostUsd: baseFloorPerSf,
+    billingQuantity: floorSf || surfaceSf,
+    surfaceSf,
+    floorSf,
     promptBlock,
   };
 }
