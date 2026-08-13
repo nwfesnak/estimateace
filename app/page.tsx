@@ -9122,6 +9122,25 @@ export default function Home() {
     [savedEstimatesList]
   );
 
+  /** Estimates/jobs with a deposit recorded (Profit → Estimates with deposit made) */
+  const estimatesWithDeposit = useMemo(() => {
+    return (savedEstimatesList || []).filter((est) => (Number(est.amountPaid) || 0) > 0);
+  }, [savedEstimatesList]);
+
+  const estimatesWithDepositTotals = useMemo(() => {
+    let totalDeposits = 0;
+    let totalEstimateValue = 0;
+    for (const est of estimatesWithDeposit) {
+      totalDeposits += Number(est.amountPaid) || 0;
+      totalEstimateValue += Number(est.grandTotal) || 0;
+    }
+    return {
+      count: estimatesWithDeposit.length,
+      totalDeposits,
+      totalEstimateValue,
+    };
+  }, [estimatesWithDeposit]);
+
   const calculateGrandTotal = (doc: any): number => {
     if (!doc || !doc.items) return 0;
     const laborAmountDoc =
@@ -13325,25 +13344,55 @@ export default function Home() {
 
                   <hr className="my-10 border-slate-200" />
 
-                  <h3 className="text-xl font-semibold mb-4 text-[#1e293b]">💵 Job profit (deposit paid)</h3>
-                  <label className="block text-sm font-semibold mb-3">Select Job / Estimate with Deposit Paid</label>
-                  <select 
+                  <h3 className="text-xl font-semibold mb-2 text-[#1e293b]">💵 Estimates with deposit made</h3>
+                  <p className="text-sm text-gray-500 mb-4">
+                    All open estimates/jobs that have a deposit recorded. Totals cover every item in the list below.
+                  </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+                    <div className="bg-white border rounded-2xl p-4 text-center">
+                      <div className="text-xs uppercase tracking-wide text-gray-500">Estimates with deposit</div>
+                      <div className="text-3xl font-bold text-[#1e293b] mt-1">
+                        {estimatesWithDepositTotals.count}
+                      </div>
+                    </div>
+                    <div className="bg-white border rounded-2xl p-4 text-center">
+                      <div className="text-xs uppercase tracking-wide text-gray-500">Total deposits collected</div>
+                      <div className="text-3xl font-bold text-[#10b981] mt-1">
+                        ${estimatesWithDepositTotals.totalDeposits.toFixed(2)}
+                      </div>
+                    </div>
+                    <div className="bg-white border rounded-2xl p-4 text-center">
+                      <div className="text-xs uppercase tracking-wide text-gray-500">Total of all estimates</div>
+                      <div className="text-3xl font-bold text-[#1e293b] mt-1">
+                        ${estimatesWithDepositTotals.totalEstimateValue.toFixed(2)}
+                      </div>
+                    </div>
+                  </div>
+
+                  <label className="block text-sm font-semibold mb-3">Select estimate with deposit made</label>
+                  <select
                     className="w-full border rounded-xl p-4 text-lg mb-8"
-                    onChange={e => {
-                      const selected = savedEstimatesList.find(est => est.id === e.target.value);
+                    value={selectedReportJob?.id || ''}
+                    onChange={(e) => {
+                      const selected = estimatesWithDeposit.find((est) => est.id === e.target.value);
                       setSelectedReportJob(selected || null);
                     }}
                   >
-                    <option value="">— Choose a paid deposit job —</option>
-                    {savedEstimatesList.filter(est => (est.amountPaid || 0) > 0).map(est => (
+                    <option value="">— Choose an estimate with deposit —</option>
+                    {estimatesWithDeposit.map((est) => (
                       <option key={est.id} value={est.id}>
-                        {est.jobName || 'Untitled'} — {est.invoiceNumber} (Deposit: ${(est.amountPaid || 0).toFixed(2)})
+                        {est.jobName || 'Untitled'} — {est.invoiceNumber} (Deposit: ${(Number(est.amountPaid) || 0).toFixed(2)} · Total: ${(Number(est.grandTotal) || 0).toFixed(2)})
                       </option>
                     ))}
                   </select>
 
+                  {estimatesWithDeposit.length === 0 && (
+                    <p className="text-sm text-gray-500 mb-6">No estimates with a deposit recorded yet.</p>
+                  )}
+
                   {selectedReportJob && (
-                    <div className="mt-10 space-y-8">
+                    <div className="mt-4 space-y-8">
                       <div className="grid grid-cols-2 gap-6">
                         <div className="bg-white border rounded-2xl p-6 text-center">
                           <div className="text-sm text-gray-500">Total Receipts</div>
@@ -13362,11 +13411,11 @@ export default function Home() {
                       <div className="bg-white border-2 border-[#1e293b] rounded-3xl p-8">
                         <div className="flex justify-between items-baseline">
                           <div>
-                            <div className="text-2xl font-semibold">Gross Total Charged</div>
+                            <div className="text-2xl font-semibold">Estimate total</div>
                             <div className="text-6xl font-bold text-[#1e293b]">${(selectedReportJob.grandTotal || 0).toFixed(2)}</div>
                           </div>
                           <div className="text-right">
-                            <div className="text-sm text-gray-500">Deposit Paid</div>
+                            <div className="text-sm text-gray-500">Deposit made</div>
                             <div className="text-5xl font-bold text-[#10b981]">${(selectedReportJob.amountPaid || 0).toFixed(2)}</div>
                           </div>
                         </div>
@@ -13374,8 +13423,8 @@ export default function Home() {
 
                       <div className="text-center text-4xl font-bold text-[#10b981]">
                         Net Profit: ${(
-                          (selectedReportJob.grandTotal || 0) - 
-                          (selectedReportJob.receiptDetails || []).reduce((sum: number, r: any) => sum + (r.amount || 0), 0) - 
+                          (selectedReportJob.grandTotal || 0) -
+                          (selectedReportJob.receiptDetails || []).reduce((sum: number, r: any) => sum + (r.amount || 0), 0) -
                           (selectedReportJob.laborAmount || 0)
                         ).toFixed(2)}
                       </div>
