@@ -9,7 +9,12 @@ import {
   type QuoteLocationInput,
 } from '@/lib/ai-quote-region';
 import { computePricingAnchor, detectWholeHomeInteriorPaint, estimateInteriorPaintableSqft } from '@/lib/ai-quote-anchor';
-import { resolveQuoteLineStructure } from '@/lib/quote-units';
+import {
+  coercePerUnitPrice,
+  getMarketSqftUnitPrice,
+  detectSqftBillingContext,
+  resolveQuoteLineStructure,
+} from '@/lib/quote-units';
 import { analyzeJobImage, type JobImageAnalysis } from '@/lib/analyze-job-image';
 import { getXaiApiKey, getXaiChatModel } from '@/lib/xai-config';
 import {
@@ -744,8 +749,19 @@ export async function POST(request: NextRequest) {
         const matSum = sumMaterialTotals(applied.materials);
         const labSum = applied.labor?.total || 0;
         const built = roundMoney(matSum + labSum);
-        if (built > 0) nextUnitPrice = built;
+        if (built > 0) {
+          // built is full-job $; for SF qty convert to per-unit so we don't do job$ × sqft
+          nextUnitPrice =
+            qty > 1 ? roundMoney(built / qty) : built;
+        }
       }
+      const sqftCtx = detectSqftBillingContext(jobDesc, qty, unit);
+      const market =
+        sqftCtx != null ? getMarketSqftUnitPrice(sqftCtx, regional) : undefined;
+      nextUnitPrice = coercePerUnitPrice(nextUnitPrice, qty, {
+        marketUnitPrice: market,
+        description: jobDesc,
+      });
       const aligned = buildAlignedQuoteBreakdown(
         applied.materials,
         applied.labor,
@@ -785,7 +801,11 @@ export async function POST(request: NextRequest) {
           structured.suggestedQty,
           structured.unit
         );
-      const finalUnit = memUnitPrice > 0 ? memUnitPrice : structured.unitPrice;
+      let finalUnit = memUnitPrice > 0 ? memUnitPrice : structured.unitPrice;
+      finalUnit = coercePerUnitPrice(finalUnit, structured.suggestedQty, {
+        marketUnitPrice: structured.unitPrice,
+        description: jobDescription,
+      });
       const finalTotal = roundMoney(finalUnit * structured.suggestedQty);
       return NextResponse.json({
         unitPrice: finalUnit,
@@ -1049,8 +1069,15 @@ PRICING MATH (strict — numbers must reconcile):
     let memoryUnitPrice = finalized.unitPrice;
     if (memoryPass.appliedMaterialCount > 0 || memoryPass.appliedLaborRate) {
       const built = roundMoney(sumMaterialTotals(materials) + (laborBreakdown?.total || 0));
-      if (built > 0) memoryUnitPrice = built;
+      // built is full-job $ — convert to per-unit when qty is SF/area
+      if (built > 0) {
+        memoryUnitPrice =
+          suggestedQty > 1 ? roundMoney(built / suggestedQty) : built;
+      }
     }
+    memoryUnitPrice = coercePerUnitPrice(memoryUnitPrice, suggestedQty, {
+      description: jobDescription,
+    });
 
     const materialsCostTotal = sumMaterialTotals(materials);
     const laborCostTotal = roundMoney(laborBreakdown?.total || 0);
@@ -1058,12 +1085,23 @@ PRICING MATH (strict — numbers must reconcile):
       suggestedQty,
       unit: lineUnit || parsed.unit,
       unitPrice: memoryUnitPrice,
-      total: roundMoney(memoryUnitPrice * suggestedQty),
+      total: roundMoney(memoryUnitPrice * Math.max(1, suggestedQty)),
     });
 
     if (structured.unitPrice <= 0 || structured.total <= 0) {
       return NextResponse.json({ error: 'AI could not produce a valid price for this description' }, { status: 500 });
     }
+
+    // Hard clamp: never allow absurd per-SF paint (e.g. $2,971 × 1,200 SF)
+    structured.unitPrice = coercePerUnitPrice(
+      structured.unitPrice,
+      structured.suggestedQty,
+      {
+        marketUnitPrice: structured.unitPrice,
+        description: jobDescription,
+      }
+    );
+    structured.total = roundMoney(structured.unitPrice * structured.suggestedQty);
 
     let aligned = buildAlignedQuoteBreakdown(
       materials,
@@ -1094,8 +1132,16 @@ PRICING MATH (strict — numbers must reconcile):
         laborCostTotal: labSum,
       };
       if (built > 0) {
-        structured.unitPrice = built;
-        structured.total = roundMoney(built * structured.suggestedQty);
+        // Never assign full-job $ as unitPrice when suggestedQty is area SF
+        const perUnit =
+          structured.suggestedQty > 1
+            ? roundMoney(built / structured.suggestedQty)
+            : built;
+        structured.unitPrice = coercePerUnitPrice(perUnit, structured.suggestedQty, {
+          marketUnitPrice: structured.unitPrice,
+          description: jobDescription,
+        });
+        structured.total = roundMoney(structured.unitPrice * structured.suggestedQty);
       }
     }
 

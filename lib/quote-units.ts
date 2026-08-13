@@ -36,7 +36,13 @@ export function detectWholeHomeInteriorPaint(description: string): WholeHomePain
 
   let coats = 1;
   if (/three\s*coat|3\s*coat|third\s*coat/i.test(text)) coats = 3;
-  else if (/two\s*coat|2\s*coat|second\s*coat/i.test(text)) coats = 2;
+  else if (
+    /two\s*coat|2\s*coat|second\s*coat|dual[\s-]*coat|double[\s-]*coat|2[\s-]*coat/i.test(
+      text
+    )
+  ) {
+    coats = 2;
+  }
 
   return { floorSqft: sqft, ceilingFt, coats };
 }
@@ -180,8 +186,68 @@ function parseCeilingFactor(description: string): number {
 function parseCoatFactor(description: string): number {
   const text = description.toLowerCase();
   if (/three\s*coat|3\s*coat|third\s*coat/i.test(text)) return 2.15;
-  if (/two\s*coat|2\s*coat|second\s*coat/i.test(text)) return 1.58;
+  if (
+    /two\s*coat|2\s*coat|second\s*coat|dual[\s-]*coat|double[\s-]*coat|2[\s-]*coat/i.test(
+      text
+    )
+  ) {
+    return 1.58;
+  }
   return 1;
+}
+
+/**
+ * Prevent catastrophic double-counting: AI/memory sometimes returns a FULL JOB total
+ * as unitPrice while suggestedQty is already SF (e.g. $2,971 × 1,200 = $3.5M).
+ * Returns a sane per-unit price for line math (total = unitPrice × qty).
+ */
+export function coercePerUnitPrice(
+  unitPrice: number,
+  suggestedQty: number,
+  options?: {
+    marketUnitPrice?: number;
+    maxPerUnit?: number;
+    description?: string;
+  }
+): number {
+  let price = roundMoney(Math.max(0, Number(unitPrice) || 0));
+  const qty = Math.max(1, Number(suggestedQty) || 1);
+  if (price <= 0) return 0;
+  if (qty <= 1) return price;
+
+  const market = options?.marketUnitPrice != null ? Number(options.marketUnitPrice) : 0;
+  const desc = String(options?.description || '');
+  const isPaint = /paint|painting|primer|coat/i.test(desc);
+  // Residential paint installed is almost never > ~$8–12/SF; exterior+interior dual coat ~$4–8/SF
+  const paintCap = 12;
+  const defaultCap = options?.maxPerUnit ?? (isPaint ? paintCap : 80);
+
+  // Full job total mistaken for $/SF: e.g. $2,971 with qty 1,200
+  if (market > 0 && price > market * 6) {
+    const asFullJobPerUnit = roundMoney(price / qty);
+    // Prefer market when "per unit from full job" is still wild
+    if (asFullJobPerUnit > market * 3) {
+      price = market;
+    } else if (Math.abs(price - market * qty) < market * qty * 0.55 || price > market * 8) {
+      price = asFullJobPerUnit > 0 && asFullJobPerUnit < market * 3 ? asFullJobPerUnit : market;
+    }
+  } else if (price > defaultCap && qty >= 50) {
+    // No market but absurdly high per-SF for area work
+    const divided = roundMoney(price / qty);
+    if (divided > 0.25 && divided <= defaultCap) {
+      price = divided;
+    } else if (isPaint) {
+      price = Math.min(price, paintCap);
+    } else {
+      price = Math.min(price, defaultCap);
+    }
+  }
+
+  if (isPaint && price > paintCap) {
+    price = paintCap;
+  }
+
+  return roundMoney(price);
 }
 
 function regionalBlend(regional: RegionalPricing): number {
@@ -302,15 +368,37 @@ export function resolveQuoteLineStructure(
 
   if (sqftContext) {
     const marketUnitPrice = getMarketSqftUnitPrice(sqftContext, regional);
-    const aiUnitPrice = roundMoney(Number(ai.unitPrice) || 0);
+    let aiUnitPrice = roundMoney(Number(ai.unitPrice) || 0);
+    // If AI put full-job total in unitPrice (or total) with SF qty, coerce first
+    aiUnitPrice = coercePerUnitPrice(aiUnitPrice, sqftContext.sqft, {
+      marketUnitPrice,
+      description,
+    });
+    let aiTotal = roundMoney(Number(ai.total) || 0);
+    if (aiTotal > 0) {
+      const totalAsPerUnit = coercePerUnitPrice(aiTotal, sqftContext.sqft, {
+        marketUnitPrice,
+        description,
+      });
+      // If ai.total looks like full job, derive per-SF from it only when near market
+      if (aiTotal > marketUnitPrice * sqftContext.sqft * 0.5 && aiTotal < marketUnitPrice * sqftContext.sqft * 1.8) {
+        aiUnitPrice = roundMoney(aiTotal / sqftContext.sqft);
+      } else if (totalAsPerUnit > 0 && totalAsPerUnit < marketUnitPrice * 2) {
+        // ignore absurd totals
+      }
+    }
     let unitPrice = marketUnitPrice;
     if (
       aiUnitPrice > 0 &&
-      aiUnitPrice >= marketUnitPrice * 0.65 &&
-      aiUnitPrice <= marketUnitPrice * 1.35
+      aiUnitPrice >= marketUnitPrice * 0.55 &&
+      aiUnitPrice <= marketUnitPrice * 1.5
     ) {
-      unitPrice = roundMoney(marketUnitPrice * 0.55 + aiUnitPrice * 0.45);
+      unitPrice = roundMoney(marketUnitPrice * 0.6 + aiUnitPrice * 0.4);
     }
+    unitPrice = coercePerUnitPrice(unitPrice, sqftContext.sqft, {
+      marketUnitPrice,
+      description,
+    });
     const suggestedQty = sqftContext.sqft;
     const total = roundMoney(unitPrice * suggestedQty);
     return {
