@@ -227,7 +227,7 @@ function formatItemBreakdownHtmlUnsafe(
       })
       .join('');
     chunks.push(
-      `<div style="margin-top:6px;font-size:12px;color:#475569;"><div style="font-weight:600;">Materials needed:</div><ul style="margin:4px 0 0;padding-left:18px;">${lis}</ul></div>`
+      `<div style="margin-top:6px;font-size:13px;color:#475569;"><div style="font-weight:600;">Materials needed:</div><ul style="margin:4px 0 0;padding-left:18px;">${lis}</ul></div>`
     );
   }
 
@@ -238,7 +238,7 @@ function formatItemBreakdownHtmlUnsafe(
       lab.hours != null ? ` — ${lab.hours} hrs` : '',
     ].join('');
     chunks.push(
-      `<div style="margin-top:4px;font-size:12px;color:#475569;"><strong>Labor:</strong> ${bit}</div>`
+      `<div style="margin-top:4px;font-size:13px;color:#475569;"><strong>Labor:</strong> ${bit}</div>`
     );
   }
 
@@ -313,7 +313,7 @@ function formatItemBreakdownHtmlUnsafe(
         `<div style="font-weight:600;margin-top:4px;">Built-up job total: ${money(builtUp)}</div>`
       );
       chunks.push(
-        `<div style="margin-top:8px;padding-top:8px;border-top:1px solid #e2e8f0;font-size:12px;color:#475569;">${costBits.join('')}</div>`
+        `<div style="margin-top:8px;padding-top:8px;border-top:1px solid #e2e8f0;font-size:13px;color:#475569;">${costBits.join('')}</div>`
       );
     }
   }

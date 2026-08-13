@@ -10500,13 +10500,13 @@ export default function Home() {
                             const preview = getVisibleBreakdownParts(item);
                             if (!preview.hasVisiblePreview) return null;
                             return (
-                              <div className="mt-1 p-2 bg-gray-50 border rounded text-[10px] text-gray-700">
+                              <div className="mt-1 p-2 bg-gray-50 border rounded text-xs text-gray-700 leading-snug">
                                 <div className="flex items-center justify-between gap-2 mb-1">
                                   <div className="font-semibold">Line {idx + 1} Breakdown:</div>
                                   <button
                                     type="button"
                                     onClick={() => openBreakdownEditor(item)}
-                                    className="text-[10px] text-[#10b981] hover:underline shrink-0"
+                                    className="text-xs text-[#10b981] hover:underline shrink-0"
                                   >
                                     Edit
                                   </button>
@@ -11619,7 +11619,7 @@ export default function Home() {
                       <tr key={i} className="border-b">
                         <td className="py-3">
                           <span className="text-xs text-gray-500">Line {i + 1}: </span>{item.description}
-                          {renderClientItemBreakdown(item, 'mt-1 text-[10px] text-gray-600 leading-tight pl-2')}
+                          {renderClientItemBreakdown(item, 'mt-1 text-xs text-gray-600 leading-snug pl-2')}
                         </td>
                         <td className="py-3 text-right">{item.qty}</td>
                         <td className="py-3 text-right">{item.unit || '—'}</td>
@@ -14024,7 +14024,7 @@ export default function Home() {
                       <tr key={i} className="border-b">
                         <td className="py-3">
                           <span className="text-xs text-gray-500">Line {i + 1}: </span>{item.description}
-                          {renderClientItemBreakdown(item, 'mt-1 text-[10px] text-gray-600 leading-tight pl-2')}
+                          {renderClientItemBreakdown(item, 'mt-1 text-xs text-gray-600 leading-snug pl-2')}
                         </td>
                         <td className="py-3 text-right border-l border-gray-400 px-3">{item.qty}</td>
                         <td className="py-3 text-right border-l border-gray-400 px-3">{item.unit || '—'}</td>
