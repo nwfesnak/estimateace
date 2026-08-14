@@ -98,15 +98,26 @@ export async function sendEmailNotification(
     };
   }
 
-  try {
+  const platformFrom =
+    (process.env.NOTIFICATION_FROM_EMAIL || '').trim() || DEFAULT_PLATFORM_FROM;
+
+  const attemptSend = async (from: string) => {
     const payload: Record<string, unknown> = {
-      from: fromEmail,
+      from,
       to: [trimmedTo],
       subject,
       text,
     };
     if (options?.html) payload.html = options.html;
-    if (options?.replyTo) payload.reply_to = options.replyTo;
+    if (options?.replyTo) {
+      const rt = String(options.replyTo).trim();
+      if (rt && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rt) && !/@estimateace\.com$/i.test(rt)) {
+        // Reply-To can be contractor Gmail/etc.; skip if invalid
+        payload.reply_to = rt;
+      } else if (rt && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rt)) {
+        payload.reply_to = rt;
+      }
+    }
 
     const response = await fetch('https://api.resend.com/emails', {
       method: 'POST',
@@ -125,12 +136,40 @@ export async function sendEmailNotification(
       /* ignore */
     }
 
-    if (response.ok) return { ok: true, id: parsed?.id };
-    const resendMsg = parsed?.message || bodyText || 'unknown error';
+    if (response.ok) return { ok: true as const, id: parsed?.id as string | undefined, from };
+    const resendMsg = String(parsed?.message || bodyText || 'unknown error');
     return {
-      ok: false,
-      error: `Email failed (${response.status}) from ${fromEmail}: ${resendMsg}`,
+      ok: false as const,
+      error: `Email failed (${response.status}) from ${from}: ${resendMsg}`,
+      resendMsg,
+      status: response.status,
     };
+  };
+
+  try {
+    const first = await attemptSend(fromEmail);
+    if (first.ok) return { ok: true, id: first.id };
+
+    // Company-slug From addresses sometimes fail domain/validation — retry platform From
+    const firstMsg = (first.resendMsg || first.error || '').toLowerCase();
+    const shouldRetryPlatform =
+      fromEmail !== platformFrom &&
+      (/domain|from|not verified|invalid|forbidden|unauthorized|403|422|451/i.test(firstMsg) ||
+        first.status === 403 ||
+        first.status === 422 ||
+        first.status === 451);
+
+    if (shouldRetryPlatform) {
+      console.warn('[email] retry with platform From after:', first.error);
+      const second = await attemptSend(platformFrom);
+      if (second.ok) return { ok: true, id: second.id };
+      return {
+        ok: false,
+        error: `${first.error} · retry: ${second.error}`,
+      };
+    }
+
+    return { ok: false, error: first.error };
   } catch (err: unknown) {
     return { ok: false, error: err instanceof Error ? err.message : 'Unknown email error' };
   }

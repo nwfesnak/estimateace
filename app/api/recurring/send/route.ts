@@ -43,9 +43,17 @@ export async function POST(request: NextRequest) {
     });
 
     if (!result.ok) {
+      const status =
+        /not configured|RESEND|API_KEY|From address|verified/i.test(result.error || '')
+          ? 502
+          : 400;
       return NextResponse.json(
-        { error: result.error || 'Send failed', clientLink: result.clientLink },
-        { status: 400 }
+        {
+          ok: false,
+          error: result.error || 'Send failed',
+          clientLink: result.clientLink || null,
+        },
+        { status }
       );
     }
 

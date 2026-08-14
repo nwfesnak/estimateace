@@ -650,17 +650,36 @@ export async function sendRecurringApprovalEmail(input: {
 </body></html>`;
 
   const { sendEmailNotification } = await import('@/lib/notifications');
-  const result = await sendEmailNotification(to, subject, text, {
+  const replyTo =
+    fresh.companyEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(fresh.companyEmail)
+      ? fresh.companyEmail
+      : undefined;
+
+  // Prefer contractor company From (same as estimate emails); notifications layer
+  // falls back to EstimateAce platform From if Resend rejects the company address.
+  let result = await sendEmailNotification(to, subject, text, {
     html,
     companyName: company,
-    replyTo:
-      fresh.companyEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(fresh.companyEmail)
-        ? fresh.companyEmail
-        : undefined,
+    replyTo,
   });
 
+  // Hard fallback: plain platform From, no company name / reply-to quirks
   if (!result.ok) {
-    return { ok: false, error: result.error || 'Email failed', clientLink };
+    console.error('[recurring email] first attempt failed:', result.error);
+    result = await sendEmailNotification(to, subject, text, {
+      html,
+      replyTo,
+    });
+  }
+
+  if (!result.ok) {
+    return {
+      ok: false,
+      error:
+        (result.error || 'Email failed') +
+        ' You can still copy the client approval link and text/email it yourself.',
+      clientLink,
+    };
   }
 
   await updateRecurringPlan(input.ownerUserId, input.planId, {

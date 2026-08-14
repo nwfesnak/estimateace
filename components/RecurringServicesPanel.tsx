@@ -161,8 +161,18 @@ export function RecurringServicesPanel({
         const sendJson = await sendRes.json().catch(() => ({}));
         await loadPlans();
         if (!sendRes.ok) {
+          const link = String(sendJson.clientLink || json.clientLink || '').trim();
+          if (link && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+            try {
+              await navigator.clipboard.writeText(link);
+            } catch {
+              /* ignore */
+            }
+          }
           showMessage(
-            `Plan created, but email failed: ${sendJson.error || 'check Resend settings'}. You can retry Email client.`
+            `Plan created, but email failed: ${sendJson.error || 'check RESEND_API_KEY / From domain'}.${
+              link ? ' Client approval link copied — paste it to your client.' : ' Use Copy client link.'
+            }`
           );
           return;
         }
@@ -200,7 +210,19 @@ export function RecurringServicesPanel({
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        showMessage(json.error || 'Could not send approval email');
+        const link = String(json.clientLink || '').trim();
+        if (link && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+          try {
+            await navigator.clipboard.writeText(link);
+          } catch {
+            /* ignore */
+          }
+        }
+        showMessage(
+          `${json.error || 'Could not send approval email'}${
+            link ? ' Client approval link was copied to your clipboard.' : ''
+          }`
+        );
         return;
       }
       showMessage(`✅ Approval email sent to ${clientEmail}`);
