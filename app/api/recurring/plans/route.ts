@@ -6,6 +6,7 @@ import {
   listRecurringPlans,
   updateRecurringPlan,
   cancelClientRecurringSubscription,
+  restoreRecurringPlanFromArchive,
   buildRecurringClientLink,
   type RecurringInterval,
 } from '@/lib/recurring-services';
@@ -113,6 +114,22 @@ export async function PATCH(request: NextRequest) {
         archiveId: result.archiveId || null,
         message:
           'Plan canceled, removed from Recurring Charges, and filed under Archive Invoices.',
+      });
+    }
+
+    if (body.action === 'restore') {
+      // Restore canceled INV-REC-* archive back onto Recurring Charges
+      const archiveId = String(body.archiveId || body.id || '').trim();
+      const result = await restoreRecurringPlanFromArchive(ownerId, archiveId);
+      if (!result.ok) {
+        return NextResponse.json({ error: result.error || 'Could not restore' }, { status: 400 });
+      }
+      return NextResponse.json({
+        ok: true,
+        plan: result.plan || null,
+        planId: result.planId || result.plan?.id || null,
+        message:
+          'Plan restored to Recurring Charges as a draft. Re-email the client if they need to approve again.',
       });
     }
 

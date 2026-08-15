@@ -879,3 +879,178 @@ export async function cancelClientRecurringSubscription(
     plan: null, // removed from active list
   };
 }
+
+/** True when an archive-est row is a canceled recurring plan filed as INV-REC-*. */
+export function isArchivedCanceledRecurringRow(row: any): boolean {
+  if (!row) return false;
+  const id = String(row.id || '');
+  const inv = String(row.invoiceNumber ?? row.invoicenumber ?? '');
+  if (/^INV-REC-/i.test(id) || /^INV-REC-/i.test(inv)) return true;
+  const rec = row.profile?._recurring;
+  if (rec && (rec.purpose === 'client_recurring' || rec.originalPlanId)) {
+    return String(rec.status || '').toLowerCase() === 'canceled' || !!rec.originalPlanId;
+  }
+  return false;
+}
+
+function archiveIdToRecurringPlanId(archiveRow: any): string {
+  const rec = archiveRow?.profile?._recurring || {};
+  if (rec.originalPlanId && String(rec.originalPlanId).trim()) {
+    return String(rec.originalPlanId).trim();
+  }
+  const id = String(archiveRow?.id || '');
+  if (/^INV-REC-/i.test(id)) {
+    return `REC-${id.replace(/^INV-REC-/i, '')}`;
+  }
+  return id.startsWith('REC-') ? id : `REC-${id}`;
+}
+
+/**
+ * Restore a canceled recurring plan from Archive Invoices back to Recurring Charges.
+ * Removes the INV-REC-* archive row and recreates the REC-* plan as draft.
+ */
+export async function restoreRecurringPlanFromArchive(
+  ownerUserId: string,
+  archiveId: string
+): Promise<{ ok: boolean; error?: string; plan?: RecurringPlan; planId?: string }> {
+  const admin = getSupabaseAdmin();
+  if (!admin) return { ok: false, error: 'Server missing SUPABASE_SERVICE_ROLE_KEY' };
+
+  const id = String(archiveId || '').trim();
+  if (!id) return { ok: false, error: 'archiveId is required' };
+
+  const { data: arch, error: loadErr } = await admin
+    .from('archive-est')
+    .select('*')
+    .eq('user_id', ownerUserId)
+    .eq('id', id)
+    .maybeSingle();
+
+  if (loadErr) return { ok: false, error: loadErr.message };
+  if (!arch) return { ok: false, error: 'Archived plan not found' };
+  if (!isArchivedCanceledRecurringRow(arch)) {
+    return {
+      ok: false,
+      error: 'This archive is not a canceled recurring plan (expected INV-REC-…).',
+    };
+  }
+
+  const planId = archiveIdToRecurringPlanId(arch);
+  const rec = (arch.profile && typeof arch.profile === 'object'
+    ? (arch.profile as any)._recurring
+    : {}) || {};
+
+  // Prefer stored recurring fields; fall back to archive row
+  const serviceName = String(
+    rec.serviceName ||
+      String(arch.jobName || arch.jobname || '')
+        .replace(/\s*\(canceled\)\s*$/i, '')
+        .trim() ||
+      'Recurring service'
+  );
+  const clientEmail = String(
+    rec.clientEmail ||
+      (Array.isArray(arch.emails) ? arch.emails[0] : '') ||
+      ''
+  ).trim();
+  const clientName = String(rec.clientName || 'Client').trim() || 'Client';
+  const clientPhone = String(
+    rec.clientPhone || (Array.isArray(arch.phones) ? arch.phones[0] : '') || ''
+  ).trim();
+  const amount = Number(rec.amount ?? arch.items?.[0]?.price ?? arch.items?.[0]?.total) || 0;
+  const interval =
+    rec.interval === 'week' || rec.interval === 'year' || rec.interval === 'month'
+      ? rec.interval
+      : 'month';
+
+  // Strip cancel notes from terms
+  let description = String(rec.description || arch.terms || '');
+  description = description
+    .replace(/\n*\[Canceled recurring plan[^\]]*\]\s*/gi, '')
+    .trim();
+
+  const now = new Date().toISOString();
+  const row = planToRow(
+    {
+      id: planId,
+      user_id: ownerUserId,
+      serviceName,
+      clientName,
+      clientEmail,
+      clientPhone,
+      address: String(arch.address || ''),
+      city: String(arch.city || ''),
+      state: String(arch.state || ''),
+      zipCode: String(arch.zipCode || arch.zipcode || ''),
+      amount: amount >= 0.5 ? amount : 0.5,
+      interval,
+      description,
+      status: 'draft',
+      stripeSubscriptionId: null, // was canceled; client must re-subscribe
+      stripeCustomerId: rec.stripeCustomerId || null,
+      lastPaymentAt: rec.lastPaymentAt || null,
+      clientApprovedAt: null,
+      approvalEmailSentAt: null,
+      companyName: String(rec.companyName || ''),
+      companyEmail: String(rec.companyEmail || ''),
+      companyPhone: String(rec.companyPhone || ''),
+    },
+    {
+      ...arch,
+      profile: {
+        ...(arch.profile && typeof arch.profile === 'object' ? arch.profile : {}),
+        _recurring: {
+          ...rec,
+          status: 'draft',
+          restoredAt: now,
+          restoredFromArchiveId: id,
+        },
+      },
+    }
+  );
+
+  // Ensure active row is a recurring plan (not invoice)
+  row.documentType = 'recurring_plan';
+  row.documenttype = 'recurring_plan';
+  row.paymentStatus = 'draft';
+  row.invoiceNumber = planId;
+  row.updated_at = now;
+  row.jobName = serviceName;
+
+  // If a leftover REC row exists, replace it
+  await admin.from('estimates').delete().eq('id', planId).eq('user_id', ownerUserId);
+
+  let { error: insErr } = await admin.from('estimates').upsert(row, { onConflict: 'id' });
+  if (insErr) {
+    const lower: Record<string, any> = {};
+    for (const [k, v] of Object.entries(row)) {
+      if (k === 'id' || k === 'user_id' || k === 'updated_at') lower[k] = v;
+      else lower[k.toLowerCase()] = v;
+    }
+    const retry = await admin.from('estimates').upsert(lower, { onConflict: 'id' });
+    insErr = retry.error;
+  }
+  if (insErr) {
+    return { ok: false, error: insErr.message || 'Could not restore plan to Recurring' };
+  }
+
+  // Remove archive invoice
+  const { error: delArch } = await admin
+    .from('archive-est')
+    .delete()
+    .eq('id', id)
+    .eq('user_id', ownerUserId);
+  if (delArch) {
+    console.warn('Restored recurring plan but archive delete failed:', delArch);
+  }
+
+  const plan = await getRecurringPlan(ownerUserId, planId);
+  if (!plan) {
+    return {
+      ok: true,
+      planId,
+      error: 'Restored, but could not reload plan — open Recurring Charges to confirm.',
+    };
+  }
+  return { ok: true, plan, planId };
+}

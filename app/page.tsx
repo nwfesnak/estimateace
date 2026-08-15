@@ -6022,6 +6022,64 @@ export default function Home() {
     showMessage('Archived document deleted');
   };
 
+  /** Canceled recurring plans archived as INV-REC-* invoices */
+  const isArchivedCanceledRecurring = (row: any) => {
+    if (!row) return false;
+    const id = String(row.id || '');
+    const inv = String(row.invoiceNumber ?? row.invoicenumber ?? '');
+    if (/^INV-REC-/i.test(id) || /^INV-REC-/i.test(inv)) return true;
+    const rec = row.profile?._recurring;
+    return !!(rec && (rec.originalPlanId || rec.purpose === 'client_recurring'));
+  };
+
+  /** Move INV-REC archive back onto Recurring Charges as a draft plan */
+  const restoreArchivedRecurringToCharges = async (archRow: any) => {
+    if (!user || !supabase) {
+      showMessage('Please log in first.');
+      return;
+    }
+    if (!archRow?.id || !isArchivedCanceledRecurring(archRow)) {
+      showMessage('This archive is not a canceled recurring plan.');
+      return;
+    }
+    if (
+      !confirm(
+        'Add this contact back to Recurring Charges?\n\nIt will leave Archive Invoices and appear as a draft plan (you can email for approval again).'
+      )
+    ) {
+      return;
+    }
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) {
+        showMessage('Please log in again.');
+        return;
+      }
+      const res = await fetch('/api/recurring/plans', {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ action: 'restore', archiveId: archRow.id, id: archRow.id }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showMessage(json.error || 'Could not restore to Recurring Charges');
+        return;
+      }
+      await refreshArchivesList();
+      await refreshSavedList();
+      showMessage(
+        `✅ Restored to Recurring Charges${json.planId ? ` (${json.planId})` : ''} as a draft. Open Recurring to re-email the client if needed.`
+      );
+      setView('recurringView');
+    } catch (e: any) {
+      showMessage(e?.message || 'Restore failed');
+    }
+  };
+
   const openArchivesView = async () => {
     await refreshArchivesList();
     setView('archivesView');
@@ -13241,14 +13299,24 @@ export default function Home() {
                               >
                                 {t('open')}
                               </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="border-[#10b981] text-[#10b981] hover:bg-emerald-50"
-                                onClick={() => retrieveArchive(inv)}
-                              >
-                                {t('retrieve')}
-                              </Button>
+                              {isArchivedCanceledRecurring(inv) ? (
+                                <Button
+                                  size="sm"
+                                  className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                                  onClick={() => void restoreArchivedRecurringToCharges(inv)}
+                                >
+                                  ↻ Add back to Recurring
+                                </Button>
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="border-[#10b981] text-[#10b981] hover:bg-emerald-50"
+                                  onClick={() => retrieveArchive(inv)}
+                                >
+                                  {t('retrieve')}
+                                </Button>
+                              )}
                               <Button
                                 size="sm"
                                 variant="destructive"
@@ -13762,30 +13830,44 @@ export default function Home() {
                     {t('noArchivedDocuments')}
                   </div>
                 )}
-                {archivesList.map((est) => (
+                {archivesList.map((est) => {
+                  const isCanceledRecurring = isArchivedCanceledRecurring(est);
+                  return (
                   <div key={est.id} className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 border p-4 rounded-lg bg-white min-w-0">
                     <div className="min-w-0">
                       <div className="font-medium break-words">{est.jobName || 'Untitled'}</div>
                       <div className="text-sm text-gray-500 break-words">
                         {est.invoiceNumber}
                         {est.documentType ? ` • ${String(est.documentType).charAt(0).toUpperCase()}${String(est.documentType).slice(1)}` : ''}
+                        {isCanceledRecurring ? ' • Canceled recurring' : ''}
                         {est.archived_at ? ` • Archived: ${new Date(est.archived_at).toLocaleDateString()}` : ''}
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-2 sm:gap-3 shrink-0">
                       <Button size="sm" onClick={async () => { await loadSelectedEstimate(est); setView('editor'); }}>{t('open')}</Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="border-[#10b981] text-[#10b981] hover:bg-emerald-50"
-                        onClick={() => retrieveArchive(est)}
-                      >
-                        {t('retrieve')}
-                      </Button>
+                      {isCanceledRecurring ? (
+                        <Button
+                          size="sm"
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                          onClick={() => void restoreArchivedRecurringToCharges(est)}
+                        >
+                          ↻ Add back to Recurring
+                        </Button>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="border-[#10b981] text-[#10b981] hover:bg-emerald-50"
+                          onClick={() => retrieveArchive(est)}
+                        >
+                          {t('retrieve')}
+                        </Button>
+                      )}
                       <Button size="sm" variant="destructive" onClick={() => deleteArchivedDocument(est.id)}>{t('delete')}</Button>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
