@@ -101,8 +101,19 @@ export async function PATCH(request: NextRequest) {
 
     if (body.action === 'cancel') {
       const result = await cancelClientRecurringSubscription(ownerId, id);
-      if (!result.ok) return NextResponse.json({ error: (result as any).error }, { status: 400 });
-      return NextResponse.json({ ok: true, plan: (result as any).plan });
+      if (!result.ok) {
+        return NextResponse.json(
+          { error: result.error || 'Could not cancel', archiveId: result.archiveId },
+          { status: 400 }
+        );
+      }
+      return NextResponse.json({
+        ok: true,
+        plan: result.plan ?? null,
+        archiveId: result.archiveId || null,
+        message:
+          'Plan canceled, removed from Recurring Charges, and filed under Archive Invoices.',
+      });
     }
 
     const patch: any = {};

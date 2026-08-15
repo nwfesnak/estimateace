@@ -289,7 +289,11 @@ export function RecurringServicesPanel({
   };
 
   const cancelPlan = async (planId: string) => {
-    if (!window.confirm('Cancel this recurring service? The client will no longer be charged.')) {
+    if (
+      !window.confirm(
+        'Cancel this recurring service?\n\nThe client will no longer be charged. This contact is removed from Recurring Charges and moved to Archive Invoices.'
+      )
+    ) {
       return;
     }
     setBusyId(planId);
@@ -305,7 +309,13 @@ export function RecurringServicesPanel({
         showMessage(json.error || 'Could not cancel');
         return;
       }
-      showMessage('Plan canceled. Your EstimateAce software subscription is unchanged.');
+      // Drop from UI immediately (server also removed / archived)
+      setPlans((prev) => prev.filter((p) => p.id !== planId));
+      showMessage(
+        json.archiveId
+          ? `✅ Plan canceled and moved to Archive Invoices (${json.archiveId}). EstimateAce software billing is unchanged.`
+          : '✅ Plan canceled and removed from Recurring. Check Archive Invoices for the closed record.'
+      );
       await loadPlans();
     } catch (e: any) {
       showMessage(e?.message || 'Cancel failed');
