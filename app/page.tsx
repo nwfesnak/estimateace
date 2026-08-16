@@ -3832,7 +3832,7 @@ export default function Home() {
   const isPaidDocRow = (row: any) =>
     String(row?.paymentStatus ?? row?.paymentstatus ?? '').toLowerCase() === 'paid';
 
-  /** Paid invoices (and fully paid work) belong in Profile → Paid Invoices, not active lists. */
+  /** Paid invoices (and fully paid work) belong in Reports → Paid invoices, not active lists. */
   const shouldMoveToPaidFolder = (row: any) => {
     if (!row || isSettingsDocRow(row)) return false;
     if (!isPaidDocRow(row)) return false;
@@ -6239,7 +6239,7 @@ export default function Home() {
     }
     if (paymentStatus === 'paid' && paid >= grandTotal - 0.009) {
       showMessage(
-        'This document is fully marked paid. Use Paid Invoices → Retrieve if you need to reopen it, then reverse the payment.'
+        'This document is fully marked paid. Use Reports → Paid invoices → Retrieve if you need to reopen it, then reverse the payment.'
       );
       return;
     }
@@ -13478,7 +13478,7 @@ export default function Home() {
                         <div>
                           <h3 className="text-xl font-semibold text-[#1e293b]">✅ Paid invoices</h3>
                           <p className="text-sm text-gray-500 mt-1">
-                            Invoices marked paid move here automatically (and under Profile → Paid Invoices).
+                            Invoices marked paid (and canceled recurring plans) appear here.
                           </p>
                         </div>
                         <Button type="button" variant="outline" size="sm" onClick={() => void refreshArchivesList()}>
