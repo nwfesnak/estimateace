@@ -9611,6 +9611,19 @@ export default function Home() {
 
   const patchReportRecurring = async (planId: string, action: 'pause' | 'resume' | 'cancel') => {
     if (!supabase) return;
+    if (!planId) {
+      showMessage('Missing plan id — refresh Reports and try again.');
+      return;
+    }
+    if (action === 'cancel') {
+      if (
+        !window.confirm(
+          'Cancel permanently and move this plan to Archive Invoices? Use Turn off payments to pause instead.'
+        )
+      ) {
+        return;
+      }
+    }
     setReportRecurringBusyId(planId);
     try {
       const { data: sessionData } = await supabase.auth.getSession();
@@ -9619,26 +9632,17 @@ export default function Home() {
         showMessage('Please log in again.');
         return;
       }
-      if (action === 'cancel') {
-        if (
-          !window.confirm(
-            'Cancel permanently and move this plan to Archive Invoices? Use Turn off payments to pause instead.'
-          )
-        ) {
-          return;
-        }
-      }
       const res = await fetch('/api/recurring/plans', {
         method: 'PATCH',
         headers: {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ id: planId, action }),
+        body: JSON.stringify({ id: planId, planId, action }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        showMessage(json.error || 'Could not update plan');
+        showMessage(json.error || `Could not update plan (HTTP ${res.status})`);
         return;
       }
       showMessage(

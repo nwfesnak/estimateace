@@ -931,9 +931,17 @@ export async function pauseClientRecurringPayments(
   planId: string
 ): Promise<{ ok: boolean; error?: string; plan?: RecurringPlan }> {
   const plan = await getRecurringPlan(ownerUserId, planId);
-  if (!plan) return { ok: false, error: 'Plan not found' };
+  if (!plan) {
+    return {
+      ok: false,
+      error: `Plan not found (${planId}). Refresh the page — it may already be archived or deleted.`,
+    };
+  }
   if (plan.status === 'canceled') {
     return { ok: false, error: 'This plan was canceled. Restore it from Archive first.' };
+  }
+  if (plan.status === 'paused') {
+    return { ok: true, plan }; // already off
   }
 
   const stripe = getStripe();
@@ -952,7 +960,7 @@ export async function pauseClientRecurringPayments(
       );
     } catch (e: any) {
       console.warn('pause subscription:', e?.message);
-      // Still mark paused locally
+      // Still mark paused locally even if Stripe pause fails (draft plans have no sub)
     }
   }
 

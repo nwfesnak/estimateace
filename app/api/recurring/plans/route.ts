@@ -91,7 +91,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-/** Update or cancel a plan. Body: { id, action?: 'cancel' | 'update', ...fields } */
+/** Update or cancel a plan. Body: { id, action?: 'cancel' | 'update' | 'pause' | 'resume' | 'restore', ...fields } */
 export async function PATCH(request: NextRequest) {
   try {
     const { user, error } = await getUserFromRequest(request);
@@ -99,10 +99,39 @@ export async function PATCH(request: NextRequest) {
 
     const ownerId = await resolveOwnerId(user.id);
     const body = await request.json().catch(() => ({}));
-    const id = String(body.id || '').trim();
-    if (!id) return NextResponse.json({ error: 'id is required' }, { status: 400 });
+    const action = String(body.action || 'update').trim().toLowerCase();
+    const id = String(body.id || body.planId || body.archiveId || '').trim();
 
-    if (body.action === 'cancel') {
+    // restore can use archiveId; other actions need a plan id
+    if (action === 'restore') {
+      const archiveId = String(body.archiveId || body.id || '').trim();
+      if (!archiveId) {
+        return NextResponse.json(
+          { error: 'archiveId is required to restore a canceled recurring plan' },
+          { status: 400 }
+        );
+      }
+      const result = await restoreRecurringPlanFromArchive(ownerId, archiveId);
+      if (!result.ok) {
+        return NextResponse.json({ error: result.error || 'Could not restore' }, { status: 400 });
+      }
+      return NextResponse.json({
+        ok: true,
+        plan: result.plan || null,
+        planId: result.planId || result.plan?.id || null,
+        message:
+          'Plan restored to Recurring Charges as a draft. Re-email the client if they need to approve again.',
+      });
+    }
+
+    if (!id) {
+      return NextResponse.json(
+        { error: 'id is required (recurring plan id, e.g. REC-…)' },
+        { status: 400 }
+      );
+    }
+
+    if (action === 'cancel') {
       const result = await cancelClientRecurringSubscription(ownerId, id);
       if (!result.ok) {
         return NextResponse.json(
@@ -119,26 +148,13 @@ export async function PATCH(request: NextRequest) {
       });
     }
 
-    if (body.action === 'restore') {
-      // Restore canceled INV-REC-* archive back onto Recurring Charges
-      const archiveId = String(body.archiveId || body.id || '').trim();
-      const result = await restoreRecurringPlanFromArchive(ownerId, archiveId);
-      if (!result.ok) {
-        return NextResponse.json({ error: result.error || 'Could not restore' }, { status: 400 });
-      }
-      return NextResponse.json({
-        ok: true,
-        plan: result.plan || null,
-        planId: result.planId || result.plan?.id || null,
-        message:
-          'Plan restored to Recurring Charges as a draft. Re-email the client if they need to approve again.',
-      });
-    }
-
-    if (body.action === 'pause') {
+    if (action === 'pause') {
       const result = await pauseClientRecurringPayments(ownerId, id);
       if (!result.ok) {
-        return NextResponse.json({ error: result.error || 'Could not turn off payments' }, { status: 400 });
+        return NextResponse.json(
+          { error: result.error || 'Could not turn off payments' },
+          { status: 400 }
+        );
       }
       return NextResponse.json({
         ok: true,
@@ -147,10 +163,13 @@ export async function PATCH(request: NextRequest) {
       });
     }
 
-    if (body.action === 'resume') {
+    if (action === 'resume') {
       const result = await resumeClientRecurringPayments(ownerId, id);
       if (!result.ok) {
-        return NextResponse.json({ error: result.error || 'Could not turn payments back on' }, { status: 400 });
+        return NextResponse.json(
+          { error: result.error || 'Could not turn payments back on' },
+          { status: 400 }
+        );
       }
       return NextResponse.json({
         ok: true,
@@ -159,6 +178,7 @@ export async function PATCH(request: NextRequest) {
       });
     }
 
+    // Default: field update
     const patch: any = {};
     if (body.serviceName != null) patch.serviceName = String(body.serviceName).trim();
     if (body.clientName != null) patch.clientName = String(body.clientName).trim();
@@ -168,6 +188,13 @@ export async function PATCH(request: NextRequest) {
     if (body.interval != null) patch.interval = body.interval;
     if (body.description != null) patch.description = String(body.description).trim();
     if (body.status != null) patch.status = body.status;
+
+    if (Object.keys(patch).length === 0) {
+      return NextResponse.json(
+        { error: 'Nothing to update. Pass fields or action=pause|resume|cancel|restore.' },
+        { status: 400 }
+      );
+    }
 
     const result = await updateRecurringPlan(ownerId, id, patch);
     if (!result.ok) return NextResponse.json({ error: result.error }, { status: 400 });
