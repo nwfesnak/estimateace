@@ -71,7 +71,7 @@ function statusLabel(status: string, clientApprovedAt?: string | null) {
     return clientApprovedAt
       ? `✓ Client approved ${new Date(clientApprovedAt).toLocaleDateString()} — set up card if needed`
       : '✓ Client approved recurring charges';
-  if (s === 'canceled') return 'Canceled';
+  if (s === 'canceled') return 'In Archive — canceled (not a paid invoice)';
   if (s === 'past_due') return 'Payment past due';
   if (s === 'link_sent') return 'Email sent — waiting for client to approve';
   return 'Draft — email client for approval';
@@ -84,6 +84,10 @@ function isPaymentsOff(status: string) {
 function isPaymentsActive(status: string) {
   const s = String(status || '').toLowerCase();
   return s !== 'paused' && s !== 'canceled';
+}
+
+function isCanceledPlan(status: string) {
+  return String(status || '').toLowerCase() === 'canceled';
 }
 
 export function RecurringServicesPanel({
@@ -506,7 +510,7 @@ export function RecurringServicesPanel({
   const cancelPlan = async (planId: string) => {
     if (
       !window.confirm(
-        'Cancel this recurring service permanently?\n\nThe client will no longer be charged. This contact is removed from Recurring Charges and moved to Archive Invoices.\n\nTip: use “Turn off payments” if you only want to pause billing.'
+        'Cancel this recurring service permanently?\n\nThe client will no longer be charged. The plan moves to Recurring → Archive (also under Reports → Recurring → Archive). It is not a paid invoice.\n\nTip: use “Turn off payments” if you only want to pause billing.'
       )
     ) {
       return;
@@ -524,16 +528,46 @@ export function RecurringServicesPanel({
         showMessage(json.error || 'Could not cancel');
         return;
       }
-      // Drop from UI immediately (server also removed / archived)
-      setPlans((prev) => prev.filter((p) => p.id !== planId));
       showMessage(
-        json.archiveId
-          ? `✅ Plan canceled and moved to Paid invoices (${json.archiveId}). Open Reports → Paid invoices. EstimateAce software billing is unchanged.`
-          : '✅ Plan canceled and removed from Recurring. Check Reports → Paid invoices for the closed record.'
+        json.message ||
+          '✅ Plan canceled and moved to Recurring → Archive. EstimateAce software billing is unchanged.'
       );
       await loadPlans();
     } catch (e: any) {
       showMessage(e?.message || 'Cancel failed');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const restorePlan = async (planId: string) => {
+    if (
+      !window.confirm(
+        'Restore this plan from Archive?\n\nIt will return as a draft under Active / onboarding so you can re-send approval.'
+      )
+    ) {
+      return;
+    }
+    setBusyId(planId);
+    try {
+      const headers = await authHeaders();
+      const res = await fetch('/api/recurring/plans', {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({ id: planId, action: 'restore' }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showMessage(json.error || 'Could not restore');
+        return;
+      }
+      showMessage(
+        json.message ||
+          '✅ Plan restored as a draft. Re-send approval if the client needs to approve again.'
+      );
+      await loadPlans();
+    } catch (e: any) {
+      showMessage(e?.message || 'Restore failed');
     } finally {
       setBusyId(null);
     }
@@ -800,6 +834,12 @@ export function RecurringServicesPanel({
               hint: 'Billing paused — turn payments back on anytime without re-creating the plan.',
               list: plans.filter((p) => isPaymentsOff(p.status)),
             },
+            {
+              key: 'archive',
+              title: 'Archive',
+              hint: 'Canceled plans. Restore to draft anytime. These are not paid invoices.',
+              list: plans.filter((p) => isCanceledPlan(p.status)),
+            },
           ] as const).map((section) => (
             <div key={section.key}>
               <div className="mb-3">
@@ -812,8 +852,10 @@ export function RecurringServicesPanel({
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {section.list.map((p) => (
-                    <Card key={p.id} className="overflow-hidden">
+                  {section.list.map((p) => {
+                    const canceled = isCanceledPlan(p.status);
+                    return (
+                    <Card key={p.id} className={`overflow-hidden ${canceled ? 'opacity-95 border-slate-300' : ''}`}>
                       <CardContent className="p-5">
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div className="min-w-0">
@@ -832,7 +874,7 @@ export function RecurringServicesPanel({
                               {p.clientEmail ? ` · ${p.clientEmail}` : ' · ⚠️ no email'}
                               {p.clientPhone ? ` · ${p.clientPhone}` : ' · ⚠️ no phone'}
                             </p>
-                            {!p.clientEmail && !p.clientPhone && (
+                            {!canceled && !p.clientEmail && !p.clientPhone && (
                               <p className="text-xs text-amber-700 mt-1">
                                 Add email and/or phone with Edit plan so approval can be sent.
                               </p>
@@ -847,12 +889,12 @@ export function RecurringServicesPanel({
                             <p className="text-xs text-gray-500 mt-1">
                               {statusLabel(p.status, p.clientApprovedAt)}
                             </p>
-                            {p.clientApprovedAt && (
+                            {p.clientApprovedAt && !canceled && (
                               <p className="text-xs font-semibold text-emerald-700 mt-1">
                                 ✓ Client approved on {new Date(p.clientApprovedAt).toLocaleString()}
                               </p>
                             )}
-                            {p.approvalEmailSentAt && !p.clientApprovedAt && (
+                            {p.approvalEmailSentAt && !p.clientApprovedAt && !canceled && (
                               <p className="text-xs text-sky-700 mt-1">
                                 Approval email sent {new Date(p.approvalEmailSentAt).toLocaleString()}
                               </p>
@@ -864,67 +906,81 @@ export function RecurringServicesPanel({
                             )}
                           </div>
                           <div className="flex flex-col gap-2 w-full sm:w-auto">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="border-slate-300"
-                              disabled={busyId === p.id || saving}
-                              onClick={() => startEditPlan(p)}
-                            >
-                              ✏️ Edit plan
-                            </Button>
-                            <Button
-                              size="sm"
-                              className="bg-[#10b981] hover:bg-[#059669] text-white"
-                              disabled={busyId === p.id}
-                              onClick={() =>
-                                void emailClientApproval(p.id, p.clientEmail, p.clientPhone)
-                              }
-                            >
-                              📧📱 Send approval (email + SMS)
-                            </Button>
-                            <Button
-                              size="sm"
-                              className="bg-[#0ea5e9] text-white"
-                              disabled={busyId === p.id}
-                              onClick={() => void copyLink(p.id)}
-                            >
-                              📋 Copy client link
-                            </Button>
-                            {isPaymentsOff(p.status) ? (
+                            {canceled ? (
                               <Button
                                 size="sm"
                                 className="bg-emerald-700 hover:bg-emerald-800 text-white"
                                 disabled={busyId === p.id}
-                                onClick={() => void setPaymentsEnabled(p.id, true)}
+                                onClick={() => void restorePlan(p.id)}
                               >
-                                ▶️ Turn payments on
+                                ↻ Restore from archive
                               </Button>
                             ) : (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="border-orange-300 text-orange-800"
-                                disabled={busyId === p.id}
-                                onClick={() => void setPaymentsEnabled(p.id, false)}
-                              >
-                                ⏸ Turn off payments
-                              </Button>
+                              <>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="border-slate-300"
+                                  disabled={busyId === p.id || saving}
+                                  onClick={() => startEditPlan(p)}
+                                >
+                                  ✏️ Edit plan
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  className="bg-[#10b981] hover:bg-[#059669] text-white"
+                                  disabled={busyId === p.id}
+                                  onClick={() =>
+                                    void emailClientApproval(p.id, p.clientEmail, p.clientPhone)
+                                  }
+                                >
+                                  📧📱 Send approval (email + SMS)
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  className="bg-[#0ea5e9] text-white"
+                                  disabled={busyId === p.id}
+                                  onClick={() => void copyLink(p.id)}
+                                >
+                                  📋 Copy client link
+                                </Button>
+                                {isPaymentsOff(p.status) ? (
+                                  <Button
+                                    size="sm"
+                                    className="bg-emerald-700 hover:bg-emerald-800 text-white"
+                                    disabled={busyId === p.id}
+                                    onClick={() => void setPaymentsEnabled(p.id, true)}
+                                  >
+                                    ▶️ Turn payments on
+                                  </Button>
+                                ) : (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="border-orange-300 text-orange-800"
+                                    disabled={busyId === p.id}
+                                    onClick={() => void setPaymentsEnabled(p.id, false)}
+                                  >
+                                    ⏸ Turn off payments
+                                  </Button>
+                                )}
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="text-red-600 border-red-200"
+                                  disabled={busyId === p.id}
+                                  onClick={() => void cancelPlan(p.id)}
+                                >
+                                  Cancel → Archive
+                                </Button>
+                              </>
                             )}
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="text-red-600 border-red-200"
-                              disabled={busyId === p.id}
-                              onClick={() => void cancelPlan(p.id)}
-                            >
-                              Cancel &amp; archive
-                            </Button>
                           </div>
                         </div>
                       </CardContent>
                     </Card>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -944,7 +1000,11 @@ export function RecurringServicesPanel({
             When they open the link and approve, you&apos;ll see <strong>✓ Client approved</strong> on
             the plan.
           </li>
-          <li>All approval goes through the message you send — no Stripe checkout from this screen.</li>
+          <li>
+            <strong>Turn off payments</strong> pauses billing; <strong>Cancel → Archive</strong> ends
+            the plan under Archive (not a paid invoice).
+          </li>
+          <li>Job invoices stay under Invoices and only move to Paid invoices when marked paid.</li>
         </ol>
         <p className="text-xs text-gray-500 pt-2">
           Email needs Resend (same as estimate send). SMS needs Twilio env vars (TWILIO_ACCOUNT_SID,

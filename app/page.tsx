@@ -421,8 +421,8 @@ export default function Home() {
       retrieveArchiveHelp: "View archived estimates and invoices, open them, or restore them to your active lists.",
       viewArchives: "View / Retrieve Archives",
       paidInvoices: "Paid Invoices",
-      paidInvoicesHelp: "Invoices marked paid (and canceled recurring plans) appear under Reports → Paid invoices.",
-      noPaidInvoices: "No paid invoices yet. When you close out an invoice as paid, it appears in this folder.",
+      paidInvoicesHelp: "Invoices marked paid appear under Reports → Paid invoices. Canceled recurring plans live under Recurring → Archive.",
+      noPaidInvoices: "No paid invoices yet. When you mark an invoice paid, it appears in this folder.",
       activeEstimates: "Active Estimates",
       metric: "Metric",
       count: "Count",
@@ -6028,7 +6028,10 @@ export default function Home() {
     showMessage('Archived document deleted');
   };
 
-  /** Canceled recurring plans archived as INV-REC-* invoices */
+  /**
+   * Legacy canceled recurring filed as INV-REC-* in archive-est (old cancel path).
+   * New cancels stay as REC-* under Recurring → Archive.
+   */
   const isArchivedCanceledRecurring = (row: any) => {
     if (!row) return false;
     const id = String(row.id || '');
@@ -6038,19 +6041,19 @@ export default function Home() {
     return !!(rec && (rec.originalPlanId || rec.purpose === 'client_recurring'));
   };
 
-  /** Move INV-REC archive back onto Recurring Charges as a draft plan */
+  /** Restore legacy INV-REC archive row back onto Recurring Charges as a draft plan */
   const restoreArchivedRecurringToCharges = async (archRow: any) => {
     if (!user || !supabase) {
       showMessage('Please log in first.');
       return;
     }
     if (!archRow?.id || !isArchivedCanceledRecurring(archRow)) {
-      showMessage('This archive is not a canceled recurring plan.');
+      showMessage('This is not a canceled recurring plan.');
       return;
     }
     if (
       !confirm(
-        'Add this contact back to Recurring Charges?\n\nIt will leave Archive Invoices and appear as a draft plan (you can email for approval again).'
+        'Add this contact back to Recurring Charges?\n\nIt will leave this list and appear as a draft plan under Recurring (you can re-send approval).'
       )
     ) {
       return;
@@ -9442,7 +9445,9 @@ export default function Home() {
 
     const isArchivedInvoice = (row: any) => {
       if (!row || isSettingsDocRow(row)) return false;
-      // Invoices only (INV- / documentType invoice) from archive-est
+      // Exclude legacy canceled recurring (INV-REC) — those are not real paid invoices
+      if (isArchivedCanceledRecurring(row)) return false;
+      // Paid invoices only (INV- / documentType invoice) from archive-est
       return isInvoiceDocRow(row);
     };
 
@@ -9542,14 +9547,14 @@ export default function Home() {
       });
   }, [archivesList]);
 
-  /** Reports: paid / closed invoices (includes canceled recurring filed as INV-REC paid) */
+  /** Reports: paid invoices only (canceled recurring plans are under Recurring → Archive) */
   const reportPaidInvoices = useMemo(() => {
     return (archivesList || [])
       .filter((row: any) => {
         if (!row || isSettingsDocRow(row)) return false;
         if (isRecurringPlanRow(row)) return false;
-        // Canceled recurring (INV-REC) + normal paid/closed invoices
-        if (isArchivedCanceledRecurring(row)) return true;
+        // Never treat canceled recurring as a paid invoice
+        if (isArchivedCanceledRecurring(row)) return false;
         return isInvoiceDocRow(row) || isPaidDocRow(row);
       })
       .sort((a: any, b: any) => {
@@ -9592,7 +9597,10 @@ export default function Home() {
     }
   }, [supabase]);
 
-  const patchReportRecurring = async (planId: string, action: 'pause' | 'resume' | 'cancel') => {
+  const patchReportRecurring = async (
+    planId: string,
+    action: 'pause' | 'resume' | 'cancel' | 'restore'
+  ) => {
     if (!supabase) return;
     if (!planId) {
       showMessage('Missing plan id — refresh Reports and try again.');
@@ -9601,7 +9609,16 @@ export default function Home() {
     if (action === 'cancel') {
       if (
         !window.confirm(
-          'Cancel permanently and move this plan to Archive Invoices? Use Turn off payments to pause instead.'
+          'Cancel permanently and move this plan to Recurring → Archive?\n\nIt will not become a paid invoice. Use Turn off payments to pause instead.'
+        )
+      ) {
+        return;
+      }
+    }
+    if (action === 'restore') {
+      if (
+        !window.confirm(
+          'Restore this plan from Archive as a draft? You can re-send approval afterward.'
         )
       ) {
         return;
@@ -9633,10 +9650,11 @@ export default function Home() {
           ? '✅ Payments turned off.'
           : action === 'resume'
             ? '✅ Payments turned back on.'
-            : '✅ Plan canceled and archived.'
+            : action === 'restore'
+              ? json.message || '✅ Plan restored as a draft.'
+              : json.message || '✅ Plan canceled and moved to Recurring → Archive.'
       );
       await loadReportRecurringPlans();
-      if (action === 'cancel') await refreshArchivesList();
     } catch (e: any) {
       showMessage(e?.message || 'Update failed');
     } finally {
@@ -13096,7 +13114,7 @@ export default function Home() {
                     <div className="border-t pt-8">
                       <h3 className="font-semibold mb-2">{t('paidInvoices')}</h3>
                       <p className="text-sm text-gray-500 mb-4">
-                        Paid invoices and canceled recurring plans are under Reports → Paid invoices.
+                        Invoices marked paid are under Reports → Paid invoices. Canceled recurring plans are under Recurring → Archive.
                       </p>
                       <Button
                         variant="outline"
@@ -13349,8 +13367,8 @@ export default function Home() {
               <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to {t('dashboard')}</Button>
               <h2 className="text-3xl font-semibold mb-2">📊 Reports</h2>
               <p className="text-sm text-gray-500 mb-6">
-                Estimates never approved live in Estimates archive. Paid invoices live under Paid invoices.
-                Recurring plans show active vs payments off (you can turn billing back on).
+                Estimates never approved live in Estimates archive. Invoices stay open until paid, then move to Paid invoices.
+                Recurring has Active, Payments off, and Archive (canceled plans — not paid invoices).
               </p>
               {currentCrew && !canSeeFinancials && (
                 <div className="p-6 bg-yellow-50 border border-yellow-200 rounded mb-6">
@@ -13478,7 +13496,7 @@ export default function Home() {
                         <div>
                           <h3 className="text-xl font-semibold text-[#1e293b]">✅ Paid invoices</h3>
                           <p className="text-sm text-gray-500 mt-1">
-                            Invoices marked paid (and canceled recurring plans) appear here.
+                            Invoices that have been marked paid. Open invoices stay under Invoices until paid.
                           </p>
                         </div>
                         <Button type="button" variant="outline" size="sm" onClick={() => void refreshArchivesList()}>
@@ -13567,10 +13585,10 @@ export default function Home() {
                     <section className="space-y-8">
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div>
-                          <h3 className="text-xl font-semibold text-[#1e293b]">🔄 Recurring invoices</h3>
+                          <h3 className="text-xl font-semibold text-[#1e293b]">🔄 Recurring</h3>
                           <p className="text-sm text-gray-500 mt-1">
-                            Active billing vs payments off. Turn payments off without losing the contact; turn back on anytime.
-                            Cancel permanently to move the plan to Archive.
+                            Active, payments off, and archive. Cancel moves a plan to Archive only — never to Paid invoices.
+                            Job invoices stay under Invoices until marked paid.
                           </p>
                         </div>
                         <div className="flex gap-2">
@@ -13602,15 +13620,23 @@ export default function Home() {
                               {
                                 key: 'on',
                                 title: 'Active / onboarding',
-                                list: reportRecurringPlans.filter(
-                                  (p) => String(p.status || '').toLowerCase() !== 'paused'
-                                ),
+                                list: reportRecurringPlans.filter((p) => {
+                                  const s = String(p.status || '').toLowerCase();
+                                  return s !== 'paused' && s !== 'canceled';
+                                }),
                               },
                               {
                                 key: 'off',
                                 title: 'Payments off',
                                 list: reportRecurringPlans.filter(
                                   (p) => String(p.status || '').toLowerCase() === 'paused'
+                                ),
+                              },
+                              {
+                                key: 'archive',
+                                title: 'Archive',
+                                list: reportRecurringPlans.filter(
+                                  (p) => String(p.status || '').toLowerCase() === 'canceled'
                                 ),
                               },
                             ] as const
@@ -13620,7 +13646,9 @@ export default function Home() {
                               <p className="text-xs text-gray-500 mb-3">
                                 {sec.key === 'on'
                                   ? 'Draft, awaiting approval, and paying clients.'
-                                  : 'Billing paused — turn back on without re-creating the plan.'}
+                                  : sec.key === 'off'
+                                    ? 'Billing paused — turn back on without re-creating the plan.'
+                                    : 'Canceled plans. Restore as draft anytime. Not paid invoices.'}
                               </p>
                               {sec.list.length === 0 ? (
                                 <div className="rounded-xl border border-dashed bg-slate-50 p-6 text-sm text-gray-500 mb-6">
@@ -13628,7 +13656,10 @@ export default function Home() {
                                 </div>
                               ) : (
                                 <div className="space-y-3 mb-6">
-                                  {sec.list.map((p: any) => (
+                                  {sec.list.map((p: any) => {
+                                    const canceled =
+                                      String(p.status || '').toLowerCase() === 'canceled';
+                                    return (
                                     <div
                                       key={p.id}
                                       className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white border rounded-xl p-4"
@@ -13647,7 +13678,16 @@ export default function Home() {
                                         </div>
                                       </div>
                                       <div className="flex flex-wrap gap-2 shrink-0">
-                                        {String(p.status).toLowerCase() === 'paused' ? (
+                                        {canceled ? (
+                                          <Button
+                                            size="sm"
+                                            className="bg-emerald-700 text-white"
+                                            disabled={reportRecurringBusyId === p.id}
+                                            onClick={() => void patchReportRecurring(p.id, 'restore')}
+                                          >
+                                            ↻ Restore from archive
+                                          </Button>
+                                        ) : String(p.status).toLowerCase() === 'paused' ? (
                                           <Button
                                             size="sm"
                                             className="bg-emerald-700 text-white"
@@ -13667,18 +13707,21 @@ export default function Home() {
                                             ⏸ Turn off payments
                                           </Button>
                                         )}
-                                        <Button
-                                          size="sm"
-                                          variant="outline"
-                                          className="text-red-600 border-red-200"
-                                          disabled={reportRecurringBusyId === p.id}
-                                          onClick={() => void patchReportRecurring(p.id, 'cancel')}
-                                        >
-                                          Cancel &amp; archive
-                                        </Button>
+                                        {!canceled && (
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="text-red-600 border-red-200"
+                                            disabled={reportRecurringBusyId === p.id}
+                                            onClick={() => void patchReportRecurring(p.id, 'cancel')}
+                                          >
+                                            Cancel → Archive
+                                          </Button>
+                                        )}
                                       </div>
                                     </div>
-                                  ))}
+                                    );
+                                  })}
                                 </div>
                               )}
                             </div>
@@ -13700,9 +13743,9 @@ export default function Home() {
                   <section className="mb-12">
                     <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
                       <div>
-                        <h3 className="text-xl font-semibold text-[#1e293b]">📁 Archived Invoices</h3>
+                        <h3 className="text-xl font-semibold text-[#1e293b]">✅ Paid invoices by month</h3>
                         <p className="text-sm text-gray-500 mt-1">
-                          All closed invoices from archives, grouped by month and year of the job invoice date.
+                          Paid invoices grouped by month and year of the job invoice date.
                         </p>
                       </div>
                       <div className="flex flex-wrap gap-2 items-center">
@@ -13760,7 +13803,7 @@ export default function Home() {
 
                     {filteredArchivedInvoiceMonths.length === 0 ? (
                       <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-8 text-center text-gray-500">
-                        No archived invoices yet. When you mark invoices paid / archive them, they appear here by month and year.
+                        No paid invoices yet. When you mark invoices paid, they appear here by month and year.
                       </div>
                     ) : (
                       <div className="space-y-3">

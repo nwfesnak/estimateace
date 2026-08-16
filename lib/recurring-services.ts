@@ -198,9 +198,7 @@ export async function listRecurringPlans(ownerUserId: string): Promise<Recurring
   const admin = getSupabaseAdmin();
   if (!admin) return [];
 
-  const notCanceled = (p: RecurringPlan) =>
-    String(p.status || '').toLowerCase() !== 'canceled';
-
+  // Include canceled — they live in Recurring → Archive folder (not paid invoices)
   const { data, error } = await admin
     .from('estimates')
     .select('*')
@@ -223,12 +221,10 @@ export async function listRecurringPlans(ownerUserId: string): Promise<Recurring
           r.documenttype === 'recurring_plan' ||
           String(r.id || '').startsWith('REC-')
       )
-      .map(rowToPlan)
-      .filter(notCanceled);
+      .map(rowToPlan);
   }
 
-  // Canceled plans are moved to archive-est; hide any leftover canceled rows
-  return (data || []).map(rowToPlan).filter(notCanceled);
+  return (data || []).map(rowToPlan);
 }
 
 export async function getRecurringPlan(
@@ -935,156 +931,19 @@ export async function sendRecurringApprovalEmail(input: {
 }
 
 /**
- * Archive a canceled recurring plan into archive-est as an invoice row,
- * then remove it from active estimates (so it leaves the Recurring page).
+ * Cancel a client recurring plan (not SaaS).
+ * Stays on Recurring Charges under the Archive folder — does NOT go to paid invoices.
+ * Invoices are separate: they stay as invoices and only move to Paid invoices when paid.
  */
-async function archiveCanceledRecurringToInvoices(
-  ownerUserId: string,
-  planId: string,
-  plan: RecurringPlan
-): Promise<{ ok: boolean; archiveId?: string; error?: string }> {
-  const admin = getSupabaseAdmin();
-  if (!admin) return { ok: false, error: 'Server missing SUPABASE_SERVICE_ROLE_KEY' };
-
-  const { data: existing, error: loadErr } = await admin
-    .from('estimates')
-    .select('*')
-    .eq('user_id', ownerUserId)
-    .eq('id', planId)
-    .maybeSingle();
-
-  if (loadErr) return { ok: false, error: loadErr.message };
-  if (!existing) return { ok: false, error: 'Plan row not found' };
-
-  const now = new Date().toISOString();
-  // Profit / archive invoice lists treat INV- + documentType invoice as invoices.
-  // REC- ids are excluded as "recurring plan" rows, so rewrite id for archive.
-  const rest = String(planId).replace(/^REC-/i, '').replace(/^INV-/i, '');
-  const archiveId = `INV-REC-${rest}`.slice(0, 80);
-  const amt = Number(plan.amount) || 0;
-  const interval = plan.interval || 'month';
-  const serviceName = plan.serviceName || 'Recurring service';
-  // Filed under Paid invoices so it shows with other closed invoices
-  const jobName = `${serviceName} (recurring — canceled)`;
-  const priorPaid = Number(existing.amountPaid ?? existing.amountpaid) || 0;
-  // Closed-out amount for the paid folder (prefer what was already collected, else plan rate)
-  const closedPaid = priorPaid > 0 ? priorPaid : amt;
-
-  const profile = {
-    ...(existing.profile && typeof existing.profile === 'object' ? existing.profile : {}),
-    _recurring: {
-      ...((existing.profile as any)?._recurring || {}),
-      status: 'canceled',
-      canceledAt: now,
-      originalPlanId: planId,
-      purpose: 'client_recurring',
-    },
-  };
-
-  const items = Array.isArray(existing.items) && existing.items.length
-    ? existing.items
-    : [
-        {
-          id: 1,
-          description: `${serviceName} — ${interval} (canceled)`,
-          qty: 1,
-          unit: interval,
-          price: amt,
-          total: amt,
-        },
-      ];
-
-  const archiveData: Record<string, any> = {
-    id: archiveId,
-    user_id: ownerUserId,
-    documentType: 'invoice',
-    documenttype: 'invoice',
-    jobName,
-    jobname: jobName,
-    address: plan.address || existing.address || '',
-    city: plan.city || existing.city || '',
-    state: plan.state || existing.state || '',
-    zipCode: plan.zipCode || existing.zipCode || existing.zipcode || '',
-    zipcode: plan.zipCode || existing.zipCode || existing.zipcode || '',
-    phones: plan.clientPhone ? [plan.clientPhone] : existing.phones || [],
-    emails: plan.clientEmail ? [plan.clientEmail] : existing.emails || [],
-    date: existing.date || now.slice(0, 10),
-    invoiceNumber: archiveId,
-    invoicenumber: archiveId,
-    items,
-    terms:
-      (existing.terms || plan.description || '') +
-      `\n\n[Canceled recurring plan ${planId} on ${now.slice(0, 10)}]`,
-    laborHours: existing.laborHours ?? existing.laborhours ?? null,
-    laborRate: existing.laborRate ?? existing.laborrate ?? null,
-    laborFixedAmount: existing.laborFixedAmount ?? existing.laborfixedamount ?? null,
-    useHourlyLabor: existing.useHourlyLabor ?? existing.usehourlylabor ?? true,
-    laborAmount: existing.laborAmount ?? existing.laboramount ?? 0,
-    taxRate: existing.taxRate ?? existing.taxrate ?? 0,
-    taxAmount: existing.taxAmount ?? existing.taxamount ?? 0,
-    isTaxExempt: existing.isTaxExempt ?? existing.istaxexempt ?? false,
-    taxLabor: existing.taxLabor ?? existing.taxlabor ?? true,
-    photoUrls: existing.photoUrls ?? existing.photourls ?? [],
-    videoUrls: existing.videoUrls ?? existing.videourls ?? [],
-    receiptUrls: existing.receiptUrls ?? existing.receipturls ?? [],
-    receiptDetails: existing.receiptDetails ?? existing.receiptdetails ?? [],
-    dueDate: existing.dueDate ?? existing.duedate ?? null,
-    // Always file canceled recurring under Paid invoices (closed-out)
-    paymentStatus: 'paid',
-    paymentstatus: 'paid',
-    amountPaid: closedPaid,
-    amountpaid: closedPaid,
-    paymentMethod: 'Recurring (canceled)',
-    paymentmethod: 'Recurring (canceled)',
-    profile,
-    updated_at: now,
-    archived_at: now,
-  };
-
-  // Clear any prior archive with this id
-  await admin.from('archive-est').delete().eq('id', archiveId).eq('user_id', ownerUserId);
-
-  let { error: insErr } = await admin.from('archive-est').insert(archiveData);
-  if (insErr) {
-    // Retry with lowercase keys only (unquoted Postgres schema)
-    const lower: Record<string, any> = {};
-    for (const [k, v] of Object.entries(archiveData)) {
-      if (k === 'id' || k === 'user_id' || k === 'updated_at' || k === 'archived_at') lower[k] = v;
-      else lower[k.toLowerCase()] = v;
-    }
-    const retry = await admin.from('archive-est').insert(lower);
-    insErr = retry.error;
-  }
-
-  if (insErr) {
-    console.error('archive canceled recurring failed:', insErr);
-    return { ok: false, error: insErr.message || 'Could not archive canceled plan' };
-  }
-
-  // Remove from active recurring list (estimates table)
-  const { error: delErr } = await admin
-    .from('estimates')
-    .delete()
-    .eq('id', planId)
-    .eq('user_id', ownerUserId);
-
-  if (delErr) {
-    console.warn('Archived canceled plan but failed to delete active row:', delErr);
-    // Mark canceled so list filter hides it even if delete failed
-    await updateRecurringPlan(ownerUserId, planId, { status: 'canceled' });
-    return { ok: true, archiveId };
-  }
-
-  return { ok: true, archiveId };
-}
-
-/** Cancel Stripe subscription for a client plan (not SaaS), archive as invoice, remove from list. */
 export async function cancelClientRecurringSubscription(
   ownerUserId: string,
   planId: string
-): Promise<{ ok: boolean; error?: string; archiveId?: string; plan?: RecurringPlan | null }> {
+): Promise<{ ok: boolean; error?: string; plan?: RecurringPlan | null }> {
   const plan = await getRecurringPlan(ownerUserId, planId);
   if (!plan) return { ok: false, error: 'Plan not found' };
+  if (plan.status === 'canceled') {
+    return { ok: true, plan };
+  }
 
   const stripe = getStripe();
   if (stripe && plan.stripeSubscriptionId) {
@@ -1098,30 +957,38 @@ export async function cancelClientRecurringSubscription(
       await stripe.subscriptions.cancel(plan.stripeSubscriptionId, undefined, opts);
     } catch (e: any) {
       console.warn('cancel subscription:', e?.message);
-      // Still mark canceled / archive locally
+      // Still mark canceled locally
     }
   }
 
-  // Archive as invoice + delete active row (status canceled stored on archive profile)
-  const archived = await archiveCanceledRecurringToInvoices(ownerUserId, planId, {
-    ...plan,
+  const updated = await updateRecurringPlan(ownerUserId, planId, {
     status: 'canceled',
+    stripeSubscriptionId: null,
   });
+  if (!updated.ok) return { ok: false, error: updated.error, plan };
+  return { ok: true, plan: updated.plan };
+}
 
-  if (!archived.ok) {
-    // Leave plan on Recurring page so user can retry cancel
-    return {
-      ok: false,
-      error: archived.error || 'Could not move canceled plan to Archive Invoices',
-      plan,
-    };
+/**
+ * Move a canceled plan out of Recurring Archive back to draft (can re-send approval).
+ */
+export async function restoreCanceledRecurringInPlace(
+  ownerUserId: string,
+  planId: string
+): Promise<{ ok: boolean; error?: string; plan?: RecurringPlan }> {
+  const plan = await getRecurringPlan(ownerUserId, planId);
+  if (!plan) return { ok: false, error: 'Plan not found' };
+  if (plan.status !== 'canceled') {
+    return { ok: true, plan };
   }
-
-  return {
-    ok: true,
-    archiveId: archived.archiveId,
-    plan: null, // removed from active list
-  };
+  const updated = await updateRecurringPlan(ownerUserId, planId, {
+    status: 'draft',
+    clientApprovedAt: null,
+    approvalEmailSentAt: null,
+    stripeSubscriptionId: null,
+  });
+  if (!updated.ok) return { ok: false, error: updated.error };
+  return { ok: true, plan: updated.plan };
 }
 
 /**
@@ -1181,7 +1048,10 @@ export async function resumeClientRecurringPayments(
   const plan = await getRecurringPlan(ownerUserId, planId);
   if (!plan) return { ok: false, error: 'Plan not found' };
   if (plan.status === 'canceled') {
-    return { ok: false, error: 'Canceled plans must be restored from Archive Invoices.' };
+    return {
+      ok: false,
+      error: 'Canceled plans are in Recurring Archive. Use Restore to re-activate, then turn payments on.',
+    };
   }
 
   const stripe = getStripe();
@@ -1213,7 +1083,10 @@ export async function resumeClientRecurringPayments(
   return { ok: true, plan: updated.plan };
 }
 
-/** True when an archive-est row is a canceled recurring plan filed as INV-REC-*. */
+/**
+ * True when an archive-est row is a legacy canceled recurring plan filed as INV-REC-*.
+ * New cancels stay as REC-* under Recurring → Archive; this only matches old data.
+ */
 export function isArchivedCanceledRecurringRow(row: any): boolean {
   if (!row) return false;
   const id = String(row.id || '');
@@ -1239,8 +1112,8 @@ function archiveIdToRecurringPlanId(archiveRow: any): string {
 }
 
 /**
- * Restore a canceled recurring plan from Archive Invoices back to Recurring Charges.
- * Removes the INV-REC-* archive row and recreates the REC-* plan as draft.
+ * Legacy: restore a canceled recurring plan that was filed as INV-REC-* in archive-est.
+ * Prefer restoreCanceledRecurringInPlace for new cancels (status stays on REC-*).
  */
 export async function restoreRecurringPlanFromArchive(
   ownerUserId: string,
@@ -1366,14 +1239,14 @@ export async function restoreRecurringPlanFromArchive(
     return { ok: false, error: insErr.message || 'Could not restore plan to Recurring' };
   }
 
-  // Remove archive invoice
+  // Remove legacy INV-REC archive row
   const { error: delArch } = await admin
     .from('archive-est')
     .delete()
     .eq('id', id)
     .eq('user_id', ownerUserId);
   if (delArch) {
-    console.warn('Restored recurring plan but archive delete failed:', delArch);
+    console.warn('Restored recurring plan but legacy archive delete failed:', delArch);
   }
 
   const plan = await getRecurringPlan(ownerUserId, planId);

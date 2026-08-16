@@ -6,6 +6,7 @@ import {
   listRecurringPlans,
   updateRecurringPlan,
   cancelClientRecurringSubscription,
+  restoreCanceledRecurringInPlace,
   restoreRecurringPlanFromArchive,
   pauseClientRecurringPayments,
   resumeClientRecurringPayments,
@@ -103,16 +104,33 @@ export async function PATCH(request: NextRequest) {
     const action = String(body.action || 'update').trim().toLowerCase() || 'update';
     const id = String(body.id || body.planId || body.archiveId || '').trim();
 
-    // restore can use archiveId; other actions need a plan id
+    // restore: REC-* plans restore in place; INV-REC-* legacy archive rows still supported
     if (action === 'restore') {
-      const archiveId = String(body.archiveId || body.id || '').trim();
-      if (!archiveId) {
+      const restoreId = String(body.id || body.planId || body.archiveId || '').trim();
+      if (!restoreId) {
         return NextResponse.json(
-          { error: 'archiveId is required to restore a canceled recurring plan' },
+          { error: 'id is required to restore a canceled recurring plan' },
           { status: 400 }
         );
       }
-      const result = await restoreRecurringPlanFromArchive(ownerId, archiveId);
+      // New path: canceled plan still lives as REC-* under Recurring → Archive
+      if (/^REC-/i.test(restoreId) || !/^INV-REC-/i.test(restoreId)) {
+        const inPlace = await restoreCanceledRecurringInPlace(ownerId, restoreId);
+        if (inPlace.ok) {
+          return NextResponse.json({
+            ok: true,
+            plan: inPlace.plan || null,
+            planId: inPlace.plan?.id || restoreId,
+            message:
+              'Plan restored from Recurring Archive as a draft. Re-send approval if the client needs to approve again.',
+          });
+        }
+        // Fall through to legacy INV-REC archive restore when plan row is missing
+        if (!String(inPlace.error || '').toLowerCase().includes('not found')) {
+          return NextResponse.json({ error: inPlace.error || 'Could not restore' }, { status: 400 });
+        }
+      }
+      const result = await restoreRecurringPlanFromArchive(ownerId, restoreId);
       if (!result.ok) {
         return NextResponse.json({ error: result.error || 'Could not restore' }, { status: 400 });
       }
@@ -121,7 +139,7 @@ export async function PATCH(request: NextRequest) {
         plan: result.plan || null,
         planId: result.planId || result.plan?.id || null,
         message:
-          'Plan restored to Recurring Charges as a draft. Re-email the client if they need to approve again.',
+          'Plan restored to Recurring Charges as a draft. Re-send approval if the client needs to approve again.',
       });
     }
 
@@ -136,16 +154,15 @@ export async function PATCH(request: NextRequest) {
       const result = await cancelClientRecurringSubscription(ownerId, id);
       if (!result.ok) {
         return NextResponse.json(
-          { error: result.error || 'Could not cancel', archiveId: result.archiveId },
+          { error: result.error || 'Could not cancel' },
           { status: 400 }
         );
       }
       return NextResponse.json({
         ok: true,
         plan: result.plan ?? null,
-        archiveId: result.archiveId || null,
         message:
-          'Plan canceled, removed from Recurring Charges, and filed under Paid invoices (Reports).',
+          'Plan canceled and moved to Recurring → Archive (and Reports → Recurring → Archive). It is not a paid invoice.',
       });
     }
 
