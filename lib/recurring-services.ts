@@ -1278,7 +1278,6 @@ export async function restoreRecurringPlanFromArchive(
 
   // Ensure active row is a recurring plan (not invoice)
   row.documentType = 'recurring_plan';
-  row.documenttype = 'recurring_plan';
   row.paymentStatus = 'draft';
   row.invoiceNumber = planId;
   row.updated_at = now;
