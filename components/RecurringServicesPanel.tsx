@@ -101,6 +101,8 @@ export function RecurringServicesPanel({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  /** When set, the form is editing this plan id instead of creating */
+  const [editingPlanId, setEditingPlanId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -134,6 +136,94 @@ export function RecurringServicesPanel({
   useEffect(() => {
     void loadPlans();
   }, [loadPlans]);
+
+  const closeForm = () => {
+    setShowForm(false);
+    setEditingPlanId(null);
+    setForm(emptyForm);
+  };
+
+  const startEditPlan = (p: RecurringPlanRow) => {
+    setEditingPlanId(p.id);
+    setForm({
+      serviceName: p.serviceName || '',
+      clientName: p.clientName || '',
+      clientEmail: p.clientEmail || '',
+      clientPhone: p.clientPhone || '',
+      address: p.address || '',
+      city: p.city || '',
+      state: p.state || '',
+      zipCode: p.zipCode || '',
+      amount: String(p.amount ?? ''),
+      interval: (p.interval === 'week' || p.interval === 'year' ? p.interval : 'month') as
+        | 'week'
+        | 'month'
+        | 'year',
+      description: p.description || '',
+    });
+    setShowForm(true);
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
+  const savePlanEdits = async () => {
+    if (!editingPlanId) return;
+    const snapshot = {
+      serviceName: String(form.serviceName || '').trim(),
+      clientName: String(form.clientName || '').trim(),
+      clientEmail: String(form.clientEmail || '')
+        .trim()
+        .replace(/\s+/g, '')
+        .toLowerCase(),
+      clientPhone: String(form.clientPhone || '').trim(),
+      address: String(form.address || '').trim(),
+      city: String(form.city || '').trim(),
+      state: String(form.state || '').trim(),
+      zipCode: String(form.zipCode || '').trim(),
+      amount: parseFloat(form.amount) || 0,
+      interval: form.interval,
+      description: String(form.description || '').trim(),
+    };
+
+    if (!snapshot.serviceName) {
+      showMessage('Enter a service name.');
+      return;
+    }
+    if (snapshot.clientEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(snapshot.clientEmail)) {
+      showMessage('Client email looks invalid (example: client@gmail.com).');
+      return;
+    }
+    if (snapshot.amount < 0.5) {
+      showMessage('Amount must be at least $0.50.');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const headers = await authHeaders();
+      const res = await fetch('/api/recurring/plans', {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({
+          id: editingPlanId,
+          ...snapshot,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showMessage(json.error || 'Could not save changes');
+        return;
+      }
+      showMessage('✅ Plan updated.');
+      closeForm();
+      await loadPlans();
+    } catch (e: any) {
+      showMessage(e?.message || 'Save failed');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const createPlan = async (andEmail: boolean) => {
     // Snapshot form before any state clear / await so email is never lost
@@ -189,8 +279,7 @@ export function RecurringServicesPanel({
           }),
         });
         const sendJson = await sendRes.json().catch(() => ({}));
-        setShowForm(false);
-        setForm(emptyForm);
+        closeForm();
         await loadPlans();
         if (!sendRes.ok) {
           const link = String(sendJson.clientLink || json.clientLink || '').trim();
@@ -213,8 +302,7 @@ export function RecurringServicesPanel({
         );
         return;
       }
-      setShowForm(false);
-      setForm(emptyForm);
+      closeForm();
       await loadPlans();
       showMessage(
         snapshot.clientEmail
@@ -473,7 +561,15 @@ export function RecurringServicesPanel({
       <div className="flex flex-wrap gap-3 mb-6">
         <Button
           className="bg-[#10b981] hover:bg-[#059669] text-white"
-          onClick={() => setShowForm((v) => !v)}
+          onClick={() => {
+            if (showForm) {
+              closeForm();
+            } else {
+              setEditingPlanId(null);
+              setForm(emptyForm);
+              setShowForm(true);
+            }
+          }}
         >
           {showForm ? 'Close form' : '+ New recurring service'}
         </Button>
@@ -485,10 +581,17 @@ export function RecurringServicesPanel({
       {showForm && (
         <Card className="mb-8 border-emerald-200">
           <CardContent className="p-6 space-y-4">
-            <h3 className="font-semibold text-lg">Create a plan (about 1 minute)</h3>
+            <h3 className="font-semibold text-lg">
+              {editingPlanId ? 'Edit recurring plan' : 'Create a plan (about 1 minute)'}
+            </h3>
             <p className="text-sm text-gray-500">
-              Example: “Monthly lawn mowing” · Client: Jane Smith · $150 every month
+              {editingPlanId
+                ? 'Update client info, amount, schedule, or notes. Save when done.'
+                : 'Example: “Monthly lawn mowing” · Client: Jane Smith · $150 every month'}
             </p>
+            {editingPlanId && (
+              <p className="text-xs font-mono text-gray-400">Plan id: {editingPlanId}</p>
+            )}
 
             <div>
               <label className="block text-sm font-semibold mb-1">Service name *</label>
@@ -592,21 +695,43 @@ export function RecurringServicesPanel({
               />
             </div>
             <div className="flex flex-col sm:flex-row gap-2">
-              <Button
-                className="flex-1 bg-[#10b981] hover:bg-[#059669] text-white py-6 text-base"
-                disabled={saving}
-                onClick={() => void createPlan(true)}
-              >
-                {saving ? 'Working…' : 'Create & email client for approval'}
-              </Button>
-              <Button
-                variant="outline"
-                className="flex-1 py-6"
-                disabled={saving}
-                onClick={() => void createPlan(false)}
-              >
-                Create only (email later)
-              </Button>
+              {editingPlanId ? (
+                <>
+                  <Button
+                    className="flex-1 bg-[#10b981] hover:bg-[#059669] text-white py-6 text-base"
+                    disabled={saving}
+                    onClick={() => void savePlanEdits()}
+                  >
+                    {saving ? 'Saving…' : '💾 Save changes'}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="flex-1 py-6"
+                    disabled={saving}
+                    onClick={() => closeForm()}
+                  >
+                    Cancel edit
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button
+                    className="flex-1 bg-[#10b981] hover:bg-[#059669] text-white py-6 text-base"
+                    disabled={saving}
+                    onClick={() => void createPlan(true)}
+                  >
+                    {saving ? 'Working…' : 'Create & email client for approval'}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="flex-1 py-6"
+                    disabled={saving}
+                    onClick={() => void createPlan(false)}
+                  >
+                    Create only (email later)
+                  </Button>
+                </>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -709,6 +834,15 @@ export function RecurringServicesPanel({
                             )}
                           </div>
                           <div className="flex flex-col gap-2 w-full sm:w-auto">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="border-slate-300"
+                              disabled={busyId === p.id || saving}
+                              onClick={() => startEditPlan(p)}
+                            >
+                              ✏️ Edit plan
+                            </Button>
                             <Button
                               size="sm"
                               className="bg-[#10b981] hover:bg-[#059669] text-white"

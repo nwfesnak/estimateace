@@ -178,14 +178,38 @@ export async function PATCH(request: NextRequest) {
       });
     }
 
-    // Default: field update
+    // Default: field update (edit plan details)
     const patch: any = {};
     if (body.serviceName != null) patch.serviceName = String(body.serviceName).trim();
     if (body.clientName != null) patch.clientName = String(body.clientName).trim();
-    if (body.clientEmail != null) patch.clientEmail = String(body.clientEmail).trim();
+    if (body.clientEmail != null) {
+      const em = String(body.clientEmail).trim().toLowerCase().replace(/\s+/g, '');
+      if (em && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) {
+        return NextResponse.json(
+          { error: 'Client email looks invalid. Use a full address like name@email.com' },
+          { status: 400 }
+        );
+      }
+      patch.clientEmail = em;
+    }
     if (body.clientPhone != null) patch.clientPhone = String(body.clientPhone).trim();
-    if (body.amount != null) patch.amount = Number(body.amount);
-    if (body.interval != null) patch.interval = body.interval;
+    if (body.address != null) patch.address = String(body.address).trim();
+    if (body.city != null) patch.city = String(body.city).trim();
+    if (body.state != null) patch.state = String(body.state).trim();
+    if (body.zipCode != null) patch.zipCode = String(body.zipCode).trim();
+    if (body.amount != null) {
+      const amt = Number(body.amount);
+      if (!Number.isFinite(amt) || amt < 0.5) {
+        return NextResponse.json({ error: 'Amount must be at least $0.50' }, { status: 400 });
+      }
+      patch.amount = amt;
+    }
+    if (body.interval != null) {
+      if (!['week', 'month', 'year'].includes(body.interval)) {
+        return NextResponse.json({ error: 'Interval must be week, month, or year' }, { status: 400 });
+      }
+      patch.interval = body.interval;
+    }
     if (body.description != null) patch.description = String(body.description).trim();
     if (body.status != null) patch.status = body.status;
 
@@ -198,7 +222,11 @@ export async function PATCH(request: NextRequest) {
 
     const result = await updateRecurringPlan(ownerId, id, patch);
     if (!result.ok) return NextResponse.json({ error: result.error }, { status: 400 });
-    return NextResponse.json({ ok: true, plan: result.plan });
+    return NextResponse.json({
+      ok: true,
+      plan: result.plan,
+      message: 'Plan updated.',
+    });
   } catch (e: any) {
     console.error('recurring/plans PATCH:', e);
     return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 });
