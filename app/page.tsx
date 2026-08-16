@@ -1551,10 +1551,16 @@ export default function Home() {
   });
 
   const [selectedReportJob, setSelectedReportJob] = useState<any>(null);
-  const [reportsSubTab, setReportsSubTab] = useState<'profit' | 'tax'>('profit');
+  const [reportsSubTab, setReportsSubTab] = useState<
+    'estimates' | 'paid' | 'recurring' | 'profit' | 'tax'
+  >('estimates');
   /** Profit report: which year/month sections are expanded for archived invoices */
   const [profitArchiveYearFilter, setProfitArchiveYearFilter] = useState<string>('all');
   const [profitArchiveExpandedMonths, setProfitArchiveExpandedMonths] = useState<Record<string, boolean>>({});
+  /** Reports → Recurring section plans */
+  const [reportRecurringPlans, setReportRecurringPlans] = useState<any[]>([]);
+  const [reportRecurringLoading, setReportRecurringLoading] = useState(false);
+  const [reportRecurringBusyId, setReportRecurringBusyId] = useState<string | null>(null);
   /** Per-job mileage (saved on the estimate under profile._mileageLogs) */
   const [jobMileageLogs, setJobMileageLogs] = useState<MileageLog[]>([]);
   /** Global $/mile rate for write-off totals (SETTINGS profile) */
@@ -9527,6 +9533,142 @@ export default function Home() {
     return archivedInvoicesByMonth.months.filter((m) => m.year === y || (y === 0 && m.key === 'unknown'));
   }, [archivedInvoicesByMonth.months, profitArchiveYearFilter]);
 
+  /** Reports: estimates archived without becoming a paid invoice (never approved / not converted) */
+  const archivedUnapprovedEstimates = useMemo(() => {
+    return (archivesList || [])
+      .filter((row: any) => {
+        if (!row || isSettingsDocRow(row)) return false;
+        if (isArchivedCanceledRecurring(row)) return false;
+        if (isRecurringPlanRow(row)) return false;
+        // Paid invoices belong in Paid Invoices
+        if (isInvoiceDocRow(row)) return false;
+        if (isPaidDocRow(row)) return false;
+        const num = String(row.invoiceNumber ?? row.invoicenumber ?? row.id ?? '').toUpperCase();
+        const id = String(row.id || '').toUpperCase();
+        const dt = String(row.documentType ?? row.documenttype ?? '').toLowerCase();
+        return (
+          dt === 'estimate' ||
+          num.startsWith('EST') ||
+          id.startsWith('EST') ||
+          isEstimateTypeRow(row)
+        );
+      })
+      .sort((a: any, b: any) => {
+        const da = new Date(a.archived_at || a.updated_at || a.date || 0).getTime();
+        const db = new Date(b.archived_at || b.updated_at || b.date || 0).getTime();
+        return db - da;
+      });
+  }, [archivesList]);
+
+  /** Reports: paid / closed invoices (not canceled recurring INV-REC) */
+  const reportPaidInvoices = useMemo(() => {
+    return (archivesList || [])
+      .filter((row: any) => {
+        if (!row || isSettingsDocRow(row)) return false;
+        if (isArchivedCanceledRecurring(row)) return false;
+        if (isRecurringPlanRow(row)) return false;
+        return isInvoiceDocRow(row) || isPaidDocRow(row);
+      })
+      .sort((a: any, b: any) => {
+        const da = new Date(a.archived_at || a.updated_at || a.date || 0).getTime();
+        const db = new Date(b.archived_at || b.updated_at || b.date || 0).getTime();
+        return db - da;
+      });
+  }, [archivesList]);
+
+  const reportPaidInvoicesTotals = useMemo(() => {
+    let total = 0;
+    let paid = 0;
+    for (const inv of reportPaidInvoices) {
+      total += calculateGrandTotal(inv);
+      paid += Number(inv.amountPaid ?? inv.amountpaid ?? 0) || 0;
+    }
+    return { count: reportPaidInvoices.length, total, paid };
+  }, [reportPaidInvoices]);
+
+  const loadReportRecurringPlans = useCallback(async () => {
+    if (!supabase) return;
+    setReportRecurringLoading(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) {
+        setReportRecurringPlans([]);
+        return;
+      }
+      const res = await fetch('/api/recurring/plans', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok) setReportRecurringPlans(json.plans || []);
+      else setReportRecurringPlans([]);
+    } catch {
+      setReportRecurringPlans([]);
+    } finally {
+      setReportRecurringLoading(false);
+    }
+  }, [supabase]);
+
+  const patchReportRecurring = async (planId: string, action: 'pause' | 'resume' | 'cancel') => {
+    if (!supabase) return;
+    setReportRecurringBusyId(planId);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) {
+        showMessage('Please log in again.');
+        return;
+      }
+      if (action === 'cancel') {
+        if (
+          !window.confirm(
+            'Cancel permanently and move this plan to Archive Invoices? Use Turn off payments to pause instead.'
+          )
+        ) {
+          return;
+        }
+      }
+      const res = await fetch('/api/recurring/plans', {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ id: planId, action }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showMessage(json.error || 'Could not update plan');
+        return;
+      }
+      showMessage(
+        action === 'pause'
+          ? '✅ Payments turned off.'
+          : action === 'resume'
+            ? '✅ Payments turned back on.'
+            : '✅ Plan canceled and archived.'
+      );
+      await loadReportRecurringPlans();
+      if (action === 'cancel') await refreshArchivesList();
+    } catch (e: any) {
+      showMessage(e?.message || 'Update failed');
+    } finally {
+      setReportRecurringBusyId(null);
+    }
+  };
+
+  // Load data when Reports tabs need archives / recurring
+  useEffect(() => {
+    if (view !== 'reportsView') return;
+    void refreshArchivesList();
+  }, [view]);
+
+  useEffect(() => {
+    if (view === 'reportsView' && reportsSubTab === 'recurring') {
+      void loadReportRecurringPlans();
+    }
+  }, [view, reportsSubTab, loadReportRecurringPlans]);
+
   const exportArchivedInvoicesByMonth = () => {
     const rows = filteredArchivedInvoiceMonths;
     let csv =
@@ -13348,27 +13490,348 @@ export default function Home() {
           {view === 'reportsView' && (
             <div>
               <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to {t('dashboard')}</Button>
-              <h2 className="text-3xl font-semibold mb-6">📊 Reports</h2>
+              <h2 className="text-3xl font-semibold mb-2">📊 Reports</h2>
+              <p className="text-sm text-gray-500 mb-6">
+                Estimates never approved live in Estimates archive. Paid invoices live under Paid invoices.
+                Recurring plans show active vs payments off (you can turn billing back on).
+              </p>
               {currentCrew && !canSeeFinancials && (
-                <div className="p-6 bg-yellow-50 border border-yellow-200 rounded">
+                <div className="p-6 bg-yellow-50 border border-yellow-200 rounded mb-6">
                   Financial reports and profit details are restricted for your crew access level.
                 </div>
               )}
 
-              <div className="flex border-b mb-6">
-                <button 
-                  onClick={() => setReportsSubTab('profit')}
-                  className={`flex-1 py-3 text-center font-medium ${reportsSubTab === 'profit' ? 'border-b-2 border-[#10b981] text-[#10b981]' : 'text-gray-500'}`}
-                >
-                  Profit Reports
-                </button>
-                <button 
-                  onClick={() => setReportsSubTab('tax')}
-                  className={`flex-1 py-3 text-center font-medium ${reportsSubTab === 'tax' ? 'border-b-2 border-[#10b981] text-[#10b981]' : 'text-gray-500'}`}
-                >
-                  Tax Reports
-                </button>
+              <div className="flex flex-wrap border-b mb-6 gap-1">
+                {(
+                  [
+                    { id: 'estimates' as const, label: 'Estimates archive' },
+                    { id: 'paid' as const, label: 'Paid invoices' },
+                    { id: 'recurring' as const, label: 'Recurring' },
+                    { id: 'profit' as const, label: 'Profit' },
+                    { id: 'tax' as const, label: 'Tax' },
+                  ] as const
+                ).map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setReportsSubTab(tab.id)}
+                    className={`flex-1 min-w-[7rem] py-3 px-2 text-center text-sm font-medium ${
+                      reportsSubTab === tab.id
+                        ? 'border-b-2 border-[#10b981] text-[#10b981]'
+                        : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
               </div>
+
+              {reportsSubTab === 'estimates' && (
+                <div>
+                  {(currentCrew && !canSeeFinancials) ? (
+                    <p className="text-sm text-gray-500">Restricted for your crew access level.</p>
+                  ) : (
+                    <section>
+                      <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+                        <div>
+                          <h3 className="text-xl font-semibold text-[#1e293b]">📁 Estimates archive</h3>
+                          <p className="text-sm text-gray-500 mt-1">
+                            Estimates that were archived without becoming a paid invoice (never approved / not converted).
+                          </p>
+                        </div>
+                        <Button type="button" variant="outline" size="sm" onClick={() => void refreshArchivesList()}>
+                          Refresh
+                        </Button>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+                        <div className="bg-white border rounded-2xl p-4 text-center">
+                          <div className="text-xs uppercase tracking-wide text-gray-500">Archived estimates</div>
+                          <div className="text-3xl font-bold text-[#1e293b] mt-1">
+                            {archivedUnapprovedEstimates.length}
+                          </div>
+                        </div>
+                        <div className="bg-white border rounded-2xl p-4 text-center">
+                          <div className="text-xs uppercase tracking-wide text-gray-500">Quoted total</div>
+                          <div className="text-3xl font-bold text-[#10b981] mt-1">
+                            $
+                            {archivedUnapprovedEstimates
+                              .reduce((s: number, e: any) => s + calculateGrandTotal(e), 0)
+                              .toFixed(2)}
+                          </div>
+                        </div>
+                      </div>
+                      {archivedUnapprovedEstimates.length === 0 ? (
+                        <div className="rounded-xl border border-dashed bg-slate-50 p-8 text-center text-gray-500">
+                          No archived estimates yet. When you archive an estimate that was never approved, it appears here.
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {archivedUnapprovedEstimates.map((est: any) => (
+                            <div
+                              key={est.id}
+                              className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white border rounded-xl p-4"
+                            >
+                              <div className="min-w-0">
+                                <div className="font-semibold text-[#1e293b]">
+                                  {est.jobName || est.jobname || 'Untitled estimate'}
+                                </div>
+                                <div className="text-sm text-gray-500">
+                                  {est.invoiceNumber || est.id}
+                                  {est.archived_at
+                                    ? ` · Archived ${new Date(est.archived_at).toLocaleDateString()}`
+                                    : ''}
+                                  {` · $${calculateGrandTotal(est).toFixed(2)}`}
+                                </div>
+                              </div>
+                              <div className="flex flex-wrap gap-2 shrink-0">
+                                <Button
+                                  size="sm"
+                                  onClick={async () => {
+                                    await loadSelectedEstimate(est);
+                                    setView('editor');
+                                  }}
+                                >
+                                  Open
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="border-[#10b981] text-[#10b981]"
+                                  onClick={() => void retrieveArchive(est)}
+                                >
+                                  Restore to estimates
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </section>
+                  )}
+                </div>
+              )}
+
+              {reportsSubTab === 'paid' && (
+                <div>
+                  {(currentCrew && !canSeeFinancials) ? (
+                    <p className="text-sm text-gray-500">Restricted for your crew access level.</p>
+                  ) : (
+                    <section>
+                      <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+                        <div>
+                          <h3 className="text-xl font-semibold text-[#1e293b]">✅ Paid invoices</h3>
+                          <p className="text-sm text-gray-500 mt-1">
+                            Invoices marked paid move here automatically (and under Profile → Paid Invoices).
+                          </p>
+                        </div>
+                        <Button type="button" variant="outline" size="sm" onClick={() => void refreshArchivesList()}>
+                          Refresh
+                        </Button>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+                        <div className="bg-white border rounded-2xl p-4 text-center">
+                          <div className="text-xs uppercase tracking-wide text-gray-500">Paid invoices</div>
+                          <div className="text-3xl font-bold text-[#1e293b] mt-1">
+                            {reportPaidInvoicesTotals.count}
+                          </div>
+                        </div>
+                        <div className="bg-white border rounded-2xl p-4 text-center">
+                          <div className="text-xs uppercase tracking-wide text-gray-500">Invoiced total</div>
+                          <div className="text-3xl font-bold text-[#10b981] mt-1">
+                            ${reportPaidInvoicesTotals.total.toFixed(2)}
+                          </div>
+                        </div>
+                        <div className="bg-white border rounded-2xl p-4 text-center">
+                          <div className="text-xs uppercase tracking-wide text-gray-500">Amount paid</div>
+                          <div className="text-3xl font-bold text-[#14b8a6] mt-1">
+                            ${reportPaidInvoicesTotals.paid.toFixed(2)}
+                          </div>
+                        </div>
+                      </div>
+                      {reportPaidInvoices.length === 0 ? (
+                        <div className="rounded-xl border border-dashed bg-slate-50 p-8 text-center text-gray-500">
+                          No paid invoices yet. Mark an invoice paid and it will show here.
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {reportPaidInvoices.map((inv: any) => (
+                            <div
+                              key={inv.id}
+                              className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white border rounded-xl p-4"
+                            >
+                              <div className="min-w-0">
+                                <div className="font-semibold text-[#1e293b]">
+                                  {inv.jobName || inv.jobname || 'Untitled invoice'}
+                                </div>
+                                <div className="text-sm text-gray-500">
+                                  {inv.invoiceNumber || inv.id}
+                                  {inv.paymentMethod || inv.paymentmethod
+                                    ? ` · ${inv.paymentMethod || inv.paymentmethod}`
+                                    : ''}
+                                  {` · $${calculateGrandTotal(inv).toFixed(2)}`}
+                                  {Number(inv.amountPaid ?? inv.amountpaid) > 0
+                                    ? ` (paid $${Number(inv.amountPaid ?? inv.amountpaid).toFixed(2)})`
+                                    : ''}
+                                </div>
+                              </div>
+                              <div className="flex flex-wrap gap-2 shrink-0">
+                                <Button
+                                  size="sm"
+                                  onClick={async () => {
+                                    await loadSelectedEstimate(inv);
+                                    setView('editor');
+                                  }}
+                                >
+                                  Open
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="border-[#10b981] text-[#10b981]"
+                                  onClick={() => void retrieveArchive(inv)}
+                                >
+                                  Retrieve
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </section>
+                  )}
+                </div>
+              )}
+
+              {reportsSubTab === 'recurring' && (
+                <div>
+                  {(currentCrew && !canSeeFinancials) ? (
+                    <p className="text-sm text-gray-500">Restricted for your crew access level.</p>
+                  ) : (
+                    <section className="space-y-8">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <h3 className="text-xl font-semibold text-[#1e293b]">🔄 Recurring invoices</h3>
+                          <p className="text-sm text-gray-500 mt-1">
+                            Active billing vs payments off. Turn payments off without losing the contact; turn back on anytime.
+                            Cancel permanently to move the plan to Archive.
+                          </p>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => void loadReportRecurringPlans()}
+                          >
+                            Refresh
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="bg-[#10b981] text-white"
+                            onClick={() => setView('recurringView')}
+                          >
+                            Manage plans
+                          </Button>
+                        </div>
+                      </div>
+
+                      {reportRecurringLoading ? (
+                        <p className="text-sm text-gray-500">Loading recurring plans…</p>
+                      ) : (
+                        <>
+                          {(
+                            [
+                              {
+                                key: 'on',
+                                title: 'Active / onboarding',
+                                list: reportRecurringPlans.filter(
+                                  (p) => String(p.status || '').toLowerCase() !== 'paused'
+                                ),
+                              },
+                              {
+                                key: 'off',
+                                title: 'Payments off',
+                                list: reportRecurringPlans.filter(
+                                  (p) => String(p.status || '').toLowerCase() === 'paused'
+                                ),
+                              },
+                            ] as const
+                          ).map((sec) => (
+                            <div key={sec.key}>
+                              <h4 className="font-semibold text-[#1e293b] mb-1">{sec.title}</h4>
+                              <p className="text-xs text-gray-500 mb-3">
+                                {sec.key === 'on'
+                                  ? 'Draft, awaiting approval, and paying clients.'
+                                  : 'Billing paused — turn back on without re-creating the plan.'}
+                              </p>
+                              {sec.list.length === 0 ? (
+                                <div className="rounded-xl border border-dashed bg-slate-50 p-6 text-sm text-gray-500 mb-6">
+                                  No plans here.
+                                </div>
+                              ) : (
+                                <div className="space-y-3 mb-6">
+                                  {sec.list.map((p: any) => (
+                                    <div
+                                      key={p.id}
+                                      className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white border rounded-xl p-4"
+                                    >
+                                      <div className="min-w-0">
+                                        <div className="font-semibold text-[#1e293b]">
+                                          {p.serviceName || 'Recurring service'}
+                                          <span className="ml-2 text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">
+                                            {p.status || 'draft'}
+                                          </span>
+                                        </div>
+                                        <div className="text-sm text-gray-500">
+                                          {p.clientName || 'Client'}
+                                          {p.clientEmail ? ` · ${p.clientEmail}` : ''}
+                                          {` · $${Number(p.amount || 0).toFixed(2)} / ${p.interval || 'month'}`}
+                                        </div>
+                                      </div>
+                                      <div className="flex flex-wrap gap-2 shrink-0">
+                                        {String(p.status).toLowerCase() === 'paused' ? (
+                                          <Button
+                                            size="sm"
+                                            className="bg-emerald-700 text-white"
+                                            disabled={reportRecurringBusyId === p.id}
+                                            onClick={() => void patchReportRecurring(p.id, 'resume')}
+                                          >
+                                            ▶️ Turn payments on
+                                          </Button>
+                                        ) : (
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="border-orange-300 text-orange-800"
+                                            disabled={reportRecurringBusyId === p.id}
+                                            onClick={() => void patchReportRecurring(p.id, 'pause')}
+                                          >
+                                            ⏸ Turn off payments
+                                          </Button>
+                                        )}
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          className="text-red-600 border-red-200"
+                                          disabled={reportRecurringBusyId === p.id}
+                                          onClick={() => void patchReportRecurring(p.id, 'cancel')}
+                                        >
+                                          Cancel &amp; archive
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </>
+                      )}
+                    </section>
+                  )}
+                </div>
+              )}
 
               {reportsSubTab === 'profit' && (
                 <>

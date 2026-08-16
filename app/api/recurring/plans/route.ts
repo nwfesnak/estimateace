@@ -7,6 +7,8 @@ import {
   updateRecurringPlan,
   cancelClientRecurringSubscription,
   restoreRecurringPlanFromArchive,
+  pauseClientRecurringPayments,
+  resumeClientRecurringPayments,
   buildRecurringClientLink,
   type RecurringInterval,
 } from '@/lib/recurring-services';
@@ -130,6 +132,30 @@ export async function PATCH(request: NextRequest) {
         planId: result.planId || result.plan?.id || null,
         message:
           'Plan restored to Recurring Charges as a draft. Re-email the client if they need to approve again.',
+      });
+    }
+
+    if (body.action === 'pause') {
+      const result = await pauseClientRecurringPayments(ownerId, id);
+      if (!result.ok) {
+        return NextResponse.json({ error: result.error || 'Could not turn off payments' }, { status: 400 });
+      }
+      return NextResponse.json({
+        ok: true,
+        plan: result.plan || null,
+        message: 'Payments turned off. Plan stays under Recurring — Payments off.',
+      });
+    }
+
+    if (body.action === 'resume') {
+      const result = await resumeClientRecurringPayments(ownerId, id);
+      if (!result.ok) {
+        return NextResponse.json({ error: result.error || 'Could not turn payments back on' }, { status: 400 });
+      }
+      return NextResponse.json({
+        ok: true,
+        plan: result.plan || null,
+        message: 'Payments turned back on.',
       });
     }
 

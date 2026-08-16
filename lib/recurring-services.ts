@@ -15,6 +15,8 @@ export type RecurringStatus =
   | 'approved'
   | 'active'
   | 'past_due'
+  /** Payments stopped but plan stays on Recurring (can turn back on) */
+  | 'paused'
   | 'canceled';
 
 export type RecurringPlan = {
@@ -918,6 +920,87 @@ export async function cancelClientRecurringSubscription(
     archiveId: archived.archiveId,
     plan: null, // removed from active list
   };
+}
+
+/**
+ * Turn off recurring payments (pause Stripe collection if any).
+ * Plan stays on Recurring Charges under "Payments off".
+ */
+export async function pauseClientRecurringPayments(
+  ownerUserId: string,
+  planId: string
+): Promise<{ ok: boolean; error?: string; plan?: RecurringPlan }> {
+  const plan = await getRecurringPlan(ownerUserId, planId);
+  if (!plan) return { ok: false, error: 'Plan not found' };
+  if (plan.status === 'canceled') {
+    return { ok: false, error: 'This plan was canceled. Restore it from Archive first.' };
+  }
+
+  const stripe = getStripe();
+  if (stripe && plan.stripeSubscriptionId) {
+    const account = await getPaymentAccount(ownerUserId);
+    const connectedId = account?.stripe_account_id || null;
+    try {
+      const opts =
+        connectedId && account?.charges_enabled
+          ? ({ stripeAccount: connectedId } as Stripe.RequestOptions)
+          : undefined;
+      await stripe.subscriptions.update(
+        plan.stripeSubscriptionId,
+        { pause_collection: { behavior: 'void' } },
+        opts
+      );
+    } catch (e: any) {
+      console.warn('pause subscription:', e?.message);
+      // Still mark paused locally
+    }
+  }
+
+  const updated = await updateRecurringPlan(ownerUserId, planId, { status: 'paused' });
+  if (!updated.ok) return { ok: false, error: updated.error };
+  return { ok: true, plan: updated.plan };
+}
+
+/**
+ * Turn recurring payments back on (resume Stripe collection if any).
+ */
+export async function resumeClientRecurringPayments(
+  ownerUserId: string,
+  planId: string
+): Promise<{ ok: boolean; error?: string; plan?: RecurringPlan }> {
+  const plan = await getRecurringPlan(ownerUserId, planId);
+  if (!plan) return { ok: false, error: 'Plan not found' };
+  if (plan.status === 'canceled') {
+    return { ok: false, error: 'Canceled plans must be restored from Archive Invoices.' };
+  }
+
+  const stripe = getStripe();
+  if (stripe && plan.stripeSubscriptionId) {
+    const account = await getPaymentAccount(ownerUserId);
+    const connectedId = account?.stripe_account_id || null;
+    try {
+      const opts =
+        connectedId && account?.charges_enabled
+          ? ({ stripeAccount: connectedId } as Stripe.RequestOptions)
+          : undefined;
+      // Empty string clears pause_collection in Stripe API
+      await stripe.subscriptions.update(
+        plan.stripeSubscriptionId,
+        { pause_collection: '' as any },
+        opts
+      );
+    } catch (e: any) {
+      console.warn('resume subscription:', e?.message);
+    }
+  }
+
+  // If they had an active sub before, mark active; otherwise draft so they can re-send approval
+  const nextStatus: RecurringStatus =
+    plan.stripeSubscriptionId || plan.clientApprovedAt ? 'active' : 'draft';
+
+  const updated = await updateRecurringPlan(ownerUserId, planId, { status: nextStatus });
+  if (!updated.ok) return { ok: false, error: updated.error };
+  return { ok: true, plan: updated.plan };
 }
 
 /** True when an archive-est row is a canceled recurring plan filed as INV-REC-*. */
