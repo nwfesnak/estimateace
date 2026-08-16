@@ -626,6 +626,92 @@ export async function createClientRecurringCheckout(input: {
   }
 }
 
+/**
+ * Email (and SMS when phone is on file) the contractor when a client
+ * approves recurring charges or finishes card / payment setup.
+ */
+async function notifyContractorRecurringEvent(
+  plan: RecurringPlan,
+  event: 'approved' | 'payment_setup'
+): Promise<void> {
+  try {
+    const { sendEmailNotification, sendSmsNotification } = await import('@/lib/notifications');
+    const to = String(plan.companyEmail || '').trim().toLowerCase();
+    const phone = String(plan.companyPhone || '').trim();
+    const client = plan.clientName || plan.clientEmail || 'A client';
+    const service = plan.serviceName || 'Recurring service';
+    const amt = `${money(plan.amount)} ${intervalLabel(plan.interval)}`;
+    const where = [plan.address, plan.city, plan.state, plan.zipCode].filter(Boolean).join(', ');
+
+    const subject =
+      event === 'approved'
+        ? `Recurring approved: ${client} — ${service}`
+        : `Recurring payment set up: ${client} — ${service}`;
+
+    const text =
+      event === 'approved'
+        ? [
+            `${client} approved recurring charges.`,
+            ``,
+            `Service: ${service}`,
+            `Amount: ${amt}`,
+            where ? `Address: ${where}` : '',
+            plan.clientEmail ? `Client email: ${plan.clientEmail}` : '',
+            plan.clientPhone ? `Client phone: ${plan.clientPhone}` : '',
+            `Plan: ${plan.id}`,
+            ``,
+            `Open EstimateAce → Recurring charges to review. They still need to finish payment setup if not already active.`,
+          ]
+            .filter((l) => l !== '')
+            .join('\n')
+        : [
+            `${client} finished setting up payment for a recurring service.`,
+            ``,
+            `Service: ${service}`,
+            `Amount: ${amt}`,
+            where ? `Address: ${where}` : '',
+            plan.clientEmail ? `Client email: ${plan.clientEmail}` : '',
+            plan.clientPhone ? `Client phone: ${plan.clientPhone}` : '',
+            `Plan: ${plan.id}`,
+            `Status: Active — billing can collect on schedule.`,
+            ``,
+            `Open EstimateAce → Recurring charges to manage the plan.`,
+          ]
+            .filter((l) => l !== '')
+            .join('\n');
+
+    const smsBody =
+      event === 'approved'
+        ? `EstimateAce: ${client} approved recurring "${service}" (${amt}). Open Recurring charges.`
+        : `EstimateAce: ${client} set up payment for "${service}" (${amt}). Plan is active.`;
+
+    if (to && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
+      const result = await sendEmailNotification(to, subject, text, {
+        // Platform From — contractor is the recipient
+        from:
+          (process.env.NOTIFICATION_FROM_EMAIL || '').trim() ||
+          'EstimateAce <notifications@estimateace.com>',
+      });
+      if (!result.ok) {
+        console.warn('notify contractor recurring email:', result.error);
+      }
+    } else {
+      console.warn(
+        'notify contractor recurring: no company email on plan — set company email on the plan or profile when creating it'
+      );
+    }
+
+    if (phone.replace(/\D/g, '').length >= 10) {
+      const sms = await sendSmsNotification(phone, smsBody);
+      if (!sms.ok) {
+        console.warn('notify contractor recurring SMS:', sms.error);
+      }
+    }
+  } catch (e: any) {
+    console.warn('notifyContractorRecurringEvent:', e?.message || e);
+  }
+}
+
 /** Webhook: activate plan after client completes subscription checkout */
 export async function markRecurringActiveFromCheckout(
   session: Stripe.Checkout.Session
@@ -641,17 +727,30 @@ export async function markRecurringActiveFromCheckout(
   const planId = String(session.metadata?.recurring_plan_id || '').trim();
   if (!ownerId || !planId) return { ok: false, error: 'Missing plan metadata' };
 
+  const existing = await getRecurringPlan(ownerId, planId);
+  const alreadyActive =
+    existing?.status === 'active' && !!existing.stripeSubscriptionId;
+
   const subRef = session.subscription;
   const subId = typeof subRef === 'string' ? subRef : subRef?.id || null;
   const custRef = session.customer;
   const customerId = typeof custRef === 'string' ? custRef : custRef?.id || null;
 
-  return updateRecurringPlan(ownerId, planId, {
+  const updated = await updateRecurringPlan(ownerId, planId, {
     status: 'active',
     stripeSubscriptionId: subId,
     stripeCustomerId: customerId,
     lastPaymentAt: new Date().toISOString(),
+    // Ensure approval timestamp if they went straight to checkout
+    clientApprovedAt: existing?.clientApprovedAt || new Date().toISOString(),
   });
+
+  if (updated.ok && !alreadyActive && updated.plan) {
+    // Fire-and-forget — never fail the webhook because email/SMS failed
+    void notifyContractorRecurringEvent(updated.plan, 'payment_setup');
+  }
+
+  return updated.ok ? { ok: true } : { ok: false, error: updated.error };
 }
 
 /** Client tapped Approve — records consent before card setup. */
@@ -668,11 +767,20 @@ export async function markClientApprovedRecurring(
     return { ok: true, plan };
   }
 
+  // Only notify once — skip re-approvals / webhook retries
+  const firstApproval = !plan.clientApprovedAt && plan.status !== 'approved';
+
   const now = new Date().toISOString();
-  return updateRecurringPlan(ownerUserId, planId, {
+  const updated = await updateRecurringPlan(ownerUserId, planId, {
     status: 'approved',
     clientApprovedAt: plan.clientApprovedAt || now,
   });
+
+  if (updated.ok && firstApproval && updated.plan) {
+    void notifyContractorRecurringEvent(updated.plan, 'approved');
+  }
+
+  return updated;
 }
 
 /**

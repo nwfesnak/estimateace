@@ -1,10 +1,19 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent } from '@/components/ui/card';
+
+type AddressSuggestion = {
+  address: string;
+  city: string;
+  state: string;
+  zipCode: string;
+  display: string;
+  place_id?: string;
+};
 
 export type RecurringPlanRow = {
   id: string;
@@ -109,6 +118,10 @@ export function RecurringServicesPanel({
   const [editingPlanId, setEditingPlanId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [addressSuggestions, setAddressSuggestions] = useState<AddressSuggestion[]>([]);
+  const [showAddressSuggestions, setShowAddressSuggestions] = useState(false);
+  const [loadingAddressSuggestions, setLoadingAddressSuggestions] = useState(false);
+  const addressSuggestAbortRef = useRef<AbortController | null>(null);
 
   const authHeaders = useCallback(async () => {
     const token = await getAccessToken();
@@ -141,10 +154,90 @@ export function RecurringServicesPanel({
     void loadPlans();
   }, [loadPlans]);
 
+  // Service address autocomplete (same Places API as estimate/invoice editor)
+  useEffect(() => {
+    if (!showForm) return;
+    const q = form.address.trim();
+    if (!q || q.length < 2) {
+      setAddressSuggestions([]);
+      setLoadingAddressSuggestions(false);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      addressSuggestAbortRef.current?.abort();
+      const controller = new AbortController();
+      addressSuggestAbortRef.current = controller;
+      setLoadingAddressSuggestions(true);
+      try {
+        const params = new URLSearchParams({ q });
+        if (form.city.trim()) params.set('city', form.city.trim());
+        if (form.state.trim()) params.set('state', form.state.trim());
+        if (form.zipCode.trim()) params.set('zip', form.zipCode.trim());
+        const res = await fetch(`/api/address-autocomplete?${params.toString()}`, {
+          signal: controller.signal,
+          cache: 'no-store',
+        });
+        if (!res.ok) {
+          if (!controller.signal.aborted) setAddressSuggestions([]);
+          return;
+        }
+        const data = await res.json().catch(() => []);
+        if (!controller.signal.aborted) {
+          setAddressSuggestions(Array.isArray(data) ? data.slice(0, 8) : []);
+        }
+      } catch (e: any) {
+        if (e?.name === 'AbortError') return;
+        if (!controller.signal.aborted) setAddressSuggestions([]);
+      } finally {
+        if (!controller.signal.aborted) setLoadingAddressSuggestions(false);
+      }
+    }, 300);
+
+    return () => {
+      clearTimeout(timer);
+      addressSuggestAbortRef.current?.abort();
+    };
+  }, [form.address, form.city, form.state, form.zipCode, showForm]);
+
+  const applyAddressSuggestion = async (sugg: AddressSuggestion) => {
+    setShowAddressSuggestions(false);
+    setAddressSuggestions([]);
+    if (sugg.place_id) {
+      try {
+        const res = await fetch(
+          `/api/address-autocomplete?place_id=${encodeURIComponent(sugg.place_id)}`
+        );
+        if (res.ok) {
+          const details = await res.json();
+          setForm((f) => ({
+            ...f,
+            address: details.address || sugg.address || sugg.display || '',
+            city: details.city || sugg.city || f.city,
+            state: details.state || sugg.state || f.state,
+            zipCode: details.zipCode || sugg.zipCode || f.zipCode,
+          }));
+          return;
+        }
+      } catch {
+        /* fall through */
+      }
+    }
+    setForm((f) => ({
+      ...f,
+      address: sugg.address || sugg.display || '',
+      city: sugg.city || f.city,
+      state: sugg.state || f.state,
+      zipCode: sugg.zipCode || f.zipCode,
+    }));
+  };
+
   const closeForm = () => {
     setShowForm(false);
     setEditingPlanId(null);
     setForm(emptyForm);
+    setAddressSuggestions([]);
+    setShowAddressSuggestions(false);
   };
 
   const startEditPlan = (p: RecurringPlanRow) => {
@@ -725,13 +818,56 @@ export function RecurringServicesPanel({
                 onChange={(e) => setForm((f) => ({ ...f, clientPhone: e.target.value }))}
               />
             </div>
-            <div>
+            <div className="relative">
               <label className="block text-sm font-semibold mb-1">Service address</label>
               <Input
                 value={form.address}
-                onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))}
-                placeholder="123 Main St"
+                onChange={(e) => {
+                  setForm((f) => ({ ...f, address: e.target.value }));
+                  setShowAddressSuggestions(true);
+                }}
+                onFocus={() => setShowAddressSuggestions(true)}
+                onBlur={() => setTimeout(() => setShowAddressSuggestions(false), 200)}
+                placeholder="Street address — include city & state for best results"
+                autoComplete="street-address"
               />
+              {showAddressSuggestions && (
+                <div className="absolute z-[60] mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-auto text-sm">
+                  {loadingAddressSuggestions && (
+                    <div className="px-3 py-2 text-xs text-gray-500">Searching addresses…</div>
+                  )}
+                  {!loadingAddressSuggestions &&
+                    addressSuggestions.length === 0 &&
+                    form.address.trim().length >= 2 && (
+                      <div className="px-3 py-2 text-xs text-gray-500">
+                        No matches yet. Try adding the city and state (e.g. 123 Main St, Charlotte NC).
+                      </div>
+                    )}
+                  {addressSuggestions.map((sugg, idx) => (
+                    <div
+                      key={`${sugg.place_id || sugg.display || sugg.address}-${idx}`}
+                      className="px-3 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        void applyAddressSuggestion(sugg);
+                      }}
+                    >
+                      <div className="font-medium leading-snug">
+                        {sugg.display || sugg.address}
+                      </div>
+                      {sugg.address && sugg.display && sugg.display !== sugg.address && (
+                        <div className="text-[11px] text-gray-600 mt-0.5">{sugg.address}</div>
+                      )}
+                      {(sugg.city || sugg.state || sugg.zipCode) &&
+                        !sugg.display?.includes(sugg.city) && (
+                          <div className="text-[10px] text-gray-500 mt-0.5">
+                            {[sugg.city, sugg.state, sugg.zipCode].filter(Boolean).join(', ')}
+                          </div>
+                        )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
             <div className="grid grid-cols-3 gap-3">
               <Input
@@ -1039,7 +1175,11 @@ export function RecurringServicesPanel({
           </li>
           <li>
             When they open the link and approve, you&apos;ll see <strong>✓ Client approved</strong> on
-            the plan.
+            the plan — and you get an email/SMS (using your company email/phone on the plan).
+          </li>
+          <li>
+            When they finish card / payment setup, the plan becomes <strong>Active</strong> and you get
+            another notification.
           </li>
           <li>
             <strong>Turn off payments</strong> pauses billing; <strong>Cancel → Archive</strong> ends
@@ -1049,8 +1189,9 @@ export function RecurringServicesPanel({
         </ol>
         <p className="text-xs text-gray-500 pt-2">
           Email needs Resend (same as estimate send). SMS needs Twilio env vars (TWILIO_ACCOUNT_SID,
-          TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER). If SMS is not set up, email still sends and you can
-          Copy client link.
+          TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER). Notifications go to the company email/phone saved on
+          the plan (from your profile when you create it). If SMS is not set up, email still sends and you
+          can Copy client link.
         </p>
       </div>
     </div>
