@@ -156,6 +156,7 @@ export function RecurringServicesPanel({
             companyName,
             companyEmail,
             companyPhone,
+            clientEmail: form.clientEmail,
           }),
         });
         const sendJson = await sendRes.json().catch(() => ({}));
@@ -177,7 +178,7 @@ export function RecurringServicesPanel({
           return;
         }
         showMessage(
-          `✅ Plan created & approval email sent to ${form.clientEmail || 'client'}.`
+          `✅ Plan created & approval email sent to ${sendJson.to || form.clientEmail || 'client'}.`
         );
         return;
       }
@@ -206,6 +207,7 @@ export function RecurringServicesPanel({
           companyName,
           companyEmail,
           companyPhone,
+          clientEmail,
         }),
       });
       const json = await res.json().catch(() => ({}));
@@ -219,13 +221,17 @@ export function RecurringServicesPanel({
           }
         }
         showMessage(
-          `${json.error || 'Could not send approval email'}${
-            link ? ' Client approval link was copied to your clipboard.' : ''
+          `❌ ${json.error || 'Could not send approval email'}${
+            link ? ' — Client approval link was copied; paste it to your client.' : ' — Use Copy client link.'
           }`
         );
         return;
       }
-      showMessage(`✅ Approval email sent to ${clientEmail}`);
+      showMessage(
+        `✅ Approval email sent to ${json.to || clientEmail}${
+          json.resendId ? ` (id ${String(json.resendId).slice(0, 8)}…)` : ''
+        }. Ask them to check inbox and spam.`
+      );
       await loadPlans();
     } catch (e: any) {
       showMessage(e?.message || 'Send failed');

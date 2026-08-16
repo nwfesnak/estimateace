@@ -40,11 +40,14 @@ export async function POST(request: NextRequest) {
       companyName: body.companyName ? String(body.companyName) : undefined,
       companyEmail: body.companyEmail ? String(body.companyEmail) : undefined,
       companyPhone: body.companyPhone ? String(body.companyPhone) : undefined,
+      clientEmail: body.clientEmail ? String(body.clientEmail) : undefined,
     });
 
     if (!result.ok) {
       const status =
-        /not configured|RESEND|API_KEY|From address|verified/i.test(result.error || '')
+        /not configured|RESEND|API_KEY|From address|verified|SERVICE_ROLE/i.test(
+          result.error || ''
+        )
           ? 502
           : 400;
       return NextResponse.json(
@@ -52,6 +55,7 @@ export async function POST(request: NextRequest) {
           ok: false,
           error: result.error || 'Send failed',
           clientLink: result.clientLink || null,
+          to: result.to || null,
         },
         { status }
       );
@@ -60,7 +64,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       ok: true,
       clientLink: result.clientLink,
-      message: 'Approval email sent to the client.',
+      to: result.to,
+      resendId: result.resendId || null,
+      message: `Approval email sent to ${result.to || 'the client'}.`,
     });
   } catch (e: any) {
     console.error('recurring/send:', e);

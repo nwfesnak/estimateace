@@ -554,7 +554,7 @@ export async function markClientApprovedRecurring(
 
 /**
  * Email the client a clear Approve button for recurring charges.
- * Uses Resend — same path as estimate/invoice emails (not SaaS billing).
+ * Uses Resend via platform From (reliable) + company Reply-To.
  */
 export async function sendRecurringApprovalEmail(input: {
   ownerUserId: string;
@@ -563,22 +563,55 @@ export async function sendRecurringApprovalEmail(input: {
   companyName?: string;
   companyEmail?: string;
   companyPhone?: string;
-}): Promise<{ ok: boolean; error?: string; clientLink?: string }> {
-  const plan = await getRecurringPlan(input.ownerUserId, input.planId);
-  if (!plan) return { ok: false, error: 'Plan not found' };
-
-  const to = (plan.clientEmail || '').trim();
-  if (!to || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
-    return { ok: false, error: 'Plan needs a valid client email before sending.' };
+  /** Optional override if UI has a fresher email than the stored plan */
+  clientEmail?: string;
+}): Promise<{ ok: boolean; error?: string; clientLink?: string; resendId?: string; to?: string }> {
+  const admin = getSupabaseAdmin();
+  if (!admin) {
+    return {
+      ok: false,
+      error:
+        'Server missing SUPABASE_SERVICE_ROLE_KEY — cannot load the plan to email. Add it in Vercel and redeploy.',
+    };
   }
 
-  // Refresh company branding if provided
-  if (input.companyName || input.companyEmail || input.companyPhone) {
-    await updateRecurringPlan(input.ownerUserId, input.planId, {
-      companyName: input.companyName || plan.companyName,
-      companyEmail: input.companyEmail || plan.companyEmail,
-      companyPhone: input.companyPhone || plan.companyPhone,
-    });
+  let plan = await getRecurringPlan(input.ownerUserId, input.planId);
+  // Loose fallback: load by id only (older rows may lack documentType)
+  if (!plan) {
+    const { data } = await admin
+      .from('estimates')
+      .select('*')
+      .eq('user_id', input.ownerUserId)
+      .eq('id', input.planId)
+      .maybeSingle();
+    if (data) plan = rowToPlan(data);
+  }
+  if (!plan) {
+    return {
+      ok: false,
+      error: `Plan not found (${input.planId}). Refresh Recurring Charges and try again.`,
+    };
+  }
+
+  // Prefer explicit override from the send request, then plan storage
+  const to = String(input.clientEmail || plan.clientEmail || '')
+    .trim()
+    .toLowerCase();
+  if (!to || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
+    return {
+      ok: false,
+      error: 'Plan needs a valid client email before sending. Edit the plan and add the client email.',
+    };
+  }
+
+  // Persist fresher contact + branding so next send works without overrides
+  const patch: Partial<RecurringPlan> = {};
+  if (input.clientEmail && input.clientEmail.trim()) patch.clientEmail = to;
+  if (input.companyName) patch.companyName = input.companyName;
+  if (input.companyEmail) patch.companyEmail = input.companyEmail;
+  if (input.companyPhone) patch.companyPhone = input.companyPhone;
+  if (Object.keys(patch).length) {
+    await updateRecurringPlan(input.ownerUserId, input.planId, patch);
   }
 
   const fresh = (await getRecurringPlan(input.ownerUserId, input.planId)) || plan;
@@ -587,7 +620,9 @@ export async function sendRecurringApprovalEmail(input: {
     input.planId,
     input.requestUrl
   );
-  const company = fresh.companyName || 'Your contractor';
+  const company = (input.companyName || fresh.companyName || 'Your contractor').trim() || 'Your contractor';
+  const companyEmail = (input.companyEmail || fresh.companyEmail || '').trim();
+  const companyPhone = (input.companyPhone || fresh.companyPhone || '').trim();
   const interval = intervalLabel(fresh.interval);
   const amt = money(fresh.amount);
   const location = [fresh.address, fresh.city, fresh.state, fresh.zipCode]
@@ -601,7 +636,7 @@ export async function sendRecurringApprovalEmail(input: {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
 
-  const subject = `Please approve recurring service: ${fresh.serviceName} — ${amt} ${interval}`;
+  const subject = `${company}: please approve recurring ${fresh.serviceName} — ${amt} ${interval}`;
 
   const text = [
     `${company} is asking you to approve a recurring service charge.`,
@@ -615,8 +650,8 @@ export async function sendRecurringApprovalEmail(input: {
     'Approve and set up payment here:',
     clientLink,
     '',
-    fresh.companyPhone ? `Questions? Call ${fresh.companyPhone}` : '',
-    fresh.companyEmail ? `Email ${fresh.companyEmail}` : '',
+    companyPhone ? `Questions? Call ${companyPhone}` : '',
+    companyEmail ? `Email ${companyEmail}` : '',
     '',
     'This is a charge from your contractor for their service — not EstimateAce software.',
   ]
@@ -649,50 +684,55 @@ export async function sendRecurringApprovalEmail(input: {
     <a href="${escape(clientLink)}" style="color:#0f766e;word-break:break-all;">${escape(clientLink)}</a>
   </p>
   <p style="margin-top:24px;font-size:13px;color:#475569;">
-    Questions? ${fresh.companyPhone ? `Call ${escape(fresh.companyPhone)}` : ''}${fresh.companyPhone && fresh.companyEmail ? ' · ' : ''}${fresh.companyEmail ? `Email ${escape(fresh.companyEmail)}` : ''}
+    Questions? ${companyPhone ? `Call ${escape(companyPhone)}` : ''}${companyPhone && companyEmail ? ' · ' : ''}${companyEmail ? `Email ${escape(companyEmail)}` : ''}
   </p>
   <p style="font-size:11px;color:#94a3b8;margin-top:28px;">This emails you about a service from your contractor — not an EstimateAce software subscription.</p>
 </body></html>`;
 
   const { sendEmailNotification } = await import('@/lib/notifications');
   const replyTo =
-    fresh.companyEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(fresh.companyEmail)
-      ? fresh.companyEmail
-      : undefined;
+    companyEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(companyEmail) ? companyEmail : undefined;
 
-  // Prefer contractor company From (same as estimate emails); notifications layer
-  // falls back to EstimateAce platform From if Resend rejects the company address.
+  // Use verified platform From first (most reliable). Company name is in the body/subject.
+  // Company-slug From addresses often fail Resend verification and look like "email not sent".
+  const platformFrom =
+    (process.env.NOTIFICATION_FROM_EMAIL || '').trim() ||
+    'EstimateAce <notifications@estimateace.com>';
+
   let result = await sendEmailNotification(to, subject, text, {
     html,
-    companyName: company,
+    from: platformFrom,
     replyTo,
   });
 
-  // Hard fallback: plain platform From, no company name / reply-to quirks
   if (!result.ok) {
-    console.error('[recurring email] first attempt failed:', result.error);
+    console.error('[recurring email] platform From failed:', result.error);
+    // Fallback: no reply-to (some Resend accounts reject external reply_to)
     result = await sendEmailNotification(to, subject, text, {
       html,
-      replyTo,
+      from: 'EstimateAce <notifications@estimateace.com>',
     });
   }
 
   if (!result.ok) {
+    console.error('[recurring email] all attempts failed:', result.error);
     return {
       ok: false,
       error:
         (result.error || 'Email failed') +
-        ' You can still copy the client approval link and text/email it yourself.',
+        ' Check RESEND_API_KEY and NOTIFICATION_FROM_EMAIL on Vercel. Client approval link is available to copy.',
       clientLink,
+      to,
     };
   }
 
   await updateRecurringPlan(input.ownerUserId, input.planId, {
     status: fresh.status === 'active' || fresh.status === 'approved' ? fresh.status : 'link_sent',
     approvalEmailSentAt: new Date().toISOString(),
+    clientEmail: to,
   });
 
-  return { ok: true, clientLink };
+  return { ok: true, clientLink, resendId: result.id, to };
 }
 
 /**

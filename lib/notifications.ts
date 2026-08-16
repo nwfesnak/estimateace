@@ -147,26 +147,42 @@ export async function sendEmailNotification(
   };
 
   try {
+    // Normalize platform From if env is still test mode
+    let safePlatform = platformFrom;
+    if (/onboarding@resend\.dev/i.test(safePlatform)) {
+      safePlatform = DEFAULT_PLATFORM_FROM;
+    }
+
     const first = await attemptSend(fromEmail);
     if (first.ok) return { ok: true, id: first.id };
 
-    // Company-slug From addresses sometimes fail domain/validation — retry platform From
-    const firstMsg = (first.resendMsg || first.error || '').toLowerCase();
-    const shouldRetryPlatform =
-      fromEmail !== platformFrom &&
-      (/domain|from|not verified|invalid|forbidden|unauthorized|403|422|451/i.test(firstMsg) ||
-        first.status === 403 ||
-        first.status === 422 ||
-        first.status === 451);
-
-    if (shouldRetryPlatform) {
+    // Always retry with platform From when company-slug / custom From fails
+    // (Resend often rejects unverified local-parts like companyname@domain)
+    if (fromEmail !== safePlatform && !/onboarding@resend\.dev/i.test(fromEmail)) {
       console.warn('[email] retry with platform From after:', first.error);
-      const second = await attemptSend(platformFrom);
+      const second = await attemptSend(safePlatform);
       if (second.ok) return { ok: true, id: second.id };
+      // Last resort: plain address without display name
+      const plain = DEFAULT_PLATFORM_FROM;
+      if (safePlatform !== plain) {
+        const third = await attemptSend(plain);
+        if (third.ok) return { ok: true, id: third.id };
+        return {
+          ok: false,
+          error: `${first.error} · retry: ${second.error} · final: ${third.error}`,
+        };
+      }
       return {
         ok: false,
         error: `${first.error} · retry: ${second.error}`,
       };
+    }
+
+    // First attempt was already platform From — try plain default once
+    if (fromEmail !== DEFAULT_PLATFORM_FROM) {
+      const last = await attemptSend(DEFAULT_PLATFORM_FROM);
+      if (last.ok) return { ok: true, id: last.id };
+      return { ok: false, error: `${first.error} · final: ${last.error}` };
     }
 
     return { ok: false, error: first.error };
