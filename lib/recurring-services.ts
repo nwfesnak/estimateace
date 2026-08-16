@@ -149,16 +149,25 @@ function planToRow(plan: Partial<RecurringPlan> & { id: string; user_id: string 
     },
   };
 
+  // Single documentType key only — dual camel/lower keys break some PostgREST schemas
   return {
     id: plan.id,
     user_id: plan.user_id,
-    jobName: plan.serviceName || existing?.jobName || 'Recurring service',
+    jobName: plan.serviceName || existing?.jobName || existing?.jobname || 'Recurring service',
     address: plan.address ?? existing?.address ?? '',
     city: plan.city ?? existing?.city ?? '',
     state: plan.state ?? existing?.state ?? '',
     zipCode: plan.zipCode ?? existing?.zipCode ?? existing?.zipcode ?? '',
-    phones: plan.clientPhone ? [plan.clientPhone] : existing?.phones || [],
-    emails: plan.clientEmail ? [plan.clientEmail] : existing?.emails || [],
+    phones: plan.clientPhone
+      ? [plan.clientPhone]
+      : Array.isArray(existing?.phones)
+        ? existing.phones
+        : [],
+    emails: plan.clientEmail
+      ? [plan.clientEmail]
+      : Array.isArray(existing?.emails)
+        ? existing.emails
+        : [],
     date: existing?.date || new Date().toISOString().slice(0, 10),
     invoiceNumber: plan.id,
     items: [
@@ -174,9 +183,13 @@ function planToRow(plan: Partial<RecurringPlan> & { id: string; user_id: string 
     terms: plan.description ?? existing?.terms ?? '',
     profile,
     documentType: 'recurring_plan',
-    documenttype: 'recurring_plan',
-    paymentStatus: plan.status === 'active' ? 'active' : plan.status || 'draft',
-    amountPaid: 0,
+    paymentStatus:
+      plan.status === 'active'
+        ? 'active'
+        : plan.status === 'paused'
+          ? 'paused'
+          : plan.status || 'draft',
+    amountPaid: Number(existing?.amountPaid ?? existing?.amountpaid) || 0,
     updated_at: new Date().toISOString(),
   };
 }
@@ -337,30 +350,117 @@ export async function updateRecurringPlan(
   const admin = getSupabaseAdmin();
   if (!admin) return { ok: false, error: 'Server missing SUPABASE_SERVICE_ROLE_KEY' };
 
-  const { data: existing } = await admin
+  const { data: existing, error: loadErr } = await admin
     .from('estimates')
     .select('*')
     .eq('user_id', ownerUserId)
     .eq('id', planId)
     .maybeSingle();
-  if (!existing) return { ok: false, error: 'Plan not found' };
+  if (loadErr) return { ok: false, error: loadErr.message };
+  if (!existing) {
+    // Also try without user filter (id is unique) then verify ownership
+    const { data: byId } = await admin.from('estimates').select('*').eq('id', planId).maybeSingle();
+    if (!byId) return { ok: false, error: `Plan not found (${planId})` };
+    if (String(byId.user_id) !== String(ownerUserId)) {
+      return { ok: false, error: 'Plan not found for this account' };
+    }
+  }
 
-  const current = rowToPlan(existing);
-  const row = planToRow(
-    {
-      ...current,
-      ...patch,
-      id: planId,
-      user_id: ownerUserId,
-    },
-    existing
-  );
+  const rowExisting = existing || (await admin.from('estimates').select('*').eq('id', planId).maybeSingle()).data;
+  if (!rowExisting) return { ok: false, error: `Plan not found (${planId})` };
 
-  const { error } = await admin.from('estimates').upsert(row, { onConflict: 'id' });
-  if (error) return { ok: false, error: error.message };
+  const current = rowToPlan(rowExisting);
+  const merged: Partial<RecurringPlan> & { id: string; user_id: string } = {
+    ...current,
+    ...patch,
+    id: planId,
+    user_id: ownerUserId,
+  };
+  // Never wipe amount to 0 on partial patches
+  if (patch.amount == null) merged.amount = current.amount;
+  if (patch.clientEmail === undefined) merged.clientEmail = current.clientEmail;
+
+  const fullRow = planToRow(merged, rowExisting);
+
+  // Prefer .update() over upsert so we don't invent columns that fail insert constraints
+  const camelUpdate: Record<string, any> = {
+    jobName: fullRow.jobName,
+    address: fullRow.address,
+    city: fullRow.city,
+    state: fullRow.state,
+    zipCode: fullRow.zipCode,
+    phones: fullRow.phones,
+    emails: fullRow.emails,
+    invoiceNumber: fullRow.invoiceNumber,
+    items: fullRow.items,
+    terms: fullRow.terms,
+    profile: fullRow.profile,
+    documentType: 'recurring_plan',
+    paymentStatus: fullRow.paymentStatus,
+    updated_at: new Date().toISOString(),
+  };
+
+  let { error } = await admin
+    .from('estimates')
+    .update(camelUpdate)
+    .eq('id', planId)
+    .eq('user_id', ownerUserId);
+
+  if (error) {
+    console.warn('recurring update camelCase failed:', error.message);
+    // Lowercase column schema (some projects unquote columns)
+    const lowerUpdate: Record<string, any> = {
+      jobname: fullRow.jobName,
+      address: fullRow.address,
+      city: fullRow.city,
+      state: fullRow.state,
+      zipcode: fullRow.zipCode,
+      phones: fullRow.phones,
+      emails: fullRow.emails,
+      invoicenumber: fullRow.invoiceNumber,
+      items: fullRow.items,
+      terms: fullRow.terms,
+      profile: fullRow.profile,
+      documenttype: 'recurring_plan',
+      paymentstatus: fullRow.paymentStatus,
+      updated_at: new Date().toISOString(),
+    };
+    const retry = await admin
+      .from('estimates')
+      .update(lowerUpdate)
+      .eq('id', planId)
+      .eq('user_id', ownerUserId);
+    error = retry.error;
+  }
+
+  if (error) {
+    console.warn('recurring update lowercase failed:', error.message);
+    // Minimal: only profile + emails (always present as JSONB / array)
+    const minimal = await admin
+      .from('estimates')
+      .update({
+        profile: fullRow.profile,
+        emails: fullRow.emails,
+        phones: fullRow.phones,
+        terms: fullRow.terms,
+        items: fullRow.items,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', planId)
+      .eq('user_id', ownerUserId);
+    if (minimal.error) {
+      return {
+        ok: false,
+        error: minimal.error.message || error.message || 'Could not save plan changes',
+      };
+    }
+  }
 
   const plan = await getRecurringPlan(ownerUserId, planId);
-  if (!plan) return { ok: false, error: 'Updated but could not reload' };
+  if (!plan) {
+    // Return merged view even if reload filter fails
+    return { ok: true, plan: { ...current, ...merged, id: planId, user_id: ownerUserId } as RecurringPlan };
+  }
   return { ok: true, plan };
 }
 

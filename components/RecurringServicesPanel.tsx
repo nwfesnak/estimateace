@@ -207,14 +207,39 @@ export function RecurringServicesPanel({
         headers,
         body: JSON.stringify({
           id: editingPlanId,
+          planId: editingPlanId,
+          action: 'update',
           ...snapshot,
         }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        showMessage(json.error || 'Could not save changes');
+        showMessage(
+          `❌ Could not save: ${json.error || `HTTP ${res.status}`}. Try again or refresh the page.`
+        );
         return;
       }
+      // Optimistic UI update so the list reflects edits immediately
+      setPlans((prev) =>
+        prev.map((p) =>
+          p.id === editingPlanId
+            ? {
+                ...p,
+                serviceName: snapshot.serviceName,
+                clientName: snapshot.clientName,
+                clientEmail: snapshot.clientEmail,
+                clientPhone: snapshot.clientPhone,
+                address: snapshot.address,
+                city: snapshot.city,
+                state: snapshot.state,
+                zipCode: snapshot.zipCode,
+                amount: snapshot.amount,
+                interval: snapshot.interval,
+                description: snapshot.description,
+              }
+            : p
+        )
+      );
       showMessage('✅ Plan updated.');
       closeForm();
       await loadPlans();
@@ -345,12 +370,17 @@ export function RecurringServicesPanel({
     setBusyId(planId);
     try {
       const headers = await authHeaders();
-      // Save email on plan first so it sticks
-      await fetch('/api/recurring/plans', {
+      // Save email on plan first (ignore failure — send still carries clientEmail)
+      const saveRes = await fetch('/api/recurring/plans', {
         method: 'PATCH',
         headers,
         body: JSON.stringify({ id: planId, clientEmail: email }),
       });
+      if (!saveRes.ok) {
+        const saveJson = await saveRes.json().catch(() => ({}));
+        console.warn('Could not persist client email before send:', saveJson.error);
+      }
+
       const res = await fetch('/api/recurring/send', {
         method: 'POST',
         headers,

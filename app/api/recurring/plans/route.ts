@@ -99,7 +99,8 @@ export async function PATCH(request: NextRequest) {
 
     const ownerId = await resolveOwnerId(user.id);
     const body = await request.json().catch(() => ({}));
-    const action = String(body.action || 'update').trim().toLowerCase();
+    // Treat missing action as field update (edit plan)
+    const action = String(body.action || 'update').trim().toLowerCase() || 'update';
     const id = String(body.id || body.planId || body.archiveId || '').trim();
 
     // restore can use archiveId; other actions need a plan id
