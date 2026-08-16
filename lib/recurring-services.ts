@@ -61,6 +61,24 @@ function newRecurringId() {
   return `REC-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 }
 
+function firstEmailFromRow(row: any, recurring: any): string {
+  const candidates = [
+    recurring?.clientEmail,
+    Array.isArray(row?.emails) ? row.emails[0] : null,
+    typeof row?.emails === 'string' ? row.emails : null,
+    row?.email,
+    row?.clientEmail,
+    row?.client_email,
+  ];
+  for (const c of candidates) {
+    const s = String(c || '')
+      .trim()
+      .toLowerCase();
+    if (s && s.includes('@')) return s;
+  }
+  return '';
+}
+
 function rowToPlan(row: any): RecurringPlan {
   const r = row?.profile?._recurring || {};
   const prof = row?.profile || {};
@@ -69,7 +87,7 @@ function rowToPlan(row: any): RecurringPlan {
     user_id: String(row.user_id || ''),
     serviceName: String(r.serviceName || row.jobName || 'Recurring service'),
     clientName: String(r.clientName || ''),
-    clientEmail: String(r.clientEmail || (Array.isArray(row.emails) ? row.emails[0] : '') || ''),
+    clientEmail: firstEmailFromRow(row, r),
     clientPhone: String(r.clientPhone || (Array.isArray(row.phones) ? row.phones[0] : '') || ''),
     address: String(row.address || r.address || ''),
     city: String(row.city || r.city || ''),
@@ -252,13 +270,20 @@ export async function createRecurringPlan(
   const serviceName = String(input.serviceName || '').trim();
   if (!serviceName) return { ok: false, error: 'Service name is required (e.g. Monthly lawn mowing)' };
 
+  const clientEmail = String(input.clientEmail || '')
+    .trim()
+    .toLowerCase();
+  if (clientEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clientEmail)) {
+    return { ok: false, error: 'Client email looks invalid. Use a full address like name@email.com' };
+  }
+
   const id = newRecurringId();
   const row = planToRow({
     id,
     user_id: ownerUserId,
     serviceName,
     clientName: String(input.clientName || '').trim() || 'Client',
-    clientEmail: String(input.clientEmail || '').trim(),
+    clientEmail,
     clientPhone: String(input.clientPhone || '').trim(),
     address: String(input.address || '').trim(),
     city: String(input.city || '').trim(),
@@ -596,25 +621,31 @@ export async function sendRecurringApprovalEmail(input: {
   }
 
   // Prefer explicit override from the send request, then plan storage
-  const to = String(input.clientEmail || plan.clientEmail || '')
+  const rawTo = String(input.clientEmail || plan.clientEmail || '')
     .trim()
+    .replace(/\s+/g, '')
     .toLowerCase();
+  // Strip accidental mailto: prefixes from paste
+  const to = rawTo.replace(/^mailto:/i, '');
   if (!to || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
     return {
       ok: false,
-      error: 'Plan needs a valid client email before sending. Edit the plan and add the client email.',
+      error:
+        'Plan needs a valid client email before sending (example: client@gmail.com). Enter it on the plan, then try Email again.',
+      clientLink: buildRecurringClientLink(
+        input.ownerUserId,
+        input.planId,
+        input.requestUrl
+      ),
     };
   }
 
-  // Persist fresher contact + branding so next send works without overrides
-  const patch: Partial<RecurringPlan> = {};
-  if (input.clientEmail && input.clientEmail.trim()) patch.clientEmail = to;
+  // Always persist client email onto the plan so reloads / re-sends work
+  const patch: Partial<RecurringPlan> = { clientEmail: to };
   if (input.companyName) patch.companyName = input.companyName;
   if (input.companyEmail) patch.companyEmail = input.companyEmail;
   if (input.companyPhone) patch.companyPhone = input.companyPhone;
-  if (Object.keys(patch).length) {
-    await updateRecurringPlan(input.ownerUserId, input.planId, patch);
-  }
+  await updateRecurringPlan(input.ownerUserId, input.planId, patch);
 
   const fresh = (await getRecurringPlan(input.ownerUserId, input.planId)) || plan;
   const clientLink = buildRecurringClientLink(

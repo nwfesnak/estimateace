@@ -136,6 +136,27 @@ export function RecurringServicesPanel({
   }, [loadPlans]);
 
   const createPlan = async (andEmail: boolean) => {
+    // Snapshot form before any state clear / await so email is never lost
+    const snapshot = {
+      ...form,
+      clientEmail: String(form.clientEmail || '')
+        .trim()
+        .replace(/\s+/g, '')
+        .toLowerCase(),
+      amount: parseFloat(form.amount) || 0,
+    };
+
+    if (!snapshot.serviceName.trim()) {
+      showMessage('Enter a service name (e.g. Monthly lawn mowing).');
+      return;
+    }
+    if (andEmail || snapshot.clientEmail) {
+      if (!snapshot.clientEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(snapshot.clientEmail)) {
+        showMessage('Enter a valid client email (example: client@gmail.com) before sending approval.');
+        return;
+      }
+    }
+
     setSaving(true);
     try {
       const headers = await authHeaders();
@@ -143,8 +164,7 @@ export function RecurringServicesPanel({
         method: 'POST',
         headers,
         body: JSON.stringify({
-          ...form,
-          amount: parseFloat(form.amount) || 0,
+          ...snapshot,
           companyName,
           companyEmail,
           companyPhone,
@@ -155,8 +175,6 @@ export function RecurringServicesPanel({
         showMessage(json.error || 'Could not create plan');
         return;
       }
-      setShowForm(false);
-      setForm(emptyForm);
       const planId = json.plan?.id;
       if (andEmail && planId) {
         const sendRes = await fetch('/api/recurring/send', {
@@ -167,10 +185,12 @@ export function RecurringServicesPanel({
             companyName,
             companyEmail,
             companyPhone,
-            clientEmail: form.clientEmail,
+            clientEmail: snapshot.clientEmail,
           }),
         });
         const sendJson = await sendRes.json().catch(() => ({}));
+        setShowForm(false);
+        setForm(emptyForm);
         await loadPlans();
         if (!sendRes.ok) {
           const link = String(sendJson.clientLink || json.clientLink || '').trim();
@@ -189,12 +209,18 @@ export function RecurringServicesPanel({
           return;
         }
         showMessage(
-          `✅ Plan created & approval email sent to ${sendJson.to || form.clientEmail || 'client'}.`
+          `✅ Plan created & approval email sent to ${sendJson.to || snapshot.clientEmail}.`
         );
         return;
       }
+      setShowForm(false);
+      setForm(emptyForm);
       await loadPlans();
-      showMessage('✅ Plan created. Use “Email client for approval” when ready.');
+      showMessage(
+        snapshot.clientEmail
+          ? '✅ Plan created. Use “Email client for approval” when ready.'
+          : '✅ Plan created. Add a client email on the plan, then email for approval.'
+      );
     } catch (e: any) {
       showMessage(e?.message || 'Create failed');
     } finally {
@@ -203,13 +229,40 @@ export function RecurringServicesPanel({
   };
 
   const emailClientApproval = async (planId: string, clientEmail: string) => {
-    if (!clientEmail?.trim()) {
-      showMessage('Add a client email on this plan before sending.');
-      return;
+    let email = String(clientEmail || '')
+      .trim()
+      .replace(/\s+/g, '')
+      .replace(/^mailto:/i, '')
+      .toLowerCase();
+
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      const typed =
+        typeof window !== 'undefined'
+          ? window.prompt(
+              'Client email is missing or invalid on this plan.\n\nEnter the client email to send approval:',
+              email || ''
+            )
+          : null;
+      email = String(typed || '')
+        .trim()
+        .replace(/\s+/g, '')
+        .replace(/^mailto:/i, '')
+        .toLowerCase();
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        showMessage('A valid client email is required (example: client@gmail.com).');
+        return;
+      }
     }
+
     setBusyId(planId);
     try {
       const headers = await authHeaders();
+      // Save email on plan first so it sticks
+      await fetch('/api/recurring/plans', {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({ id: planId, clientEmail: email }),
+      });
       const res = await fetch('/api/recurring/send', {
         method: 'POST',
         headers,
@@ -218,7 +271,7 @@ export function RecurringServicesPanel({
           companyName,
           companyEmail,
           companyPhone,
-          clientEmail,
+          clientEmail: email,
         }),
       });
       const json = await res.json().catch(() => ({}));
@@ -236,10 +289,11 @@ export function RecurringServicesPanel({
             link ? ' — Client approval link was copied; paste it to your client.' : ' — Use Copy client link.'
           }`
         );
+        await loadPlans();
         return;
       }
       showMessage(
-        `✅ Approval email sent to ${json.to || clientEmail}${
+        `✅ Approval email sent to ${json.to || email}${
           json.resendId ? ` (id ${String(json.resendId).slice(0, 8)}…)` : ''
         }. Ask them to check inbox and spam.`
       );
@@ -454,13 +508,17 @@ export function RecurringServicesPanel({
                 />
               </div>
               <div>
-                <label className="block text-sm font-semibold mb-1">Client email</label>
+                <label className="block text-sm font-semibold mb-1">Client email *</label>
                 <Input
                   type="email"
                   value={form.clientEmail}
                   onChange={(e) => setForm((f) => ({ ...f, clientEmail: e.target.value }))}
-                  placeholder="client@email.com"
+                  placeholder="client@gmail.com"
+                  required
                 />
+                <p className="text-xs text-gray-500 mt-1">
+                  Required to email approval. Without it, use Copy client link instead.
+                </p>
               </div>
             </div>
             <div>
@@ -617,8 +675,13 @@ export function RecurringServicesPanel({
                             </div>
                             <p className="text-sm text-gray-600 mt-1">
                               {p.clientName || 'Client'}
-                              {p.clientEmail ? ` · ${p.clientEmail}` : ''}
+                              {p.clientEmail ? ` · ${p.clientEmail}` : ' · ⚠️ no client email'}
                             </p>
+                            {!p.clientEmail && (
+                              <p className="text-xs text-amber-700 mt-1">
+                                Add email via “Email client for approval” (you’ll be prompted) or recreate the plan with an email.
+                              </p>
+                            )}
                             <p className="text-xl font-bold text-emerald-700 mt-2">
                               ${Number(p.amount).toFixed(2)}
                               <span className="text-sm font-semibold text-gray-600">
@@ -649,7 +712,7 @@ export function RecurringServicesPanel({
                             <Button
                               size="sm"
                               className="bg-[#10b981] hover:bg-[#059669] text-white"
-                              disabled={busyId === p.id || !p.clientEmail}
+                              disabled={busyId === p.id}
                               onClick={() => void emailClientApproval(p.id, p.clientEmail)}
                             >
                               📧 Email client for approval
