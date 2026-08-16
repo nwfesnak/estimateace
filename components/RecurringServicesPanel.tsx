@@ -405,18 +405,8 @@ export function RecurringServicesPanel({
         closeForm();
         await loadPlans();
         if (!sendRes.ok) {
-          const link = String(sendJson.clientLink || json.clientLink || '').trim();
-          if (link && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-            try {
-              await navigator.clipboard.writeText(link);
-            } catch {
-              /* ignore */
-            }
-          }
           showMessage(
-            `Plan created, but send failed: ${sendJson.error || 'check email/SMS setup'}.${
-              link ? ' Client approval link copied — paste it to your client.' : ' Use Copy client link.'
-            }`
+            `Plan created, but send failed: ${sendJson.error || 'check email/SMS setup'}. Use Edit plan to fix contact info, then Send approval again.`
           );
           return;
         }
@@ -517,18 +507,8 @@ export function RecurringServicesPanel({
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const link = String(json.clientLink || '').trim();
-        if (link && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-          try {
-            await navigator.clipboard.writeText(link);
-          } catch {
-            /* ignore */
-          }
-        }
         showMessage(
-          `❌ ${json.error || 'Could not send approval'}${
-            link ? ' — Client approval link was copied; paste it to your client.' : ' — Use Copy client link.'
-          }`
+          `❌ ${json.error || 'Could not send approval'}. Fix email/phone on the plan and try Send approval again.`
         );
         await loadPlans();
         return;
@@ -545,29 +525,6 @@ export function RecurringServicesPanel({
       await loadPlans();
     } catch (e: any) {
       showMessage(e?.message || 'Send failed');
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  const copyLink = async (planId: string) => {
-    setBusyId(planId);
-    try {
-      const headers = await authHeaders();
-      const res = await fetch('/api/recurring/checkout', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ planId, linkOnly: true }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json.clientLink) {
-        showMessage(json.error || 'Could not get link');
-        return;
-      }
-      await navigator.clipboard.writeText(json.clientLink);
-      showMessage('✅ Client link copied. Send it so they can subscribe & pay automatically.');
-    } catch (e: any) {
-      showMessage(e?.message || 'Copy failed');
     } finally {
       setBusyId(null);
     }
@@ -807,7 +764,7 @@ export function RecurringServicesPanel({
                   required
                 />
                 <p className="text-xs text-gray-500 mt-1">
-                  Required to email approval. Without it, use Copy client link instead.
+                  Required to email approval (or use client phone for SMS).
                 </p>
               </div>
             </div>
@@ -1113,14 +1070,6 @@ export function RecurringServicesPanel({
                                 >
                                   📧📱 Send approval (email + SMS)
                                 </Button>
-                                <Button
-                                  size="sm"
-                                  className="bg-[#0ea5e9] text-white"
-                                  disabled={busyId === p.id}
-                                  onClick={() => void copyLink(p.id)}
-                                >
-                                  📋 Copy client link
-                                </Button>
                                 {isPaymentsOff(p.status) ? (
                                   <Button
                                     size="sm"
@@ -1190,8 +1139,7 @@ export function RecurringServicesPanel({
         <p className="text-xs text-gray-500 pt-2">
           Email needs Resend (same as estimate send). SMS needs Twilio env vars (TWILIO_ACCOUNT_SID,
           TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER). Notifications go to the company email/phone saved on
-          the plan (from your profile when you create it). If SMS is not set up, email still sends and you
-          can Copy client link.
+          the plan (from your profile when you create it). If SMS is not set up, email still sends.
         </p>
       </div>
     </div>
