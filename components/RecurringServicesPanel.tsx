@@ -301,6 +301,7 @@ export function RecurringServicesPanel({
             companyEmail,
             companyPhone,
             clientEmail: snapshot.clientEmail,
+            clientPhone: snapshot.clientPhone,
           }),
         });
         const sendJson = await sendRes.json().catch(() => ({}));
@@ -316,14 +317,17 @@ export function RecurringServicesPanel({
             }
           }
           showMessage(
-            `Plan created, but email failed: ${sendJson.error || 'check RESEND_API_KEY / From domain'}.${
+            `Plan created, but send failed: ${sendJson.error || 'check email/SMS setup'}.${
               link ? ' Client approval link copied — paste it to your client.' : ' Use Copy client link.'
             }`
           );
           return;
         }
+        const bits: string[] = [];
+        if (sendJson.emailSent) bits.push(`email ${sendJson.to || snapshot.clientEmail}`);
+        if (sendJson.smsSent) bits.push(`SMS ${sendJson.smsTo || snapshot.clientPhone}`);
         showMessage(
-          `✅ Plan created & approval email sent to ${sendJson.to || snapshot.clientEmail}.`
+          `✅ Plan created & approval sent${bits.length ? ` (${bits.join(' · ')})` : ''}.`
         );
         return;
       }
@@ -341,45 +345,66 @@ export function RecurringServicesPanel({
     }
   };
 
-  const emailClientApproval = async (planId: string, clientEmail: string) => {
+  const emailClientApproval = async (
+    planId: string,
+    clientEmail: string,
+    clientPhone?: string
+  ) => {
     let email = String(clientEmail || '')
       .trim()
       .replace(/\s+/g, '')
       .replace(/^mailto:/i, '')
       .toLowerCase();
+    let phone = String(clientPhone || '').trim();
 
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       const typed =
         typeof window !== 'undefined'
           ? window.prompt(
-              'Client email is missing or invalid on this plan.\n\nEnter the client email to send approval:',
+              'Client email is missing or invalid on this plan.\n\nEnter the client email to send approval (or leave blank if sending SMS only):',
               email || ''
             )
           : null;
-      email = String(typed || '')
-        .trim()
-        .replace(/\s+/g, '')
-        .replace(/^mailto:/i, '')
-        .toLowerCase();
-      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-        showMessage('A valid client email is required (example: client@gmail.com).');
-        return;
+      if (typed != null) {
+        email = String(typed || '')
+          .trim()
+          .replace(/\s+/g, '')
+          .replace(/^mailto:/i, '')
+          .toLowerCase();
       }
+    }
+
+    if (!phone || phone.replace(/\D/g, '').length < 10) {
+      // keep phone from plan; optional prompt only if no email either
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        const typedPhone =
+          typeof window !== 'undefined'
+            ? window.prompt('Enter client phone for SMS approval link (10+ digits):', phone || '')
+            : null;
+        if (typedPhone != null) phone = String(typedPhone || '').trim();
+      }
+    }
+
+    const hasEmail = !!(email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email));
+    const hasPhone = !!(phone && phone.replace(/\D/g, '').length >= 10);
+    if (!hasEmail && !hasPhone) {
+      showMessage('Add a client email and/or phone on the plan (Edit plan), then send again.');
+      return;
     }
 
     setBusyId(planId);
     try {
       const headers = await authHeaders();
-      // Save email on plan first (ignore failure — send still carries clientEmail)
-      const saveRes = await fetch('/api/recurring/plans', {
+      // Persist contact before send
+      await fetch('/api/recurring/plans', {
         method: 'PATCH',
         headers,
-        body: JSON.stringify({ id: planId, clientEmail: email }),
+        body: JSON.stringify({
+          id: planId,
+          ...(hasEmail ? { clientEmail: email } : {}),
+          ...(hasPhone ? { clientPhone: phone } : {}),
+        }),
       });
-      if (!saveRes.ok) {
-        const saveJson = await saveRes.json().catch(() => ({}));
-        console.warn('Could not persist client email before send:', saveJson.error);
-      }
 
       const res = await fetch('/api/recurring/send', {
         method: 'POST',
@@ -389,7 +414,8 @@ export function RecurringServicesPanel({
           companyName,
           companyEmail,
           companyPhone,
-          clientEmail: email,
+          clientEmail: hasEmail ? email : undefined,
+          clientPhone: hasPhone ? phone : undefined,
         }),
       });
       const json = await res.json().catch(() => ({}));
@@ -403,17 +429,21 @@ export function RecurringServicesPanel({
           }
         }
         showMessage(
-          `❌ ${json.error || 'Could not send approval email'}${
+          `❌ ${json.error || 'Could not send approval'}${
             link ? ' — Client approval link was copied; paste it to your client.' : ' — Use Copy client link.'
           }`
         );
         await loadPlans();
         return;
       }
+      const bits: string[] = [];
+      if (json.emailSent) bits.push(`email ${json.to || email}`);
+      if (json.smsSent) bits.push(`SMS ${json.smsTo || phone}`);
+      if (!json.smsSent && hasPhone) {
+        bits.push('SMS not sent (check Twilio setup)');
+      }
       showMessage(
-        `✅ Approval email sent to ${json.to || email}${
-          json.resendId ? ` (id ${String(json.resendId).slice(0, 8)}…)` : ''
-        }. Ask them to check inbox and spam.`
+        `✅ Approval sent${bits.length ? `: ${bits.join(' · ')}` : ''}. Client can open the link to approve.`
       );
       await loadPlans();
     } catch (e: any) {
@@ -441,37 +471,6 @@ export function RecurringServicesPanel({
       showMessage('✅ Client link copied. Send it so they can subscribe & pay automatically.');
     } catch (e: any) {
       showMessage(e?.message || 'Copy failed');
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  const openCheckoutForClient = async (planId: string) => {
-    setBusyId(planId);
-    try {
-      const headers = await authHeaders();
-      const res = await fetch('/api/recurring/checkout', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ planId }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (json.url) {
-        window.open(json.url, '_blank');
-        showMessage('Opened Stripe checkout in a new tab (for client to complete).');
-        return;
-      }
-      if (json.clientLink) {
-        await navigator.clipboard.writeText(json.clientLink);
-        showMessage(
-          (json.error ? json.error + ' — ' : '') +
-            'Client link copied instead. Share it with your client.'
-        );
-        return;
-      }
-      showMessage(json.error || 'Could not start checkout');
-    } catch (e: any) {
-      showMessage(e?.message || 'Checkout failed');
     } finally {
       setBusyId(null);
     }
@@ -750,7 +749,7 @@ export function RecurringServicesPanel({
                     disabled={saving}
                     onClick={() => void createPlan(true)}
                   >
-                    {saving ? 'Working…' : 'Create & email client for approval'}
+                    {saving ? 'Working…' : 'Create & send approval (email + SMS)'}
                   </Button>
                   <Button
                     variant="outline"
@@ -776,7 +775,7 @@ export function RecurringServicesPanel({
             <p className="font-semibold text-lg text-gray-800">No recurring services yet</p>
             <p className="mt-2 text-sm max-w-md mx-auto">
               Create one for lawn care, pool service, filter changes, or any service you bill on a
-              schedule. Your client gets a simple link to subscribe with a card.
+              schedule. Send approval by email and text — the client opens the link to approve.
             </p>
             <Button
               className="mt-6 bg-[#10b981] text-white"
@@ -830,11 +829,12 @@ export function RecurringServicesPanel({
                             </div>
                             <p className="text-sm text-gray-600 mt-1">
                               {p.clientName || 'Client'}
-                              {p.clientEmail ? ` · ${p.clientEmail}` : ' · ⚠️ no client email'}
+                              {p.clientEmail ? ` · ${p.clientEmail}` : ' · ⚠️ no email'}
+                              {p.clientPhone ? ` · ${p.clientPhone}` : ' · ⚠️ no phone'}
                             </p>
-                            {!p.clientEmail && (
+                            {!p.clientEmail && !p.clientPhone && (
                               <p className="text-xs text-amber-700 mt-1">
-                                Add email via “Email client for approval” (you’ll be prompted) or recreate the plan with an email.
+                                Add email and/or phone with Edit plan so approval can be sent.
                               </p>
                             )}
                             <p className="text-xl font-bold text-emerald-700 mt-2">
@@ -877,9 +877,11 @@ export function RecurringServicesPanel({
                               size="sm"
                               className="bg-[#10b981] hover:bg-[#059669] text-white"
                               disabled={busyId === p.id}
-                              onClick={() => void emailClientApproval(p.id, p.clientEmail)}
+                              onClick={() =>
+                                void emailClientApproval(p.id, p.clientEmail, p.clientPhone)
+                              }
                             >
-                              📧 Email client for approval
+                              📧📱 Send approval (email + SMS)
                             </Button>
                             <Button
                               size="sm"
@@ -888,14 +890,6 @@ export function RecurringServicesPanel({
                               onClick={() => void copyLink(p.id)}
                             >
                               📋 Copy client link
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              disabled={busyId === p.id || p.status === 'active'}
-                              onClick={() => void openCheckoutForClient(p.id)}
-                            >
-                              Open Stripe checkout
                             </Button>
                             {isPaymentsOff(p.status) ? (
                               <Button
@@ -941,19 +935,21 @@ export function RecurringServicesPanel({
       <div className="mt-10 rounded-xl border bg-white p-5 text-sm text-gray-600 space-y-2">
         <p className="font-semibold text-gray-900">How it works</p>
         <ol className="list-decimal pl-5 space-y-1">
-          <li>Create a plan (service, client email, amount, weekly/monthly/yearly).</li>
+          <li>Create a plan (service, client email + phone, amount, weekly/monthly/yearly).</li>
           <li>
-            Tap <strong>Email client for approval</strong> — they get a message with an{' '}
-            <strong>Approve recurring charges</strong> button.
+            Tap <strong>Send approval (email + SMS)</strong> — the client gets the approval link by
+            email and text (phone on file).
           </li>
           <li>
-            When they approve, you&apos;ll see <strong>✓ Client approved</strong> on the plan.
+            When they open the link and approve, you&apos;ll see <strong>✓ Client approved</strong> on
+            the plan.
           </li>
-          <li>They set up a card; Stripe charges automatically each period.</li>
+          <li>All approval goes through the message you send — no Stripe checkout from this screen.</li>
         </ol>
         <p className="text-xs text-gray-500 pt-2">
-          Tip: Finish Stripe Connect under Profile → Payments so charges can pay out to your bank.
-          Requires Resend email setup (same as estimate send).
+          Email needs Resend (same as estimate send). SMS needs Twilio env vars (TWILIO_ACCOUNT_SID,
+          TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER). If SMS is not set up, email still sends and you can
+          Copy client link.
         </p>
       </div>
     </div>

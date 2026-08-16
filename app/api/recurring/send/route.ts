@@ -41,11 +41,12 @@ export async function POST(request: NextRequest) {
       companyEmail: body.companyEmail ? String(body.companyEmail) : undefined,
       companyPhone: body.companyPhone ? String(body.companyPhone) : undefined,
       clientEmail: body.clientEmail ? String(body.clientEmail) : undefined,
+      clientPhone: body.clientPhone ? String(body.clientPhone) : undefined,
     });
 
     if (!result.ok) {
       const status =
-        /not configured|RESEND|API_KEY|From address|verified|SERVICE_ROLE/i.test(
+        /not configured|RESEND|API_KEY|From address|verified|SERVICE_ROLE|Twilio|TWILIO/i.test(
           result.error || ''
         )
           ? 502
@@ -56,17 +57,26 @@ export async function POST(request: NextRequest) {
           error: result.error || 'Send failed',
           clientLink: result.clientLink || null,
           to: result.to || null,
+          smsTo: result.smsTo || null,
+          emailSent: !!result.emailSent,
+          smsSent: !!result.smsSent,
         },
         { status }
       );
     }
 
+    const bits: string[] = [];
+    if (result.emailSent && result.to) bits.push(`email → ${result.to}`);
+    if (result.smsSent && result.smsTo) bits.push(`SMS → ${result.smsTo}`);
     return NextResponse.json({
       ok: true,
       clientLink: result.clientLink,
-      to: result.to,
+      to: result.to || null,
+      smsTo: result.smsTo || null,
+      emailSent: !!result.emailSent,
+      smsSent: !!result.smsSent,
       resendId: result.resendId || null,
-      message: `Approval email sent to ${result.to || 'the client'}.`,
+      message: `Approval sent (${bits.join(' · ') || 'ok'}).`,
     });
   } catch (e: any) {
     console.error('recurring/send:', e);

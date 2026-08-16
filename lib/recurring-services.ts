@@ -680,8 +680,8 @@ export async function markClientApprovedRecurring(
 }
 
 /**
- * Email the client a clear Approve button for recurring charges.
- * Uses Resend via platform From (reliable) + company Reply-To.
+ * Send client recurring approval via email + SMS (phone on file).
+ * Uses Resend for email; Twilio for SMS when configured.
  */
 export async function sendRecurringApprovalEmail(input: {
   ownerUserId: string;
@@ -692,7 +692,18 @@ export async function sendRecurringApprovalEmail(input: {
   companyPhone?: string;
   /** Optional override if UI has a fresher email than the stored plan */
   clientEmail?: string;
-}): Promise<{ ok: boolean; error?: string; clientLink?: string; resendId?: string; to?: string }> {
+  /** Optional override for SMS */
+  clientPhone?: string;
+}): Promise<{
+  ok: boolean;
+  error?: string;
+  clientLink?: string;
+  resendId?: string;
+  to?: string;
+  smsTo?: string;
+  emailSent?: boolean;
+  smsSent?: boolean;
+}> {
   const admin = getSupabaseAdmin();
   if (!admin) {
     return {
@@ -727,32 +738,38 @@ export async function sendRecurringApprovalEmail(input: {
     .toLowerCase();
   // Strip accidental mailto: prefixes from paste
   const to = rawTo.replace(/^mailto:/i, '');
-  if (!to || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
-    return {
-      ok: false,
-      error:
-        'Plan needs a valid client email before sending (example: client@gmail.com). Enter it on the plan, then try Email again.',
-      clientLink: buildRecurringClientLink(
-        input.ownerUserId,
-        input.planId,
-        input.requestUrl
-      ),
-    };
-  }
+  const hasEmail = !!(to && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to));
 
-  // Always persist client email onto the plan so reloads / re-sends work
-  const patch: Partial<RecurringPlan> = { clientEmail: to };
-  if (input.companyName) patch.companyName = input.companyName;
-  if (input.companyEmail) patch.companyEmail = input.companyEmail;
-  if (input.companyPhone) patch.companyPhone = input.companyPhone;
-  await updateRecurringPlan(input.ownerUserId, input.planId, patch);
+  const phoneRaw = String(input.clientPhone || plan.clientPhone || '').trim();
+  const hasPhone = !!phoneRaw && phoneRaw.replace(/\D/g, '').length >= 10;
 
-  const fresh = (await getRecurringPlan(input.ownerUserId, input.planId)) || plan;
   const clientLink = buildRecurringClientLink(
     input.ownerUserId,
     input.planId,
     input.requestUrl
   );
+
+  if (!hasEmail && !hasPhone) {
+    return {
+      ok: false,
+      error:
+        'Add a client email and/or phone on the plan before sending approval.',
+      clientLink,
+    };
+  }
+
+  // Persist contact onto the plan so reloads / re-sends work
+  const patch: Partial<RecurringPlan> = {};
+  if (hasEmail) patch.clientEmail = to;
+  if (hasPhone) patch.clientPhone = phoneRaw;
+  if (input.companyName) patch.companyName = input.companyName;
+  if (input.companyEmail) patch.companyEmail = input.companyEmail;
+  if (input.companyPhone) patch.companyPhone = input.companyPhone;
+  if (Object.keys(patch).length) {
+    await updateRecurringPlan(input.ownerUserId, input.planId, patch);
+  }
+
+  const fresh = (await getRecurringPlan(input.ownerUserId, input.planId)) || plan;
   const company = (input.companyName || fresh.companyName || 'Your contractor').trim() || 'Your contractor';
   const companyEmail = (input.companyEmail || fresh.companyEmail || '').trim();
   const companyPhone = (input.companyPhone || fresh.companyPhone || '').trim();
@@ -822,50 +839,99 @@ export async function sendRecurringApprovalEmail(input: {
   <p style="font-size:11px;color:#94a3b8;margin-top:28px;">This emails you about a service from your contractor — not an EstimateAce software subscription.</p>
 </body></html>`;
 
-  const { sendEmailNotification } = await import('@/lib/notifications');
+  const { sendEmailNotification, sendSmsNotification } = await import('@/lib/notifications');
   const replyTo =
     companyEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(companyEmail) ? companyEmail : undefined;
 
   // Use verified platform From first (most reliable). Company name is in the body/subject.
-  // Company-slug From addresses often fail Resend verification and look like "email not sent".
   const platformFrom =
     (process.env.NOTIFICATION_FROM_EMAIL || '').trim() ||
     'EstimateAce <notifications@estimateace.com>';
 
-  let result = await sendEmailNotification(to, subject, text, {
-    html,
-    from: platformFrom,
-    replyTo,
-  });
+  let emailSent = false;
+  let resendId: string | undefined;
+  let emailError: string | undefined;
 
-  if (!result.ok) {
-    console.error('[recurring email] platform From failed:', result.error);
-    // Fallback: no reply-to (some Resend accounts reject external reply_to)
-    result = await sendEmailNotification(to, subject, text, {
+  if (hasEmail) {
+    let result = await sendEmailNotification(to, subject, text, {
       html,
-      from: 'EstimateAce <notifications@estimateace.com>',
+      from: platformFrom,
+      replyTo,
     });
+
+    if (!result.ok) {
+      console.error('[recurring email] platform From failed:', result.error);
+      result = await sendEmailNotification(to, subject, text, {
+        html,
+        from: 'EstimateAce <notifications@estimateace.com>',
+      });
+    }
+
+    if (result.ok) {
+      emailSent = true;
+      resendId = result.id;
+    } else {
+      emailError = result.error || 'Email failed';
+      console.error('[recurring email] all attempts failed:', emailError);
+    }
   }
 
-  if (!result.ok) {
-    console.error('[recurring email] all attempts failed:', result.error);
+  // Always try SMS to phone on file when present
+  let smsSent = false;
+  let smsError: string | undefined;
+  let smsTo: string | undefined;
+  if (hasPhone) {
+    const smsBody = [
+      `${company}: please approve recurring ${fresh.serviceName} — ${amt} ${interval}.`,
+      `Approve here: ${clientLink}`,
+      companyPhone ? `Questions? Call ${companyPhone}` : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+    const smsResult = await sendSmsNotification(phoneRaw, smsBody);
+    if (smsResult.ok) {
+      smsSent = true;
+      smsTo = phoneRaw;
+    } else {
+      smsError = smsResult.error || 'SMS failed';
+      console.warn('[recurring sms] failed:', smsError);
+    }
+  }
+
+  if (!emailSent && !smsSent) {
+    const parts = [
+      emailError || (hasEmail ? null : 'No client email on plan'),
+      smsError || (hasPhone ? null : 'No client phone on plan'),
+    ].filter(Boolean);
     return {
       ok: false,
       error:
-        (result.error || 'Email failed') +
-        ' Check RESEND_API_KEY and NOTIFICATION_FROM_EMAIL on Vercel. Client approval link is available to copy.',
+        parts.join(' · ') +
+        ' Client approval link is available to copy. For SMS, Twilio must be configured (TWILIO_* env).',
       clientLink,
-      to,
+      to: hasEmail ? to : undefined,
+      smsTo: hasPhone ? phoneRaw : undefined,
+      emailSent: false,
+      smsSent: false,
     };
   }
 
   await updateRecurringPlan(input.ownerUserId, input.planId, {
     status: fresh.status === 'active' || fresh.status === 'approved' ? fresh.status : 'link_sent',
     approvalEmailSentAt: new Date().toISOString(),
-    clientEmail: to,
+    ...(hasEmail ? { clientEmail: to } : {}),
+    ...(hasPhone ? { clientPhone: phoneRaw } : {}),
   });
 
-  return { ok: true, clientLink, resendId: result.id, to };
+  return {
+    ok: true,
+    clientLink,
+    resendId,
+    to: emailSent ? to : undefined,
+    smsTo: smsSent ? phoneRaw : undefined,
+    emailSent,
+    smsSent,
+  };
 }
 
 /**
