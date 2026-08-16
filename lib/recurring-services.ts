@@ -767,7 +767,11 @@ async function archiveCanceledRecurringToInvoices(
   const amt = Number(plan.amount) || 0;
   const interval = plan.interval || 'month';
   const serviceName = plan.serviceName || 'Recurring service';
-  const jobName = `${serviceName} (canceled)`;
+  // Filed under Paid invoices so it shows with other closed invoices
+  const jobName = `${serviceName} (recurring — canceled)`;
+  const priorPaid = Number(existing.amountPaid ?? existing.amountpaid) || 0;
+  // Closed-out amount for the paid folder (prefer what was already collected, else plan rate)
+  const closedPaid = priorPaid > 0 ? priorPaid : amt;
 
   const profile = {
     ...(existing.profile && typeof existing.profile === 'object' ? existing.profile : {}),
@@ -828,12 +832,13 @@ async function archiveCanceledRecurringToInvoices(
     receiptUrls: existing.receiptUrls ?? existing.receipturls ?? [],
     receiptDetails: existing.receiptDetails ?? existing.receiptdetails ?? [],
     dueDate: existing.dueDate ?? existing.duedate ?? null,
-    paymentStatus: amt > 0 && Number(existing.amountPaid ?? existing.amountpaid) >= amt ? 'paid' : 'canceled',
-    paymentstatus: amt > 0 && Number(existing.amountPaid ?? existing.amountpaid) >= amt ? 'paid' : 'canceled',
-    amountPaid: Number(existing.amountPaid ?? existing.amountpaid) || 0,
-    amountpaid: Number(existing.amountPaid ?? existing.amountpaid) || 0,
-    paymentMethod: existing.paymentMethod ?? existing.paymentmethod ?? 'recurring',
-    paymentmethod: existing.paymentMethod ?? existing.paymentmethod ?? 'recurring',
+    // Always file canceled recurring under Paid invoices (closed-out)
+    paymentStatus: 'paid',
+    paymentstatus: 'paid',
+    amountPaid: closedPaid,
+    amountpaid: closedPaid,
+    paymentMethod: 'Recurring (canceled)',
+    paymentmethod: 'Recurring (canceled)',
     profile,
     updated_at: now,
     archived_at: now,

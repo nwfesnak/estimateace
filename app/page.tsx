@@ -421,7 +421,7 @@ export default function Home() {
       retrieveArchiveHelp: "View archived estimates and invoices, open them, or restore them to your active lists.",
       viewArchives: "View / Retrieve Archives",
       paidInvoices: "Paid Invoices",
-      paidInvoicesHelp: "Invoices marked paid are moved here automatically and removed from Estimates and open Invoices.",
+      paidInvoicesHelp: "Invoices marked paid (and canceled recurring plans) appear under Reports → Paid invoices.",
       noPaidInvoices: "No paid invoices yet. When you close out an invoice as paid, it appears in this folder.",
       activeEstimates: "Active Estimates",
       metric: "Metric",
@@ -1006,9 +1006,9 @@ export default function Home() {
     return (translations as any)[currentLang]?.[key] || (translations as any)['en']?.[key] || key;
   };
 
-  const [profileTab, setProfileTab] = useState<
-    'info' | 'payments' | 'paidInvoices' | 'billing' | 'tutorials'
-  >('info');
+  const [profileTab, setProfileTab] = useState<'info' | 'payments' | 'billing' | 'tutorials'>(
+    'info'
+  );
   const [tutorials, setTutorials] = useState<
     Array<{
       id: string;
@@ -6196,8 +6196,7 @@ export default function Home() {
       if (fetchErr || !est) {
         console.error('Fetch for archive failed:', fetchErr);
         showMessage(`✅ Invoice marked as Paid (${methodLabel}), but could not load for archiving.`);
-        setProfileTab('paidInvoices');
-        setView('profileView');
+        openPaidInvoicesReport();
         await refreshSavedList();
         return;
       }
@@ -6212,9 +6211,8 @@ export default function Home() {
         return;
       }
 
-      showMessage(`✅ Invoice marked as Paid (${methodLabel}) and moved to Paid Invoices`);
-      setProfileTab('paidInvoices');
-      setView('profileView');
+      showMessage(`✅ Invoice marked as Paid (${methodLabel}) and moved to Paid Invoices (Reports)`);
+      openPaidInvoicesReport();
       await refreshSavedList();
       await refreshArchivesList();
     } catch (e: any) {
@@ -7661,13 +7659,6 @@ export default function Home() {
     }
   }, [view, invoiceNumber, documentType, terms]);
 
-  useEffect(() => {
-    if (view === 'profileView' && profileTab === 'paidInvoices') {
-      void refreshArchivesList();
-      void refreshSavedList();
-    }
-  }, [view, profileTab]);
-
   // Ensure the chosen language from localStorage (user choice) is always applied
   useEffect(() => {
     const preferred = getPreferredLanguage();
@@ -8389,8 +8380,7 @@ export default function Home() {
         setAmountPaid(grandTotal);
         setPaymentMethod(methodLabel);
         setIsZellePayOpen(false);
-        setProfileTab('paidInvoices');
-        setView('profileView');
+        openPaidInvoicesReport();
         await refreshSavedList();
         return;
       }
@@ -8407,7 +8397,7 @@ export default function Home() {
           `✅ Marked paid (${methodLabel}), but moving to Paid Invoices failed: ${(archiveErr as any).message || 'unknown'}`
         );
       } else {
-        showMessage(`✅ Invoice marked Paid (${methodLabel}) and moved to Paid Invoices`);
+        showMessage(`✅ Invoice marked Paid (${methodLabel}) and moved to Paid Invoices (Reports)`);
       }
 
       setPaymentStatus('paid');
@@ -8416,8 +8406,7 @@ export default function Home() {
       setIsZellePayOpen(false);
       setIsVenmoPayOpen(false);
       setIsPayPalPayOpen(false);
-      setProfileTab('paidInvoices');
-      setView('profileView');
+      openPaidInvoicesReport();
       await refreshSavedList();
       await refreshArchivesList();
     } catch (e) {
@@ -9197,22 +9186,15 @@ export default function Home() {
     return true;
   };
 
-  /** Open (unpaid) invoices only — paid ones live under Profile → Paid Invoices. */
+  /** Open (unpaid) invoices only — paid ones live under Reports → Paid invoices. */
   const isOpenInvoiceDoc = (est: any) => isInvoiceDocRow(est) && !isPaidDocRow(est);
 
-  const paidInvoicesList = useMemo(() => {
-    return (archivesList || [])
-      .filter((row: any) => {
-        if (isSettingsDocRow(row)) return false;
-        // Paid folder: paid status, or archived invoice (closed out)
-        return isPaidDocRow(row) || isInvoiceDocRow(row);
-      })
-      .sort((a: any, b: any) => {
-        const da = new Date(a.archived_at || a.updated_at || a.date || 0).getTime();
-        const db = new Date(b.archived_at || b.updated_at || b.date || 0).getTime();
-        return db - da;
-      });
-  }, [archivesList]);
+  /** Navigate to Reports → Paid invoices (replaces old Profile paid tab). */
+  const openPaidInvoicesReport = () => {
+    void refreshArchivesList();
+    setReportsSubTab('paid');
+    setView('reportsView');
+  };
 
   /**
    * All mileage trips across active estimates/invoices + archives (for Reports → Tax).
@@ -9560,13 +9542,14 @@ export default function Home() {
       });
   }, [archivesList]);
 
-  /** Reports: paid / closed invoices (not canceled recurring INV-REC) */
+  /** Reports: paid / closed invoices (includes canceled recurring filed as INV-REC paid) */
   const reportPaidInvoices = useMemo(() => {
     return (archivesList || [])
       .filter((row: any) => {
         if (!row || isSettingsDocRow(row)) return false;
-        if (isArchivedCanceledRecurring(row)) return false;
         if (isRecurringPlanRow(row)) return false;
+        // Canceled recurring (INV-REC) + normal paid/closed invoices
+        if (isArchivedCanceledRecurring(row)) return true;
         return isInvoiceDocRow(row) || isPaidDocRow(row);
       })
       .sort((a: any, b: any) => {
@@ -10356,7 +10339,7 @@ export default function Home() {
                 )}
               </div>
               <p className="text-sm text-gray-500 mb-4">
-                Paid invoices are moved to Profile → {t('paidInvoices')}.
+                Paid invoices are moved to Reports → Paid invoices.
               </p>
 
               {selectedIds.length > 0 && (
@@ -10379,7 +10362,7 @@ export default function Home() {
               <div className="space-y-4">
                 {openInvoicesList.length === 0 && (
                   <div className="border border-dashed rounded-lg p-8 text-center text-sm text-gray-500 bg-white">
-                    No open invoices. Paid invoices are under Profile → {t('paidInvoices')}.
+                    No open invoices. Paid invoices are under Reports → Paid invoices.
                   </div>
                 )}
                 {openInvoicesList.map((est) => (
@@ -12084,21 +12067,6 @@ export default function Home() {
                 </button>
                 <button
                   onClick={() => {
-                    setProfileTab('paidInvoices');
-                    void refreshArchivesList();
-                    void refreshSavedList();
-                  }}
-                  className={`flex-1 min-w-[8rem] py-4 text-center font-semibold ${profileTab === 'paidInvoices' ? 'border-b-4 border-[#10b981] text-[#10b981]' : 'text-gray-500'}`}
-                >
-                  ✅ {t('paidInvoices')}
-                  {paidInvoicesList.length > 0 && (
-                    <span className="ml-1 text-xs font-medium px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
-                      {paidInvoicesList.length}
-                    </span>
-                  )}
-                </button>
-                <button
-                  onClick={() => {
                     setProfileTab('tutorials');
                     void refreshTutorials();
                   }}
@@ -13127,18 +13095,15 @@ export default function Home() {
 
                     <div className="border-t pt-8">
                       <h3 className="font-semibold mb-2">{t('paidInvoices')}</h3>
-                      <p className="text-sm text-gray-500 mb-4">{t('paidInvoicesHelp')}</p>
+                      <p className="text-sm text-gray-500 mb-4">
+                        Paid invoices and canceled recurring plans are under Reports → Paid invoices.
+                      </p>
                       <Button
                         variant="outline"
                         className="w-full mb-2 border-[#10b981] text-[#10b981] hover:bg-emerald-50"
-                        onClick={() => {
-                          setProfileTab('paidInvoices');
-                          void refreshArchivesList();
-                          void refreshSavedList();
-                        }}
+                        onClick={() => openPaidInvoicesReport()}
                       >
-                        ✅ {t('paidInvoices')}
-                        {paidInvoicesList.length > 0 ? ` (${paidInvoicesList.length})` : ''}
+                        ✅ Open Paid invoices (Reports)
                       </Button>
                       <Button
                         variant="outline"
@@ -13376,118 +13341,6 @@ export default function Home() {
                 </Card>
               )}
 
-              {profileTab === 'paidInvoices' && (
-                <Card className="mb-8">
-                  <CardContent className="p-6 sm:p-8 space-y-4">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <h3 className="text-xl font-semibold flex items-center gap-2">
-                          <span>✅</span>
-                          <span>{t('paidInvoices')}</span>
-                        </h3>
-                        <p className="text-sm text-gray-500 mt-1">{t('paidInvoicesHelp')}</p>
-                      </div>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          void refreshArchivesList();
-                          void refreshSavedList();
-                        }}
-                      >
-                        Refresh
-                      </Button>
-                    </div>
-
-                    <div className="space-y-3">
-                      {paidInvoicesList.length === 0 && (
-                        <div className="border border-dashed rounded-lg p-8 text-center text-sm text-gray-500 bg-gray-50">
-                          {t('noPaidInvoices')}
-                        </div>
-                      )}
-                      {paidInvoicesList.map((inv) => {
-                        const paidLabel = inv.paymentMethod
-                          ? `${t('paid')} · ${inv.paymentMethod}`
-                          : t('paid');
-                        const archivedDate = inv.archived_at
-                          ? new Date(inv.archived_at).toLocaleDateString()
-                          : inv.date || '';
-                        return (
-                          <div
-                            key={inv.id}
-                            className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 border p-4 rounded-lg bg-white min-w-0"
-                          >
-                            <div className="min-w-0">
-                              <div className="font-medium break-words">{inv.jobName || 'Untitled'}</div>
-                              <div className="text-sm text-gray-500 break-words">
-                                {inv.invoiceNumber || inv.id}
-                                {inv.documentType ? ` · ${String(inv.documentType)}` : ''}
-                                {archivedDate ? ` · ${archivedDate}` : ''}
-                              </div>
-                              <div className="mt-1 flex flex-wrap items-center gap-2">
-                                <span className="px-2 py-0.5 text-xs font-medium bg-green-100 text-green-700 rounded-full">
-                                  {paidLabel}
-                                </span>
-                                {typeof inv.amountPaid === 'number' && inv.amountPaid > 0 && (
-                                  <span className="text-xs text-gray-600">
-                                    ${Number(inv.amountPaid).toFixed(2)}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                            <div className="flex flex-wrap gap-2 shrink-0">
-                              <Button
-                                size="sm"
-                                onClick={async () => {
-                                  await loadSelectedEstimate(inv);
-                                  setView('editor');
-                                }}
-                              >
-                                {t('open')}
-                              </Button>
-                              {isArchivedCanceledRecurring(inv) ? (
-                                <Button
-                                  size="sm"
-                                  className="bg-emerald-600 hover:bg-emerald-700 text-white"
-                                  onClick={() => void restoreArchivedRecurringToCharges(inv)}
-                                >
-                                  ↻ Add back to Recurring
-                                </Button>
-                              ) : (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  className="border-[#10b981] text-[#10b981] hover:bg-emerald-50"
-                                  onClick={() => retrieveArchive(inv)}
-                                >
-                                  {t('retrieve')}
-                                </Button>
-                              )}
-                              <Button
-                                size="sm"
-                                variant="destructive"
-                                onClick={() => deleteArchivedDocument(inv.id)}
-                              >
-                                {t('delete')}
-                              </Button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    <div className="pt-4 border-t">
-                      <Button
-                        variant="outline"
-                        className="w-full"
-                        onClick={openArchivesView}
-                      >
-                        📦 {t('viewArchives')} ({t('archivedDocuments')})
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
             </div>
           )}
 

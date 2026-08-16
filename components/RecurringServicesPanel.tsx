@@ -357,8 +357,8 @@ export function RecurringServicesPanel({
       setPlans((prev) => prev.filter((p) => p.id !== planId));
       showMessage(
         json.archiveId
-          ? `✅ Plan canceled and moved to Archive Invoices (${json.archiveId}). EstimateAce software billing is unchanged.`
-          : '✅ Plan canceled and removed from Recurring. Check Archive Invoices for the closed record.'
+          ? `✅ Plan canceled and moved to Paid invoices (${json.archiveId}). Open Reports → Paid invoices. EstimateAce software billing is unchanged.`
+          : '✅ Plan canceled and removed from Recurring. Check Reports → Paid invoices for the closed record.'
       );
       await loadPlans();
     } catch (e: any) {

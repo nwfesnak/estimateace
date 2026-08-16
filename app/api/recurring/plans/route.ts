@@ -144,7 +144,7 @@ export async function PATCH(request: NextRequest) {
         plan: result.plan ?? null,
         archiveId: result.archiveId || null,
         message:
-          'Plan canceled, removed from Recurring Charges, and filed under Archive Invoices.',
+          'Plan canceled, removed from Recurring Charges, and filed under Paid invoices (Reports).',
       });
     }
 
