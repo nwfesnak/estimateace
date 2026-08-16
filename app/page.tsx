@@ -9599,7 +9599,7 @@ export default function Home() {
 
   const patchReportRecurring = async (
     planId: string,
-    action: 'pause' | 'resume' | 'cancel' | 'restore'
+    action: 'pause' | 'resume' | 'cancel' | 'restore' | 'delete'
   ) => {
     if (!supabase) return;
     if (!planId) {
@@ -9619,6 +9619,15 @@ export default function Home() {
       if (
         !window.confirm(
           'Restore this plan from Archive as a draft? You can re-send approval afterward.'
+        )
+      ) {
+        return;
+      }
+    }
+    if (action === 'delete') {
+      if (
+        !window.confirm(
+          'Permanently delete this archived plan?\n\nThis cannot be undone.'
         )
       ) {
         return;
@@ -9652,7 +9661,9 @@ export default function Home() {
             ? '✅ Payments turned back on.'
             : action === 'restore'
               ? json.message || '✅ Plan restored as a draft.'
-              : json.message || '✅ Plan canceled and moved to Recurring → Archive.'
+              : action === 'delete'
+                ? json.message || '✅ Archived plan deleted.'
+                : json.message || '✅ Plan canceled and moved to Recurring → Archive.'
       );
       await loadReportRecurringPlans();
     } catch (e: any) {
@@ -13648,7 +13659,7 @@ export default function Home() {
                                   ? 'Draft, awaiting approval, and paying clients.'
                                   : sec.key === 'off'
                                     ? 'Billing paused — turn back on without re-creating the plan.'
-                                    : 'Canceled plans. Restore as draft anytime. Not paid invoices.'}
+                                    : 'Canceled plans. Restore as draft or delete permanently. Not paid invoices.'}
                               </p>
                               {sec.list.length === 0 ? (
                                 <div className="rounded-xl border border-dashed bg-slate-50 p-6 text-sm text-gray-500 mb-6">
@@ -13679,14 +13690,24 @@ export default function Home() {
                                       </div>
                                       <div className="flex flex-wrap gap-2 shrink-0">
                                         {canceled ? (
-                                          <Button
-                                            size="sm"
-                                            className="bg-emerald-700 text-white"
-                                            disabled={reportRecurringBusyId === p.id}
-                                            onClick={() => void patchReportRecurring(p.id, 'restore')}
-                                          >
-                                            ↻ Restore from archive
-                                          </Button>
+                                          <>
+                                            <Button
+                                              size="sm"
+                                              className="bg-emerald-700 text-white"
+                                              disabled={reportRecurringBusyId === p.id}
+                                              onClick={() => void patchReportRecurring(p.id, 'restore')}
+                                            >
+                                              ↻ Restore from archive
+                                            </Button>
+                                            <Button
+                                              size="sm"
+                                              variant="destructive"
+                                              disabled={reportRecurringBusyId === p.id}
+                                              onClick={() => void patchReportRecurring(p.id, 'delete')}
+                                            >
+                                              🗑 Delete
+                                            </Button>
+                                          </>
                                         ) : String(p.status).toLowerCase() === 'paused' ? (
                                           <Button
                                             size="sm"

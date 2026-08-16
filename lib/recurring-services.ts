@@ -992,6 +992,69 @@ export async function restoreCanceledRecurringInPlace(
 }
 
 /**
+ * Permanently delete a plan that is already in Recurring → Archive (status canceled).
+ * Active / paused plans must be canceled first.
+ */
+export async function deleteArchivedRecurringPlan(
+  ownerUserId: string,
+  planId: string
+): Promise<{ ok: boolean; error?: string }> {
+  const admin = getSupabaseAdmin();
+  if (!admin) return { ok: false, error: 'Server missing SUPABASE_SERVICE_ROLE_KEY' };
+
+  const id = String(planId || '').trim();
+  if (!id) return { ok: false, error: 'Plan id is required' };
+
+  const plan = await getRecurringPlan(ownerUserId, id);
+  if (!plan) return { ok: false, error: 'Plan not found' };
+  if (plan.status !== 'canceled') {
+    return {
+      ok: false,
+      error: 'Only archived (canceled) plans can be deleted. Cancel the plan first.',
+    };
+  }
+
+  // Best-effort: cancel any leftover Stripe subscription before hard delete
+  const stripe = getStripe();
+  if (stripe && plan.stripeSubscriptionId) {
+    const account = await getPaymentAccount(ownerUserId);
+    const connectedId = account?.stripe_account_id || null;
+    try {
+      const opts =
+        connectedId && account?.charges_enabled
+          ? ({ stripeAccount: connectedId } as Stripe.RequestOptions)
+          : undefined;
+      await stripe.subscriptions.cancel(plan.stripeSubscriptionId, undefined, opts);
+    } catch (e: any) {
+      console.warn('delete archived recurring — stripe cancel:', e?.message);
+    }
+  }
+
+  const { error: delErr } = await admin
+    .from('estimates')
+    .delete()
+    .eq('id', id)
+    .eq('user_id', ownerUserId);
+
+  if (delErr) {
+    return { ok: false, error: delErr.message || 'Could not delete archived plan' };
+  }
+
+  // Clean up any legacy INV-REC archive row tied to this plan
+  const rest = id.replace(/^REC-/i, '');
+  const legacyIds = [`INV-REC-${rest}`, id].filter(Boolean);
+  for (const archId of legacyIds) {
+    try {
+      await admin.from('archive-est').delete().eq('id', archId).eq('user_id', ownerUserId);
+    } catch {
+      /* optional cleanup */
+    }
+  }
+
+  return { ok: true };
+}
+
+/**
  * Turn off recurring payments (pause Stripe collection if any).
  * Plan stays on Recurring Charges under "Payments off".
  */

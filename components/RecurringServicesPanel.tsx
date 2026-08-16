@@ -573,6 +573,37 @@ export function RecurringServicesPanel({
     }
   };
 
+  const deleteArchivedPlan = async (planId: string) => {
+    if (
+      !window.confirm(
+        'Permanently delete this archived plan?\n\nThis cannot be undone. The client will not be charged (billing already stopped when canceled).'
+      )
+    ) {
+      return;
+    }
+    setBusyId(planId);
+    try {
+      const headers = await authHeaders();
+      const res = await fetch('/api/recurring/plans', {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({ id: planId, action: 'delete' }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showMessage(json.error || 'Could not delete');
+        return;
+      }
+      setPlans((prev) => prev.filter((p) => p.id !== planId));
+      showMessage(json.message || '✅ Archived plan deleted.');
+      await loadPlans();
+    } catch (e: any) {
+      showMessage(e?.message || 'Delete failed');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   return (
     <div className="w-full max-w-4xl mx-auto min-w-0">
       {/* Same chrome style as Create Estimate */}
@@ -837,7 +868,7 @@ export function RecurringServicesPanel({
             {
               key: 'archive',
               title: 'Archive',
-              hint: 'Canceled plans. Restore to draft anytime. These are not paid invoices.',
+              hint: 'Canceled plans. Restore to draft or delete permanently. These are not paid invoices.',
               list: plans.filter((p) => isCanceledPlan(p.status)),
             },
           ] as const).map((section) => (
@@ -907,14 +938,24 @@ export function RecurringServicesPanel({
                           </div>
                           <div className="flex flex-col gap-2 w-full sm:w-auto">
                             {canceled ? (
-                              <Button
-                                size="sm"
-                                className="bg-emerald-700 hover:bg-emerald-800 text-white"
-                                disabled={busyId === p.id}
-                                onClick={() => void restorePlan(p.id)}
-                              >
-                                ↻ Restore from archive
-                              </Button>
+                              <>
+                                <Button
+                                  size="sm"
+                                  className="bg-emerald-700 hover:bg-emerald-800 text-white"
+                                  disabled={busyId === p.id}
+                                  onClick={() => void restorePlan(p.id)}
+                                >
+                                  ↻ Restore from archive
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="destructive"
+                                  disabled={busyId === p.id}
+                                  onClick={() => void deleteArchivedPlan(p.id)}
+                                >
+                                  🗑 Delete permanently
+                                </Button>
+                              </>
                             ) : (
                               <>
                                 <Button
@@ -1002,7 +1043,7 @@ export function RecurringServicesPanel({
           </li>
           <li>
             <strong>Turn off payments</strong> pauses billing; <strong>Cancel → Archive</strong> ends
-            the plan under Archive (not a paid invoice).
+            the plan under Archive (not a paid invoice). From Archive you can restore or delete permanently.
           </li>
           <li>Job invoices stay under Invoices and only move to Paid invoices when marked paid.</li>
         </ol>

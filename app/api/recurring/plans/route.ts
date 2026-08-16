@@ -8,6 +8,7 @@ import {
   cancelClientRecurringSubscription,
   restoreCanceledRecurringInPlace,
   restoreRecurringPlanFromArchive,
+  deleteArchivedRecurringPlan,
   pauseClientRecurringPayments,
   resumeClientRecurringPayments,
   buildRecurringClientLink,
@@ -92,7 +93,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-/** Update or cancel a plan. Body: { id, action?: 'cancel' | 'update' | 'pause' | 'resume' | 'restore', ...fields } */
+/** Update or cancel a plan. Body: { id, action?: 'cancel' | 'update' | 'pause' | 'resume' | 'restore' | 'delete', ...fields } */
 export async function PATCH(request: NextRequest) {
   try {
     const { user, error } = await getUserFromRequest(request);
@@ -166,6 +167,20 @@ export async function PATCH(request: NextRequest) {
       });
     }
 
+    if (action === 'delete') {
+      const result = await deleteArchivedRecurringPlan(ownerId, id);
+      if (!result.ok) {
+        return NextResponse.json(
+          { error: result.error || 'Could not delete' },
+          { status: 400 }
+        );
+      }
+      return NextResponse.json({
+        ok: true,
+        message: 'Archived plan permanently deleted.',
+      });
+    }
+
     if (action === 'pause') {
       const result = await pauseClientRecurringPayments(ownerId, id);
       if (!result.ok) {
@@ -233,7 +248,7 @@ export async function PATCH(request: NextRequest) {
 
     if (Object.keys(patch).length === 0) {
       return NextResponse.json(
-        { error: 'Nothing to update. Pass fields or action=pause|resume|cancel|restore.' },
+        { error: 'Nothing to update. Pass fields or action=pause|resume|cancel|restore|delete.' },
         { status: 400 }
       );
     }
