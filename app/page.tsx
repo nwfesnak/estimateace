@@ -963,6 +963,8 @@ export default function Home() {
     appointmentReminderEnabled: false,
     showDiscountOnEstimate: true,
     taxesEnabled: true,
+    /** When false, hide AI Job Renderings in the editor and send flow */
+    aiJobRenderingEnabled: true,
     teammates: [] as {
       email: string;
       userId?: string;
@@ -1088,6 +1090,15 @@ export default function Home() {
       return cached.taxesEnabled !== false;
     }
     return profile.taxesEnabled !== false;
+  };
+
+  /** Company Info toggle — default on when unset */
+  const getAiJobRenderingEnabled = (): boolean => {
+    const cached = getProfileSettingsCache();
+    if ('aiJobRenderingEnabled' in cached) {
+      return cached.aiJobRenderingEnabled !== false;
+    }
+    return (profile as any).aiJobRenderingEnabled !== false;
   };
 
   const estimateTotals = computeEstimateTotals({
@@ -1245,6 +1256,7 @@ export default function Home() {
     appointmentReminderEnabled: !!full.appointmentReminderEnabled,
     showDiscountOnEstimate: full.showDiscountOnEstimate === true,
     taxesEnabled: full.taxesEnabled !== false,
+    aiJobRenderingEnabled: full.aiJobRenderingEnabled !== false,
     paymentSettings: mergePaymentSettings(full.paymentSettings),
     // SMS 2FA forced off until phone line is active
     twoFactorEnabled: false,
@@ -2557,6 +2569,7 @@ export default function Home() {
       const hasSavedPrefs =
         'showDiscountOnEstimate' in cached ||
         'taxesEnabled' in cached ||
+        'aiJobRenderingEnabled' in cached ||
         !!serverProfile;
 
       if (!hasSavedPrefs) return;
@@ -2569,10 +2582,17 @@ export default function Home() {
             : (serverProfile && 'taxesEnabled' in serverProfile
               ? serverProfile.taxesEnabled !== false
               : prev.taxesEnabled !== false);
+        const aiJobRenderingEnabled =
+          'aiJobRenderingEnabled' in cached
+            ? cached.aiJobRenderingEnabled !== false
+            : (serverProfile && 'aiJobRenderingEnabled' in serverProfile
+              ? (serverProfile as any).aiJobRenderingEnabled !== false
+              : (prev as any).aiJobRenderingEnabled !== false);
         return {
           ...prev,
           ...displaySettings,
           taxesEnabled,
+          aiJobRenderingEnabled,
         };
       });
     })();
@@ -4157,6 +4177,13 @@ export default function Home() {
           : ('taxesEnabled' in loadedProfile
             ? loadedProfile.taxesEnabled !== false
             : profile.taxesEnabled !== false)),
+      aiJobRenderingEnabled: 'aiJobRenderingEnabled' in cached
+        ? cached.aiJobRenderingEnabled !== false
+        : (serverProfile && 'aiJobRenderingEnabled' in serverProfile
+          ? (serverProfile as any).aiJobRenderingEnabled !== false
+          : ('aiJobRenderingEnabled' in loadedProfile
+            ? loadedProfile.aiJobRenderingEnabled !== false
+            : (profile as any).aiJobRenderingEnabled !== false)),
       ...displaySettings,
       appointmentReminderEnabled: 'appointmentReminderEnabled' in loadedProfile
         ? !!loadedProfile.appointmentReminderEnabled
@@ -4352,6 +4379,13 @@ export default function Home() {
               ? serverProfile.taxesEnabled !== false
               : ('taxesEnabled' in l
                 ? l.taxesEnabled !== false
+                : true)),
+          aiJobRenderingEnabled: 'aiJobRenderingEnabled' in cached
+            ? cached.aiJobRenderingEnabled !== false
+            : (serverProfile && 'aiJobRenderingEnabled' in serverProfile
+              ? (serverProfile as any).aiJobRenderingEnabled !== false
+              : ('aiJobRenderingEnabled' in l
+                ? (l as any).aiJobRenderingEnabled !== false
                 : true)),
           ...displaySettings,
           appointmentReminderEnabled: 'appointmentReminderEnabled' in (s as any)
@@ -7015,6 +7049,7 @@ export default function Home() {
       appointmentReminderEnabled: nextProfile.appointmentReminderEnabled,
       showDiscountOnEstimate: nextProfile.showDiscountOnEstimate === true,
       taxesEnabled: nextProfile.taxesEnabled !== false,
+      aiJobRenderingEnabled: nextProfile.aiJobRenderingEnabled !== false,
     });
     await upsertUserSettingsProfile(nextProfile);
     // Keep open estimate's embedded profile in sync, but SETTINGS row is source of truth
@@ -11231,6 +11266,7 @@ export default function Home() {
               </Card>
 
               {/* AI Job Renderings — photo linked to a description line → completed look */}
+              {getAiJobRenderingEnabled() && (
               <Card className="mb-8 border-violet-200">
                 <CardContent className="p-6">
                   <h3 className="text-xl font-semibold mb-2">
@@ -11559,6 +11595,7 @@ export default function Home() {
                   )}
                 </CardContent>
               </Card>
+              )}
 
               <Dialog open={isPhotoQuoteLinePickerOpen} onOpenChange={setIsPhotoQuoteLinePickerOpen}>
                 <DialogContent>
@@ -12039,7 +12076,7 @@ export default function Home() {
                   </div>
                 )}
 
-                {jobRenderings.length > 0 && (
+                {getAiJobRenderingEnabled() && jobRenderings.length > 0 && (
                   <div className="mt-12">
                     <h3 className="text-2xl font-semibold mb-4 border-b pb-3">
                       AI Job Renderings (After Completing)
@@ -13050,6 +13087,38 @@ export default function Home() {
                                 checked
                                   ? '✅ Taxes enabled on estimates.'
                                   : '✅ Taxes disabled — totals will exclude sales tax.'
+                              );
+                            }}
+                            className="sr-only peer"
+                          />
+                          <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]"></div>
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="border rounded-xl p-4 space-y-4 bg-gray-50">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="font-semibold">AI Job Renderings</p>
+                          <p className="text-sm text-gray-500">
+                            When on, show AI Job Renderings on estimates (before/after completed-look photos).
+                            Turn off to hide that section in the editor and when sending to clients.
+                          </p>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={getAiJobRenderingEnabled()}
+                            onChange={async (e) => {
+                              const checked = e.target.checked;
+                              const nextProfile = { ...profile, aiJobRenderingEnabled: checked };
+                              setProfile(nextProfile);
+                              await saveProfileSettings(nextProfile);
+                              if (!checked) setSendIncludeJobRenderings(false);
+                              showMessage(
+                                checked
+                                  ? '✅ AI Job Renderings enabled.'
+                                  : '✅ AI Job Renderings turned off in the app.'
                               );
                             }}
                             className="sr-only peer"
@@ -14396,7 +14465,8 @@ export default function Home() {
                       </div>
                     </div>
 
-                    {/* AI Renderings toggle */}
+                    {/* AI Renderings toggle — only when enabled in Company Info */}
+                    {getAiJobRenderingEnabled() && (
                     <div
                       className={`rounded-xl border-2 bg-white p-4 ${
                         jobRenderings.length === 0
@@ -14448,6 +14518,7 @@ export default function Home() {
                         </div>
                       </div>
                     </div>
+                    )}
 
                     {/* Videos toggle */}
                     <div
@@ -14504,7 +14575,9 @@ export default function Home() {
                       sendIncludeSitePhotos && photoUrls.length > 0
                         ? `Site Photos (${photoUrls.length})`
                         : null,
-                      sendIncludeJobRenderings && jobRenderings.length > 0
+                      getAiJobRenderingEnabled() &&
+                      sendIncludeJobRenderings &&
+                      jobRenderings.length > 0
                         ? `AI Renderings (${jobRenderings.length})`
                         : null,
                       sendIncludeVideos && videoUrls.length > 0
@@ -14753,7 +14826,9 @@ export default function Home() {
                 )}
 
                 {/* AI Job Renderings (with legal disclosure) */}
-                {sendIncludeJobRenderings && jobRenderings.length > 0 && (
+                {getAiJobRenderingEnabled() &&
+                  sendIncludeJobRenderings &&
+                  jobRenderings.length > 0 && (
                   <div className="mt-12">
                     <h3 className="text-2xl font-semibold mb-3 border-b pb-3">
                       AI Job Renderings (After Completing)
@@ -14965,15 +15040,19 @@ export default function Home() {
                     empty: 'None on this document',
                     colorOn: 'bg-emerald-600',
                   },
-                  {
-                    key: 'renders' as const,
-                    title: '✨ AI Job Renderings',
-                    count: jobRenderings.length,
-                    on: sendIncludeJobRenderings,
-                    set: setSendIncludeJobRenderings,
-                    empty: 'None on this document',
-                    colorOn: 'bg-violet-600',
-                  },
+                  ...(getAiJobRenderingEnabled()
+                    ? [
+                        {
+                          key: 'renders' as const,
+                          title: '✨ AI Job Renderings',
+                          count: jobRenderings.length,
+                          on: sendIncludeJobRenderings,
+                          set: setSendIncludeJobRenderings,
+                          empty: 'None on this document',
+                          colorOn: 'bg-violet-600',
+                        },
+                      ]
+                    : []),
                   {
                     key: 'videos' as const,
                     title: '🎥 Videos',
@@ -15032,7 +15111,9 @@ export default function Home() {
                 </div>
               ))}
 
-              {sendIncludeJobRenderings && jobRenderings.length > 0 && (
+              {getAiJobRenderingEnabled() &&
+                sendIncludeJobRenderings &&
+                jobRenderings.length > 0 && (
                 <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs text-amber-950 leading-relaxed">
                   <strong className="block mb-1">⚠️ AI-generated imagery disclosure</strong>
                   AI renderings are illustrative previews only. Actual results may vary. They are
@@ -15116,7 +15197,9 @@ export default function Home() {
                   const includePhotos = sendIncludeSitePhotos && photoUrls.length > 0;
                   const includeVideos = sendIncludeVideos && videoUrls.length > 0;
                   const includeRenders =
-                    sendIncludeJobRenderings && jobRenderings.length > 0;
+                    getAiJobRenderingEnabled() &&
+                    sendIncludeJobRenderings &&
+                    jobRenderings.length > 0;
 
                   const sitePhotoUrls = includePhotos
                     ? await createEmailMediaUrls(photoUrls.slice(0, 24))
