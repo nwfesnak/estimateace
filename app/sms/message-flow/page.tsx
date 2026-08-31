@@ -10,6 +10,7 @@ import {
   getSmsOptInNumber,
   helpSms,
   privacyPolicyUrl,
+  smsCtaUrl,
   smsOptInPageUrl,
   stopSms,
   termsUrl,
@@ -47,10 +48,25 @@ export default function SmsMessageFlowPage() {
             </p>
             <h1 className="text-2xl font-bold mt-1">How end-users consent to receive messages</h1>
             <p className="text-sm text-slate-600 mt-2">
-              Use this page URL in Twilio&apos;s Message Flow field, or screenshot this card for
-              OneDrive / Drive hosting.
+              Paste this page URL (or the CTA page) into Twilio&apos;s Message Flow field. Screenshot
+              either page if Twilio asks for hosted image evidence.
             </p>
           </header>
+
+          <section className="rounded-lg border-4 border-emerald-700 bg-emerald-50 p-5 text-center space-y-2">
+            <p className="text-xs font-bold uppercase text-emerald-900">
+              Public text opt-in call-to-action (for Twilio reviewers)
+            </p>
+            <p className="text-2xl font-black">
+              Text {SMS_KEYWORD_OPT_IN} to {number}
+            </p>
+            <p className="text-sm">
+              Full CTA page:{' '}
+              <a className="text-emerald-800 font-semibold underline" href={smsCtaUrl()}>
+                {smsCtaUrl()}
+              </a>
+            </p>
+          </section>
 
           <section className="rounded-lg border bg-white p-4 text-sm leading-relaxed">
             <h2 className="font-semibold mb-2">Message flow (paste into Twilio)</h2>
