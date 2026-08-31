@@ -9445,24 +9445,53 @@ export default function Home() {
   }, [estimatesWithDeposit]);
 
   const calculateGrandTotal = (doc: any): number => {
-    if (!doc || !doc.items) return 0;
+    if (!doc) return 0;
+
+    // Archive / DB rows sometimes store items as JSON string or omit them
+    let items = doc.items;
+    if (typeof items === 'string') {
+      try {
+        items = JSON.parse(items);
+      } catch {
+        items = [];
+      }
+    }
+    if (!Array.isArray(items)) items = [];
+
     const laborAmountDoc =
-      doc.laborAmount ??
-      (doc.useHourlyLabor
-        ? (doc.laborHours || 0) * (doc.laborRate || 0)
-        : doc.laborFixedAmount || 0);
-    const docDiscountData = getDiscountFromDoc(doc);
-    return computeEstimateTotals({
-      items: doc.items,
-      laborAmount: laborAmountDoc,
-      isTaxExempt: doc.isTaxExempt,
-      taxesEnabled: getTaxesEnabled(),
-      taxRate: doc.taxRate ?? 7,
-      discountDescription: docDiscountData.discountDescription,
-      discountValue: docDiscountData.discountValue,
-      discountType: docDiscountData.discountType,
-      storedDiscountAmount: docDiscountData.discountAmount,
-    }).grandTotal;
+      Number(doc.laborAmount ?? doc.laboramount) ||
+      (doc.useHourlyLabor ?? doc.usehourlylabor
+        ? (Number(doc.laborHours ?? doc.laborhours) || 0) *
+          (Number(doc.laborRate ?? doc.laborrate) || 0)
+        : Number(doc.laborFixedAmount ?? doc.laborfixedamount) || 0);
+
+    if (items.length > 0 || laborAmountDoc > 0) {
+      const docDiscountData = getDiscountFromDoc(doc);
+      const computed = computeEstimateTotals({
+        items,
+        laborAmount: laborAmountDoc,
+        isTaxExempt: !!(doc.isTaxExempt ?? doc.istaxexempt),
+        taxesEnabled: getTaxesEnabled(),
+        taxRate: Number(doc.taxRate ?? doc.taxrate) || 7,
+        discountDescription: docDiscountData.discountDescription,
+        discountValue: docDiscountData.discountValue,
+        discountType: docDiscountData.discountType,
+        storedDiscountAmount: docDiscountData.discountAmount,
+      }).grandTotal;
+      if (computed > 0.009) return computed;
+    }
+
+    // Fallbacks so Reports never show $0 when a paid amount / stored total exists
+    const stored =
+      Number(doc.grandTotal ?? doc.grandtotal) ||
+      Number(doc.total ?? doc.amount) ||
+      0;
+    if (stored > 0.009) return stored;
+
+    const paid = Number(doc.amountPaid ?? doc.amountpaid) || 0;
+    if (paid > 0.009) return paid;
+
+    return 0;
   };
 
   const totalOutstanding = outstandingInvoices.reduce((sum, inv) => sum + calculateGrandTotal(inv), 0);
@@ -9697,7 +9726,10 @@ export default function Home() {
         if (isRecurringPlanRow(row)) return false;
         // Never treat canceled recurring as a paid invoice
         if (isArchivedCanceledRecurring(row)) return false;
-        return isInvoiceDocRow(row) || isPaidDocRow(row);
+        // Only real invoices that are marked paid (not random paid estimates)
+        if (!isInvoiceDocRow(row)) return false;
+        const paidAmt = Number(row.amountPaid ?? row.amountpaid) || 0;
+        return isPaidDocRow(row) || paidAmt > 0.009;
       })
       .sort((a: any, b: any) => {
         const da = new Date(a.archived_at || a.updated_at || a.date || 0).getTime();
@@ -9710,8 +9742,11 @@ export default function Home() {
     let total = 0;
     let paid = 0;
     for (const inv of reportPaidInvoices) {
-      total += calculateGrandTotal(inv);
-      paid += Number(inv.amountPaid ?? inv.amountpaid ?? 0) || 0;
+      const invTotal = calculateGrandTotal(inv);
+      const paidAmt = Number(inv.amountPaid ?? inv.amountpaid ?? 0) || 0;
+      total += invTotal;
+      // Cap displayed paid to this invoice's own total (avoids inflated/wrong paid figures)
+      paid += paidAmt > 0 ? Math.min(paidAmt, invTotal > 0 ? invTotal : paidAmt) : invTotal;
     }
     return { count: reportPaidInvoices.length, total, paid };
   }, [reportPaidInvoices]);
@@ -13911,6 +13946,13 @@ export default function Home() {
                                 >
                                   Restore to estimates
                                 </Button>
+                                <Button
+                                  size="sm"
+                                  variant="destructive"
+                                  onClick={() => void deleteArchivedDocument(est.id)}
+                                >
+                                  Delete
+                                </Button>
                               </div>
                             </div>
                           ))}
@@ -13964,7 +14006,14 @@ export default function Home() {
                         </div>
                       ) : (
                         <div className="space-y-3">
-                          {reportPaidInvoices.map((inv: any) => (
+                          {reportPaidInvoices.map((inv: any) => {
+                            const invTotal = calculateGrandTotal(inv);
+                            const paidRaw = Number(inv.amountPaid ?? inv.amountpaid) || 0;
+                            const paidShow =
+                              paidRaw > 0
+                                ? Math.min(paidRaw, invTotal > 0 ? invTotal : paidRaw)
+                                : invTotal;
+                            return (
                             <div
                               key={inv.id}
                               className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white border rounded-xl p-4"
@@ -13974,14 +14023,12 @@ export default function Home() {
                                   {inv.jobName || inv.jobname || 'Untitled invoice'}
                                 </div>
                                 <div className="text-sm text-gray-500">
-                                  {inv.invoiceNumber || inv.id}
+                                  {inv.invoiceNumber || inv.invoicenumber || inv.id}
                                   {inv.paymentMethod || inv.paymentmethod
                                     ? ` · ${inv.paymentMethod || inv.paymentmethod}`
                                     : ''}
-                                  {` · $${calculateGrandTotal(inv).toFixed(2)}`}
-                                  {Number(inv.amountPaid ?? inv.amountpaid) > 0
-                                    ? ` (paid $${Number(inv.amountPaid ?? inv.amountpaid).toFixed(2)})`
-                                    : ''}
+                                  {` · $${invTotal.toFixed(2)}`}
+                                  {paidShow > 0 ? ` (paid $${paidShow.toFixed(2)})` : ''}
                                 </div>
                               </div>
                               <div className="flex flex-wrap gap-2 shrink-0">
@@ -14002,9 +14049,17 @@ export default function Home() {
                                 >
                                   Retrieve
                                 </Button>
+                                <Button
+                                  size="sm"
+                                  variant="destructive"
+                                  onClick={() => void deleteArchivedDocument(inv.id)}
+                                >
+                                  Delete
+                                </Button>
                               </div>
                             </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       )}
                     </section>
