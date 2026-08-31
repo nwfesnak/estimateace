@@ -7299,10 +7299,14 @@ export default function Home() {
 
       if (data.notified) {
         showMessage(
-          `✅ Test reminder sent (${data.appointmentCount} appointment${data.appointmentCount === 1 ? '' : 's'}).\n\n${parts.join('\n')}`
+          data.sampleAppointment
+            ? `✅ Twilio/email test sent (sample appointment — you had none scheduled).\n\n${parts.join('\n')}`
+            : `✅ Test reminder sent (${data.appointmentCount} appointment${data.appointmentCount === 1 ? '' : 's'}).\n\n${parts.join('\n')}`
         );
       } else {
-        showMessage(`Reminder test completed but nothing was sent.\n\n${parts.join('\n') || 'Check RESEND_API_KEY / Twilio settings.'}`);
+        showMessage(
+          `Reminder test completed but nothing was sent.\n\n${parts.join('\n') || 'Add your company phone/email on Profile, and check Twilio / Resend settings.'}`
+        );
       }
     } catch {
       showMessage('Reminder test failed. Check the server console.');

@@ -67,13 +67,27 @@ export async function POST(request: NextRequest) {
 
     const appointments = (profile._appointments || []) as StoredAppointment[];
     let tomorrowAppointments = getTomorrowsAppointments(appointments);
+    let usedSampleAppointment = false;
     if (tomorrowAppointments.length === 0 && forceTest) {
       tomorrowAppointments = appointments
         .filter(appt => new Date(appt.datetime).getTime() > Date.now())
         .sort((a, b) => new Date(a.datetime).getTime() - new Date(b.datetime).getTime())
         .slice(0, 5);
+      // Allow Twilio/email test with no calendar data — send a sample appointment
       if (tomorrowAppointments.length === 0) {
-        return NextResponse.json({ skipped: true, reason: 'No upcoming appointments to test with.' });
+        const sampleWhen = new Date();
+        sampleWhen.setDate(sampleWhen.getDate() + 1);
+        sampleWhen.setHours(10, 0, 0, 0);
+        tomorrowAppointments = [
+          {
+            id: 'TEST-SAMPLE',
+            estimateId: 'TEST',
+            jobName: 'Sample client (Twilio test)',
+            invoiceNumber: 'TEST-SMS',
+            datetime: sampleWhen.toISOString(),
+          },
+        ];
+        usedSampleAppointment = true;
       }
     } else if (tomorrowAppointments.length === 0) {
       return NextResponse.json({ skipped: true, reason: 'No appointments tomorrow.' });
@@ -82,10 +96,25 @@ export async function POST(request: NextRequest) {
     const contractorEmail = (profile.email || '').trim();
     const contractorPhone = (profile.phone || '').trim();
     const companyName = profile.company || 'EstimateAce';
-    const { subject, emailText, smsText } = buildContractorReminderMessage(
-      tomorrowAppointments,
-      companyName
-    );
+    const built = buildContractorReminderMessage(tomorrowAppointments, companyName);
+    const subject = usedSampleAppointment
+      ? `EstimateAce SMS test — ${companyName}`
+      : built.subject;
+    const emailText = usedSampleAppointment
+      ? [
+          `This is a test from EstimateAce (no real appointments on your calendar).`,
+          '',
+          built.emailText,
+          '',
+          'If you received this email, outbound email is working.',
+        ].join('\n')
+      : built.emailText;
+    const smsText = usedSampleAppointment
+      ? `EstimateAce TEST: Twilio SMS is working for ${companyName || 'your account'}. Sample: 1 appointment tomorrow (not a real booking).`.slice(
+          0,
+          1600
+        )
+      : built.smsText;
 
     const result = {
       emailsSent: [] as string[],
@@ -130,6 +159,7 @@ export async function POST(request: NextRequest) {
       notified,
       appointmentCount: tomorrowAppointments.length,
       testMode: forceTest,
+      sampleAppointment: usedSampleAppointment,
     });
   } catch (err: unknown) {
     console.error('Appointment reminder send error:', err);
