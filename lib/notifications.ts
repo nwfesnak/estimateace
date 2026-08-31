@@ -193,8 +193,15 @@ export async function sendEmailNotification(
 
 export async function sendSmsNotification(
   phone: string,
-  body: string
-): Promise<{ ok: boolean; error?: string }> {
+  body: string,
+  options?: { waitForStatus?: boolean }
+): Promise<{
+  ok: boolean;
+  error?: string;
+  sid?: string;
+  status?: string;
+  to?: string;
+}> {
   const twilioSid = process.env.TWILIO_ACCOUNT_SID;
   const twilioToken = process.env.TWILIO_AUTH_TOKEN;
   const twilioFrom = process.env.TWILIO_PHONE_NUMBER;
@@ -231,9 +238,62 @@ export async function sendSmsNotification(
       }
     );
 
-    if (response.ok) return { ok: true };
-    const errBody = await response.text();
-    return { ok: false, error: `SMS failed: ${errBody}` };
+    const raw = await response.text();
+    let parsed: any = {};
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      /* ignore */
+    }
+
+    if (!response.ok) {
+      const code = parsed?.code ? ` (${parsed.code})` : '';
+      const msg = String(parsed?.message || raw || 'unknown error');
+      return { ok: false, error: `SMS failed${code}: ${msg}`, to };
+    }
+
+    const sid = String(parsed?.sid || '');
+    let status = String(parsed?.status || 'queued');
+
+    // Optional short poll — Twilio accepts messages that later undeliver (e.g. 30032)
+    if (options?.waitForStatus && sid) {
+      for (let i = 0; i < 4; i++) {
+        await new Promise((r) => setTimeout(r, 1200));
+        try {
+          const stRes = await fetch(
+            `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages/${sid}.json`,
+            { headers: { Authorization: `Basic ${twilioAuth}` } }
+          );
+          if (stRes.ok) {
+            const st = await stRes.json();
+            status = String(st.status || status);
+            const errCode = st.error_code;
+            if (status === 'delivered') break;
+            if (status === 'failed' || status === 'undelivered') {
+              const hint =
+                errCode === 30032
+                  ? ' Toll-free number is not verified for US SMS (Twilio Console → Toll-Free Verification).'
+                  : errCode === 21608
+                    ? ' Trial accounts can only text verified numbers (Twilio Console → Verified Caller IDs).'
+                    : errCode
+                      ? ` Twilio error ${errCode}.`
+                      : '';
+              return {
+                ok: false,
+                error: `SMS ${status}.${hint}`,
+                sid,
+                status,
+                to,
+              };
+            }
+          }
+        } catch {
+          break;
+        }
+      }
+    }
+
+    return { ok: true, sid, status, to };
   } catch (err: unknown) {
     return { ok: false, error: err instanceof Error ? err.message : 'Unknown SMS error' };
   }

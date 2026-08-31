@@ -133,9 +133,21 @@ export async function POST(request: NextRequest) {
     if (!contractorPhone) {
       result.errors.push('Add your company phone on the Profile page to receive text reminders.');
     } else {
-      const smsResult = await sendSmsNotification(contractorPhone, smsText);
-      if (smsResult.ok) result.smsSent.push(contractorPhone);
-      else if (smsResult.error) result.errors.push(smsResult.error);
+      // On manual "Test Reminder Now", wait briefly for delivery status so we
+      // don't report success when Twilio later marks undelivered (e.g. 30032).
+      const smsResult = await sendSmsNotification(contractorPhone, smsText, {
+        waitForStatus: forceTest,
+      });
+      if (smsResult.ok) {
+        result.smsSent.push(contractorPhone);
+        if (forceTest && smsResult.status && smsResult.status !== 'delivered') {
+          result.errors.push(
+            `SMS accepted by Twilio (status: ${smsResult.status}). If it does not arrive, check Toll-Free Verification / trial limits in Twilio Console.`
+          );
+        }
+      } else if (smsResult.error) {
+        result.errors.push(smsResult.error);
+      }
     }
 
     const notified = result.emailsSent.length > 0 || result.smsSent.length > 0;
