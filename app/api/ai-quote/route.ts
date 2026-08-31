@@ -85,6 +85,7 @@ function parseFactsBody(raw: any): QuoteFacts {
     'wallSqft',
     'roofSqft',
     'areaSqft',
+    'linearFeet',
     'coats',
     'ceilingFt',
     'quantity',
@@ -173,6 +174,9 @@ export async function POST(request: NextRequest) {
         if (!factsOverride.wallSqft && lineQty < 400) factsOverride.wallSqft = lineQty;
         if (!factsOverride.areaSqft) factsOverride.areaSqft = lineQty;
         if (!factsOverride.roofSqft && lineQty >= 200) factsOverride.roofSqft = lineQty;
+      }
+      if (/lf|lin|ft|feet/i.test(unit) && !factsOverride.linearFeet) {
+        factsOverride.linearFeet = lineQty;
       }
     }
 

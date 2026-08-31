@@ -80,18 +80,22 @@ async function callExtractorLlm(description: string): Promise<Partial<ExtractedS
 NEVER invent prices, gallons, hours, labor rates, or $/SF.
 When a description mentions both a small wall (e.g. 240 SF) AND a home floor area (e.g. 1,567 SF home / bedrooms), use the HOME FLOOR SF for whole-home paint templates.
 If painting all interior walls of a home, templateId = paint_interior_whole_home.
-If only a single wall/room with no whole-home language, use paint_interior_walls.
-Texture blend + whole-home paint → paint_interior_whole_home (texture is prep).
+Fence / gutter / pipe / duct / trim jobs use linearFeet (LF), not floorSqft.
+Landscaping / sod / mulch / irrigation use areaSqft.
+Plumbing fixtures (toilet, faucet) → plumbing_fixture. Water/drain line runs → plumbing_water_line.
+Outlets/fans/lights → electrical_fixture. New circuits/rewire → electrical_circuit.
+HVAC systems → hvac_system. Duct runs → hvac_duct.
+NEVER invent prices.
 
 Templates:
 ${catalog}
-- unit_task: single fixture/hardware/appliance job
+- unit_task: miscellaneous single fixture/hardware job
 
 Return ONLY JSON:
 {
   "templateId": "paint_interior_whole_home",
   "confidence": "high",
-  "facts": { "floorSqft": 1567, "wallSqft": null, "coats": 2, "ceilingFt": 8, "areaSqft": null, "roofSqft": null },
+  "facts": { "floorSqft": 1567, "wallSqft": null, "coats": 2, "ceilingFt": 8, "areaSqft": null, "roofSqft": null, "linearFeet": null, "quantity": 1 },
   "scopeSummary": "short scope"
 }`,
           },

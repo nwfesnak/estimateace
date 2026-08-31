@@ -64,6 +64,25 @@ const q2 = priceTemplate(
 );
 assert(q2.laborBreakdown.hours < 100, `desc2 hours ${q2.laborBreakdown.hours}`);
 
+// Multi-trade smoke checks
+const fence = extractScopeDeterministic('Install 120 lf of privacy fence along the backyard');
+assert(fence.templateId === 'fencing', `fence template ${fence.templateId}`);
+assert(fence.facts.linearFeet === 120, `fence lf ${fence.facts.linearFeet}`);
+const fenceQ = priceTemplate('fencing', { linearFeet: 120 }, regional, 'Install 120 lf privacy fence');
+assert(fenceQ.unit === 'LF', fenceQ.unit);
+assert(Math.abs(fenceQ.materialsCostTotal + fenceQ.laborCostTotal - fenceQ.total) < 0.03, 'fence identity');
+
+const toilet = extractScopeDeterministic('Replace toilet in master bath');
+assert(toilet.templateId === 'plumbing_fixture' || toilet.templateId === 'unit_task', toilet.templateId);
+const toiletQ = priceTemplate('plumbing_fixture', {}, regional, 'Replace toilet in master bath');
+assert(toiletQ.total > 200 && toiletQ.total < 2000, `toilet total ${toiletQ.total}`);
+assert(toiletQ.laborBreakdown.hours < 20, `toilet hours ${toiletQ.laborBreakdown.hours}`);
+
+const sod = extractScopeDeterministic('Install sod on 2000 sq ft front lawn');
+assert(sod.templateId === 'landscaping_sod', sod.templateId);
+const sodQ = priceTemplate('landscaping_sod', { areaSqft: 2000 }, regional, 'Install sod 2000 sq ft');
+assert(sodQ.suggestedQty === 2000, String(sodQ.suggestedQty));
+
 console.log('OK', {
   qty: quote.suggestedQty,
   unitPrice: quote.unitPrice,
@@ -73,4 +92,7 @@ console.log('OK', {
   paintGal: paintGal?.qty,
   mat: quote.materialsCostTotal,
   lab: quote.laborCostTotal,
+  fenceTotal: fenceQ.total,
+  toiletTotal: toiletQ.total,
+  sodTotal: sodQ.total,
 });

@@ -26,10 +26,10 @@ export type QuoteLabor = {
 export type LockedQuote = {
   templateId: string;
   suggestedQty: number;
-  unit: 'SF' | 'Unit';
+  unit: 'SF' | 'LF' | 'Unit';
   unitPrice: number;
   total: number;
-  billingMode: 'sqft' | 'unit';
+  billingMode: 'sqft' | 'lf' | 'unit';
   materials: QuoteMaterial[];
   laborBreakdown: QuoteLabor;
   materialsCostTotal: number;
@@ -97,6 +97,24 @@ export function regionalSfRate(
   const blend =
     (regional.materialMultiplier || 1) * 0.32 + (regional.laborMultiplier || 1) * 0.68;
   return roundMoney(basePerSf * coatFactor * blend);
+}
+
+/** Same regional blend for per-linear-foot installed rates. */
+export function regionalLfRate(
+  regional: RegionalPricing,
+  basePerLf: number
+): number {
+  return regionalSfRate(regional, basePerLf, 1);
+}
+
+/** Regionalized lump-sum (unit job) mid total. */
+export function regionalUnitTotal(
+  regional: RegionalPricing,
+  nationalMid: number
+): number {
+  const blend =
+    (regional.materialMultiplier || 1) * 0.38 + (regional.laborMultiplier || 1) * 0.62;
+  return roundMoney(nationalMid * blend);
 }
 
 /**
