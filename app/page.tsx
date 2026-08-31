@@ -1643,6 +1643,11 @@ export default function Home() {
   const SUPPORT_EMAIL =
     (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_SUPPORT_EMAIL) ||
     'support@estimateace.com';
+  const ADMIN_EMAIL =
+    (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_ADMIN_EMAIL) ||
+    'admin@estimateace.com';
+  const [billingContactSubject, setBillingContactSubject] = useState('EstimateAce billing / account help');
+  const [billingContactMessage, setBillingContactMessage] = useState('');
 
   // Photo / video media picker + device-style in-app camera (fixed chrome)
   const [isPhotoPickerOpen, setIsPhotoPickerOpen] = useState(false);
@@ -12429,6 +12434,64 @@ export default function Home() {
                     )}
                     <p className="text-xs text-gray-500">
                       <strong>Manage billing</strong> opens crew members, payment method (Stripe), and account deletion.
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
+
+              {profileTab === 'billing' && (
+                <Card className="mb-8 border-slate-200">
+                  <CardContent className="p-6 space-y-4">
+                    <div>
+                      <h3 className="text-xl font-semibold text-[#1e293b]">📧 Message EstimateAce</h3>
+                      <p className="text-sm text-gray-500 mt-1">
+                        Questions about your plan, billing, or account? Send us a note — opens your email
+                        to <strong>{ADMIN_EMAIL}</strong>.
+                      </p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold mb-1">Subject</label>
+                      <Input
+                        value={billingContactSubject}
+                        onChange={(e) => setBillingContactSubject(e.target.value)}
+                        placeholder="Billing / account help"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold mb-1">Message</label>
+                      <Textarea
+                        value={billingContactMessage}
+                        onChange={(e) => setBillingContactMessage(e.target.value)}
+                        placeholder="How can we help?"
+                        className="min-h-[120px]"
+                      />
+                    </div>
+                    <Button
+                      className="bg-[#10b981] hover:bg-[#059669] text-white"
+                      onClick={() => {
+                        const body = [
+                          billingContactMessage.trim() || '(No message entered)',
+                          '',
+                          '---',
+                          `Company: ${profile.company || '(not set)'}`,
+                          `Profile email: ${profile.email || '(not set)'}`,
+                          `Account: ${user?.email || '(unknown)'}`,
+                          `Billing status: ${billing.status || 'unknown'}`,
+                        ].join('\n');
+                        const href = `mailto:${ADMIN_EMAIL}?subject=${encodeURIComponent(
+                          billingContactSubject.trim() || 'EstimateAce help'
+                        )}&body=${encodeURIComponent(body)}`;
+                        window.location.href = href;
+                        showMessage(`Opening email to ${ADMIN_EMAIL}…`);
+                      }}
+                    >
+                      Send message to EstimateAce
+                    </Button>
+                    <p className="text-xs text-gray-500">
+                      Or email directly:{' '}
+                      <a className="text-emerald-700 underline" href={`mailto:${ADMIN_EMAIL}`}>
+                        {ADMIN_EMAIL}
+                      </a>
                     </p>
                   </CardContent>
                 </Card>
