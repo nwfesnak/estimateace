@@ -54,8 +54,50 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json().catch(() => ({}));
     const forceTest = body?.force === true;
+    const optInConfirm = body?.optInConfirm === true;
 
     const profile = data?.profile || {};
+
+    // Explicit SMS opt-in confirmation text (from Profile toggle)
+    if (optInConfirm) {
+      const contractorPhone = String(profile.phone || '').trim();
+      const companyName = profile.company || 'EstimateAce';
+      if (!contractorPhone) {
+        return NextResponse.json(
+          { error: 'Add your company phone on the Profile page first.' },
+          { status: 400 }
+        );
+      }
+      if (!profile.smsOptIn) {
+        return NextResponse.json(
+          { error: 'Turn on “Opt in to text messaging” on Profile first.' },
+          { status: 400 }
+        );
+      }
+      const smsText =
+        `EstimateAce: You're opted in to transactional texts for ${companyName} (reminders, estimate/invoice notices). Msg&data rates may apply. Reply STOP to opt out, HELP for help.`.slice(
+          0,
+          1600
+        );
+      const smsResult = await sendSmsNotification(contractorPhone, smsText, {
+        waitForStatus: true,
+      });
+      return NextResponse.json({
+        notified: !!smsResult.ok,
+        smsSent: smsResult.ok ? [contractorPhone] : [],
+        emailsSent: [],
+        errors: smsResult.ok
+          ? smsResult.status && smsResult.status !== 'delivered'
+            ? [
+                `SMS accepted (status: ${smsResult.status}). If it does not arrive, finish Twilio number verification / A2P registration.`,
+              ]
+            : []
+          : [smsResult.error || 'SMS failed'],
+        optInConfirm: true,
+        testMode: true,
+      });
+    }
+
     if (!profile.appointmentReminderEnabled && !forceTest) {
       return NextResponse.json({ skipped: true, reason: 'Appointment reminders are off.' });
     }
@@ -132,6 +174,10 @@ export async function POST(request: NextRequest) {
 
     if (!contractorPhone) {
       result.errors.push('Add your company phone on the Profile page to receive text reminders.');
+    } else if (!profile.smsOptIn) {
+      result.errors.push(
+        'Opt in to text messaging on Profile (below Appointment Reminders) to receive SMS.'
+      );
     } else {
       // On manual "Test Reminder Now", wait briefly for delivery status so we
       // don't report success when Twilio later marks undelivered (e.g. 30032).
@@ -142,7 +188,7 @@ export async function POST(request: NextRequest) {
         result.smsSent.push(contractorPhone);
         if (forceTest && smsResult.status && smsResult.status !== 'delivered') {
           result.errors.push(
-            `SMS accepted by Twilio (status: ${smsResult.status}). If it does not arrive, check Toll-Free Verification / trial limits in Twilio Console.`
+            `SMS accepted by Twilio (status: ${smsResult.status}). If it does not arrive, check Toll-Free Verification / A2P 10DLC registration in Twilio Console.`
           );
         }
       } else if (smsResult.error) {

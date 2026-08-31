@@ -973,6 +973,9 @@ export default function Home() {
     showLaborBreakdownOnEstimate: false,
     showCostBreakdownOnEstimate: false,
     appointmentReminderEnabled: false,
+    /** Contractor opted in to receive EstimateAce SMS (reminders, notices) */
+    smsOptIn: false,
+    smsOptInAt: '' as string,
     showDiscountOnEstimate: true,
     taxesEnabled: true,
     /** When false, hide AI Job Renderings in the editor and send flow */
@@ -1266,6 +1269,8 @@ export default function Home() {
     escrowMinimumAmount: Math.max(0, Number(full.escrowMinimumAmount) || 0),
     autoSaveEnabled: full.autoSaveEnabled !== false,
     appointmentReminderEnabled: !!full.appointmentReminderEnabled,
+    smsOptIn: !!full.smsOptIn,
+    smsOptInAt: String(full.smsOptInAt || ''),
     showDiscountOnEstimate: full.showDiscountOnEstimate === true,
     taxesEnabled: full.taxesEnabled !== false,
     aiJobRenderingEnabled: full.aiJobRenderingEnabled !== false,
@@ -7138,6 +7143,8 @@ export default function Home() {
       escrowMinimumAmount: Math.max(0, Number(nextProfile.escrowMinimumAmount) || 0),
       autoSaveEnabled: nextProfile.autoSaveEnabled,
       appointmentReminderEnabled: nextProfile.appointmentReminderEnabled,
+      smsOptIn: !!nextProfile.smsOptIn,
+      smsOptInAt: String(nextProfile.smsOptInAt || ''),
       showDiscountOnEstimate: nextProfile.showDiscountOnEstimate === true,
       taxesEnabled: nextProfile.taxesEnabled !== false,
       aiJobRenderingEnabled: nextProfile.aiJobRenderingEnabled !== false,
@@ -13338,6 +13345,89 @@ export default function Home() {
                           <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]"></div>
                         </label>
                       </div>
+
+                      <div className="flex items-start justify-between gap-3 border-t border-gray-200 pt-4">
+                        <div className="min-w-0">
+                          <p className="font-semibold">Opt in to text messaging</p>
+                          <p className="text-sm text-gray-500 mt-1">
+                            I agree to receive transactional SMS from EstimateAce at the company phone
+                            above (appointment reminders, estimate/invoice notices, and account alerts).
+                            Msg &amp; data rates may apply. Reply STOP to opt out, HELP for help.
+                          </p>
+                          {profile.smsOptIn && profile.smsOptInAt ? (
+                            <p className="text-xs text-emerald-700 mt-1">
+                              Opted in {new Date(profile.smsOptInAt).toLocaleString()}
+                            </p>
+                          ) : (
+                            <p className="text-xs text-amber-700 mt-1">
+                              Required for SMS reminders. Add your company phone above first.
+                            </p>
+                          )}
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer shrink-0 mt-1">
+                          <input
+                            type="checkbox"
+                            checked={!!profile.smsOptIn}
+                            onChange={async (e) => {
+                              const checked = e.target.checked;
+                              const phone = String(profile.phone || '').trim();
+                              if (checked && phone.replace(/\D/g, '').length < 10) {
+                                showMessage('Add a valid company phone on this profile before opting in to texts.');
+                                return;
+                              }
+                              const nextProfile = {
+                                ...profile,
+                                smsOptIn: checked,
+                                smsOptInAt: checked ? new Date().toISOString() : '',
+                              };
+                              setProfile(nextProfile);
+                              await saveProfileSettings(nextProfile);
+                              if (!checked) {
+                                showMessage('Text messaging opted out. You will not receive EstimateAce SMS.');
+                                return;
+                              }
+                              showMessage('✅ Text messaging opted in. Sending confirmation text…');
+                              try {
+                                if (!supabase) return;
+                                const { data: sessionData } = await supabase.auth.getSession();
+                                const token = sessionData.session?.access_token;
+                                if (!token) return;
+                                const res = await fetch('/api/appointment-reminders/send', {
+                                  method: 'POST',
+                                  headers: {
+                                    'Content-Type': 'application/json',
+                                    Authorization: `Bearer ${token}`,
+                                  },
+                                  body: JSON.stringify({ optInConfirm: true }),
+                                });
+                                const data = await res.json().catch(() => ({}));
+                                if (data.smsSent?.length) {
+                                  showMessage(
+                                    `✅ Opted in. Confirmation text sent to ${data.smsSent.join(', ')}.${
+                                      data.errors?.length ? `\n\n${data.errors.join('\n')}` : ''
+                                    }`
+                                  );
+                                } else {
+                                  showMessage(
+                                    `✅ Opted in, but confirmation SMS did not send.\n\n${
+                                      (data.errors || [data.error || 'Check Twilio registration / company phone.']).join(
+                                        '\n'
+                                      )
+                                    }`
+                                  );
+                                }
+                              } catch {
+                                showMessage(
+                                  '✅ Opted in. Could not send confirmation SMS — try Test Reminder Now.'
+                                );
+                              }
+                            }}
+                            className="sr-only peer"
+                          />
+                          <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]"></div>
+                        </label>
+                      </div>
+
                       <Button
                         variant="outline"
                         className="w-full"
