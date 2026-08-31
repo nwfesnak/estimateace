@@ -48,19 +48,20 @@ export function smsMessageFlowUrl(): string {
   return `${getPublicSiteUrl()}/sms/message-flow`;
 }
 
-/** Twilio "How do end-users consent…" Message Flow field (under 2048 chars). */
+/** Twilio "How do end-users consent…" / Recipient consent Message Flow field. */
 export function buildTwilioMessageFlowDescription(): string {
   const num = formatSmsNumberDisplay(getSmsOptInNumber());
+  const e164 = getSmsOptInNumber();
   const site = getPublicSiteUrl();
   return (
-    `End users opt-in by visiting ${site}/sms and adding their mobile phone number, then checking a box agreeing to receive transactional text messages from EstimateAce (appointment reminders, estimate/invoice notices, recurring-service approvals, and account alerts). ` +
-    `They then submit the form and receive a confirmation text. ` +
-    `Additionally, end users can opt-in by texting ${SMS_KEYWORD_OPT_IN} to ${num}; we reply with a welcome message and ask them to reply ${SMS_KEYWORD_CONFIRM} to confirm. ` +
-    `After ${SMS_KEYWORD_CONFIRM}, they receive a final confirmation message. ` +
-    `Message frequency varies (typically a few messages per week when active). Message and data rates may apply. ` +
-    `Reply ${SMS_KEYWORD_STOP} to opt out, ${SMS_KEYWORD_HELP} for help. ` +
-    `Terms and Conditions: ${site}/terms. Privacy Policy: ${site}/privacy. ` +
-    `Campaign collateral / message flow screenshot page: ${site}/sms/message-flow.`
+    `Recipients opt in to EstimateAce transactional SMS in two ways. ` +
+    `(1) Web Form: visit ${site}/sms , enter a mobile number, check a box agreeing to receive texts from EstimateAce about appointment reminders, estimate/invoice notices, recurring-service approvals, and account alerts, check a separate final-confirmation box, and submit; they then receive a confirmation SMS. ` +
+    `(2) Via Text: text the keyword ${SMS_KEYWORD_OPT_IN} to long code / toll-free number ${num} (${e164}). ` +
+    `Welcome message: we reply explaining EstimateAce SMS alerts, that message frequency varies, that message and data rates may apply, with HELP and STOP instructions and links to Terms (${site}/terms) and Privacy (${site}/privacy), and we request final confirmation by asking the user to reply ${SMS_KEYWORD_CONFIRM}. ` +
+    `Confirmation message: after ${SMS_KEYWORD_CONFIRM}, we send a final confirmation that they are opted in, again noting message frequency, message and data rates may apply, and STOP/HELP. ` +
+    `Reply ${SMS_KEYWORD_STOP} to opt out; reply ${SMS_KEYWORD_HELP} for help. ` +
+    `Privacy Policy: ${site}/privacy . Terms: ${site}/terms . ` +
+    `Hosted campaign collateral (screenshot this page for Twilio): ${site}/sms/message-flow .`
   );
 }
 

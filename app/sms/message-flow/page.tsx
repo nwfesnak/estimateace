@@ -57,23 +57,47 @@ export default function SmsMessageFlowPage() {
             <p>{flow}</p>
           </section>
 
-          <section className="rounded-lg border bg-white p-4 text-sm space-y-2">
-            <h2 className="font-semibold">Opt-in methods</h2>
-            <ol className="list-decimal pl-5 space-y-2">
+          <section className="rounded-lg border-2 border-emerald-600 bg-emerald-50 p-4 text-sm space-y-2">
+            <h2 className="font-semibold text-emerald-950">Via Text — number &amp; keyword</h2>
+            <p className="text-2xl font-bold text-emerald-900 tracking-wide">{number}</p>
+            <p>
+              E.164: <strong>{getSmsOptInNumber()}</strong>
+            </p>
+            <ul className="list-disc pl-5 space-y-1">
               <li>
-                <strong>Web form:</strong> Visit{' '}
+                Opt-in keyword: <strong>{SMS_KEYWORD_OPT_IN}</strong>
+              </li>
+              <li>
+                Final confirmation keyword: <strong>{SMS_KEYWORD_CONFIRM}</strong>
+              </li>
+              <li>
+                Help: <strong>{SMS_KEYWORD_HELP}</strong> · Opt-out:{' '}
+                <strong>{SMS_KEYWORD_STOP}</strong>
+              </li>
+            </ul>
+          </section>
+
+          <section className="rounded-lg border bg-white p-4 text-sm space-y-2">
+            <h2 className="font-semibold">Opt-in methods (check in Twilio)</h2>
+            <ul className="list-disc pl-5 space-y-2">
+              <li>
+                <strong>Web Form:</strong>{' '}
                 <a className="text-emerald-700 underline" href={smsOptInPageUrl()}>
                   {smsOptInPageUrl()}
-                </a>
-                , enter mobile number, check consent + final confirmation, submit. User receives a
-                confirmation SMS.
+                </a>{' '}
+                — enter mobile number, consent checkbox (unchecked by default), final confirmation
+                checkbox, submit → confirmation SMS.
               </li>
               <li>
-                <strong>Keyword:</strong> Text <strong>{SMS_KEYWORD_OPT_IN}</strong> to{' '}
-                <strong>{number}</strong> → welcome SMS asking to reply{' '}
-                <strong>{SMS_KEYWORD_CONFIRM}</strong> → confirmation SMS.
+                <strong>Via Text:</strong> Text <strong>{SMS_KEYWORD_OPT_IN}</strong> to{' '}
+                <strong>{number}</strong> → welcome message (frequency, rates, HELP/STOP, Terms &amp;
+                Privacy links, request to reply <strong>{SMS_KEYWORD_CONFIRM}</strong>) → confirmation
+                message after <strong>{SMS_KEYWORD_CONFIRM}</strong>.
               </li>
-            </ol>
+            </ul>
+            <p className="text-xs text-slate-600">
+              Do not check Verbal, Paper Form, Mobile QR Code, or Other unless you actually use them.
+            </p>
           </section>
 
           <section className="rounded-lg border bg-white p-4 text-sm space-y-3">

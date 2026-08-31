@@ -75,14 +75,20 @@ export default function SmsOptInPage() {
           estimate/invoice notices, recurring approvals, and account alerts)—not marketing blasts.
         </p>
 
-        <div className="mt-6 rounded-xl border bg-white p-5 space-y-3 text-sm text-slate-700">
-          <p>
-            <strong>Opt in by text:</strong> Text <strong>START</strong> to{' '}
-            <strong>{smsNumber}</strong>, then reply <strong>YES</strong> when asked to confirm.
+        <div className="mt-6 rounded-xl border-2 border-emerald-600 bg-emerald-50 p-5 space-y-3 text-sm text-slate-800">
+          <p className="text-xs font-bold uppercase tracking-wide text-emerald-800">Via text opt-in</p>
+          <p className="text-xl font-bold">
+            Text <span className="underline">START</span> to{' '}
+            <span className="whitespace-nowrap">{smsNumber}</span>
           </p>
           <p>
-            <strong>Message frequency:</strong> Varies with your appointments and documents
-            (typically a few messages per week when active).
+            You will get a <strong>welcome message</strong> explaining EstimateAce SMS. Reply{' '}
+            <strong>YES</strong> for <strong>final confirmation</strong>. Then you receive a{' '}
+            <strong>confirmation message</strong>.
+          </p>
+          <p>
+            <strong>Message frequency:</strong> varies (typically a few messages per week when
+            active).
           </p>
           <p>
             <strong>Message and data rates may apply.</strong>
