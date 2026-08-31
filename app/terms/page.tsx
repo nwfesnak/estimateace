@@ -17,7 +17,7 @@ export default function TermsPage() {
           </Link>
         </p>
         <h1>Terms of Service</h1>
-        <p className="text-sm text-slate-500">Last updated: August 2, 2026 · Phase A soft-launch</p>
+        <p className="text-sm text-slate-500">Last updated: March 16, 2026</p>
 
         <p>
           These Terms govern your use of EstimateAce (&quot;Service&quot;), a software platform for
@@ -73,6 +73,18 @@ export default function TermsPage() {
           Payment methods you configure (PayPal, Venmo, Zelle, etc.) are between you and those
           processors. EstimateAce does not hold client funds unless a future feature expressly
           states otherwise.
+        </p>
+
+        <h2>7A. Text messaging (SMS)</h2>
+        <p>
+          By opting in to EstimateAce SMS (via our{' '}
+          <Link href="/sms">web form</Link>, Profile opt-in, or texting the published keyword to our
+          long code / toll-free number), you consent to receive transactional text messages about
+          appointments, estimates, invoices, recurring service approvals, and account verification.
+          Message frequency varies with your activity. Message and data rates may apply. Consent is
+          not required as a condition of purchase. Reply <strong>STOP</strong> to cancel,{' '}
+          <strong>HELP</strong> for help. See our <Link href="/privacy">Privacy Policy</Link> and{' '}
+          <Link href="/sms/message-flow">SMS message flow</Link>.
         </p>
 
         <h2>8. Disclaimers</h2>

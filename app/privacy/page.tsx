@@ -17,7 +17,7 @@ export default function PrivacyPage() {
           </Link>
         </p>
         <h1>Privacy Policy</h1>
-        <p className="text-sm text-slate-500">Last updated: August 2, 2026 · Phase A soft-launch</p>
+        <p className="text-sm text-slate-500">Last updated: March 16, 2026</p>
 
         <p>
           This Privacy Policy explains how EstimateAce (&quot;we&quot;, &quot;us&quot;) collects and
@@ -75,6 +75,29 @@ export default function PrivacyPage() {
           We do not sell your personal information. We share data with processors only as needed to
           run the Service, or if required by law, or with your direction (e.g. payment links you open
           to third-party apps).
+        </p>
+        <p>
+          <strong>Mobile phone numbers:</strong> We do not sell, rent, or share mobile phone numbers
+          with third parties or affiliates for their marketing or promotional purposes. Phone numbers
+          collected for SMS are used only to deliver the transactional messages you consented to
+          receive, and by SMS/telecom providers (such as Twilio) solely to transmit those messages.
+        </p>
+
+        <h2>5A. Text messaging (SMS)</h2>
+        <p>
+          If you opt in to EstimateAce SMS, we may send transactional texts such as appointment
+          reminders, estimate/invoice notices, recurring-service approval links, and account
+          verification codes. Message frequency varies based on your appointments and document
+          activity (typically a few messages per week when your account is active; more during busy
+          scheduling periods). <strong>Message and data rates may apply.</strong>
+        </p>
+        <p>
+          You can opt out at any time by replying <strong>STOP</strong>. Reply{' '}
+          <strong>HELP</strong> for help. For support, contact{' '}
+          <a href={`mailto:${SUPPORT}`}>{SUPPORT}</a>. Consent to SMS is not a condition of
+          purchasing EstimateAce software. See our{' '}
+          <Link href="/sms">SMS opt-in page</Link> and{' '}
+          <Link href="/terms">Terms of Service</Link>.
         </p>
 
         <h2>6. Retention</h2>

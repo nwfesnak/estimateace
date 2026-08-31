@@ -13352,7 +13352,33 @@ export default function Home() {
                           <p className="text-sm text-gray-500 mt-1">
                             I agree to receive transactional SMS from EstimateAce at the company phone
                             above (appointment reminders, estimate/invoice notices, and account alerts).
-                            Msg &amp; data rates may apply. Reply STOP to opt out, HELP for help.
+                            Msg frequency varies. Msg &amp; data rates may apply. Reply STOP to opt out,
+                            HELP for help.{' '}
+                            <a
+                              href="/sms"
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-emerald-700 underline"
+                            >
+                              Public SMS opt-in form
+                            </a>
+                            {' · '}
+                            <a
+                              href="/sms/message-flow"
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-emerald-700 underline"
+                            >
+                              Message flow (for Twilio)
+                            </a>
+                            {' · '}
+                            <a href="/privacy" target="_blank" rel="noreferrer" className="text-emerald-700 underline">
+                              Privacy
+                            </a>
+                            {' · '}
+                            <a href="/terms" target="_blank" rel="noreferrer" className="text-emerald-700 underline">
+                              Terms
+                            </a>
                           </p>
                           {profile.smsOptIn && profile.smsOptInAt ? (
                             <p className="text-xs text-emerald-700 mt-1">
