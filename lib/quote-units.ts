@@ -15,14 +15,14 @@ export function detectWholeHomeInteriorPaint(description: string): WholeHomePain
   const text = description.toLowerCase();
   if (!/paint|painting|primer|coat/i.test(text)) return null;
   if (
-    !/(home|house|ranch|residence|interior|whole|entire|single[\s-]?story|1[\s-]?story|bungalow|craftsman|townhome|townhouse|condo|apartment|flat)/i.test(
+    !/(home|house|ranch|residence|interior|whole|entire|single[\s-]?story|1[\s-]?story|bungalow|craftsman|townhome|townhouse|condo|apartment|flat|\d[\s-]*bed|\d[\s-]*bath|bedroom|bathroom)/i.test(
       text
     )
   ) {
     return null;
   }
 
-  const sqft = parseSqftFromDescription(description);
+  const sqft = parsePrimaryFloorSqft(description);
   if (!sqft || sqft < 400 || sqft > 20000) return null;
 
   let ceilingFt = 8;
@@ -37,7 +37,7 @@ export function detectWholeHomeInteriorPaint(description: string): WholeHomePain
   let coats = 1;
   if (/three\s*coat|3\s*coat|third\s*coat/i.test(text)) coats = 3;
   else if (
-    /two\s*coat|2\s*coat|second\s*coat|dual[\s-]*coat|double[\s-]*coat|2[\s-]*coat/i.test(
+    /two\s*coat|2\s*coat|second\s*coat|dual[\s-]*coat|double[\s-]*coat|2[\s-]*coat|full\s*coats?/i.test(
       text
     )
   ) {
@@ -162,16 +162,51 @@ export function getLineItemUnitOptions(currentUnit?: string): string[] {
   return exists ? [...LINE_ITEM_UNITS] : [trimmed, ...LINE_ITEM_UNITS];
 }
 
+/** All explicit sqft mentions in a description (in order). */
+export function parseAllSqftFromDescription(description: string): number[] {
+  const text = String(description || '');
+  const out: number[] = [];
+  const re =
+    /(\d[\d,]*)\s*(?:sq\.?\s*ft|sqft|sf|square\s*feet|square\s*foot|sq\s*fr)\b/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const n = Number(m[1].replace(/,/g, ''));
+    if (Number.isFinite(n) && n > 0) out.push(n);
+  }
+  return out;
+}
+
+/**
+ * Prefer home / floor area over a small wall callout.
+ * Example: "240 sq ft wall" + "1,567 sq ft, 3-bedroom home" → 1567.
+ */
+export function parsePrimaryFloorSqft(description: string): number | null {
+  const text = String(description || '');
+  const all = parseAllSqftFromDescription(text);
+  if (!all.length) return null;
+
+  // SF near home / bedroom / bath / residence language
+  const homeRe =
+    /(\d[\d,]*)\s*(?:sq\.?\s*ft|sqft|sf|square\s*feet|square\s*foot)\b([^.]{0,80}?(?:home|house|residence|ranch|condo|apartment|bedroom|bath|interior))|((?:home|house|residence|ranch|condo|apartment|bedroom|bath|interior)[^.]{0,80}?)(\d[\d,]*)\s*(?:sq\.?\s*ft|sqft|sf|square\s*feet|square\s*foot)\b/gi;
+  const homeHits: number[] = [];
+  let hm: RegExpExecArray | null;
+  while ((hm = homeRe.exec(text)) !== null) {
+    const raw = hm[1] || hm[4];
+    const n = Number(String(raw || '').replace(/,/g, ''));
+    if (Number.isFinite(n) && n >= 400) homeHits.push(n);
+  }
+  if (homeHits.length) return Math.max(...homeHits);
+
+  // Largest SF ≥ 400 (typical home floor) wins over small wall patches
+  const large = all.filter((n) => n >= 400);
+  if (large.length) return Math.max(...large);
+
+  return Math.max(...all);
+}
+
+/** Backward-compatible: returns primary floor / largest meaningful SF (not always first match). */
 export function parseSqftFromDescription(description: string): number | null {
-  const text = description.toLowerCase();
-  const match =
-    text.match(/(\d[\d,]*)\s*(?:sq\.?\s*ft|sqft|sf|square\s*feet|square\s*foot)\b/i) ||
-    text.match(/(\d[\d,]*)\s*sq\s*fr\b/i) ||
-    text.match(/(\d[\d,]*)sq\s*ft\b/i) ||
-    text.match(/(\d[\d,]*)sqft\b/i);
-  if (!match) return null;
-  const sqft = Number(match[1].replace(/,/g, ''));
-  return Number.isFinite(sqft) && sqft > 0 ? sqft : null;
+  return parsePrimaryFloorSqft(description);
 }
 
 function parseCeilingFactor(description: string): number {

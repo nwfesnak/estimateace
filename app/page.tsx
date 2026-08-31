@@ -838,6 +838,18 @@ export default function Home() {
   const [isPhotoQuoteLinePickerOpen, setIsPhotoQuoteLinePickerOpen] = useState(false);
   const [photoQuoteImageUrl, setPhotoQuoteImageUrl] = useState('');
   const [photoQuoteLineId, setPhotoQuoteLineId] = useState<number | null>(null);
+  /** Template quote needs more facts (floor SF, coats, …) before pricing */
+  const [aiQuoteFactsOpen, setAiQuoteFactsOpen] = useState(false);
+  const [aiQuoteFactsItemId, setAiQuoteFactsItemId] = useState<number | null>(null);
+  const [aiQuoteFactsMeta, setAiQuoteFactsMeta] = useState<{
+    templateId: string;
+    templateLabel: string;
+    questions: Array<{ key: string; label: string }>;
+    partialFacts: Record<string, number | string>;
+    scopeSummary?: string;
+  } | null>(null);
+  const [aiQuoteFactsDraft, setAiQuoteFactsDraft] = useState<Record<string, string>>({});
+  const [aiQuoteFactsBusy, setAiQuoteFactsBusy] = useState(false);
 
   // Resolve storage paths (and legacy signed URLs) to fresh signed URLs for display.
   // Keep one entry per path (including '') so indexes stay aligned for open/delete.
@@ -1831,12 +1843,32 @@ export default function Home() {
           </div>
         )}
         <div className="font-semibold mt-1">
-          Built-up job total: ${builtUpPrice.toFixed(2)}
-          {lineTotal > 0 && Math.abs(builtUpPrice - lineTotal) > 0.05
-            ? ` (quoted line total $${lineTotal.toFixed(2)}${billing.perSqft ? ` — ${linePricing.qty.toLocaleString()} SF × $${linePricing.price.toFixed(2)}/SF` : ''})`
-            : billing.perSqft && lineTotal > 0
-              ? ` (${linePricing.qty.toLocaleString()} SF × $${linePricing.price.toFixed(2)}/SF = $${lineTotal.toFixed(2)})`
-              : ''}
+          {(() => {
+            // Always explain using the LINE price — never a fantasy built-up $/SF
+            const lineUnitPrice = Number(item.price) || linePricing.price || 0;
+            const lineQty = Number(item.qty) || linePricing.qty || 1;
+            const perSfNote =
+              billing.perSqft && lineTotal > 0
+                ? ` — ${lineQty.toLocaleString()} SF × $${lineUnitPrice.toFixed(2)}/SF`
+                : '';
+            if (lineTotal > 0 && Math.abs(builtUpPrice - lineTotal) > 0.05) {
+              return (
+                <>
+                  Job total (line): ${lineTotal.toFixed(2)}
+                  {perSfNote}
+                  <span className="block text-xs font-normal text-amber-800 mt-0.5">
+                    Breakdown was out of sync (${builtUpPrice.toFixed(2)}) — re-run AI Price Quote to refresh.
+                  </span>
+                </>
+              );
+            }
+            return (
+              <>
+                Job total: ${builtUpPrice.toFixed(2)}
+                {perSfNote ? ` (${lineQty.toLocaleString()} SF × $${lineUnitPrice.toFixed(2)}/SF)` : ''}
+              </>
+            );
+          })()}
         </div>
       </div>
     );
@@ -4806,8 +4838,9 @@ export default function Home() {
         if (laborToSave) {
           updated.laborBreakdown = laborToSave;
         }
-        // Fresh AI quote — allow one align pass until user edits
-        updated.breakdownUserEdited = false;
+        // Template quotes are already reconciled — lock so display doesn't invent hours
+        updated.breakdownUserEdited = data.pricingMethod === 'template-v1';
+        updated.breakdownLocked = data.pricingMethod === 'template-v1';
         return updated;
       })
     );
@@ -4829,32 +4862,29 @@ export default function Home() {
       );
     }
 
-    const regionLabel =
-      data.estimationPro?.location || data.pricingRegion?.label;
+    const regionLabel = data.pricingRegion?.label;
     const regionNote = regionLabel
       ? `\nPriced for: ${regionLabel}${
-          data.estimationPro?.multiplier
-            ? ` · EstimationPro multiplier ×${Number(data.estimationPro.multiplier).toFixed(2)}`
-            : data.pricingRegion?.source === 'company'
-              ? ' (from company profile — add job ZIP for best accuracy)'
-              : ''
+          data.pricingRegion?.source === 'company'
+            ? ' (from company profile — add job ZIP for best accuracy)'
+            : ''
         }`
       : '';
+    const templateNote =
+      data.pricingMethod === 'template-v1' && data.templateLabel
+        ? `\nTemplate: ${data.templateLabel}`
+        : '';
     const billingLabel = billing.perSqft
       ? `${linePricing.qty.toLocaleString()} SF × $${linePricing.price.toFixed(2)}/SF`
       : linePricing.qty > 1
         ? `${linePricing.qty} ${linePricing.unit} × $${linePricing.price.toFixed(2)}`
         : `1 Unit @ $${linePricing.price.toFixed(2)}`;
     let msg = options?.fromPhoto
-      ? `✅ AI quote from photo applied!${regionNote}`
-      : `✅ AI Price Quote applied!${regionNote}`;
+      ? `✅ AI quote from photo applied!${regionNote}${templateNote}`
+      : `✅ AI Price Quote applied!${regionNote}${templateNote}`;
     msg += `\n\n${billingLabel} = $${linePricing.total.toFixed(2)}\nConfidence: ${data.confidence}`;
-    if (data.priceRange && Number(data.priceRange.low) > 0 && Number(data.priceRange.high) > 0) {
-      msg += `\n\nRange (BuildCalculator base × EstimationPro regional):`;
-      msg += `\n  Low $${Number(data.priceRange.low).toFixed(0)}  ·  Typical $${Number(data.priceRange.typical).toFixed(0)}  ·  High $${Number(data.priceRange.high).toFixed(0)}`;
-      if (data.priceRange.perSf?.typical) {
-        msg += `\n  Per SF: $${Number(data.priceRange.perSf.low).toFixed(2)} – $${Number(data.priceRange.perSf.high).toFixed(2)} (typical $${Number(data.priceRange.perSf.typical).toFixed(2)})`;
-      }
+    if (data.laborBreakdown?.hours != null) {
+      msg += `\nLabor: ${Number(data.laborBreakdown.hours).toFixed(1)} hrs × $${Number(data.laborBreakdown.rate || 0).toFixed(2)}/hr = $${Number(data.laborCostTotal || data.laborBreakdown.total || 0).toFixed(2)}`;
     }
     if (scopeFromPhoto && options?.fromPhoto) {
       msg += `\n\nScope from photo: ${scopeFromPhoto}`;
@@ -4910,7 +4940,13 @@ export default function Home() {
 
   const requestAiQuote = async (
     item: any,
-    options?: { imageBase64?: string; imageUrl?: string; fromPhoto?: boolean }
+    options?: {
+      imageBase64?: string;
+      imageUrl?: string;
+      fromPhoto?: boolean;
+      facts?: Record<string, number>;
+      templateId?: string;
+    }
   ) => {
     setAiQuoteLoadingId(item.id);
     try {
@@ -4940,8 +4976,9 @@ export default function Home() {
             address: profile.address,
           },
           lineContext: { qty: item.qty, unit: item.unit },
-          // Contractor-edited material unit prices + labor rate from prior breakdown saves
           priceMemory: normalizeAiPriceMemory(profile.aiPriceMemory),
+          facts: options?.facts || undefined,
+          templateId: options?.templateId || undefined,
         }),
       });
 
@@ -4951,7 +4988,7 @@ export default function Home() {
       } catch {
         showMessage(
           res.status === 504 || res.status === 408
-            ? '⏳ AI quote timed out. Wait a moment and try again (include sqft + ZIP for faster BC/EP pricing).'
+            ? '⏳ AI quote timed out. Wait a moment and try again (include home sqft in the description).'
             : `❌ AI quote failed (HTTP ${res.status}). Try again.`
         );
         return;
@@ -4964,8 +5001,6 @@ export default function Home() {
           showMessage('🔒 Please log in with a main account to use AI features.');
         } else if (errMsg.includes('API key') || errMsg.includes('Incorrect') || errMsg.includes('GROK_API_KEY')) {
           showMessage('🔑 AI service key issue. Check Vercel env vars and redeploy.');
-        } else if (errMsg.includes('invalid format')) {
-          showMessage('⚠️ AI returned invalid data. Try a different description or photo.');
         } else if (errMsg.includes('Vision') || errMsg.includes('photo') || errMsg.includes('image')) {
           showMessage(`📷 ${errMsg}`);
         } else {
@@ -4974,17 +5009,73 @@ export default function Home() {
         return;
       }
 
+      // Template needs required facts before pricing
+      if (data.needsFacts) {
+        const questions = Array.isArray(data.questions) ? data.questions : [];
+        const partial = (data.partialFacts || {}) as Record<string, number | string>;
+        const draft: Record<string, string> = {};
+        for (const q of questions) {
+          const key = String(q.key || '');
+          const pre = partial[key];
+          draft[key] = pre != null && pre !== '' ? String(pre) : key === 'coats' ? '2' : '';
+        }
+        setAiQuoteFactsItemId(item.id);
+        setAiQuoteFactsMeta({
+          templateId: String(data.templateId || ''),
+          templateLabel: String(data.templateLabel || 'Job template'),
+          questions,
+          partialFacts: partial,
+          scopeSummary: data.scopeSummary,
+        });
+        setAiQuoteFactsDraft(draft);
+        setAiQuoteFactsOpen(true);
+        showMessage(
+          data.message ||
+            `Need a few details to price “${data.templateLabel || 'this job'}” accurately.`
+        );
+        return;
+      }
+
       applyAiQuoteData(item.id, data, { fromPhoto: options?.fromPhoto });
     } catch (err: any) {
       console.error('AI Quote call failed:', err);
       const msg = String(err?.message || err || '');
       if (/abort|timeout|network|Failed to fetch|Load failed/i.test(msg)) {
-        showMessage('⏳ AI quote took too long or the network dropped. Try again with sqft + job ZIP filled in.');
+        showMessage('⏳ AI quote took too long or the network dropped. Try again with sqft in the description.');
       } else {
         showMessage('⚠️ Network error. Could not reach AI quote service.');
       }
     } finally {
       setAiQuoteLoadingId(null);
+    }
+  };
+
+  const submitAiQuoteFacts = async () => {
+    if (aiQuoteFactsItemId == null || !aiQuoteFactsMeta) return;
+    const item = items.find((r) => r.id === aiQuoteFactsItemId);
+    if (!item) {
+      setAiQuoteFactsOpen(false);
+      return;
+    }
+    const facts: Record<string, number> = {};
+    for (const q of aiQuoteFactsMeta.questions) {
+      const raw = String(aiQuoteFactsDraft[q.key] || '').trim();
+      const n = parseFloat(raw.replace(/,/g, ''));
+      if (!Number.isFinite(n) || n <= 0) {
+        showMessage(`Enter a valid number for: ${q.label}`);
+        return;
+      }
+      facts[q.key] = n;
+    }
+    setAiQuoteFactsBusy(true);
+    try {
+      setAiQuoteFactsOpen(false);
+      await requestAiQuote(item, {
+        facts,
+        templateId: aiQuoteFactsMeta.templateId,
+      });
+    } finally {
+      setAiQuoteFactsBusy(false);
     }
   };
 
@@ -11620,6 +11711,65 @@ export default function Home() {
                     <Button variant="outline" onClick={() => setIsPhotoQuoteLinePickerOpen(false)}>Cancel</Button>
                     <Button onClick={() => void runGalleryPhotoQuote()} className="bg-violet-600 hover:bg-violet-700">
                       Generate Quote
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+
+              <Dialog
+                open={aiQuoteFactsOpen}
+                onOpenChange={(open) => {
+                  setAiQuoteFactsOpen(open);
+                  if (!open) setAiQuoteFactsMeta(null);
+                }}
+              >
+                <DialogContent className="max-w-md">
+                  <DialogHeader>
+                    <DialogTitle>Need a few details to price</DialogTitle>
+                  </DialogHeader>
+                  <p className="text-sm text-gray-600">
+                    Template:{' '}
+                    <strong>{aiQuoteFactsMeta?.templateLabel || 'Job'}</strong>
+                    {aiQuoteFactsMeta?.scopeSummary ? (
+                      <span className="block mt-1 text-xs text-gray-500">
+                        {aiQuoteFactsMeta.scopeSummary}
+                      </span>
+                    ) : null}
+                  </p>
+                  <div className="space-y-3 mt-2">
+                    {(aiQuoteFactsMeta?.questions || []).map((q) => (
+                      <div key={q.key}>
+                        <label className="block text-sm font-semibold mb-1">{q.label}</label>
+                        <Input
+                          type="number"
+                          min={q.key === 'coats' ? 1 : 1}
+                          step={q.key === 'coats' ? 1 : 1}
+                          value={aiQuoteFactsDraft[q.key] ?? ''}
+                          onChange={(e) =>
+                            setAiQuoteFactsDraft((prev) => ({
+                              ...prev,
+                              [q.key]: e.target.value,
+                            }))
+                          }
+                          placeholder={q.key === 'coats' ? '2' : 'e.g. 1567'}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <DialogFooter>
+                    <Button
+                      variant="outline"
+                      onClick={() => setAiQuoteFactsOpen(false)}
+                      disabled={aiQuoteFactsBusy}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      className="bg-[#10b981] hover:bg-[#059669] text-white"
+                      disabled={aiQuoteFactsBusy}
+                      onClick={() => void submitAiQuoteFacts()}
+                    >
+                      {aiQuoteFactsBusy ? 'Pricing…' : 'Price with these facts'}
                     </Button>
                   </DialogFooter>
                 </DialogContent>
