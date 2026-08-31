@@ -2511,7 +2511,7 @@ export default function Home() {
     if (trialParam === 'started') {
       const planLabel = planParam === 'yearly' ? 'yearly ($249/yr after trial)' : 'monthly ($29.99/mo after trial)';
       showMessage(
-        `✅ 14-day free trial started! After the trial you will be billed ${planLabel} unless you cancel in Plan / Billing.`
+        `✅ 14-day free trial started! After the trial you will be billed ${planLabel} unless you cancel in Billing / Contact Us.`
       );
       if (user?.id && supabase) void refreshBillingStatus();
       cleanUrl();
@@ -2536,7 +2536,7 @@ export default function Home() {
           console.warn(e);
         }
         await refreshBillingStatus();
-        showMessage('✅ Billing status refreshed. Open Profile → Plan / Billing if needed.');
+        showMessage('✅ Billing status refreshed. Open Profile → Billing / Contact Us if needed.');
       })();
     } else if (billingParam === 'crew_seat_success') {
       const crew = params.get('crew') || 'crew member';
@@ -9970,7 +9970,7 @@ export default function Home() {
 
           <p className="text-[10px] text-gray-500 mt-4 text-center leading-relaxed">
             Crew members use this same login with the email and password set by the account owner
-            under Plan / Billing → Manage account → Crew.
+            under Billing / Contact Us → Manage account → Crew.
           </p>
         </Card>
       </div>
@@ -12310,7 +12310,7 @@ export default function Home() {
                     }}
                     className={`flex-1 min-w-[7rem] py-4 text-center font-semibold ${profileTab === 'billing' ? 'border-b-4 border-[#10b981] text-[#10b981]' : 'text-gray-500'}`}
                   >
-                    💳 Plan / Billing
+                    💳 Billing / Contact Us
                   </button>
                 )}
                 <button 
@@ -12915,7 +12915,7 @@ export default function Home() {
                             void refreshBillingStatus();
                           }}
                         >
-                          Plan / Billing →
+                          Billing / Contact Us →
                         </button>
                       </p>
                       {profileAutoSaveLabel && (
@@ -13540,7 +13540,7 @@ export default function Home() {
                             void refreshBillingStatus();
                           }}
                         >
-                          Plan / Billing → Manage billing
+                          Billing / Contact Us → Manage billing
                         </button>
                         .
                       </p>
