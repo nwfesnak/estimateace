@@ -9,13 +9,13 @@ function displayNumber(): string {
   const raw = (
     process.env.NEXT_PUBLIC_SMS_OPT_IN_NUMBER ||
     process.env.NEXT_PUBLIC_TWILIO_PHONE_NUMBER ||
-    '+18559169529'
+    '+19802434145'
   ).replace(/\D/g, '');
   if (raw.length === 11 && raw.startsWith('1')) {
     return `(${raw.slice(1, 4)}) ${raw.slice(4, 7)}-${raw.slice(7)}`;
   }
   if (raw.length === 10) return `(${raw.slice(0, 3)}) ${raw.slice(3, 6)}-${raw.slice(6)}`;
-  return '+18559169529';
+  return '(980) 243-4145';
 }
 
 export default function SmsOptInPage() {

@@ -15,7 +15,7 @@ export function getPublicSiteUrl(): string {
 
 /** Long code / toll-free customers text to opt in. */
 export function getSmsOptInNumber(): string {
-  const n = (process.env.NEXT_PUBLIC_SMS_OPT_IN_NUMBER || process.env.TWILIO_PHONE_NUMBER || '+18559169529')
+  const n = (process.env.NEXT_PUBLIC_SMS_OPT_IN_NUMBER || process.env.TWILIO_PHONE_NUMBER || '+19802434145')
     .trim()
     .replace(/\s+/g, '');
   return n.startsWith('+') ? n : n.replace(/\D/g, '').length === 10 ? `+1${n.replace(/\D/g, '')}` : n;
