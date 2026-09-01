@@ -2888,6 +2888,11 @@ export default function Home() {
     setJobMileageLogs([]);
     setItems([{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
     setInvoiceNumber('EST-0001');
+    setAmountPaid(0);
+    setPaymentStatus('pending');
+    setPaymentMethod('');
+    setDueDate('');
+    setDocumentType('estimate');
     setSaveStatus('idle');
     setSaveErrorDetail('');
     lastSavedCompanyFingerprintRef.current = '';
@@ -4515,7 +4520,9 @@ export default function Home() {
     }
   };
 
-  const newEstimate = async () => {
+  const newEstimate = async (typeOverride?: 'estimate' | 'invoice') => {
+    const nextType = typeOverride || documentType || 'estimate';
+    setDocumentType(nextType);
     setJobName(''); setAddress(''); setCity(''); setState(''); setZipCode('');
     setPhones(['']); setEmails(['']); setTerms('');
     setPhotoUrls([]); setVideoUrls([]); setReceiptUrls([]); setReceiptDetails([]); setJobMileageLogs([]);
@@ -4523,6 +4530,8 @@ export default function Home() {
     setJobRenderSourcePath('');
     setJobRenderLineId(null);
     setJobRenderNotes('');
+    setJobRenderRefineDrafts({});
+    setJobRenderRefineBusyId(null);
     setPhotosFolderOpen(false);
     setItems([{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
     setLaborHours(0); setLaborRate(0); setLaborFixedAmount(0); setUseHourlyLabor(true);
@@ -4535,11 +4544,16 @@ export default function Home() {
     setAppliedDiscountValue(0);
     setAppliedDiscountType('dollar');
     setEstimateBreakdownSettings(DEFAULT_ESTIMATE_BREAKDOWN);
+    // Fresh document: never carry deposit / payment state from the previous estimate or invoice
+    setAmountPaid(0);
+    setPaymentStatus('pending');
+    setPaymentMethod('');
+    setDueDate('');
     const today = new Date().toISOString().split('T')[0];
     setDate(today);
     const savedCount = parseInt(localStorage.getItem('estimateCount') || '0') + 1;
     localStorage.setItem('estimateCount', savedCount.toString());
-    const prefix = documentType === 'invoice' ? 'INV' : 'EST';
+    const prefix = nextType === 'invoice' ? 'INV' : 'EST';
     setInvoiceNumber(`${prefix}-${String(savedCount).padStart(4, '0')}`);
     const loadedProfile = await loadLatestProfile();
     // Force the chosen language (from localStorage preference) so new estimates never revert
@@ -4562,8 +4576,7 @@ export default function Home() {
   };
 
   const openNewDocument = async (type: 'estimate' | 'invoice') => {
-    setDocumentType(type);
-    await newEstimate();
+    await newEstimate(type);
     if (user?.id) {
       await refreshSavedList();
       refreshArchivesList();
