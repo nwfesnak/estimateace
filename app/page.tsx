@@ -1044,6 +1044,9 @@ export default function Home() {
   const tutorialFileRef = useRef<HTMLInputElement>(null);
   /** Skip profile auto-save while hydrating from server/local cache */
   const profileHydratingRef = useRef(false);
+  /** Block autosave briefly after New Estimate so deposit/payment from the prior doc cannot be written onto the blank form. */
+  const skipAutosaveUntilRef = useRef(0);
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const profileAutoSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSavedCompanyFingerprintRef = useRef('');
   const profileRef = useRef(profile);
@@ -3972,28 +3975,31 @@ export default function Home() {
     return { numberKeys, jobKeys };
   };
 
-  /** True if this active estimate belongs to already-closed/paid work. */
-  const estimateBelongsToClosedWork = (est: any, closed: { numberKeys: Set<string>; jobKeys: Set<string> }) => {
-    if (!est || isSettingsDocRow(est)) return false;
+  /**
+   * True if this active estimate is the work-order twin of already-closed/paid work.
+   * Match by document number only (EST-0001 ↔ INV-0001). Never match by job name alone —
+   * that previously wiped unrelated estimates that shared a client/job title.
+   */
+  const estimateBelongsToClosedWork = (
+    est: any,
+    closed: { numberKeys: Set<string>; jobKeys: Set<string> }
+  ) => {
+    if (!est || isSettingsDocRow(est) || isRecurringPlanRow(est)) return false;
+    // Never treat open unpaid invoices as "closed work" leftovers
     if (isInvoiceDocRow(est) && !isPaidDocRow(est)) return false;
-    if (isPaidDocRow(est)) return true;
-    if (!isEstimateTypeRow(est) && !isInvoiceDocRow(est)) {
-      // unknown type — still hide if number/job matches closed work
-    }
     for (const k of docNumberKeys(est)) {
       if (closed.numberKeys.has(k)) return true;
     }
+    // Optional tight job match (zip or address required) — never bare job title
     const estJobKeys = jobMatchKeys(est);
-    // Prefer job+zip or job+address; fall back to job-only
     if (estJobKeys.some((k) => k.startsWith('jobzip:') && closed.jobKeys.has(k))) return true;
     if (estJobKeys.some((k) => k.startsWith('jobaddr:') && closed.jobKeys.has(k))) return true;
-    if (estJobKeys.some((k) => k.startsWith('job:') && closed.jobKeys.has(k))) return true;
     return false;
   };
 
   /**
-   * Delete related estimate/work-order rows for a closed invoice (or set of closed docs).
-   * Awaits DB deletes so the Estimates list stays clean after close-out.
+   * Delete ONLY the estimate/work-order twins of the given closed invoice(s).
+   * Never mass-delete all estimates. Number twin (EST↔INV) first; optional tight job match.
    */
   const purgeRelatedEstimatesForClosedDocs = async (
     closedDocs: any[],
@@ -4019,11 +4025,11 @@ export default function Home() {
     const toDelete: string[] = [];
     for (const row of activeRows) {
       const rid = String(row.id || '');
-      if (!rid || closedIds.has(rid) || isSettingsDocRow(row)) continue;
+      if (!rid || closedIds.has(rid) || isSettingsDocRow(row) || isRecurringPlanRow(row)) continue;
       // Never delete open unpaid invoices
       if (isInvoiceDocRow(row) && !isPaidDocRow(row)) continue;
-      // Delete paid leftovers and any estimate/work order tied to closed work
-      if (isPaidDocRow(row) || isEstimateTypeRow(row) || estimateBelongsToClosedWork(row, closed)) {
+      // ONLY rows that actually belong to this closed work (number twin / tight job match)
+      if (estimateBelongsToClosedWork(row, closed)) {
         toDelete.push(rid);
       }
     }
@@ -4099,38 +4105,22 @@ export default function Home() {
       void refreshArchivesList();
     }
 
-    // Purge estimates that belong to closed/paid invoices (await so UI is correct)
+    // Hide (do NOT hard-delete) estimates that belong to closed/paid invoices.
+    // Permanent deletes here previously wiped unrelated active estimates.
     const closedIndex = buildClosedWorkIndex([
       ...archives,
       ...rows.filter((r) => isPaidDocRow(r) || isInvoiceDocRow(r)),
     ]);
-    const purgeIds: string[] = [];
-    rows = rows.filter((row: any) => {
-      if (isSettingsDocRow(row)) return true;
-      if (isInvoiceDocRow(row) && !isPaidDocRow(row)) return true;
-      if (isPaidDocRow(row)) {
-        purgeIds.push(String(row.id));
-        return false;
-      }
-      if (isEstimateTypeRow(row) && estimateBelongsToClosedWork(row, closedIndex)) {
-        purgeIds.push(String(row.id));
-        return false;
-      }
-      return true;
-    });
 
-    if (purgeIds.length > 0) {
-      for (const estId of Array.from(new Set(purgeIds))) {
-        await supabase.from('estimates').delete().eq('id', estId).eq('user_id', workspaceUserId);
-      }
-    }
-
-    // Never show paid invoices in active list UI
+    // Never show paid invoices in active list UI (they live under Reports → Paid invoices)
     rows = rows.filter((row: any) => !(isInvoiceDocRow(row) && isPaidDocRow(row)));
-    // Never show estimates for closed work
+    // Never show estimate twins of closed work (number match / tight job match only)
     rows = rows.filter(
       (row: any) =>
-        !isEstimateTypeRow(row) || !estimateBelongsToClosedWork(row, closedIndex)
+        isSettingsDocRow(row) ||
+        isRecurringPlanRow(row) ||
+        !isEstimateTypeRow(row) ||
+        !estimateBelongsToClosedWork(row, closedIndex)
     );
 
     setSavedEstimatesList(rows);
@@ -4522,6 +4512,14 @@ export default function Home() {
 
   const newEstimate = async (typeOverride?: 'estimate' | 'invoice') => {
     const nextType = typeOverride || documentType || 'estimate';
+    // Cancel any pending autosave from the previous document and block new ones briefly
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
+    }
+    skipAutosaveUntilRef.current = Date.now() + 3000;
+    profileHydratingRef.current = true;
+
     setDocumentType(nextType);
     setJobName(''); setAddress(''); setCity(''); setState(''); setZipCode('');
     setPhones(['']); setEmails(['']); setTerms('');
@@ -4556,6 +4554,11 @@ export default function Home() {
     const prefix = nextType === 'invoice' ? 'INV' : 'EST';
     setInvoiceNumber(`${prefix}-${String(savedCount).padStart(4, '0')}`);
     const loadedProfile = await loadLatestProfile();
+    // Force payment reset again after async profile load (guards against stale state races)
+    setAmountPaid(0);
+    setPaymentStatus('pending');
+    setPaymentMethod('');
+    setDueDate('');
     // Force the chosen language (from localStorage preference) so new estimates never revert
     const newLang = getPreferredLanguage();
     setProfile(prev => ({ ...prev, language: newLang }));
@@ -4564,6 +4567,9 @@ export default function Home() {
     if (companyTerms) {
       setTerms(companyTerms);
     }
+    window.setTimeout(() => {
+      profileHydratingRef.current = false;
+    }, 500);
   };
 
   /** Open an estimate or invoice from dashboard / lists (clickable links). */
@@ -5750,6 +5756,8 @@ export default function Home() {
   /**
    * Remove the original estimate/work-order row once a job has become an invoice
    * (or is being closed out), so it no longer appears on the Estimates page.
+   * Only deletes the EST twin with the same number (EST-0001 ↔ INV-0001).
+   * Never deletes unrelated estimates by job name.
    */
   const removeEstimateWorkOrderForInvoice = async (
     invoiceRowOrId: any,
@@ -5771,28 +5779,27 @@ export default function Home() {
           }
         : invoiceRowOrId;
 
-    // Direct EST twin delete (fast path)
+    const deletedIds: string[] = [];
+    // Direct EST twin delete only (EST-#### for INV-####)
     for (const key of docNumberKeys(invoiceRow)) {
       const m = String(key).match(/^INV[-_]?(.*)$/i);
       if (!m) continue;
       const rest = m[1];
       for (const estId of [`EST-${rest}`, `EST${rest}`, `est-${rest}`, `Est-${rest}`]) {
-        await supabase.from('estimates').delete().eq('id', estId).eq('user_id', userId);
+        const { error: delErr, count } = await supabase
+          .from('estimates')
+          .delete({ count: 'exact' })
+          .eq('id', estId)
+          .eq('user_id', userId);
+        if (!delErr && (count ?? 0) > 0) deletedIds.push(estId);
       }
     }
 
-    // Broad purge by number + job for any leftover work orders
-    await purgeRelatedEstimatesForClosedDocs(
-      [
-        {
-          ...invoiceRow,
-          documentType: invoiceRow.documentType || 'invoice',
-          paymentStatus: invoiceRow.paymentStatus || 'paid',
-          archived_at: invoiceRow.archived_at || new Date().toISOString(),
-        },
-      ],
-      userId
-    );
+    if (deletedIds.length > 0) {
+      setSavedEstimatesList((prev) =>
+        (prev || []).filter((r: any) => !deletedIds.includes(String(r.id)))
+      );
+    }
   };
 
   const convertToInvoice = async () => {
@@ -6169,11 +6176,8 @@ export default function Home() {
     const docId = String(id || '').trim();
     if (!docId) return;
 
-    const row = (archivesList || []).find((r: any) => String(r.id) === docId);
-
     // Optimistic update so Paid invoices AND Profit both drop the row immediately
     setArchivesList((prev) => (prev || []).filter((r: any) => String(r.id) !== docId));
-    setSavedEstimatesList((prev) => (prev || []).filter((r: any) => String(r.id) !== docId));
 
     const { error, count } = await supabase
       .from('archive-est')
@@ -6184,29 +6188,38 @@ export default function Home() {
       console.error('deleteArchivedDocument error:', error);
       showMessage('Could not delete archive: ' + error.message);
       await refreshArchivesList();
-      await refreshSavedList();
       return;
     }
     if ((count ?? 0) < 1) {
       console.warn('deleteArchivedDocument: no archive row matched', docId);
     }
 
-    // Purge any leftover active copy so Tax / sales figures (allDocs) stay in sync
+    // Only remove this exact id from active estimates if a leftover copy exists.
+    // Do NOT call removeEstimateWorkOrderForInvoice / job-name purge — that wiped
+    // unrelated saved estimates.
     try {
       await supabase.from('estimates').delete().eq('id', docId).eq('user_id', workspaceUserId);
-      if (row) {
-        await removeEstimateWorkOrderForInvoice(
-          {
-            ...row,
-            id: docId,
-            paymentStatus: row.paymentStatus || 'paid',
-            documentType: row.documentType || 'invoice',
-          },
-          workspaceUserId
-        );
+      // Exact EST twin for INV-#### only (same number), nothing else
+      const m = docId.match(/^(INV)[-_]?(.*)$/i);
+      if (m) {
+        const rest = m[2];
+        for (const estId of [`EST-${rest}`, `EST${rest}`]) {
+          await supabase.from('estimates').delete().eq('id', estId).eq('user_id', workspaceUserId);
+        }
       }
+      setSavedEstimatesList((prev) =>
+        (prev || []).filter((r: any) => {
+          const rid = String(r.id || '');
+          if (rid === docId) return false;
+          if (m) {
+            const rest = m[2];
+            if (rid === `EST-${rest}` || rid === `EST${rest}`) return false;
+          }
+          return true;
+        })
+      );
     } catch (e) {
-      console.warn('Cleanup of active twin after archive delete failed', e);
+      console.warn('Cleanup of exact active twin after archive delete failed', e);
     }
 
     await refreshArchivesList();
@@ -7739,8 +7752,6 @@ export default function Home() {
     showMessage('✅ Selected data exported as CSV');
   };
 
-  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
   /** Gallery pickers (no capture) — camera uses DeviceCamera component instead. */
   const photoGalleryInputRef = useRef<HTMLInputElement>(null);
   const videoGalleryInputRef = useRef<HTMLInputElement>(null);
@@ -7752,10 +7763,14 @@ export default function Home() {
     if (!profile.autoSaveEnabled) return;
     if (!user?.id || !workspaceUserId || !supabase) return;
     if (profileHydratingRef.current) return;
+    if (Date.now() < skipAutosaveUntilRef.current) return;
     if (requires2FA) return;
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     saveTimeoutRef.current = setTimeout(() => {
-      void saveToDB({ quiet: true });
+      if (profileHydratingRef.current) return;
+      if (Date.now() < skipAutosaveUntilRef.current) return;
+      // Never autosave a carried-over deposit onto a blank new estimate
+      void saveToDB({ quiet: true, amountPaid: Number(amountPaid) || 0, paymentStatus, paymentMethod });
     }, 1000);
   };
 
