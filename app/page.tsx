@@ -6166,13 +6166,51 @@ export default function Home() {
       showMessage('Crew accounts cannot delete archived documents.');
       return;
     }
-    const { error } = await supabase.from('archive-est').delete().eq('id', id).eq('user_id', workspaceUserId);
+    const docId = String(id || '').trim();
+    if (!docId) return;
+
+    const row = (archivesList || []).find((r: any) => String(r.id) === docId);
+
+    // Optimistic update so Paid invoices AND Profit both drop the row immediately
+    setArchivesList((prev) => (prev || []).filter((r: any) => String(r.id) !== docId));
+    setSavedEstimatesList((prev) => (prev || []).filter((r: any) => String(r.id) !== docId));
+
+    const { error, count } = await supabase
+      .from('archive-est')
+      .delete({ count: 'exact' })
+      .eq('id', docId)
+      .eq('user_id', workspaceUserId);
     if (error) {
       console.error('deleteArchivedDocument error:', error);
       showMessage('Could not delete archive: ' + error.message);
+      await refreshArchivesList();
+      await refreshSavedList();
       return;
     }
+    if ((count ?? 0) < 1) {
+      console.warn('deleteArchivedDocument: no archive row matched', docId);
+    }
+
+    // Purge any leftover active copy so Tax / sales figures (allDocs) stay in sync
+    try {
+      await supabase.from('estimates').delete().eq('id', docId).eq('user_id', workspaceUserId);
+      if (row) {
+        await removeEstimateWorkOrderForInvoice(
+          {
+            ...row,
+            id: docId,
+            paymentStatus: row.paymentStatus || 'paid',
+            documentType: row.documentType || 'invoice',
+          },
+          workspaceUserId
+        );
+      }
+    } catch (e) {
+      console.warn('Cleanup of active twin after archive delete failed', e);
+    }
+
     await refreshArchivesList();
+    await refreshSavedList();
     showMessage('Archived document deleted');
   };
 
@@ -9612,8 +9650,28 @@ export default function Home() {
   };
 
   /**
-   * Archived invoices for Profit Reports, grouped by month & year of invoice date.
-   * Source: archive-est rows that are invoices (INV- / documentType invoice).
+   * Same membership rule for Reports → Paid invoices and Reports → Profit.
+   * Only real paid invoices from archive-est (not canceled recurring, not unpaid archives).
+   */
+  const isReportPaidInvoiceRow = (row: any) => {
+    if (!row || isSettingsDocRow(row)) return false;
+    if (isRecurringPlanRow(row)) return false;
+    if (isArchivedCanceledRecurring(row)) return false;
+    if (!isInvoiceDocRow(row)) return false;
+    const paidAmt = Number(row.amountPaid ?? row.amountpaid) || 0;
+    return isPaidDocRow(row) || paidAmt > 0.009;
+  };
+
+  const paidAmountForReportInvoice = (inv: any) => {
+    const invTotal = calculateGrandTotal(inv);
+    const paidRaw = Number(inv.amountPaid ?? inv.amountpaid ?? 0) || 0;
+    if (paidRaw > 0) return Math.min(paidRaw, invTotal > 0 ? invTotal : paidRaw);
+    return invTotal;
+  };
+
+  /**
+   * Archived paid invoices for Profit Reports, grouped by month & year of invoice date.
+   * Uses the same filter as Reports → Paid invoices so totals always match.
    */
   const archivedInvoicesByMonth = useMemo(() => {
     type MonthGroup = {
@@ -9627,15 +9685,7 @@ export default function Home() {
       count: number;
     };
 
-    const isArchivedInvoice = (row: any) => {
-      if (!row || isSettingsDocRow(row)) return false;
-      // Exclude legacy canceled recurring (INV-REC) — those are not real paid invoices
-      if (isArchivedCanceledRecurring(row)) return false;
-      // Paid invoices only (INV- / documentType invoice) from archive-est
-      return isInvoiceDocRow(row);
-    };
-
-    const list = (archivesList || []).filter(isArchivedInvoice);
+    const list = (archivesList || []).filter(isReportPaidInvoiceRow);
     const map = new Map<string, MonthGroup>();
 
     for (const inv of list) {
@@ -9665,7 +9715,7 @@ export default function Home() {
       }
       const g = map.get(key)!;
       const grand = calculateGrandTotal(inv);
-      const paid = Number(inv.amountPaid ?? inv.amountpaid ?? 0) || 0;
+      const paid = paidAmountForReportInvoice(inv);
       g.invoices.push(inv);
       g.total += grand;
       g.amountPaid += paid;
@@ -9731,19 +9781,10 @@ export default function Home() {
       });
   }, [archivesList]);
 
-  /** Reports: paid invoices only (canceled recurring plans are under Recurring → Archive) */
+  /** Reports: paid invoices only (same set as Profit → Paid invoices by month) */
   const reportPaidInvoices = useMemo(() => {
     return (archivesList || [])
-      .filter((row: any) => {
-        if (!row || isSettingsDocRow(row)) return false;
-        if (isRecurringPlanRow(row)) return false;
-        // Never treat canceled recurring as a paid invoice
-        if (isArchivedCanceledRecurring(row)) return false;
-        // Only real invoices that are marked paid (not random paid estimates)
-        if (!isInvoiceDocRow(row)) return false;
-        const paidAmt = Number(row.amountPaid ?? row.amountpaid) || 0;
-        return isPaidDocRow(row) || paidAmt > 0.009;
-      })
+      .filter(isReportPaidInvoiceRow)
       .sort((a: any, b: any) => {
         const da = new Date(a.archived_at || a.updated_at || a.date || 0).getTime();
         const db = new Date(b.archived_at || b.updated_at || b.date || 0).getTime();
@@ -9755,11 +9796,8 @@ export default function Home() {
     let total = 0;
     let paid = 0;
     for (const inv of reportPaidInvoices) {
-      const invTotal = calculateGrandTotal(inv);
-      const paidAmt = Number(inv.amountPaid ?? inv.amountpaid ?? 0) || 0;
-      total += invTotal;
-      // Cap displayed paid to this invoice's own total (avoids inflated/wrong paid figures)
-      paid += paidAmt > 0 ? Math.min(paidAmt, invTotal > 0 ? invTotal : paidAmt) : invTotal;
+      total += calculateGrandTotal(inv);
+      paid += paidAmountForReportInvoice(inv);
     }
     return { count: reportPaidInvoices.length, total, paid };
   }, [reportPaidInvoices]);
@@ -13986,7 +14024,7 @@ export default function Home() {
                         <div>
                           <h3 className="text-xl font-semibold text-[#1e293b]">✅ Paid invoices</h3>
                           <p className="text-sm text-gray-500 mt-1">
-                            Invoices that have been marked paid. Open invoices stay under Invoices until paid.
+                            Invoices that have been marked paid. Totals match Reports → Profit. Open invoices stay under Invoices until paid.
                           </p>
                         </div>
                         <Button type="button" variant="outline" size="sm" onClick={() => void refreshArchivesList()}>
@@ -14252,13 +14290,14 @@ export default function Home() {
                     <p className="text-sm text-gray-500">Profit details are restricted for your crew access level.</p>
                   ) : (
                     <>
-                  {/* Archived invoices by month / year of invoice date */}
+                  {/* Same paid-invoice set as Reports → Paid invoices, grouped by month */}
                   <section className="mb-12">
                     <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
                       <div>
                         <h3 className="text-xl font-semibold text-[#1e293b]">✅ Paid invoices by month</h3>
                         <p className="text-sm text-gray-500 mt-1">
-                          Paid invoices grouped by month and year of the job invoice date.
+                          Same paid invoices as the Paid invoices tab, grouped by month and year of the job invoice date.
+                          Deleting a paid invoice removes it from both places.
                         </p>
                       </div>
                       <div className="flex flex-wrap gap-2 items-center">
@@ -14376,7 +14415,7 @@ export default function Home() {
                                             })
                                           : '—';
                                         const grand = calculateGrandTotal(inv);
-                                        const paid = Number(inv.amountPaid ?? inv.amountpaid ?? 0) || 0;
+                                        const paid = paidAmountForReportInvoice(inv);
                                         return (
                                           <TableRow key={inv.id || inv.invoiceNumber}>
                                             <TableCell className="font-medium whitespace-nowrap">
@@ -14403,18 +14442,29 @@ export default function Home() {
                                               ${paid.toFixed(2)}
                                             </TableCell>
                                             <TableCell className="text-right">
-                                              <Button
-                                                type="button"
-                                                size="sm"
-                                                variant="outline"
-                                                className="text-xs"
-                                                onClick={() => {
-                                                  void loadSelectedEstimate(inv);
-                                                  setView('editor');
-                                                }}
-                                              >
-                                                Open
-                                              </Button>
+                                              <div className="flex flex-wrap justify-end gap-2">
+                                                <Button
+                                                  type="button"
+                                                  size="sm"
+                                                  variant="outline"
+                                                  className="text-xs"
+                                                  onClick={() => {
+                                                    void loadSelectedEstimate(inv);
+                                                    setView('editor');
+                                                  }}
+                                                >
+                                                  Open
+                                                </Button>
+                                                <Button
+                                                  type="button"
+                                                  size="sm"
+                                                  variant="destructive"
+                                                  className="text-xs"
+                                                  onClick={() => void deleteArchivedDocument(inv.id)}
+                                                >
+                                                  Delete
+                                                </Button>
+                                              </div>
                                             </TableCell>
                                           </TableRow>
                                         );
