@@ -10402,49 +10402,6 @@ export default function Home() {
                 </CardContent>
               </Card>
 
-              <Card className="mb-8 border-emerald-200 bg-gradient-to-br from-white to-emerald-50/40">
-                <CardContent className="p-6">
-                  <div className="flex flex-wrap items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <h3 className="font-semibold text-lg flex items-center gap-2">
-                        📞 AI Receptionist
-                        <span className="text-[10px] font-bold uppercase bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
-                          Beta
-                        </span>
-                        {receptionistSettings.enabled ? (
-                          <span className="text-[10px] font-bold uppercase bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
-                            On
-                          </span>
-                        ) : (
-                          <span className="text-[10px] font-bold uppercase bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
-                            Off
-                          </span>
-                        )}
-                      </h3>
-                      <p className="text-sm text-gray-600 mt-1 max-w-lg">
-                        Knowledge base + <strong>Test call</strong> + message inbox work now. Live phone
-                        forwarding is <strong>not</strong> available yet (Phase C).
-                      </p>
-                      {receptionistMessages.filter((m) => m.status === 'new' && !m.spam).length > 0 && (
-                        <p className="text-xs font-semibold text-sky-700 mt-2">
-                          {receptionistMessages.filter((m) => m.status === 'new' && !m.spam).length} new message
-                          {receptionistMessages.filter((m) => m.status === 'new' && !m.spam).length === 1 ? '' : 's'}
-                        </p>
-                      )}
-                    </div>
-                    <Button
-                      className="bg-[#10b981] hover:bg-[#059669] text-white shrink-0"
-                      onClick={() => {
-                        void loadReceptionistFromSettings();
-                        setView('receptionistView');
-                      }}
-                    >
-                      Open receptionist
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-
               {canSeeFinancials && (
                 <Card>
                   <CardContent className="p-6">
@@ -12536,6 +12493,53 @@ export default function Home() {
                     <p className="text-xs text-gray-500">
                       <strong>Manage billing</strong> opens crew members, payment method (Stripe), and account deletion.
                     </p>
+                  </CardContent>
+                </Card>
+              )}
+
+              {profileTab === 'billing' && billingPanel === 'overview' && !currentCrew && (
+                <Card className="mb-8 border-emerald-200 bg-gradient-to-br from-white to-emerald-50/40">
+                  <CardContent className="p-6">
+                    <div className="flex flex-wrap items-start justify-between gap-4">
+                      <div className="min-w-0">
+                        <h3 className="font-semibold text-lg flex items-center gap-2">
+                          📞 AI Receptionist
+                          <span className="text-[10px] font-bold uppercase bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
+                            Beta
+                          </span>
+                          {receptionistSettings.enabled ? (
+                            <span className="text-[10px] font-bold uppercase bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
+                              On
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-bold uppercase bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
+                              Off
+                            </span>
+                          )}
+                        </h3>
+                        <p className="text-sm text-gray-600 mt-1 max-w-lg">
+                          Knowledge base + <strong>Test call</strong> + message inbox work now. Live phone
+                          forwarding is <strong>not</strong> available yet (Phase C).
+                        </p>
+                        {receptionistMessages.filter((m) => m.status === 'new' && !m.spam).length > 0 && (
+                          <p className="text-xs font-semibold text-sky-700 mt-2">
+                            {receptionistMessages.filter((m) => m.status === 'new' && !m.spam).length} new message
+                            {receptionistMessages.filter((m) => m.status === 'new' && !m.spam).length === 1
+                              ? ''
+                              : 's'}
+                          </p>
+                        )}
+                      </div>
+                      <Button
+                        className="bg-[#10b981] hover:bg-[#059669] text-white shrink-0"
+                        onClick={() => {
+                          void loadReceptionistFromSettings();
+                          setView('receptionistView');
+                        }}
+                      >
+                        Open receptionist
+                      </Button>
+                    </div>
                   </CardContent>
                 </Card>
               )}
@@ -14701,7 +14705,11 @@ export default function Home() {
               onChangeMessages={setReceptionistMessages}
               onSave={saveReceptionistData}
               saving={receptionistSaving}
-              onBack={goToDashboard}
+              onBack={() => {
+                setProfileTab('billing');
+                setBillingPanel('overview');
+                setView('profileView');
+              }}
               getAccessToken={async () => {
                 if (!supabase) return null;
                 const { data } = await supabase.auth.getSession();
