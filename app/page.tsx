@@ -10380,28 +10380,6 @@ export default function Home() {
                 </CardContent>
               </Card>
 
-              <Card className="mb-8 border-teal-200 bg-gradient-to-br from-white to-teal-50/40">
-                <CardContent className="p-6">
-                  <div className="flex flex-wrap items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <h3 className="font-semibold text-lg flex items-center gap-2">
-                        🔁 Recurring charges
-                      </h3>
-                      <p className="text-sm text-gray-600 mt-1 max-w-lg">
-                        Create and manage client recurring payments (lawn care, maintenance, etc.).
-                        Active, payments off, and archive — separate from one-time invoices.
-                      </p>
-                    </div>
-                    <Button
-                      className="bg-teal-700 hover:bg-teal-800 text-white shrink-0"
-                      onClick={() => setView('recurringView')}
-                    >
-                      Manage recurring
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-
               {canSeeFinancials && (
                 <Card>
                   <CardContent className="p-6">
