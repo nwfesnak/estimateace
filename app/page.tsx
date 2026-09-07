@@ -370,6 +370,7 @@ export default function Home() {
       printPreview: "Print/Preview",
       sendEstimate: "Send Estimate",
       convertToInvoice: "Convert to Invoice",
+      convertToEstimate: "Convert back to Estimate",
       takePhoto: "Take Photo",
       addPhoto: "Add Photo",
       addPhotos: "Add Photos",
@@ -421,9 +422,12 @@ export default function Home() {
       retrieveArchive: "Retrieve Archive",
       retrieveArchiveHelp: "View archived estimates and invoices, open them, or restore them to your active lists.",
       viewArchives: "View / Retrieve Archives",
-      paidInvoices: "Paid Invoices",
-      paidInvoicesHelp: "Invoices marked paid appear under Reports → Paid invoices. Canceled recurring plans live under Recurring → Archive.",
+      paidInvoices: "Paid & Open Invoices",
+      paidInvoicesHelp: "Reports → Paid & open invoices lists paid invoices and unpaid/open invoices. Canceled recurring plans live under Recurring → Archive.",
       noPaidInvoices: "No paid invoices yet. When you mark an invoice paid, it appears in this folder.",
+      openUnpaidInvoices: "Open / unpaid invoices",
+      openUnpaidInvoicesHelp: "Invoices not marked paid yet. Open one to send, collect payment, or convert it back to an estimate.",
+      noOpenUnpaidInvoices: "No open invoices. Convert an estimate to an invoice and it will show here until paid.",
       activeEstimates: "Active Estimates",
       metric: "Metric",
       count: "Count",
@@ -510,6 +514,7 @@ export default function Home() {
       printPreview: "Imprimir/Vista Previa",
       sendEstimate: "Enviar Presupuesto",
       convertToInvoice: "Convertir a Factura",
+      convertToEstimate: "Volver a Presupuesto",
       takePhoto: "Tomar Foto",
       addPhoto: "Agregar Foto",
       addPhotos: "Agregar Fotos",
@@ -561,9 +566,12 @@ export default function Home() {
       retrieveArchive: "Recuperar Archivo",
       retrieveArchiveHelp: "Vea presupuestos y facturas archivados, ábralos o restáurelos a sus listas activas.",
       viewArchives: "Ver / Recuperar Archivos",
-      paidInvoices: "Facturas Pagadas",
-      paidInvoicesHelp: "Las facturas marcadas como pagadas se mueven aquí automáticamente y se quitan de Presupuestos y Facturas abiertas.",
+      paidInvoices: "Facturas pagadas y abiertas",
+      paidInvoicesHelp: "Informes → Facturas pagadas y abiertas muestra facturas pagadas y facturas sin pagar. Los planes recurrentes cancelados están en Recurrente → Archivo.",
       noPaidInvoices: "Aún no hay facturas pagadas. Al cerrar una factura como pagada, aparece en esta carpeta.",
+      openUnpaidInvoices: "Facturas abiertas / sin pagar",
+      openUnpaidInvoicesHelp: "Facturas aún no marcadas como pagadas. Ábralas para enviar, cobrar o volver a convertirlas en presupuesto.",
+      noOpenUnpaidInvoices: "No hay facturas abiertas. Convierta un presupuesto en factura y aparecerá aquí hasta pagarse.",
       activeEstimates: "Presupuestos Activos",
       metric: "Métrica",
       count: "Cantidad",
@@ -650,6 +658,7 @@ export default function Home() {
       printPreview: "Imprimer/Aperçu",
       sendEstimate: "Envoyer le Devis",
       convertToInvoice: "Convertir en Facture",
+      convertToEstimate: "Reconvertir en Devis",
       takePhoto: "Prendre Photo",
       addPhoto: "Ajouter Photo",
       addPhotos: "Ajouter Photos",
@@ -701,9 +710,12 @@ export default function Home() {
       retrieveArchive: "Récupérer les Archives",
       retrieveArchiveHelp: "Consultez les devis et factures archivés, ouvrez-les ou restaurez-les dans vos listes actives.",
       viewArchives: "Voir / Récupérer les Archives",
-      paidInvoices: "Factures Payées",
-      paidInvoicesHelp: "Les factures marquées payées sont déplacées ici automatiquement et retirées des Devis et Factures ouvertes.",
+      paidInvoices: "Factures payées et ouvertes",
+      paidInvoicesHelp: "Rapports → Factures payées et ouvertes liste les factures payées et les factures impayées. Les forfaits récurrents annulés sont sous Récurrent → Archive.",
       noPaidInvoices: "Aucune facture payée pour le moment. Lorsqu'une facture est clôturée comme payée, elle apparaît dans ce dossier.",
+      openUnpaidInvoices: "Factures ouvertes / impayées",
+      openUnpaidInvoicesHelp: "Factures pas encore marquées payées. Ouvrez-en une pour envoyer, encaisser, ou la reconvertir en devis.",
+      noOpenUnpaidInvoices: "Aucune facture ouverte. Convertissez un devis en facture et elle apparaîtra ici jusqu'au paiement.",
       activeEstimates: "Devis Actifs",
       metric: "Métrique",
       count: "Nombre",
@@ -5934,6 +5946,318 @@ export default function Home() {
     }
   };
 
+  /**
+   * Turn an open (unpaid) invoice back into an estimate.
+   * Uses the same reliable save path as Save (client upsert → lowercase → /api/documents/save).
+   */
+  const convertInvoiceToEstimate = async (sourceRow?: any) => {
+    if (!user || !supabase || !workspaceUserId) {
+      showMessage('Not logged in — cannot convert. Log in again.');
+      return;
+    }
+
+    let row: any = sourceRow || null;
+    const fromList = Boolean(sourceRow);
+
+    // Always load the latest DB row when converting from a list card
+    if (fromList) {
+      const lookupId = String(sourceRow.id || sourceRow.invoiceNumber || sourceRow.invoicenumber || '').trim();
+      if (lookupId) {
+        let fresh: any = null;
+        const byId = await supabase
+          .from('estimates')
+          .select('*')
+          .eq('user_id', workspaceUserId)
+          .eq('id', lookupId)
+          .maybeSingle();
+        if (!byId.error && byId.data) fresh = byId.data;
+        if (!fresh) {
+          const byNum = await supabase
+            .from('estimates')
+            .select('*')
+            .eq('user_id', workspaceUserId)
+            .eq('invoiceNumber', lookupId)
+            .limit(1)
+            .maybeSingle();
+          if (!byNum.error && byNum.data) fresh = byNum.data;
+        }
+        if (fresh) row = fresh;
+      }
+    }
+
+    const currentType = String(
+      row?.documentType ?? row?.documenttype ?? (fromList ? '' : documentType) ?? ''
+    ).toLowerCase();
+    const currentStatus = String(
+      row?.paymentStatus ?? row?.paymentstatus ?? (fromList ? '' : paymentStatus) ?? 'pending'
+    ).toLowerCase();
+    const docNum = String(
+      row?.invoiceNumber ?? row?.invoicenumber ?? row?.id ?? (fromList ? '' : invoiceNumber) ?? ''
+    ).trim();
+    const isInvoice =
+      currentType === 'invoice' || docNum.toUpperCase().startsWith('INV');
+
+    if (!isInvoice) {
+      showMessage('This document is already an estimate.');
+      return;
+    }
+    if (currentStatus === 'paid' || (row && isPaidDocRow(row))) {
+      showMessage(
+        'This invoice is marked paid. Retrieve it from Paid invoices first if you need to reopen it, then convert.'
+      );
+      return;
+    }
+
+    const previousId = String(row?.id || docNum || invoiceNumber || '').trim();
+    if (!previousId) {
+      showMessage('Could not find this invoice id.');
+      return;
+    }
+
+    if (
+      !confirm(
+        `Convert invoice ${previousId} back to an estimate?\n\nIt will leave Open invoices and return to Estimates. Any recorded deposit stays on the estimate.`
+      )
+    ) {
+      return;
+    }
+
+    const prevUpper = previousId.toUpperCase();
+    const nextNumber = prevUpper.startsWith('INV')
+      ? previousId.replace(/^inv/i, 'EST').replace(/^INV/, 'EST')
+      : previousId.startsWith('INV') || previousId.startsWith('inv')
+        ? previousId.replace(/^inv/i, 'EST')
+        : previousId;
+
+    const g = (camel: string, lower?: string) => {
+      if (!row) return undefined;
+      const l = lower || camel.toLowerCase();
+      if (row[camel] !== undefined && row[camel] !== null) return row[camel];
+      if (row[l] !== undefined && row[l] !== null) return row[l];
+      return undefined;
+    };
+
+    const depositAlreadyPaid = Math.max(
+      0,
+      Number(fromList ? g('amountPaid') : amountPaid) || 0
+    );
+
+    const snap = fromList
+      ? {
+          jobName: String(g('jobName') ?? ''),
+          address: String(g('address') ?? ''),
+          city: String(g('city') ?? ''),
+          state: String(g('state') ?? ''),
+          zipCode: String(g('zipCode') ?? ''),
+          phones: Array.isArray(g('phones')) ? g('phones') : g('phones') ? [g('phones')] : [],
+          emails: Array.isArray(g('emails')) ? g('emails') : g('emails') ? [g('emails')] : [],
+          date: String(g('date') ?? new Date().toISOString().slice(0, 10)),
+          items: Array.isArray(g('items')) ? g('items') : [],
+          terms: String(g('terms') ?? ''),
+          profile: g('profile') ?? getDocumentProfileSnapshot(),
+          dueDate: String(g('dueDate') ?? ''),
+          paymentMethod: String(g('paymentMethod') ?? ''),
+          photoUrls: Array.isArray(g('photoUrls')) ? g('photoUrls') : [],
+          videoUrls: Array.isArray(g('videoUrls')) ? g('videoUrls') : [],
+          receiptUrls: Array.isArray(g('receiptUrls')) ? g('receiptUrls') : [],
+          receiptDetails: Array.isArray(g('receiptDetails')) ? g('receiptDetails') : [],
+          laborHours: Number(g('laborHours')) || 0,
+          laborRate: Number(g('laborRate')) || 0,
+          laborFixedAmount: Number(g('laborFixedAmount')) || 0,
+          useHourlyLabor: g('useHourlyLabor') !== false,
+          laborAmount: Number(g('laborAmount')) || 0,
+          taxRate: Number(g('taxRate')) || 0,
+          taxAmount: Number(g('taxAmount')) || 0,
+          isTaxExempt: Boolean(g('isTaxExempt')),
+          taxLabor: g('taxLabor') !== false,
+        }
+      : {
+          jobName,
+          address,
+          city,
+          state,
+          zipCode,
+          phones,
+          emails,
+          date,
+          items,
+          terms,
+          profile: getDocumentProfileSnapshot(),
+          dueDate,
+          paymentMethod,
+          photoUrls,
+          videoUrls,
+          receiptUrls,
+          receiptDetails,
+          laborHours,
+          laborRate,
+          laborFixedAmount,
+          useHourlyLabor,
+          laborAmount,
+          taxRate: baseTaxRate,
+          taxAmount,
+          isTaxExempt,
+          taxLabor,
+        };
+
+    const payload = {
+      id: nextNumber,
+      user_id: workspaceUserId,
+      ...snap,
+      invoiceNumber: nextNumber,
+      documentType: 'estimate' as const,
+      paymentStatus: 'pending' as const,
+      amountPaid: depositAlreadyPaid,
+      updated_at: new Date().toISOString(),
+    };
+
+    showMessage('Converting to estimate…');
+
+    try {
+      let saved = false;
+      let lastErr = '';
+
+      // 1) Client camelCase upsert
+      {
+        const { error } = await supabase.from('estimates').upsert(payload, { onConflict: 'id' });
+        if (!error) saved = true;
+        else {
+          lastErr = error.message || String(error);
+          console.warn('convertInvoiceToEstimate camelCase failed:', error);
+        }
+      }
+
+      // 2) Client lowercase upsert
+      if (!saved) {
+        const lower: Record<string, any> = {};
+        for (const [k, v] of Object.entries(payload)) {
+          if (
+            k === 'id' ||
+            k === 'user_id' ||
+            k === 'updated_at' ||
+            k === 'profile' ||
+            k === 'items' ||
+            k === 'terms' ||
+            k === 'phones' ||
+            k === 'emails' ||
+            k === 'address' ||
+            k === 'city' ||
+            k === 'state' ||
+            k === 'date'
+          ) {
+            lower[k] = v;
+          } else {
+            lower[k.toLowerCase()] = v;
+          }
+        }
+        const { error } = await supabase.from('estimates').upsert(lower, { onConflict: 'id' });
+        if (!error) saved = true;
+        else {
+          lastErr = error.message || String(error);
+          console.warn('convertInvoiceToEstimate lowercase failed:', error);
+        }
+      }
+
+      // 3) Server save (service role) — same path as Save button
+      if (!saved) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const token = sessionData.session?.access_token;
+        if (!token) {
+          showMessage('Session expired. Log in again, then convert.');
+          return;
+        }
+        const res = await fetch('/api/documents/save', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (res.ok && json.ok) {
+          saved = true;
+        } else {
+          lastErr = json.error || lastErr || `HTTP ${res.status}`;
+          console.error('convertInvoiceToEstimate server save failed:', json);
+        }
+      }
+
+      if (!saved) {
+        showMessage(`Could not convert to estimate: ${lastErr || 'save failed'}`);
+        return;
+      }
+
+      // Remove the old invoice row when the id changed (INV → EST)
+      if (previousId && previousId !== nextNumber) {
+        await supabase.from('estimates').delete().eq('id', previousId).eq('user_id', workspaceUserId);
+        try {
+          await supabase
+            .from('estimates')
+            .delete()
+            .eq('user_id', workspaceUserId)
+            .eq('invoiceNumber', previousId);
+        } catch {
+          /* invoiceNumber column may be lowercase-only */
+        }
+        try {
+          await supabase
+            .from('estimates')
+            .delete()
+            .eq('user_id', workspaceUserId)
+            .eq('invoicenumber', previousId);
+        } catch {
+          /* optional */
+        }
+      }
+
+      // Update editor state to the new estimate
+      setDocumentType('estimate');
+      setInvoiceNumber(nextNumber);
+      setPaymentStatus('pending');
+      setAmountPaid(depositAlreadyPaid);
+      if (fromList) {
+        await loadSelectedEstimate({
+          ...payload,
+          id: nextNumber,
+          documentType: 'estimate',
+          paymentStatus: 'pending',
+          amountPaid: depositAlreadyPaid,
+        });
+      }
+      setView('editor');
+
+      setSavedEstimatesList((prev) => {
+        const withoutOld = (prev || []).filter(
+          (r: any) =>
+            String(r.id) !== previousId &&
+            String(r.invoiceNumber ?? r.invoicenumber ?? '') !== previousId &&
+            String(r.id) !== nextNumber
+        );
+        return [
+          {
+            ...payload,
+            id: nextNumber,
+            documentType: 'estimate',
+            paymentStatus: 'pending',
+            amountPaid: depositAlreadyPaid,
+          },
+          ...withoutOld,
+        ];
+      });
+
+      await refreshSavedList();
+      showMessage(
+        depositAlreadyPaid > 0.009
+          ? `✅ Converted back to estimate ${nextNumber}. Deposit $${depositAlreadyPaid.toFixed(2)} kept on the estimate.`
+          : `✅ Converted back to estimate ${nextNumber}. It is back under Estimates.`
+      );
+    } catch (e: any) {
+      console.error('convertInvoiceToEstimate unexpected error:', e);
+      showMessage(`Could not convert invoice back to estimate: ${e?.message || 'unexpected error'}`);
+    }
+  };
+
   // Build archive payload. Reads camelCase or lowercase keys from estimates rows.
   const prepareArchiveData = (estRow: any) => {
     if (!estRow) return null;
@@ -10625,7 +10949,7 @@ export default function Home() {
                 )}
               </div>
               <p className="text-sm text-gray-500 mb-4">
-                Paid invoices are moved to Reports → Paid invoices.
+                Paid invoices move to Reports → Paid &amp; open invoices. You can also convert an open invoice back to an estimate from Reports or the invoice editor.
               </p>
 
               {selectedIds.length > 0 && (
@@ -10648,7 +10972,7 @@ export default function Home() {
               <div className="space-y-4">
                 {openInvoicesList.length === 0 && (
                   <div className="border border-dashed rounded-lg p-8 text-center text-sm text-gray-500 bg-white">
-                    No open invoices. Paid invoices are under Reports → Paid invoices.
+                    {t('noOpenUnpaidInvoices')} Paid invoices are under Reports → Paid &amp; open invoices.
                   </div>
                 )}
                 {openInvoicesList.map((est) => (
@@ -10686,8 +11010,16 @@ export default function Home() {
                         </div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-4">
+                    <div className="flex flex-wrap items-center gap-2">
                       <Button size="sm" onClick={() => void openDocumentFromList(est)}>{t('open')}</Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="border-[#f59e0b] text-[#b45309] hover:bg-amber-50"
+                        onClick={() => void convertInvoiceToEstimate(est)}
+                      >
+                        {t('convertToEstimate')}
+                      </Button>
                       <Button size="sm" variant="outline" onClick={() => archiveEstimate(est.id)}>{t('archive')}</Button>
                       <Button size="sm" variant="destructive" onClick={() => deleteSelectedEstimate(est.id)}>{t('delete')}</Button>
                     </div>
@@ -11411,6 +11743,16 @@ export default function Home() {
                   >
                     📧 Send Invoice
                   </Button>
+                  {paymentStatus !== 'paid' && (
+                    <Button
+                      type="button"
+                      onClick={() => void convertInvoiceToEstimate()}
+                      className="bg-[#f59e0b] hover:bg-[#d97706] text-white"
+                      title="Turn this open invoice back into an estimate"
+                    >
+                      {t('convertToEstimate')}
+                    </Button>
+                  )}
                 </div>
               ) : (
                 <div className="flex flex-wrap items-center gap-3 mb-8">
@@ -13718,14 +14060,14 @@ export default function Home() {
                     <div className="border-t pt-8">
                       <h3 className="font-semibold mb-2">{t('paidInvoices')}</h3>
                       <p className="text-sm text-gray-500 mb-4">
-                        Invoices marked paid are under Reports → Paid invoices. Canceled recurring plans are under Recurring → Archive.
+                        {t('paidInvoicesHelp')}
                       </p>
                       <Button
                         variant="outline"
                         className="w-full mb-2 border-[#10b981] text-[#10b981] hover:bg-emerald-50"
                         onClick={() => openPaidInvoicesReport()}
                       >
-                        ✅ Open Paid invoices (Reports)
+                        ✅ Open Paid &amp; open invoices (Reports)
                       </Button>
                       <Button
                         variant="outline"
@@ -13971,8 +14313,8 @@ export default function Home() {
               <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to {t('dashboard')}</Button>
               <h2 className="text-3xl font-semibold mb-2">📊 Reports</h2>
               <p className="text-sm text-gray-500 mb-6">
-                Estimates never approved live in Estimates archive. Invoices stay open until paid, then move to Paid invoices.
-                Recurring has Active, Payments off, and Archive (canceled plans — not paid invoices).
+                Estimates never approved live in Estimates archive. Paid &amp; open invoices shows paid work and unpaid invoices
+                (convert unpaid ones back to estimates if needed). Recurring has Active, Payments off, and Archive.
               </p>
               {currentCrew && !canSeeFinancials && (
                 <div className="p-6 bg-yellow-50 border border-yellow-200 rounded mb-6">
@@ -13984,7 +14326,7 @@ export default function Home() {
                 {(
                   [
                     { id: 'profit' as const, label: 'Profit' },
-                    { id: 'paid' as const, label: 'Paid invoices' },
+                    { id: 'paid' as const, label: 'Paid & open invoices' },
                     { id: 'estimates' as const, label: 'Estimates archive' },
                     { id: 'recurring' as const, label: 'Recurring' },
                     { id: 'tax' as const, label: 'Tax' },
@@ -14098,105 +14440,197 @@ export default function Home() {
               )}
 
               {reportsSubTab === 'paid' && (
-                <div>
+                <div className="space-y-10">
                   {(currentCrew && !canSeeFinancials) ? (
                     <p className="text-sm text-gray-500">Restricted for your crew access level.</p>
                   ) : (
-                    <section>
-                      <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
-                        <div>
-                          <h3 className="text-xl font-semibold text-[#1e293b]">✅ Paid invoices</h3>
-                          <p className="text-sm text-gray-500 mt-1">
-                            Invoices that have been marked paid. Totals match Reports → Profit. Open invoices stay under Invoices until paid.
-                          </p>
-                        </div>
-                        <Button type="button" variant="outline" size="sm" onClick={() => void refreshArchivesList()}>
-                          Refresh
-                        </Button>
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-                        <div className="bg-white border rounded-2xl p-4 text-center">
-                          <div className="text-xs uppercase tracking-wide text-gray-500">Paid invoices</div>
-                          <div className="text-3xl font-bold text-[#1e293b] mt-1">
-                            {reportPaidInvoicesTotals.count}
+                    <>
+                      <section>
+                        <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+                          <div>
+                            <h3 className="text-xl font-semibold text-[#1e293b]">✅ Paid invoices</h3>
+                            <p className="text-sm text-gray-500 mt-1">
+                              Invoices marked paid. Totals match Reports → Profit.
+                            </p>
                           </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              void refreshArchivesList();
+                              void refreshSavedList();
+                            }}
+                          >
+                            Refresh
+                          </Button>
                         </div>
-                        <div className="bg-white border rounded-2xl p-4 text-center">
-                          <div className="text-xs uppercase tracking-wide text-gray-500">Invoiced total</div>
-                          <div className="text-3xl font-bold text-[#10b981] mt-1">
-                            ${reportPaidInvoicesTotals.total.toFixed(2)}
-                          </div>
-                        </div>
-                        <div className="bg-white border rounded-2xl p-4 text-center">
-                          <div className="text-xs uppercase tracking-wide text-gray-500">Amount paid</div>
-                          <div className="text-3xl font-bold text-[#14b8a6] mt-1">
-                            ${reportPaidInvoicesTotals.paid.toFixed(2)}
-                          </div>
-                        </div>
-                      </div>
-                      {reportPaidInvoices.length === 0 ? (
-                        <div className="rounded-xl border border-dashed bg-slate-50 p-8 text-center text-gray-500">
-                          No paid invoices yet. Mark an invoice paid and it will show here.
-                        </div>
-                      ) : (
-                        <div className="space-y-3">
-                          {reportPaidInvoices.map((inv: any) => {
-                            const invTotal = calculateGrandTotal(inv);
-                            const paidRaw = Number(inv.amountPaid ?? inv.amountpaid) || 0;
-                            const paidShow =
-                              paidRaw > 0
-                                ? Math.min(paidRaw, invTotal > 0 ? invTotal : paidRaw)
-                                : invTotal;
-                            return (
-                            <div
-                              key={inv.id}
-                              className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white border rounded-xl p-4"
-                            >
-                              <div className="min-w-0">
-                                <div className="font-semibold text-[#1e293b]">
-                                  {inv.jobName || inv.jobname || 'Untitled invoice'}
-                                </div>
-                                <div className="text-sm text-gray-500">
-                                  {inv.invoiceNumber || inv.invoicenumber || inv.id}
-                                  {inv.paymentMethod || inv.paymentmethod
-                                    ? ` · ${inv.paymentMethod || inv.paymentmethod}`
-                                    : ''}
-                                  {` · $${invTotal.toFixed(2)}`}
-                                  {paidShow > 0 ? ` (paid $${paidShow.toFixed(2)})` : ''}
-                                </div>
-                              </div>
-                              <div className="flex flex-wrap gap-2 shrink-0">
-                                <Button
-                                  size="sm"
-                                  onClick={async () => {
-                                    await loadSelectedEstimate(inv);
-                                    setView('editor');
-                                  }}
-                                >
-                                  Open
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  className="border-[#10b981] text-[#10b981]"
-                                  onClick={() => void retrieveArchive(inv)}
-                                >
-                                  Retrieve
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="destructive"
-                                  onClick={() => void deleteArchivedDocument(inv.id)}
-                                >
-                                  Delete
-                                </Button>
-                              </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+                          <div className="bg-white border rounded-2xl p-4 text-center">
+                            <div className="text-xs uppercase tracking-wide text-gray-500">Paid invoices</div>
+                            <div className="text-3xl font-bold text-[#1e293b] mt-1">
+                              {reportPaidInvoicesTotals.count}
                             </div>
-                            );
-                          })}
+                          </div>
+                          <div className="bg-white border rounded-2xl p-4 text-center">
+                            <div className="text-xs uppercase tracking-wide text-gray-500">Invoiced total</div>
+                            <div className="text-3xl font-bold text-[#10b981] mt-1">
+                              ${reportPaidInvoicesTotals.total.toFixed(2)}
+                            </div>
+                          </div>
+                          <div className="bg-white border rounded-2xl p-4 text-center">
+                            <div className="text-xs uppercase tracking-wide text-gray-500">Amount paid</div>
+                            <div className="text-3xl font-bold text-[#14b8a6] mt-1">
+                              ${reportPaidInvoicesTotals.paid.toFixed(2)}
+                            </div>
+                          </div>
                         </div>
-                      )}
-                    </section>
+                        {reportPaidInvoices.length === 0 ? (
+                          <div className="rounded-xl border border-dashed bg-slate-50 p-8 text-center text-gray-500">
+                            {t('noPaidInvoices')}
+                          </div>
+                        ) : (
+                          <div className="space-y-3">
+                            {reportPaidInvoices.map((inv: any) => {
+                              const invTotal = calculateGrandTotal(inv);
+                              const paidRaw = Number(inv.amountPaid ?? inv.amountpaid) || 0;
+                              const paidShow =
+                                paidRaw > 0
+                                  ? Math.min(paidRaw, invTotal > 0 ? invTotal : paidRaw)
+                                  : invTotal;
+                              return (
+                              <div
+                                key={inv.id}
+                                className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white border rounded-xl p-4"
+                              >
+                                <div className="min-w-0">
+                                  <div className="font-semibold text-[#1e293b]">
+                                    {inv.jobName || inv.jobname || 'Untitled invoice'}
+                                  </div>
+                                  <div className="text-sm text-gray-500">
+                                    {inv.invoiceNumber || inv.invoicenumber || inv.id}
+                                    {inv.paymentMethod || inv.paymentmethod
+                                      ? ` · ${inv.paymentMethod || inv.paymentmethod}`
+                                      : ''}
+                                    {` · $${invTotal.toFixed(2)}`}
+                                    {paidShow > 0 ? ` (paid $${paidShow.toFixed(2)})` : ''}
+                                  </div>
+                                </div>
+                                <div className="flex flex-wrap gap-2 shrink-0">
+                                  <Button
+                                    size="sm"
+                                    onClick={async () => {
+                                      await loadSelectedEstimate(inv);
+                                      setView('editor');
+                                    }}
+                                  >
+                                    Open
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="border-[#10b981] text-[#10b981]"
+                                    onClick={() => void retrieveArchive(inv)}
+                                  >
+                                    Retrieve
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="destructive"
+                                    onClick={() => void deleteArchivedDocument(inv.id)}
+                                  >
+                                    Delete
+                                  </Button>
+                                </div>
+                              </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </section>
+
+                      <section>
+                        <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+                          <div>
+                            <h3 className="text-xl font-semibold text-[#1e293b]">
+                              📤 {t('openUnpaidInvoices')}
+                            </h3>
+                            <p className="text-sm text-gray-500 mt-1">
+                              {t('openUnpaidInvoicesHelp')}
+                            </p>
+                          </div>
+                          <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 text-center min-w-[8rem]">
+                            <div className="text-xs uppercase tracking-wide text-amber-800">Open</div>
+                            <div className="text-2xl font-bold text-amber-900">{openInvoicesList.length}</div>
+                          </div>
+                        </div>
+                        {openInvoicesList.length === 0 ? (
+                          <div className="rounded-xl border border-dashed bg-slate-50 p-8 text-center text-gray-500">
+                            {t('noOpenUnpaidInvoices')}
+                          </div>
+                        ) : (
+                          <div className="space-y-3">
+                            {openInvoicesList.map((inv: any) => {
+                              const invTotal = calculateGrandTotal(inv);
+                              const paidRaw = Number(inv.amountPaid ?? inv.amountpaid) || 0;
+                              const balance = Math.max(0, invTotal - paidRaw);
+                              return (
+                                <div
+                                  key={inv.id}
+                                  className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white border border-amber-100 rounded-xl p-4"
+                                >
+                                  <div className="min-w-0">
+                                    <div className="font-semibold text-[#1e293b]">
+                                      {inv.jobName || inv.jobname || 'Untitled invoice'}
+                                    </div>
+                                    <div className="text-sm text-gray-500">
+                                      {inv.invoiceNumber || inv.invoicenumber || inv.id}
+                                      {` · $${invTotal.toFixed(2)}`}
+                                      {paidRaw > 0.009
+                                        ? ` · deposit $${paidRaw.toFixed(2)} · balance $${balance.toFixed(2)}`
+                                        : ' · unpaid'}
+                                    </div>
+                                  </div>
+                                  <div className="flex flex-wrap gap-2 shrink-0">
+                                    <Button
+                                      size="sm"
+                                      onClick={async () => {
+                                        await loadSelectedEstimate(inv);
+                                        setView('editor');
+                                      }}
+                                    >
+                                      Open
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="border-[#f59e0b] text-[#b45309] hover:bg-amber-50"
+                                      onClick={() => void convertInvoiceToEstimate(inv)}
+                                    >
+                                      {t('convertToEstimate')}
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => void archiveEstimate(inv.id)}
+                                    >
+                                      {t('archive')}
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="destructive"
+                                      onClick={() => void deleteSelectedEstimate(inv.id)}
+                                    >
+                                      {t('delete')}
+                                    </Button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </section>
+                    </>
                   )}
                 </div>
               )}
