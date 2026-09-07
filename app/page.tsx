@@ -1587,7 +1587,7 @@ export default function Home() {
   const [selectedReportJob, setSelectedReportJob] = useState<any>(null);
   const [reportsSubTab, setReportsSubTab] = useState<
     'estimates' | 'paid' | 'recurring' | 'profit' | 'tax'
-  >('estimates');
+  >('profit');
   /** Profit report: which year/month sections are expanded for archived invoices */
   const [profitArchiveYearFilter, setProfitArchiveYearFilter] = useState<string>('all');
   const [profitArchiveExpandedMonths, setProfitArchiveExpandedMonths] = useState<Record<string, boolean>>({});
@@ -13915,10 +13915,10 @@ export default function Home() {
               <div className="flex flex-wrap border-b mb-6 gap-1">
                 {(
                   [
-                    { id: 'estimates' as const, label: 'Estimates archive' },
-                    { id: 'paid' as const, label: 'Paid invoices' },
-                    { id: 'recurring' as const, label: 'Recurring' },
                     { id: 'profit' as const, label: 'Profit' },
+                    { id: 'paid' as const, label: 'Paid invoices' },
+                    { id: 'estimates' as const, label: 'Estimates archive' },
+                    { id: 'recurring' as const, label: 'Recurring' },
                     { id: 'tax' as const, label: 'Tax' },
                   ] as const
                 ).map((tab) => (
