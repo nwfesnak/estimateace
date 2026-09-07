@@ -3139,9 +3139,9 @@ export default function Home() {
         const serverErr =
           json.error ||
           clientErr?.message ||
-          isOpsAdmin
+          (isOpsAdmin
             ? 'Save failed on server. Check SUPABASE_SERVICE_ROLE_KEY and estimates table.'
-            : 'Save failed on the server. Please try again or contact support.';
+            : 'Save failed on the server. Please try again or contact support.');
         console.error('Server save failed:', json);
         setSaveStatus('error');
         setSaveErrorDetail(serverErr);
@@ -3154,14 +3154,13 @@ export default function Home() {
         clientErr?.message ||
         clientErr?.details ||
         'Failed to save document.';
-      const friendly =
-        /row-level security|RLS|permission|policy/i.test(errMsg)
-          isOpsAdmin
-            ? 'Save blocked by database security (RLS). Run supabase/rls-policies.sql or ensure SUPABASE_SERVICE_ROLE_KEY is set on Vercel.'
-            : 'Save was blocked by database security. Please try again or contact support.'
-          : /column|schema|does not exist/i.test(errMsg)
-            ? `Save failed (database schema): ${errMsg}`
-            : `Failed to save: ${errMsg}`;
+      const friendly = /row-level security|RLS|permission|policy/i.test(errMsg)
+        ? isOpsAdmin
+          ? 'Save blocked by database security (RLS). Run supabase/rls-policies.sql or ensure SUPABASE_SERVICE_ROLE_KEY is set on Vercel.'
+          : 'Save was blocked by database security. Please try again or contact support.'
+        : /column|schema|does not exist/i.test(errMsg)
+          ? `Save failed (database schema): ${errMsg}`
+          : `Failed to save: ${errMsg}`;
       setSaveStatus('error');
       setSaveErrorDetail(friendly);
       showMessage(`❌ ${friendly}`);
