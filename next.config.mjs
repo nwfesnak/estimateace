@@ -16,6 +16,15 @@ const nextConfig = {
     ],
   },
 
+  async redirects() {
+    return [
+      { source: '/login', destination: '/', permanent: false },
+      { source: '/signup', destination: '/trial', permanent: false },
+      { source: '/register', destination: '/trial', permanent: false },
+      { source: '/pricing', destination: '/trial', permanent: false },
+    ];
+  },
+
   async headers() {
     const appOrigin = (process.env.NEXT_PUBLIC_APP_URL || 'https://app.estimateace.com')
       .trim()

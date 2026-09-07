@@ -1,0 +1,11 @@
+User-agent: *
+Allow: /trial
+Allow: /terms
+Allow: /privacy
+Allow: /sms
+Allow: /login
+Allow: /signup
+Allow: /pricing
+Disallow: /api/
+Disallow: /client/
+
