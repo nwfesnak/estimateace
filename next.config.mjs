@@ -37,9 +37,9 @@ const nextConfig = {
       img-src 'self' blob: data: https://*.supabase.co https://*.supabase.in https://*.stripe.com;
       font-src 'self';
       connect-src 'self' https://*.supabase.co https://*.supabase.in https://libretranslate.com https://api.x.ai https://api.stripe.com https://*.stripe.com wss://*.supabase.co;
-      media-src 'self' blob: https://*.supabase.co;
+      media-src 'self' blob: https://*.supabase.co https://*.supabase.in;
       object-src 'none';
-      frame-src https://js.stripe.com https://hooks.stripe.com;
+      frame-src https://js.stripe.com https://hooks.stripe.com https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com https://www.loom.com;
       frame-ancestors 'none';
       base-uri 'self';
       form-action 'self' https://checkout.stripe.com;

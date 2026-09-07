@@ -5,7 +5,8 @@ export default function robots(): MetadataRoute.Robots {
     rules: {
       userAgent: '*',
       allow: ['/trial', '/terms', '/privacy', '/sms', '/login', '/signup', '/pricing'],
-      disallow: ['/api/', '/client/'],
+      // /welcome is an unlisted signup video link — not for search engines
+      disallow: ['/api/', '/client/', '/welcome'],
     },
   };
 }
