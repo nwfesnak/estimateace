@@ -10074,8 +10074,10 @@ export default function Home() {
                 </Button>
               </div>
               <p className="text-[11px] text-gray-500 mb-3 text-center leading-relaxed">
-                New customers: <strong>Sign Up</strong> opens the free trial &amp; plan page. Accounts are
-                not created on this screen — only through the trial / pricing signup.
+                New customers: the <strong>Sign Up</strong>
+                {' '}
+                button opens the free trial and plan page. Accounts are not created on this screen
+                — only through the trial / pricing signup.
               </p>
               <button 
                 onClick={() => setShowMainForgot(true)} 
