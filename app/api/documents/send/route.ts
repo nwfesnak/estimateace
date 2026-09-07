@@ -83,6 +83,7 @@ export async function POST(request: NextRequest) {
     const showDiscount = discountAmount > 0.005;
     const depositPercent = Math.max(0, Number(body.depositPercent) || 0);
     const showDepositOnApproval = body.showDepositOnApproval !== false;
+    const depositMinimumAmount = Math.max(0, Number(body.depositMinimumAmount) || 0);
     // Fee language only when contractor charges CC fees; Zelle / mail never do
     const chargeCCFee = body.chargeCCFee === true;
     const ccFeePercentage =
@@ -98,6 +99,7 @@ export async function POST(request: NextRequest) {
       amountPaid,
       depositPercent,
       showDepositOnApproval,
+      depositMinimumAmount,
     });
     const depositDue = due.depositDue;
     const amountDueNow = due.amountDueNow;

@@ -978,6 +978,8 @@ export default function Home() {
     language: 'en' as string,
     depositPercentage: 10,
     showDepositOnApproval: true,
+    /** Only prompt clients for a deposit when estimate total is at least this ($). 0 = always. */
+    depositMinimumAmount: 0,
     thirdPartyEscrowEnabled: false,
     escrowMinimumAmount: 10000,
     autoSaveEnabled: true,
@@ -1283,6 +1285,7 @@ export default function Home() {
     zipCode: full.zipCode || '',
     depositPercentage: Number(full.depositPercentage) || 0,
     showDepositOnApproval: full.showDepositOnApproval !== false,
+    depositMinimumAmount: Math.max(0, Number(full.depositMinimumAmount) || 0),
     thirdPartyEscrowEnabled: !!full.thirdPartyEscrowEnabled,
     escrowMinimumAmount: Math.max(0, Number(full.escrowMinimumAmount) || 0),
     autoSaveEnabled: full.autoSaveEnabled !== false,
@@ -1384,8 +1387,6 @@ export default function Home() {
   const [pendingCrewEmail, setPendingCrewEmail] = useState('');
   // This price is set by the owner of Estimate Ace (you). 
   // End users / account holders of sold instances cannot change it.
-  const CREW_MONTHLY_FEE = 20;
-  const [selectedCrewPaymentMethod, setSelectedCrewPaymentMethod] = useState<string | null>(null);
   // Other states
   const [isLoadModalOpen, setIsLoadModalOpen] = useState(false);
   const [savedEstimatesList, setSavedEstimatesList] = useState<any[]>([]);
@@ -4256,6 +4257,14 @@ export default function Home() {
       showDepositOnApproval: 'showDepositOnApproval' in loadedProfile
         ? loadedProfile.showDepositOnApproval !== false
         : (cached.showDepositOnApproval ?? profile.showDepositOnApproval ?? true),
+      depositMinimumAmount:
+        'depositMinimumAmount' in cached
+          ? Math.max(0, Number(cached.depositMinimumAmount) || 0)
+          : (serverProfile && 'depositMinimumAmount' in serverProfile
+            ? Math.max(0, Number(serverProfile.depositMinimumAmount) || 0)
+            : ('depositMinimumAmount' in loadedProfile
+              ? Math.max(0, Number(loadedProfile.depositMinimumAmount) || 0)
+              : Math.max(0, Number(profile.depositMinimumAmount) || 0))),
       thirdPartyEscrowEnabled: 'thirdPartyEscrowEnabled' in loadedProfile
         ? !!loadedProfile.thirdPartyEscrowEnabled
         : (cached.thirdPartyEscrowEnabled ?? profile.thirdPartyEscrowEnabled ?? false),
@@ -4463,6 +4472,14 @@ export default function Home() {
             : ('showDepositOnApproval' in l
               ? l.showDepositOnApproval !== false
               : (cached.showDepositOnApproval ?? true)),
+          depositMinimumAmount:
+            'depositMinimumAmount' in cached
+              ? Math.max(0, Number(cached.depositMinimumAmount) || 0)
+              : (serverProfile && 'depositMinimumAmount' in serverProfile
+                ? Math.max(0, Number(serverProfile.depositMinimumAmount) || 0)
+                : ('depositMinimumAmount' in l
+                  ? Math.max(0, Number(l.depositMinimumAmount) || 0)
+                  : 0)),
           thirdPartyEscrowEnabled: 'thirdPartyEscrowEnabled' in (s as any)
             ? !!(s as any).thirdPartyEscrowEnabled
             : ('thirdPartyEscrowEnabled' in l
@@ -7561,6 +7578,7 @@ export default function Home() {
     setProfileSettingsCache({
       depositPercentage: nextProfile.depositPercentage,
       showDepositOnApproval: nextProfile.showDepositOnApproval,
+      depositMinimumAmount: Math.max(0, Number(nextProfile.depositMinimumAmount) || 0),
       thirdPartyEscrowEnabled: nextProfile.thirdPartyEscrowEnabled,
       escrowMinimumAmount: Math.max(0, Number(nextProfile.escrowMinimumAmount) || 0),
       autoSaveEnabled: nextProfile.autoSaveEnabled,
@@ -8261,6 +8279,23 @@ export default function Home() {
   const isDepositOnApprovalEnabled = () => profile.showDepositOnApproval !== false;
   const isThirdPartyEscrowProfileEnabled = () => !!profile.thirdPartyEscrowEnabled;
 
+  const getDepositMinimumAmount = (): number => {
+    const cached = getProfileSettingsCache();
+    if ('depositMinimumAmount' in cached) {
+      return Math.max(0, Number(cached.depositMinimumAmount) || 0);
+    }
+    return Math.max(0, Number(profile.depositMinimumAmount) || 0);
+  };
+
+  /** Deposit prompt only when enabled AND estimate total meets the profile minimum (if set). */
+  const shouldShowDepositOnEstimate = (estimateTotal: number = grandTotal) => {
+    if (!isDepositOnApprovalEnabled()) return false;
+    if (!(Number(profile.depositPercentage) > 0)) return false;
+    const minimum = getDepositMinimumAmount();
+    if (minimum <= 0) return true;
+    return estimateTotal + 0.009 >= minimum;
+  };
+
   const getEscrowMinimumAmount = (): number => {
     const cached = getProfileSettingsCache();
     if ('escrowMinimumAmount' in cached) {
@@ -8572,7 +8607,7 @@ export default function Home() {
 
   const renderApprovedPaymentSection = (options?: { interactive?: boolean }) => {
     if (documentType === 'invoice') return null;
-    if (!isDepositOnApprovalEnabled() && !shouldShowEscrowOnEstimate()) return null;
+    if (!shouldShowDepositOnEstimate() && !shouldShowEscrowOnEstimate()) return null;
 
     const interactive = options?.interactive ?? true;
     const depositBase = grandTotal * (profile.depositPercentage || 0) / 100;
@@ -8581,25 +8616,25 @@ export default function Home() {
     return (
       <div className="mt-12 text-center border-2 border-dashed border-[#10b981] rounded-3xl p-8">
         <div className="text-4xl font-bold text-[#10b981]">✅ Approved</div>
-        {isDepositOnApprovalEnabled() && (
+        {shouldShowDepositOnEstimate() && (
           <div className="mt-4 text-xl">
             Deposit due: <span className="font-semibold">${depositBase.toFixed(2)}</span>
             <span className="text-sm text-gray-500 ml-2">({profile.depositPercentage || 0}% of total)</span>
           </div>
         )}
-        {isDepositOnApprovalEnabled() && profile.chargeCCFee && (
+        {shouldShowDepositOnEstimate() && profile.chargeCCFee && (
           <div className="mt-2 text-sm text-gray-600">
             Credit card payments include an additional {ccFeePercent}% processing fee
           </div>
         )}
-        {shouldShowEscrowOnEstimate() && !isDepositOnApprovalEnabled() && (
+        {shouldShowEscrowOnEstimate() && !shouldShowDepositOnEstimate() && (
           <p className="mt-4 text-lg text-gray-700">
             Funds can be held in a third-party escrow account until work is complete.
           </p>
         )}
         {interactive ? (
           <div className="mt-6 flex flex-col gap-4 justify-center max-w-lg mx-auto">
-            {isDepositOnApprovalEnabled() && (
+            {shouldShowDepositOnEstimate() && (
               <Button
                 onClick={openDepositPayment}
                 className="w-full text-xl py-7 bg-[#10b981] hover:bg-[#0ea16b] text-white font-semibold rounded-2xl shadow-lg"
@@ -13723,22 +13758,55 @@ export default function Home() {
                         </label>
                       </div>
                       {profile.showDepositOnApproval !== false && (
-                        <div>
-                          <label className="block text-sm font-semibold mb-2">Default Deposit Percentage (%) of total bill</label>
-                          <Input
-                            type="number"
-                            value={profile.depositPercentage || 0}
-                            onChange={e => {
-                              const nextProfile = { ...profile, depositPercentage: parseFloat(e.target.value) || 0 };
-                              setProfile(nextProfile);
-                            }}
-                            onBlur={async (e) => {
-                              const nextProfile = { ...profile, depositPercentage: parseFloat(e.target.value) || 0 };
-                              setProfile(nextProfile);
-                              await saveProfileSettings(nextProfile);
-                            }}
-                            placeholder="10"
-                          />
+                        <div className="space-y-4">
+                          <div>
+                            <label className="block text-sm font-semibold mb-2">Default Deposit Percentage (%) of total bill</label>
+                            <Input
+                              type="number"
+                              value={profile.depositPercentage || 0}
+                              onChange={e => {
+                                const nextProfile = { ...profile, depositPercentage: parseFloat(e.target.value) || 0 };
+                                setProfile(nextProfile);
+                              }}
+                              onBlur={async (e) => {
+                                const nextProfile = { ...profile, depositPercentage: parseFloat(e.target.value) || 0 };
+                                setProfile(nextProfile);
+                                await saveProfileSettings(nextProfile);
+                              }}
+                              placeholder="10"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-semibold mb-2">
+                              Minimum estimate total before asking for a deposit ($)
+                            </label>
+                            <Input
+                              type="number"
+                              min={0}
+                              step="1"
+                              value={profile.depositMinimumAmount ?? 0}
+                              onChange={(e) => {
+                                const nextProfile = {
+                                  ...profile,
+                                  depositMinimumAmount: Math.max(0, parseFloat(e.target.value) || 0),
+                                };
+                                setProfile(nextProfile);
+                              }}
+                              onBlur={async (e) => {
+                                const nextProfile = {
+                                  ...profile,
+                                  depositMinimumAmount: Math.max(0, parseFloat(e.target.value) || 0),
+                                };
+                                setProfile(nextProfile);
+                                await saveProfileSettings(nextProfile);
+                              }}
+                              placeholder="0"
+                            />
+                            <p className="text-xs text-gray-500 mt-2">
+                              Example: set <strong>500</strong> and estimates under $500 will not ask the customer for a
+                              deposit. Use <strong>0</strong> to always ask when deposits are on.
+                            </p>
+                          </div>
                         </div>
                       )}
                       <div className="pt-2 border-t space-y-4">
@@ -15747,7 +15815,7 @@ export default function Home() {
                 )}
 
                 {/* Full terms also under pay when estimate (deposit section already embeds disclosures) */}
-                {documentType === 'estimate' && !isDepositOnApprovalEnabled() && !shouldShowEscrowOnEstimate() && (terms || profile.disclosure) && (
+                {documentType === 'estimate' && !shouldShowDepositOnEstimate() && !shouldShowEscrowOnEstimate() && (terms || profile.disclosure) && (
                   <div className="mt-12">
                     {renderPaySectionDisclosures()}
                   </div>
@@ -16273,6 +16341,7 @@ export default function Home() {
                       taxAmount,
                       depositPercent: Number(profile.depositPercentage) || 0,
                       showDepositOnApproval: profile.showDepositOnApproval !== false,
+                      depositMinimumAmount: Math.max(0, Number(profile.depositMinimumAmount) || 0),
                       chargeCCFee: profile.chargeCCFee === true,
                       ccFeePercentage: Number(profile.ccFeePercentage) || 0,
                       breakdownSettings: {

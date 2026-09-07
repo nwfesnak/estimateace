@@ -210,6 +210,8 @@ export function resolveAmountDue(input: {
   amountPaid?: number;
   depositPercent?: number;
   showDepositOnApproval?: boolean;
+  /** If > 0, only ask for a deposit when grandTotal is at least this amount. */
+  depositMinimumAmount?: number;
 }): {
   documentType: 'estimate' | 'invoice';
   grandTotal: number;
@@ -227,10 +229,13 @@ export function resolveAmountDue(input: {
   const grandTotal = roundMoney(Number(input.grandTotal) || 0);
   const amountPaid = roundMoney(Number(input.amountPaid) || 0);
   const depositPercent = Math.max(0, Number(input.depositPercent) || 0);
+  const depositMinimum = Math.max(0, Number(input.depositMinimumAmount) || 0);
+  const meetsDepositMinimum = depositMinimum <= 0 || grandTotal + 0.009 >= depositMinimum;
   const showDeposit =
     documentType === 'estimate' &&
     input.showDepositOnApproval !== false &&
-    depositPercent > 0;
+    depositPercent > 0 &&
+    meetsDepositMinimum;
   const depositDue = showDeposit
     ? roundMoney((grandTotal * depositPercent) / 100)
     : 0;

@@ -57,6 +57,7 @@ export async function POST(request: NextRequest) {
       amountPaid,
       depositPercent,
       showDepositOnApproval: profile.showDepositOnApproval !== false,
+      depositMinimumAmount: Math.max(0, Number(profile.depositMinimumAmount) || 0),
     });
 
     // Force correct amount: estimate → deposit; invoice → remaining balance

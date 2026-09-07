@@ -172,6 +172,7 @@ export async function GET(request: NextRequest) {
       amountPaid,
       depositPercent,
       showDepositOnApproval: profile.showDepositOnApproval !== false,
+      depositMinimumAmount: Math.max(0, Number(profile.depositMinimumAmount) || 0),
     });
 
     const invoiceNumber = row.invoiceNumber || row.invoicenumber || inv;
