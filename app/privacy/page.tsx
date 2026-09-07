@@ -17,7 +17,7 @@ export default function PrivacyPage() {
           </Link>
         </p>
         <h1>Privacy Policy</h1>
-        <p className="text-sm text-slate-500">Last updated: March 16, 2026</p>
+        <p className="text-sm text-slate-500">Last updated: September 7, 2026</p>
 
         <p>
           This Privacy Policy explains how EstimateAce (&quot;we&quot;, &quot;us&quot;) collects and
@@ -132,13 +132,17 @@ export default function PrivacyPage() {
           policy. Material changes will be reflected by the &quot;Last updated&quot; date.
         </p>
 
-        <h2>11. Contact</h2>
+        <h2>11. International users</h2>
         <p>
-          <a href={`mailto:${SUPPORT}`}>{SUPPORT}</a>
+          The Service is operated from the United States. If you access it from another country, you
+          understand that your information may be processed in the U.S. and other locations where our
+          providers operate.
         </p>
 
-        <p className="text-sm text-slate-500">
-          This policy is a Phase A template. Have counsel review for your jurisdiction before scale.
+        <h2>12. Contact</h2>
+        <p>
+          Privacy questions or data requests:{' '}
+          <a href={`mailto:${SUPPORT}`}>{SUPPORT}</a>
         </p>
       </div>
     </main>

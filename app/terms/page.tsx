@@ -17,7 +17,7 @@ export default function TermsPage() {
           </Link>
         </p>
         <h1>Terms of Service</h1>
-        <p className="text-sm text-slate-500">Last updated: March 16, 2026</p>
+        <p className="text-sm text-slate-500">Last updated: September 7, 2026</p>
 
         <p>
           These Terms govern your use of EstimateAce (&quot;Service&quot;), a software platform for
@@ -107,14 +107,25 @@ export default function TermsPage() {
           violate these Terms or create risk to the Service or other users.
         </p>
 
-        <h2>11. Contact</h2>
+        <h2>11. Governing law</h2>
         <p>
-          Support: <a href={`mailto:${SUPPORT}`}>{SUPPORT}</a>
+          These Terms are governed by the laws of the United States and the State of North Carolina,
+          without regard to conflict-of-law rules, except where mandatory consumer protections in your
+          jurisdiction apply. Courts in that state shall have exclusive jurisdiction over disputes,
+          except where prohibited by law.
         </p>
 
-        <p className="text-sm text-slate-500">
-          This is a standard software terms template for Phase A launch. Have a lawyer review before
-          high-volume commercial sales.
+        <h2>12. Changes</h2>
+        <p>
+          We may update these Terms from time to time. The &quot;Last updated&quot; date will change when we
+          do. Continued use of the Service after an update constitutes acceptance of the revised Terms.
+          If you do not agree, stop using the Service and cancel any subscription.
+        </p>
+
+        <h2>13. Contact</h2>
+        <p>
+          Questions about these Terms:{' '}
+          <a href={`mailto:${SUPPORT}`}>{SUPPORT}</a>
         </p>
       </div>
     </main>
