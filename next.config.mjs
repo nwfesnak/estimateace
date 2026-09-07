@@ -26,12 +26,10 @@ const nextConfig = {
   },
 
   async headers() {
-    const appOrigin = (process.env.NEXT_PUBLIC_APP_URL || 'https://app.estimateace.com')
-      .trim()
-      .replace(/\/$/, '');
-
     // Tighten CSP: drop unsafe-eval (major XSS amplifier). Keep unsafe-inline for Next.js
     // inline bootstrapping until nonce-based CSP is added.
+    // Note: do NOT set Access-Control-Allow-Origin globally — public marketing APIs
+    // set CORS per-route (e.g. /api/marketing/chat for estimateace.com).
     const cspHeader = `
       default-src 'self';
       script-src 'self' 'unsafe-inline' https://*.supabase.co https://js.stripe.com;
@@ -58,15 +56,6 @@ const nextConfig = {
           {
             key: 'Content-Security-Policy',
             value: cspHeader,
-          },
-          {
-            // Lock CORS to the app origin (replaces any wide-open * from platform defaults)
-            key: 'Access-Control-Allow-Origin',
-            value: appOrigin,
-          },
-          {
-            key: 'Vary',
-            value: 'Origin',
           },
           {
             key: 'X-Content-Type-Options',

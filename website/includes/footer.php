@@ -42,5 +42,6 @@
   </div>
 </footer>
 <script src="/js/main.js" defer></script>
+<script src="/js/chat-widget.js" defer></script>
 </body>
 </html>
