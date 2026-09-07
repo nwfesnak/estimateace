@@ -32,6 +32,7 @@ import {
   hasAppAccess,
   type BillingSnapshot,
 } from '@/lib/billing';
+import { isPlatformAdminEmail } from '@/lib/platform-tutorials';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { getSupabaseClient, getSupabaseConfigHelpMessage } from '@/lib/supabase/client';
@@ -1648,11 +1649,11 @@ export default function Home() {
   const SUPPORT_EMAIL =
     (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_SUPPORT_EMAIL) ||
     'support@estimateace.com';
-  const ADMIN_EMAIL =
-    (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_ADMIN_EMAIL) ||
-    'admin@estimateace.com';
+  /** True only for platform operators — used to hide ops/debug UI from customers */
+  const isOpsAdmin = isPlatformAdminEmail(user?.email);
   const [billingContactSubject, setBillingContactSubject] = useState('EstimateAce billing / account help');
   const [billingContactMessage, setBillingContactMessage] = useState('');
+  const [billingContactBusy, setBillingContactBusy] = useState(false);
 
   // Photo / video media picker + device-style in-app camera (fixed chrome)
   const [isPhotoPickerOpen, setIsPhotoPickerOpen] = useState(false);
@@ -3138,7 +3139,9 @@ export default function Home() {
         const serverErr =
           json.error ||
           clientErr?.message ||
-          'Save failed on server. Check SUPABASE_SERVICE_ROLE_KEY and estimates table.';
+          isOpsAdmin
+            ? 'Save failed on server. Check SUPABASE_SERVICE_ROLE_KEY and estimates table.'
+            : 'Save failed on the server. Please try again or contact support.';
         console.error('Server save failed:', json);
         setSaveStatus('error');
         setSaveErrorDetail(serverErr);
@@ -3153,7 +3156,9 @@ export default function Home() {
         'Failed to save document.';
       const friendly =
         /row-level security|RLS|permission|policy/i.test(errMsg)
-          ? 'Save blocked by database security (RLS). Run supabase/rls-policies.sql or ensure SUPABASE_SERVICE_ROLE_KEY is set on Vercel.'
+          isOpsAdmin
+            ? 'Save blocked by database security (RLS). Run supabase/rls-policies.sql or ensure SUPABASE_SERVICE_ROLE_KEY is set on Vercel.'
+            : 'Save was blocked by database security. Please try again or contact support.'
           : /column|schema|does not exist/i.test(errMsg)
             ? `Save failed (database schema): ${errMsg}`
             : `Failed to save: ${errMsg}`;
@@ -5288,7 +5293,9 @@ export default function Home() {
           }
           if (h?.hasServiceRole === false) {
             throw new Error(
-              'SUPABASE_SERVICE_ROLE_KEY is missing on Vercel. Add it under Environment Variables → Production, then Redeploy (required for AI render).'
+              isOpsAdmin
+                ? 'SUPABASE_SERVICE_ROLE_KEY is missing on Vercel. Add it under Environment Variables → Production, then Redeploy (required for AI render).'
+                : 'AI rendering is temporarily unavailable. Please try again later or contact support.'
             );
           }
         }
@@ -5312,7 +5319,9 @@ export default function Home() {
       } catch (netErr: any) {
         console.error('job-render network error', netErr);
         throw new Error(
-          'Network error reaching /api/job-render. Wait for Vercel deploy to finish, hard-refresh, and confirm GROK_API_KEY + SUPABASE_SERVICE_ROLE_KEY are set.'
+          isOpsAdmin
+            ? 'Network error reaching /api/job-render. Wait for Vercel deploy to finish, hard-refresh, and confirm GROK_API_KEY + SUPABASE_SERVICE_ROLE_KEY are set.'
+            : 'Network error reaching AI render. Please wait a moment and try again.'
         );
       }
 
@@ -5356,12 +5365,17 @@ export default function Home() {
       const msg = err?.message || 'Could not generate rendering';
       if (/Failed to fetch|NetworkError|Load failed/i.test(msg)) {
         showMessage(
-          '❌ Network error. Wait for Vercel deploy, hard-refresh, set GROK_API_KEY + SUPABASE_SERVICE_ROLE_KEY, try again.'
+          isOpsAdmin
+            ? '❌ Network error. Wait for Vercel deploy, hard-refresh, set GROK_API_KEY + SUPABASE_SERVICE_ROLE_KEY, try again.'
+            : '❌ Network error. Please wait a moment and try again.'
         );
       } else if (/Rate limit/i.test(msg)) showMessage(`⏳ ${msg}`);
       else if (/Unauthorized|log in/i.test(msg)) showMessage('🔒 Please log in to use AI renderings.');
       else if (/GROK_API_KEY|XAI_API_KEY|API key/i.test(msg)) showMessage(`🔑 ${msg}`);
-      else if (/SERVICE_ROLE/i.test(msg)) showMessage(`🗄️ ${msg}`);
+      else if (/SERVICE_ROLE/i.test(msg))
+        showMessage(
+          isOpsAdmin ? `🗄️ ${msg}` : '🗄️ Server configuration issue. Please contact support.'
+        );
       else if (/too large|413/i.test(msg))
         showMessage('📷 Photo is too large. Re-upload a smaller Site Photo and try again.');
       else showMessage(`❌ ${msg}`);
@@ -5465,7 +5479,10 @@ export default function Home() {
       if (/Failed to fetch|NetworkError/i.test(msg)) {
         showMessage('❌ Network error refining the image. Wait for deploy, hard-refresh, try again.');
       } else if (/GROK_API_KEY|XAI_API_KEY|API key/i.test(msg)) showMessage(`🔑 ${msg}`);
-      else if (/SERVICE_ROLE/i.test(msg)) showMessage(`🗄️ ${msg}`);
+      else if (/SERVICE_ROLE/i.test(msg))
+        showMessage(
+          isOpsAdmin ? `🗄️ ${msg}` : '🗄️ Server configuration issue. Please contact support.'
+        );
       else showMessage(`❌ ${msg}`);
     } finally {
       setJobRenderRefineBusyId(null);
@@ -9141,17 +9158,27 @@ export default function Home() {
           </p>
           {stripeConnectStatus?.isTest && (
             <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950 sm:ml-14">
-              <strong>Test mode.</strong> Keys start with <code className="text-xs">sk_test_</code> —
-              no real money. For live payments: Stripe Dashboard → switch to{' '}
-              <strong>Live</strong> → Developers → API keys → copy <code className="text-xs">sk_live_…</code>{' '}
-              into Vercel <code className="text-xs">STRIPE_SECRET_KEY</code>, use live price IDs + live
-              webhook secret, then redeploy.
+              {isOpsAdmin ? (
+                <>
+                  <strong>Test mode.</strong> Keys start with <code className="text-xs">sk_test_</code> —
+                  no real money. For live payments: Stripe Dashboard → <strong>Live</strong> → API keys →{' '}
+                  <code className="text-xs">sk_live_…</code> in Vercel <code className="text-xs">STRIPE_SECRET_KEY</code>,
+                  live price IDs + webhook, then redeploy.
+                </>
+              ) : (
+                <>
+                  <strong>Card payments are in test mode.</strong> Real charges are not enabled yet. Use
+                  Message EstimateAce under Billing if you expected live payments.
+                </>
+              )}
             </div>
           )}
           {stripeConnectStatus?.isLive && (
             <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-950 sm:ml-14">
-              <strong>Live mode.</strong> Real card payments enabled. Checkout shows job amount + card
-              processing fee (default 2.9% + $0.30) as separate lines for the payee.
+              <strong>Live mode.</strong> Real card payments enabled
+              {isOpsAdmin
+                ? '. Checkout shows job amount + card processing fee (default 2.9% + $0.30) as separate lines for the payee.'
+                : '.'}
             </div>
           )}
         </div>
@@ -9341,7 +9368,9 @@ export default function Home() {
       }
       if (json.stripeMode === 'test') {
         showMessage(
-          '⚠ Stripe is still in TEST mode (sk_test_). Replace STRIPE_SECRET_KEY with sk_live_… in Vercel for real money.'
+          isOpsAdmin
+            ? '⚠ Stripe is still in TEST mode (sk_test_). Replace STRIPE_SECRET_KEY with sk_live_… in Vercel for real money.'
+            : '⚠ Card payments are in test mode. Contact support if you expected live charges.'
         );
       } else if (json.mode === 'platform') {
         showMessage(
@@ -12470,19 +12499,23 @@ export default function Home() {
                         Refresh status
                       </Button>
                     </div>
-                    <p className="text-xs text-gray-500">
-                      Monthly uses <code className="text-[10px]">STRIPE_PRICE_ID_MONTHLY</code> (or legacy{' '}
-                      <code className="text-[10px]">STRIPE_PRICE_ID</code>). Yearly uses{' '}
-                      <code className="text-[10px]">STRIPE_PRICE_ID_YEARLY</code>.
-                    </p>
-                    {billingCheckoutError && (
-                      <p className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-lg p-3">
-                        {billingCheckoutError}
+                    {isOpsAdmin && (
+                      <p className="text-xs text-gray-500">
+                        Monthly uses <code className="text-[10px]">STRIPE_PRICE_ID_MONTHLY</code> (or legacy{' '}
+                        <code className="text-[10px]">STRIPE_PRICE_ID</code>). Yearly uses{' '}
+                        <code className="text-[10px]">STRIPE_PRICE_ID_YEARLY</code>.
                       </p>
                     )}
-                    {!billingStripeOk && (
+                    {billingCheckoutError && (
+                      <p className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-lg p-3">
+                        {isOpsAdmin
+                          ? billingCheckoutError
+                          : 'Checkout could not start. Please try again or use Message EstimateAce below.'}
+                      </p>
+                    )}
+                    {isOpsAdmin && !billingStripeOk && (
                       <div className="text-xs text-gray-600 rounded-lg border bg-slate-50 p-3 space-y-1">
-                        <div className="font-semibold text-gray-700">Setup incomplete (owner only)</div>
+                        <div className="font-semibold text-gray-700">Setup incomplete (platform admin)</div>
                         <div>{billingStripeDiag.hasSecretKey ? '✅' : '❌'} STRIPE_SECRET_KEY</div>
                         <div>
                           {billingStripeDiag.hasPriceIdMonthly ? '✅' : '❌'} STRIPE_PRICE_ID_MONTHLY
@@ -12555,8 +12588,8 @@ export default function Home() {
                     <div>
                       <h3 className="text-xl font-semibold text-[#1e293b]">📧 Message EstimateAce</h3>
                       <p className="text-sm text-gray-500 mt-1">
-                        Questions about your plan, billing, or account? Send us a note — opens your email
-                        to <strong>{ADMIN_EMAIL}</strong>.
+                        Questions about your plan, billing, or account? Send a note and our team will
+                        reply to your account email.
                       </p>
                     </div>
                     <div>
@@ -12578,31 +12611,56 @@ export default function Home() {
                     </div>
                     <Button
                       className="bg-[#10b981] hover:bg-[#059669] text-white"
+                      disabled={billingContactBusy}
                       onClick={() => {
-                        const body = [
-                          billingContactMessage.trim() || '(No message entered)',
-                          '',
-                          '---',
-                          `Company: ${profile.company || '(not set)'}`,
-                          `Profile email: ${profile.email || '(not set)'}`,
-                          `Account: ${user?.email || '(unknown)'}`,
-                          `Billing status: ${billing.status || 'unknown'}`,
-                        ].join('\n');
-                        const href = `mailto:${ADMIN_EMAIL}?subject=${encodeURIComponent(
-                          billingContactSubject.trim() || 'EstimateAce help'
-                        )}&body=${encodeURIComponent(body)}`;
-                        window.location.href = href;
-                        showMessage(`Opening email to ${ADMIN_EMAIL}…`);
+                        void (async () => {
+                          if (!supabase || !user) {
+                            showMessage('Please log in to send a message.');
+                            return;
+                          }
+                          if (!billingContactMessage.trim()) {
+                            showMessage('Please enter a message.');
+                            return;
+                          }
+                          setBillingContactBusy(true);
+                          try {
+                            const { data: sessionData } = await supabase.auth.getSession();
+                            const token = sessionData.session?.access_token;
+                            if (!token) {
+                              showMessage('Session expired. Log in again.');
+                              return;
+                            }
+                            const res = await fetch('/api/support/contact', {
+                              method: 'POST',
+                              headers: {
+                                Authorization: `Bearer ${token}`,
+                                'Content-Type': 'application/json',
+                              },
+                              body: JSON.stringify({
+                                subject: billingContactSubject.trim() || 'EstimateAce help',
+                                message: billingContactMessage.trim(),
+                                company: profile.company || '',
+                                profileEmail: profile.email || '',
+                                billingStatus: billing.status || '',
+                              }),
+                            });
+                            const json = await res.json().catch(() => ({}));
+                            if (!res.ok) {
+                              showMessage(json.error || 'Could not send message. Try again later.');
+                              return;
+                            }
+                            setBillingContactMessage('');
+                            showMessage('✅ Message sent. We will reply to your account email.');
+                          } catch {
+                            showMessage('Network error sending message. Try again.');
+                          } finally {
+                            setBillingContactBusy(false);
+                          }
+                        })();
                       }}
                     >
-                      Send message to EstimateAce
+                      {billingContactBusy ? 'Sending…' : 'Send message to EstimateAce'}
                     </Button>
-                    <p className="text-xs text-gray-500">
-                      Or email directly:{' '}
-                      <a className="text-emerald-700 underline" href={`mailto:${ADMIN_EMAIL}`}>
-                        {ADMIN_EMAIL}
-                      </a>
-                    </p>
                   </CardContent>
                 </Card>
               )}
@@ -16631,7 +16689,9 @@ export default function Home() {
                     </p>
                     {stripeConnectStatus?.isTest && (
                       <p className="text-[11px] text-amber-700 font-medium mt-1">
-                        Stripe test mode — no real charges until live keys are set.
+                        {isOpsAdmin
+                          ? 'Stripe test mode — no real charges until live keys are set.'
+                          : 'Card payments are currently in test mode.'}
                       </p>
                     )}
                   </>
