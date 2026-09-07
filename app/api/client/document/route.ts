@@ -157,15 +157,9 @@ export async function GET(request: NextRequest) {
     const subtotalBeforeDiscount = itemsTotal;
     const subtotalAfterDiscount = Math.max(0, itemsTotal - discountAmount);
 
-    // Prefer stored totals if present on row
-    const grandTotal =
-      Number(row.grandTotal) ||
-      Number(row.grand_total) ||
-      (Number(row.taxAmount) > 0
-        ? subtotalAfterDiscount + Number(row.taxAmount)
-        : subtotalAfterDiscount) ||
-      itemsTotal ||
-      0;
+    // Same formula as Stripe checkout / mark-paid (shared helper)
+    const { computeDocumentGrandTotal } = await import('@/lib/document-totals');
+    const grandTotal = computeDocumentGrandTotal(row);
     const amountPaid = Number(row.amountPaid ?? row.amount_paid) || 0;
     const taxAmount = Number(row.taxAmount ?? row.tax_amount) || 0;
     const depositPercent = Number(profile.depositPercentage) || 0;

@@ -436,17 +436,9 @@ export async function markDocumentPaidFromJobCheckout(session: Stripe.Checkout.S
 
   // Deposit / partial payments must NOT mark the document fully paid (that archives
   // estimates out of the active list while balance is still owed).
-  const items = Array.isArray((row as any)?.items) ? (row as any).items : [];
-  const itemsTotal = items.reduce((sum: number, it: any) => {
-    const t = Number(it?.total);
-    if (Number.isFinite(t) && t > 0) return sum + t;
-    return sum + (Number(it?.qty) || 0) * (Number(it?.price) || 0);
-  }, 0);
-  const laborAmount = Number((row as any)?.laborAmount ?? (row as any)?.laboramount) || 0;
-  const taxAmount = Number((row as any)?.taxAmount ?? (row as any)?.taxamount) || 0;
-  const storedGrand =
-    Number((row as any)?.grandTotal ?? (row as any)?.grandtotal ?? (row as any)?.total) || 0;
-  const grandTotal = Math.max(itemsTotal + laborAmount + taxAmount, storedGrand, 0);
+  // Use same grand total as approve page / checkout (discount; no labor double-count).
+  const { computeDocumentGrandTotal } = await import('@/lib/document-totals');
+  const grandTotal = computeDocumentGrandTotal(row);
   const paymentKind = String(session.metadata?.payment_kind || '').toLowerCase();
   const fullyPaid = grandTotal > 0.009 ? paidAmount >= grandTotal - 0.009 : paymentKind !== 'deposit';
   const nextStatus = fullyPaid ? 'paid' : 'pending';

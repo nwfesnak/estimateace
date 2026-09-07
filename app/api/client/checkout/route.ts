@@ -43,17 +43,9 @@ export async function POST(request: NextRequest) {
     }
 
     const profile = (row?.profile || {}) as any;
-    const items = Array.isArray(row?.items) ? row.items : [];
-    const itemsTotal = items.reduce((sum: number, it: any) => {
-      const t = Number(it.total);
-      if (t > 0) return sum + t;
-      return sum + (Number(it.qty) || 0) * (Number(it.price) || 0);
-    }, 0);
-    // Amounts come from the saved document only — never trust client-supplied totals
-    const laborAmount = Number(row?.laborAmount ?? row?.laboramount) || 0;
-    const taxAmount = Number(row?.taxAmount ?? row?.taxamount) || 0;
-    const storedGrand = Number(row?.grandTotal ?? row?.grand_total ?? row?.total) || 0;
-    const grandTotal = Math.max(itemsTotal + laborAmount + taxAmount, storedGrand, 0);
+    // Same total as approve page /api/client/document (discount applied; labor not double-counted)
+    const { computeDocumentGrandTotal } = await import('@/lib/document-totals');
+    const grandTotal = computeDocumentGrandTotal(row);
     const amountPaid = Number(row?.amountPaid ?? row?.amount_paid) || 0;
     const depositPercent = Number(profile.depositPercentage) || 0;
     const documentType = String(row?.documentType || row?.document_type || typ || 'estimate');
