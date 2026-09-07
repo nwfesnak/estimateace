@@ -100,7 +100,7 @@ export async function POST(request: NextRequest) {
 
     const prev =
       settings?.profile && typeof settings.profile === 'object' ? settings.profile : {};
-    const profile = {
+    const profile: Record<string, unknown> = {
       ...prev,
       company: company || (prev as any).company || '',
       name: name || (prev as any).name || '',
@@ -119,6 +119,22 @@ export async function POST(request: NextRequest) {
       updated_at: new Date().toISOString(),
     });
 
+    // Auto welcome email + SMS with walkthrough video (no CRM). Once per account.
+    let welcomeOnboarding: unknown = null;
+    try {
+      const { maybeSendAndPersistWelcomeOnboarding } = await import('@/lib/welcome-onboarding');
+      welcomeOnboarding = await maybeSendAndPersistWelcomeOnboarding({
+        admin,
+        userId: user.id,
+        email: user.email || '',
+        phone,
+        name,
+        company,
+      });
+    } catch (welcomeErr) {
+      console.warn('start-trial welcome onboarding error:', welcomeErr);
+    }
+
     return NextResponse.json({
       ok: true,
       plan,
@@ -126,6 +142,7 @@ export async function POST(request: NextRequest) {
       trialDays,
       trialEndsAt: snapshot.trialEndsAt,
       status: snapshot.status === 'active' ? 'active' : 'trialing',
+      welcomeOnboarding,
     });
   } catch (e: any) {
     console.error('start-trial:', e);

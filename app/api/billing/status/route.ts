@@ -101,6 +101,25 @@ export async function GET(request: NextRequest) {
             updated_at: new Date().toISOString(),
           });
         }
+
+        // First login after email-confirm signup may skip /api/billing/start-trial —
+        // still send welcome email/SMS once if not already sent.
+        try {
+          const { maybeSendAndPersistWelcomeOnboarding } = await import(
+            '@/lib/welcome-onboarding'
+          );
+          const meta = (user.user_metadata || {}) as Record<string, unknown>;
+          await maybeSendAndPersistWelcomeOnboarding({
+            admin,
+            userId: user.id,
+            email: user.email || '',
+            phone: String(meta.phone || ''),
+            name: String(meta.full_name || meta.name || ''),
+            company: String(meta.company || ''),
+          });
+        } catch (welcomeErr) {
+          console.warn('billing/status welcome onboarding:', welcomeErr);
+        }
       }
     } else {
       snapshot = ensureTrialEndsAt(snapshot);
