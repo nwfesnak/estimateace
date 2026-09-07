@@ -93,12 +93,15 @@ export async function GET(request: NextRequest) {
       summary.errors.push(`${row.user_id}: missing company email in profile settings`);
     }
 
-    if (contractorPhone) {
+    // One platform Twilio number texts every contractor who opted in (Profile → SMS + reminders)
+    if (!contractorPhone) {
+      summary.errors.push(`${row.user_id}: missing company phone in profile settings`);
+    } else if (!profile.smsOptIn) {
+      summary.errors.push(`${row.user_id}: SMS opt-in off on Profile — email-only reminder`);
+    } else {
       const smsResult = await sendSmsNotification(contractorPhone, smsText);
       if (smsResult.ok) notified = true;
       else if (smsResult.error) summary.errors.push(`${row.user_id} sms: ${smsResult.error}`);
-    } else {
-      summary.errors.push(`${row.user_id}: missing company phone in profile settings`);
     }
 
     if (notified) {

@@ -205,11 +205,14 @@ export async function sendSmsNotification(
   const twilioSid = process.env.TWILIO_ACCOUNT_SID;
   const twilioToken = process.env.TWILIO_AUTH_TOKEN;
   const twilioFrom = process.env.TWILIO_PHONE_NUMBER;
+  /** Prefer Messaging Service for A2P 10DLC (one number serves all EstimateAce users). */
+  const messagingServiceSid = (process.env.TWILIO_MESSAGING_SERVICE_SID || '').trim();
 
-  if (!twilioSid || !twilioToken || !twilioFrom) {
+  if (!twilioSid || !twilioToken || (!twilioFrom && !messagingServiceSid)) {
     return {
       ok: false,
-      error: 'SMS service not configured. Add TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER.',
+      error:
+        'SMS service not configured. Add TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER (and ideally TWILIO_MESSAGING_SERVICE_SID for A2P).',
     };
   }
 
@@ -236,9 +239,14 @@ export async function sendSmsNotification(
     const twilioAuth = Buffer.from(`${twilioSid}:${twilioToken}`).toString('base64');
     const params = new URLSearchParams({
       To: to,
-      From: twilioFrom,
       Body: body.slice(0, 1600),
     });
+    // A2P: send via Messaging Service when configured (number must be in that service's sender pool)
+    if (messagingServiceSid) {
+      params.set('MessagingServiceSid', messagingServiceSid);
+    } else if (twilioFrom) {
+      params.set('From', twilioFrom);
+    }
 
     const response = await fetch(
       `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`,
