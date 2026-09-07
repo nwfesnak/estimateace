@@ -1,6 +1,6 @@
 <?php
-$page_title = 'EstimateAce | AI Estimates That Start From a Job Photo';
-$page_description = 'Snap a job photo, get an AI-assisted estimate in minutes, then invoice, schedule, and get paid — in one web app. $29.99/mo. 14-day free trial.';
+$page_title = 'EstimateAce | Quote From the Truck. Run the Job in One App.';
+$page_description = 'Grok AI turns photos and rough notes into customer-ready estimates — then invoices, scheduling, payments, and crew. Install as a PWA. Start free trial.';
 include __DIR__ . '/includes/header.php';
 $app_url = 'https://app.estimateace.com';
 ?>
@@ -8,17 +8,18 @@ $app_url = 'https://app.estimateace.com';
 <section class="hero">
   <div class="container hero-grid">
     <div>
-      <h1>AI estimates that start from a job photo</h1>
-      <p class="lead">Quote on-site in minutes, then invoice, schedule, and get paid — in one app. Built for painters, remodelers, HVAC, plumbing, and exterior crews.</p>
+      <p class="eyebrow" style="margin-bottom:0.75rem;">Built for contractors • Install as a PWA</p>
+      <h1>Quote from the truck. Run the job in one app.</h1>
+      <p class="lead">Grok AI turns photos and rough notes into customer-ready estimates — then handles invoices, scheduling, payments, and crew.</p>
       <div class="hero-actions">
-        <a class="btn btn-primary btn-lg" href="<?= $app_url ?>/trial">Start 14-day free trial</a>
-        <a class="btn btn-outline btn-lg" href="/pricing.php">See pricing</a>
+        <a class="btn btn-primary btn-lg" href="<?= $app_url ?>/trial">Start free trial</a>
+        <a class="btn btn-outline btn-lg" href="/solutions.php">See how it works</a>
       </div>
-      <p class="hero-note">No credit card required · Web app + PWA — no App Store required</p>
+      <p class="hero-note">14 days free · No credit card required · <a href="<?= $app_url ?>">Log in</a></p>
       <div class="trust-row">
         <div class="trust-item"><strong>Photo → quote</strong><span>AI line items from the job</span></div>
-        <div class="trust-item"><strong>$29.99/mo</strong><span>Full platform, not a la carte</span></div>
-        <div class="trust-item"><strong>On-site</strong><span>Works on phone in the field</span></div>
+        <div class="trust-item"><strong>$29.99/mo</strong><span>Full stack, not a la carte</span></div>
+        <div class="trust-item"><strong>PWA</strong><span>No App Store required</span></div>
       </div>
     </div>
     <div class="mockup-wrap">
