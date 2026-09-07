@@ -12,10 +12,9 @@ $app_url = 'https://app.estimateace.com';
       <h1>Quote from the truck. Run the job in one app.</h1>
       <p class="lead">Grok AI turns photos and rough notes into customer-ready estimates — then handles invoices, scheduling, payments, and crew.</p>
       <div class="hero-actions">
-        <a class="btn btn-primary btn-lg" href="<?= $app_url ?>/trial">Start free trial</a>
+        <a class="btn btn-primary btn-lg" href="<?= $app_url ?>/trial">14-Day Free Trial</a>
         <a class="btn btn-outline btn-lg" href="/solutions.php">See how it works</a>
       </div>
-      <p class="hero-note">14 days free · No credit card required · <a href="<?= $app_url ?>">Log in</a></p>
       <div class="trust-row">
         <div class="trust-item"><strong>Photo → quote</strong><span>AI line items from the job</span></div>
         <div class="trust-item"><strong>$29.99/mo</strong><span>Full stack, not a la carte</span></div>
