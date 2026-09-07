@@ -42,4 +42,4 @@ SUPPORT
 `.trim();
 
 export const MARKETING_FALLBACK =
-  "I don't have a solid answer for that yet. We've saved your question and someone from EstimateAce will get back to you within 49 hours. You can also start a free trial at https://app.estimateace.com/trial";
+  "I don't have a solid answer for that yet. We've saved your question and someone from EstimateAce will get back to you within 48 hours. You can also start a free trial at https://app.estimateace.com/trial";

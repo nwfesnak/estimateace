@@ -55,7 +55,7 @@ function looksLikeConfidentAnswer(text: string): boolean {
   if (t.includes("i don't know") || t.includes('i do not know')) return false;
   if (t.includes("i'm not sure") || t.includes('i am not sure')) return false;
   if (t.includes("can't find") || t.includes('cannot find')) return false;
-  if (t.includes('someone will get back') || t.includes('within 49 hours')) return false;
+  if (t.includes('someone will get back') || t.includes('within 48 hours') || t.includes('within 49 hours')) return false;
   return text.trim().length > 40;
 }
 
@@ -163,7 +163,7 @@ ${MARKETING_KNOWLEDGE}`;
       void sendEmailNotification(
         inbox,
         needsHuman
-          ? `[Website chat] Needs reply within 49h`
+          ? `[Website chat] Needs reply within 48h`
           : `[Website chat] Lead question`,
         [
           `Question: ${question}`,
@@ -184,14 +184,14 @@ ${MARKETING_KNOWLEDGE}`;
         ok: true,
         answer,
         needsHuman,
-        followUpHours: needsHuman ? 49 : null,
+        followUpHours: needsHuman ? 48 : null,
       },
       { headers }
     );
   } catch (e: any) {
     console.error('marketing/chat:', e);
     return NextResponse.json(
-      { ok: true, answer: MARKETING_FALLBACK, needsHuman: true, followUpHours: 49 },
+      { ok: true, answer: MARKETING_FALLBACK, needsHuman: true, followUpHours: 48 },
       { headers: corsHeaders(origin) }
     );
   }

@@ -50,7 +50,7 @@
     var panel = el('div', { id: 'ea-chat-panel' });
     panel.innerHTML =
       '<div id="ea-chat-head">EstimateAce Assistant' +
-      '<small>Ask about the product. If we cannot answer, we will reply within 49 hours.</small></div>' +
+      '<small>Ask about the product. If we cannot answer, we will reply within 48 hours.</small></div>' +
       '<div id="ea-chat-box"></div>' +
       '<form id="ea-chat-form">' +
       '<input id="ea-chat-name" type="text" placeholder="Your name (optional)" autocomplete="name" />' +
@@ -67,7 +67,7 @@
     addMsg(
       box,
       'bot',
-      'Hi! Ask about EstimateAce pricing, AI estimates, trials, or features. If I am not sure, we will get back to you within 49 hours.'
+      'Hi! Ask about EstimateAce pricing, AI estimates, trials, or features. If I am not sure, we will get back to you within 48 hours.'
     );
 
     btn.addEventListener('click', function () {
@@ -98,13 +98,13 @@
         .then(function (res) {
           var answer =
             (res.j && res.j.answer) ||
-            "Thanks — we saved your question and will get back to you within 49 hours.";
+            "Thanks — we saved your question and will get back to you within 48 hours.";
           addMsg(box, 'bot', answer);
           history.push({ role: 'assistant', text: answer });
         })
         .catch(function () {
           var fallback =
-            "Thanks — we could not reach the assistant just now. We will get back to you within 49 hours.";
+            "Thanks — we could not reach the assistant just now. We will get back to you within 48 hours.";
           addMsg(box, 'bot', fallback);
         })
         .finally(function () {
