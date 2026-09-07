@@ -1046,6 +1046,8 @@ export default function Home() {
   const profileHydratingRef = useRef(false);
   /** Block autosave briefly after New Estimate so deposit/payment from the prior doc cannot be written onto the blank form. */
   const skipAutosaveUntilRef = useRef(0);
+  /** True until the user has real content on a brand-new document (avoids blank EST clutter + deposit bleed). */
+  const freshDocumentRef = useRef(false);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const profileAutoSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSavedCompanyFingerprintRef = useRef('');
@@ -4168,6 +4170,7 @@ export default function Home() {
   };
 
   const loadSelectedEstimate = async (est: any) => {
+    freshDocumentRef.current = false;
     setJobName(est.jobName || '');
     setAddress(est.address || '');
     setCity(est.city || '');
@@ -4518,6 +4521,7 @@ export default function Home() {
       saveTimeoutRef.current = null;
     }
     skipAutosaveUntilRef.current = Date.now() + 3000;
+    freshDocumentRef.current = true;
     profileHydratingRef.current = true;
 
     setDocumentType(nextType);
@@ -7708,10 +7712,10 @@ export default function Home() {
   const bulkDelete = async () => {
     if (selectedIds.length === 0) return;
     if (!confirm(`Delete ${selectedIds.length} documents permanently?`)) return;
-    if (!supabase) return;
+    if (!supabase || !workspaceUserId) return;
 
     for (const id of selectedIds) {
-      await supabase.from('estimates').delete().eq('id', id);
+      await supabase.from('estimates').delete().eq('id', id).eq('user_id', workspaceUserId);
     }
     showMessage(`${selectedIds.length} documents deleted`);
     setSelectedIds([]);
@@ -7769,8 +7773,22 @@ export default function Home() {
     saveTimeoutRef.current = setTimeout(() => {
       if (profileHydratingRef.current) return;
       if (Date.now() < skipAutosaveUntilRef.current) return;
-      // Never autosave a carried-over deposit onto a blank new estimate
-      void saveToDB({ quiet: true, amountPaid: Number(amountPaid) || 0, paymentStatus, paymentMethod });
+      const hasContent =
+        !!(jobName || '').trim() ||
+        !!(address || '').trim() ||
+        (items || []).some((it: any) => !!(it?.description || '').trim() || Number(it?.price) > 0);
+      if (freshDocumentRef.current && !hasContent) return;
+      if (hasContent) freshDocumentRef.current = false;
+      // Fresh docs always persist deposit as zero until user records a payment
+      const paidToSave = freshDocumentRef.current ? 0 : Number(amountPaid) || 0;
+      const statusToSave = freshDocumentRef.current ? 'pending' : paymentStatus;
+      const methodToSave = freshDocumentRef.current ? '' : paymentMethod;
+      void saveToDB({
+        quiet: true,
+        amountPaid: paidToSave,
+        paymentStatus: statusToSave,
+        paymentMethod: methodToSave,
+      });
     }, 1000);
   };
 

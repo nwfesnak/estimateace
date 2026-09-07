@@ -15,13 +15,9 @@ export type PlatformTutorial = {
   createdByEmail?: string;
 };
 
-/** Comma-separated admin emails (server or NEXT_PUBLIC for UI). */
+/** Comma-separated admin emails — server-only (do not use NEXT_PUBLIC_*). */
 export function getPlatformAdminEmails(): string[] {
-  const raw =
-    process.env.PLATFORM_ADMIN_EMAILS ||
-    process.env.ESTIMATEACE_ADMIN_EMAILS ||
-    process.env.NEXT_PUBLIC_PLATFORM_ADMIN_EMAILS ||
-    '';
+  const raw = process.env.PLATFORM_ADMIN_EMAILS || process.env.ESTIMATEACE_ADMIN_EMAILS || '';
   return String(raw)
     .split(/[,;\s]+/)
     .map((e) => e.trim().toLowerCase())

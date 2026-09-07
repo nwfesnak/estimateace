@@ -58,5 +58,14 @@ Goal: ship EstimateAce as a **real multi-customer product** for estimating/invoi
 
 - Real crew invites (Supabase Auth) + seat billing
 - Real MFA
-- AI Receptionist live Twilio voice + forward-to number
-- Stripe Connect for client job payments
+- AI Receptionist live Twilio voice + forward-to number (or third-party reseller)
+- Stripe Connect for client job payments (partially live via job Checkout)
+
+## Security hardening (done in app code)
+- Deposit Stripe payments no longer force `paymentStatus=paid` unless fully paid
+- Client checkout amounts computed from DB only
+- Cron requires `CRON_SECRET` in production
+- Twilio inbound webhook signature validation
+- SMS respects STOP opt-outs; web opt-in is double-confirm (reply YES)
+- `CLIENT_ACTION_SECRET` required in production for pay/approve links
+- Limited crew cannot DELETE owner estimates (re-run `supabase/crew-members.sql`)

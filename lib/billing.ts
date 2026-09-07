@@ -45,13 +45,11 @@ export const DEFAULT_BILLING_SNAPSHOT: BillingSnapshot = {
 
 /**
  * Client + server: only enforce paywall when explicitly enabled.
- * Soft launch: keep false so logins are not blocked by the subscription gate.
- * Set NEXT_PUBLIC_BILLING_ENFORCE=true in Vercel and flip this back when ready to hard-paywall.
+ * Soft launch: leave NEXT_PUBLIC_BILLING_ENFORCE unset/false so logins are not blocked.
+ * Set NEXT_PUBLIC_BILLING_ENFORCE=true in Vercel when ready to hard-paywall.
  */
 export function isBillingEnforced(): boolean {
-  // Hard-off for now (owner request): do not block app on login even if env is true.
-  // To re-enable: restore → return String(process.env.NEXT_PUBLIC_BILLING_ENFORCE || '').toLowerCase() === 'true';
-  return false;
+  return String(process.env.NEXT_PUBLIC_BILLING_ENFORCE || '').toLowerCase() === 'true';
 }
 
 export function isStripeConfigured(): boolean {

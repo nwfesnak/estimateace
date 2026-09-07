@@ -7,11 +7,12 @@ Professional contractor estimating & invoicing tool with AI assistance.
 - AI-powered line item pricing and description improvement (via xAI Grok)
 - Photo/video/receipt capture + storage
 - Labor, tax calculation, quick lines, templates
-- Crew / Sub-contractors management with simulated monthly billing
-- Reports, exports, archiving
-- Basic profile + payment method settings (demo)
+- Crew / sub-contractors (Supabase Auth) with optional Stripe seat billing
+- Reports, exports, archiving, recurring charges
+- Profile, client payments (Stripe Checkout / Connect where configured)
+- AI Receptionist **beta** (test call + knowledge base; live phone answering not shipped)
 
-**Phase A**: Product subscription via Stripe (optional enforce). Client payment *links* (PayPal/Venmo/Zelle) are BYO. Crew seats are free beta (not secure multi-user). AI Receptionist is test-call only (no live phone). See `GO_LIVE_PHASE_A.md`.
+**Phase A**: Product subscription via Stripe (`NEXT_PUBLIC_BILLING_ENFORCE=true` to hard-paywall). Client job deposits/balances via Stripe Checkout. AI Receptionist is test-call only until Phase C. See `GO_LIVE_PHASE_A.md`.
 
 ## Setup
 
@@ -64,10 +65,10 @@ Open http://localhost:3000
 - The API routes (`/api/grok`, `/api/ai-quote`) should be protected in production.
 - Consider adding auth checks using the Supabase session token.
 
-### 5. Demo vs Production Code
-- Crew/subcontractor passwords are stored in plaintext (demo only).
-- 2FA, payments, and crew login are fully simulated.
-- Replace or heavily gate these before real users.
+### 5. Production checklist
+- Set `CLIENT_ACTION_SECRET`, `CRON_SECRET`, Twilio + Stripe keys in Vercel.
+- Re-run `supabase/crew-members.sql` so limited crew cannot DELETE owner docs.
+- Keep `NEXT_PUBLIC_BILLING_ENFORCE=false` until Stripe webhooks are verified end-to-end.
 
 ### 6. Regular Security Maintenance
 ```bash

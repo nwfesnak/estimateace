@@ -1,15 +1,15 @@
 <?php
-$page_title = 'AI Receptionist | EstimateAce 24/7 Call Assistant for Contractors';
-$page_description = 'Never miss a lead. EstimateAce AI Receptionist answers calls 24/7, takes messages, flags urgents, books appointments, and answers service questions — for contractors and small businesses.';
+$page_title = 'AI Receptionist (Beta) | EstimateAce Call Assistant for Contractors';
+$page_description = 'Practice with EstimateAce AI Receptionist: knowledge base, test call, and message inbox. Live phone answering and call forwarding are coming soon.';
 include __DIR__ . '/includes/header.php';
 $app_url = 'https://app.estimateace.com';
 ?>
 
 <section class="page-hero">
   <div class="container">
-    <span class="eyebrow">AI Receptionist</span>
-    <h1>Your 24/7 virtual front desk</h1>
-    <p class="lead">A virtual phone and call assistant designed for small businesses and contractors. It answers when you can’t — so you never miss leads or important calls.</p>
+    <span class="eyebrow">AI Receptionist · Beta</span>
+    <h1>Your virtual front desk (in beta)</h1>
+    <p class="lead">Build a knowledge base, run test calls, and review message summaries in EstimateAce today. <strong>Live phone answering and carrier call forwarding are not available yet</strong> — coming in a later release.</p>
     <div class="hero-actions" style="margin-top:1.25rem;">
       <a class="btn btn-primary btn-lg" href="<?= $app_url ?>">Open in EstimateAce</a>
       <a class="btn btn-outline btn-lg" href="/pricing.php">See plans</a>
@@ -25,9 +25,9 @@ $app_url = 'https://app.estimateace.com';
     </div>
     <div class="cards-2">
       <article class="card icon-card">
-        <div class="icon">24/7</div>
-        <h3>Answers &amp; manages calls around the clock</h3>
-        <p>Handles unanswered, missed, or after-hours calls. Set standard call forwarding from your existing number — no porting and no second number required.</p>
+        <div class="icon">BETA</div>
+        <h3>Test call &amp; knowledge base (live now)</h3>
+        <p>Practice conversations in the app, fill services/pricing/hours, and review inbox summaries. Live missed-call forwarding will be enabled when Voice goes live — no number porting planned.</p>
       </article>
       <article class="card icon-card">
         <div class="icon">MSG</div>
@@ -76,8 +76,8 @@ $app_url = 'https://app.estimateace.com';
 
 <section>
   <div class="container final-cta" style="padding:2rem 0;">
-    <h2>Turn on your AI front desk</h2>
-    <p>Log in to EstimateAce → Dashboard → AI Receptionist. Build your knowledge base, set greetings, and run a test call in minutes.</p>
+    <h2>Try AI Receptionist (beta)</h2>
+    <p>Log in to EstimateAce → Profile → Billing / Contact Us → AI Receptionist. Build your knowledge base, set greetings, and run a test call in minutes.</p>
     <a class="btn btn-primary btn-lg" href="<?= $app_url ?>">Start Free Trial</a>
   </div>
 </section>

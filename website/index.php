@@ -147,7 +147,7 @@ $app_url = 'https://app.estimateace.com';
             <li>Labor hours and rate breakdown</li>
             <li>Toggle client visibility for materials & labor</li>
             <li>Smart address autocomplete while typing job sites</li>
-            <li>AI Receptionist — 24/7 missed-call coverage for contractors</li>
+            <li>AI Receptionist (beta) — test call &amp; knowledge base; live phone answering coming soon</li>
           </ul>
           <div class="stat-callout"><strong>Price with confidence</strong> instead of guessing after a long day in the field.</div>
           <a class="btn btn-dark" href="/receptionist.php">Meet AI Receptionist →</a>

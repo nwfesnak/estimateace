@@ -104,7 +104,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           error:
-            'Only the EstimateAce owner can upload tutorials. Set PLATFORM_ADMIN_EMAILS (or NEXT_PUBLIC_PLATFORM_ADMIN_EMAILS) to your login email in Vercel.',
+            'Only the EstimateAce owner can upload tutorials. Set PLATFORM_ADMIN_EMAILS to your login email in Vercel (server-only).',
         },
         { status: 403 }
       );

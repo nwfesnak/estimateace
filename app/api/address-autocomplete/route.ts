@@ -8,7 +8,7 @@ import {
 export const dynamic = 'force-dynamic';
 
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
-const RATE_LIMIT = 40;
+const RATE_LIMIT = 20;
 const WINDOW_MS = 60 * 1000;
 
 function checkRateLimit(identifier: string) {

@@ -15,10 +15,18 @@ export function getPublicSiteUrl(): string {
 
 /** Long code / toll-free customers text to opt in. */
 export function getSmsOptInNumber(): string {
-  const n = (process.env.NEXT_PUBLIC_SMS_OPT_IN_NUMBER || process.env.TWILIO_PHONE_NUMBER || '+19802434145')
+  const raw = (process.env.NEXT_PUBLIC_SMS_OPT_IN_NUMBER || process.env.TWILIO_PHONE_NUMBER || '')
     .trim()
     .replace(/\s+/g, '');
-  return n.startsWith('+') ? n : n.replace(/\D/g, '').length === 10 ? `+1${n.replace(/\D/g, '')}` : n;
+  if (!raw) {
+    // Fail closed for public pages — do not advertise a hardcoded number
+    return '';
+  }
+  return raw.startsWith('+')
+    ? raw
+    : raw.replace(/\D/g, '').length === 10
+      ? `+1${raw.replace(/\D/g, '')}`
+      : raw;
 }
 
 export function formatSmsNumberDisplay(e164: string): string {

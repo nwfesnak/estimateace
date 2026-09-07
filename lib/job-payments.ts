@@ -434,27 +434,22 @@ export async function markDocumentPaidFromJobCheckout(session: Stripe.Checkout.S
   const paidAmount =
     jobPaidAmount != null ? previousPaid + jobPaidAmount : previousPaid;
 
-  const base = row || { id: invoiceId, user_id: ownerId };
-  const updates: Record<string, unknown> = {
-    id: invoiceId,
-    user_id: ownerId,
-    paymentStatus: 'paid',
-    paymentstatus: 'paid',
-    amountPaid: paidAmount,
-    amountpaid: paidAmount,
-    paymentMethod: 'Stripe',
-    paymentmethod: 'Stripe',
-    updated_at: new Date().toISOString(),
-  };
-
-  // Preserve other fields when we have the row
-  if (row) {
-    for (const [k, v] of Object.entries(row)) {
-      if (updates[k] === undefined && k !== 'id') {
-        // don't spread everything if lower-case DB
-      }
-    }
-  }
+  // Deposit / partial payments must NOT mark the document fully paid (that archives
+  // estimates out of the active list while balance is still owed).
+  const items = Array.isArray((row as any)?.items) ? (row as any).items : [];
+  const itemsTotal = items.reduce((sum: number, it: any) => {
+    const t = Number(it?.total);
+    if (Number.isFinite(t) && t > 0) return sum + t;
+    return sum + (Number(it?.qty) || 0) * (Number(it?.price) || 0);
+  }, 0);
+  const laborAmount = Number((row as any)?.laborAmount ?? (row as any)?.laboramount) || 0;
+  const taxAmount = Number((row as any)?.taxAmount ?? (row as any)?.taxamount) || 0;
+  const storedGrand =
+    Number((row as any)?.grandTotal ?? (row as any)?.grandtotal ?? (row as any)?.total) || 0;
+  const grandTotal = Math.max(itemsTotal + laborAmount + taxAmount, storedGrand, 0);
+  const paymentKind = String(session.metadata?.payment_kind || '').toLowerCase();
+  const fullyPaid = grandTotal > 0.009 ? paidAmount >= grandTotal - 0.009 : paymentKind !== 'deposit';
+  const nextStatus = fullyPaid ? 'paid' : 'pending';
 
   const camel = {
     id: invoiceId,
@@ -473,7 +468,7 @@ export async function markDocumentPaidFromJobCheckout(session: Stripe.Checkout.S
     profile: (row as any)?.profile ?? {},
     documentType: (row as any)?.documentType ?? (row as any)?.documenttype ?? 'invoice',
     dueDate: (row as any)?.dueDate ?? (row as any)?.duedate ?? '',
-    paymentStatus: 'paid',
+    paymentStatus: nextStatus,
     amountPaid: paidAmount || Number((row as any)?.amountPaid ?? (row as any)?.amountpaid) || 0,
     paymentMethod: 'Stripe',
     photoUrls: (row as any)?.photoUrls ?? (row as any)?.photourls ?? [],

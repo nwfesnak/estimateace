@@ -9,11 +9,19 @@ import {
 import { sendEmailNotification, sendSmsNotification } from '@/lib/notifications';
 
 export async function GET(request: NextRequest) {
-  const cronSecret = process.env.CRON_SECRET;
+  const cronSecret = (process.env.CRON_SECRET || '').trim();
   const authHeader = request.headers.get('authorization');
   const isVercelCron = request.headers.get('x-vercel-cron') === '1';
 
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}` && !isVercelCron) {
+  // Always require auth in production — never leave cron open if CRON_SECRET is missing
+  if (!cronSecret) {
+    if (process.env.NODE_ENV === 'production' || process.env.VERCEL) {
+      return NextResponse.json(
+        { error: 'CRON_SECRET is not configured. Refusing to run reminders.' },
+        { status: 503 }
+      );
+    }
+  } else if (authHeader !== `Bearer ${cronSecret}` && !isVercelCron) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

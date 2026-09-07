@@ -209,7 +209,7 @@ export async function sendLoginOtpSms(userId: string, phone: string): Promise<{ 
   const code = String(randomInt(100000, 999999));
   await storeLoginOtp(userId, code);
   const body = `EstimateAce login code: ${code}. Valid 10 minutes. If you did not try to sign in, ignore this message.`;
-  const sms = await sendSmsNotification(phone, body);
+  const sms = await sendSmsNotification(phone, body, { skipOptInCheck: true });
   if (!sms.ok) {
     return { ok: false, error: sms.error || 'Could not send SMS.' };
   }

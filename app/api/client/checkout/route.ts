@@ -38,6 +38,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    if (!row) {
+      return NextResponse.json({ error: 'Document not found for this payment link.' }, { status: 404 });
+    }
+
     const profile = (row?.profile || {}) as any;
     const items = Array.isArray(row?.items) ? row.items : [];
     const itemsTotal = items.reduce((sum: number, it: any) => {
@@ -45,15 +49,13 @@ export async function POST(request: NextRequest) {
       if (t > 0) return sum + t;
       return sum + (Number(it.qty) || 0) * (Number(it.price) || 0);
     }, 0);
-    const grandTotal =
-      Number(body.grandTotal) ||
-      Number(row?.grandTotal) ||
-      Number(row?.grand_total) ||
-      itemsTotal ||
-      0;
+    // Amounts come from the saved document only — never trust client-supplied totals
+    const laborAmount = Number(row?.laborAmount ?? row?.laboramount) || 0;
+    const taxAmount = Number(row?.taxAmount ?? row?.taxamount) || 0;
+    const storedGrand = Number(row?.grandTotal ?? row?.grand_total ?? row?.total) || 0;
+    const grandTotal = Math.max(itemsTotal + laborAmount + taxAmount, storedGrand, 0);
     const amountPaid = Number(row?.amountPaid ?? row?.amount_paid) || 0;
-    const depositPercent =
-      Number(body.depositPercent) || Number(profile.depositPercentage) || 0;
+    const depositPercent = Number(profile.depositPercentage) || 0;
     const documentType = String(row?.documentType || row?.document_type || typ || 'estimate');
 
     const { resolveAmountDue } = await import('@/lib/stripe-fees');
@@ -66,11 +68,7 @@ export async function POST(request: NextRequest) {
     });
 
     // Force correct amount: estimate → deposit; invoice → remaining balance
-    let amount = due.amountDueNow;
-    // Allow explicit amount only if it matches the due type and is valid
-    if (Number(body.amount) >= 0.5 && Math.abs(Number(body.amount) - amount) < 0.02) {
-      amount = Number(body.amount);
-    }
+    const amount = due.amountDueNow;
 
     if (!Number.isFinite(amount) || amount < 0.5) {
       return NextResponse.json(

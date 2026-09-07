@@ -63,8 +63,27 @@ AS $$
   );
 $$;
 
+-- Full-access crew only (can delete). Limited crew may still view/edit work orders.
+CREATE OR REPLACE FUNCTION public.is_full_crew_of(owner_id uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.crew_members cm
+    WHERE cm.owner_user_id = owner_id
+      AND cm.crew_user_id = auth.uid()
+      AND cm.role = 'full'
+  );
+$$;
+
 REVOKE ALL ON FUNCTION public.is_crew_of(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.is_crew_of(uuid) TO authenticated;
+REVOKE ALL ON FUNCTION public.is_full_crew_of(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.is_full_crew_of(uuid) TO authenticated;
 
 -- Extra RLS so crew can work in the owner's workspace
 DROP POLICY IF EXISTS "Crew can view owner estimates" ON public.estimates;
@@ -89,12 +108,13 @@ CREATE POLICY "Crew can update owner estimates"
   USING (public.is_crew_of(user_id))
   WITH CHECK (public.is_crew_of(user_id));
 
+-- Limited crew must not hard-delete owner documents
 DROP POLICY IF EXISTS "Crew can delete owner estimates" ON public.estimates;
 CREATE POLICY "Crew can delete owner estimates"
   ON public.estimates
   FOR DELETE
   TO authenticated
-  USING (public.is_crew_of(user_id));
+  USING (public.is_full_crew_of(user_id));
 
 DROP POLICY IF EXISTS "Crew can view owner archives" ON public."archive-est";
 CREATE POLICY "Crew can view owner archives"

@@ -12,11 +12,20 @@ export type ClientActionPayload = {
 };
 
 function pepper(): string {
+  const dedicated =
+    (process.env.CLIENT_ACTION_SECRET || '').trim() || (process.env.OTP_PEPPER || '').trim();
+  if (dedicated) return dedicated;
+
+  // Dev-only fallbacks. Production must set CLIENT_ACTION_SECRET (or OTP_PEPPER).
+  const isProd = process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL);
+  if (isProd) {
+    throw new Error(
+      'CLIENT_ACTION_SECRET (or OTP_PEPPER) must be set in production for client pay/approve links.'
+    );
+  }
   return (
-    process.env.CLIENT_ACTION_SECRET ||
-    process.env.OTP_PEPPER ||
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.TWILIO_AUTH_TOKEN ||
+    (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim() ||
+    (process.env.TWILIO_AUTH_TOKEN || '').trim() ||
     'estimateace-client-action-dev'
   );
 }

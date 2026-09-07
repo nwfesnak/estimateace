@@ -1,12 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sendSmsNotification } from '@/lib/notifications';
-import { confirmationSms, welcomeSms } from '@/lib/sms-compliance';
+import { welcomeSms } from '@/lib/sms-compliance';
 import { upsertSmsOptIn } from '@/lib/sms-opt-in-store';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-/** Public web form SMS opt-in (double opt-in: welcome then confirmation text). */
+const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
+const RATE_LIMIT = 5;
+const WINDOW_MS = 15 * 60 * 1000;
+
+function checkRateLimit(identifier: string) {
+  const now = Date.now();
+  const entry = rateLimitMap.get(identifier);
+  if (!entry || now > entry.resetTime) {
+    rateLimitMap.set(identifier, { count: 1, resetTime: now + WINDOW_MS });
+    return { allowed: true };
+  }
+  if (entry.count >= RATE_LIMIT) {
+    return { allowed: false };
+  }
+  entry.count++;
+  return { allowed: true };
+}
+
+/** Public web form SMS opt-in (double opt-in: welcome, then YES to confirm). */
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({}));
@@ -14,6 +32,19 @@ export async function POST(request: NextRequest) {
     const name = String(body.name || '').trim();
     const agreed = body.agreed === true;
     const finalConfirm = body.finalConfirm === true;
+
+    const ip =
+      request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+      request.headers.get('x-real-ip') ||
+      'unknown';
+    const userAgent = request.headers.get('user-agent') || '';
+
+    if (!checkRateLimit(`sms-opt-in:${ip}`).allowed) {
+      return NextResponse.json(
+        { error: 'Too many opt-in attempts. Please wait and try again.' },
+        { status: 429 }
+      );
+    }
 
     if (!agreed) {
       return NextResponse.json(
@@ -31,43 +62,39 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Mobile phone number is required.' }, { status: 400 });
     }
 
-    const ip =
-      request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-      request.headers.get('x-real-ip') ||
-      '';
-    const userAgent = request.headers.get('user-agent') || '';
-
+    // Do NOT mark opted-in until they reply YES to the SMS (double opt-in)
     await upsertSmsOptIn({
       phone,
-      optedIn: true,
-      method: 'web_form',
+      optedIn: false,
+      method: 'web_form_pending',
       source: name || 'web',
       ip,
       userAgent,
-      pendingConfirm: false,
+      pendingConfirm: true,
     });
 
-    const text = confirmationSms('EstimateAce');
-    const sms = await sendSmsNotification(phone, text, { waitForStatus: true });
+    const text = welcomeSms('EstimateAce');
+    const sms = await sendSmsNotification(phone, text, {
+      waitForStatus: true,
+      skipOptInCheck: true,
+    });
 
-    // Also send welcome-style first message content if confirm failed silently — prefer one clear confirm
     if (!sms.ok) {
-      // Still try welcome as fallback notice
-      await sendSmsNotification(phone, welcomeSms('EstimateAce'));
       return NextResponse.json({
         ok: false,
         error:
           sms.error ||
-          'Opt-in saved, but confirmation SMS failed. Check Twilio A2P / toll-free verification.',
-        optedIn: true,
+          'Could not send confirmation SMS. Check Twilio A2P / number registration.',
+        optedIn: false,
       });
     }
 
     return NextResponse.json({
       ok: true,
-      optedIn: true,
+      optedIn: false,
+      pendingConfirm: true,
       message:
-        'You are opted in. A confirmation text was sent to your phone. Reply STOP anytime to opt out.',
+        'Check your phone and reply YES to finish opting in. Reply STOP anytime to opt out.',
       smsStatus: sms.status,
     });
   } catch (e: any) {

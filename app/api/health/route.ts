@@ -1,6 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import packageJson from '@/package.json';
-import { getXaiRuntimeConfig } from '@/lib/xai-config';
 import {
   isGooglePlacesConfigured,
   probeAddressAutocomplete,
@@ -9,20 +7,35 @@ import {
 export const dynamic = 'force-dynamic';
 
 /**
- * Lightweight runtime health check — confirms which model aliases and
- * dependency versions the deployed build is using.
+ * Lightweight runtime health check.
+ * Detailed probes require Authorization: Bearer $CRON_SECRET (or non-production).
  */
 export async function GET(request: NextRequest) {
-  const xai = getXaiRuntimeConfig();
   const probe = request.nextUrl.searchParams.get('probe');
+  const cronSecret = (process.env.CRON_SECRET || '').trim();
+  const authHeader = request.headers.get('authorization');
+  const detailedAllowed =
+    process.env.NODE_ENV !== 'production' ||
+    (Boolean(cronSecret) && authHeader === `Bearer ${cronSecret}`);
 
   if (probe === 'address') {
+    if (!detailedAllowed) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
     const addressProbe = await probeAddressAutocomplete();
     return NextResponse.json({
       ok: addressProbe.combinedCount > 0,
       service: 'estimateace',
       timestamp: new Date().toISOString(),
       addressProbe,
+    });
+  }
+
+  if (!detailedAllowed) {
+    return NextResponse.json({
+      ok: true,
+      service: 'estimateace',
+      timestamp: new Date().toISOString(),
     });
   }
 
@@ -33,23 +46,9 @@ export async function GET(request: NextRequest) {
     runtime: {
       node: process.version,
     },
-    xai: {
-      chatModel: xai.chatModel,
-      quoteModel: (xai as any).quoteModel,
-      visionModel: xai.visionModel,
-      apiKeyConfigured: xai.hasApiKey,
-      modelPolicy:
-        'AI Quote uses SuperGrok-class flagship (grok-4.6). Override via GROK_QUOTE_MODEL / GROK_CHAT_MODEL / GROK_MODEL.',
-    },
     addressAutocomplete: {
       googlePlacesConfigured: isGooglePlacesConfigured(),
       fallbackProviders: ['nominatim', 'census', 'photon'],
-      probeUrl: '/api/health?probe=address',
-    },
-    dependencies: {
-      next: packageJson.dependencies?.next ?? 'unknown',
-      react: packageJson.dependencies?.react ?? 'unknown',
-      supabase: packageJson.dependencies?.['@supabase/supabase-js'] ?? 'unknown',
     },
   });
 }

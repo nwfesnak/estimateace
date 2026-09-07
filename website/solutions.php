@@ -47,8 +47,8 @@ $app_url = 'https://app.estimateace.com';
     </article>
     <article class="card icon-card" id="receptionist">
       <div class="icon">📞</div>
-      <h3>AI Receptionist</h3>
-      <p>24/7 virtual front desk: answers missed and after-hours calls, summarizes messages, flags urgents, books appointments, and answers FAQs from your knowledge base.</p>
+      <h3>AI Receptionist (beta)</h3>
+      <p>Knowledge base, test call, and message inbox in the app today. Live missed-call answering and forwarding are coming in a later release.</p>
       <p style="margin-top:0.75rem;"><a href="/receptionist.php">Learn more →</a></p>
     </article>
   </div>

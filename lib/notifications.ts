@@ -194,7 +194,7 @@ export async function sendEmailNotification(
 export async function sendSmsNotification(
   phone: string,
   body: string,
-  options?: { waitForStatus?: boolean }
+  options?: { waitForStatus?: boolean; skipOptInCheck?: boolean }
 ): Promise<{
   ok: boolean;
   error?: string;
@@ -216,6 +216,20 @@ export async function sendSmsNotification(
   const to = formatPhoneE164(phone);
   if (!to) {
     return { ok: false, error: `Invalid phone number: ${phone}` };
+  }
+
+  // Respect STOP except for OTP, HELP/STOP replies, and double-opt-in prompts.
+  // Missing row (null) = legacy / not tracked yet — allow transactional send.
+  if (!options?.skipOptInCheck) {
+    try {
+      const { getSmsOptIn } = await import('@/lib/sms-opt-in-store');
+      const consent = await getSmsOptIn(to);
+      if (consent && consent.optedIn === false) {
+        return { ok: false, error: 'Recipient opted out of SMS (STOP).', to };
+      }
+    } catch (e) {
+      console.warn('SMS opt-in check failed (continuing):', e);
+    }
   }
 
   try {
