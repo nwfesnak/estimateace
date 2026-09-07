@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>EstimateAce — AI-Powered Contractor Estimating &amp; Operations (Web App)</title>
-    <meta name="description" content="Fast, accurate contractor estimates and invoices with Grok AI pricing, photos, payments, scheduling, and reporting. Web-based app — use in any browser or install as a PWA.">
+    <title>EstimateAce — AI Estimates That Start From a Job Photo</title>
+    <meta name="description" content="Snap a job photo, get an AI-assisted estimate in minutes, then invoice, schedule, and get paid — in one web app. $29.99/mo. 14-day free trial.">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <style>
@@ -48,25 +48,27 @@
                 <div class="lg:col-span-7">
                     <div class="inline-flex items-center gap-x-2 bg-white/10 px-4 py-1.5 rounded-3xl mb-6 text-sm">
                         <div class="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></div>
-                        <span>AI-powered with Grok • Web app you can install</span>
+                        <span>AI photo quotes • $29.99/mo • Works in any browser</span>
                     </div>
                     
-                    <h1 class="text-6xl lg:text-7xl font-bold tracking-tighter leading-tight mb-6">The complete<br>contractor platform.</h1>
+                    <h1 class="text-5xl lg:text-7xl font-bold tracking-tighter leading-tight mb-6">AI estimates that<br>start from a job photo.</h1>
                     
-                    <p class="max-w-lg text-xl text-slate-300 mb-4">
-                        Create AI-assisted estimates, send invoices, schedule jobs, collect payments, and run your back office — all in one place.
+                    <p class="max-w-xl text-xl text-slate-300 mb-4">
+                        Quote on-site in minutes, then invoice, schedule, and get paid — in one app.
                     </p>
-                    <p class="max-w-lg text-base text-slate-400 mb-8">
-                        EstimateAce is a <strong class="text-slate-200 font-medium">web-based app</strong> — open it in any browser at <a href="https://app.estimateace.com" class="text-emerald-400 underline underline-offset-2 hover:text-emerald-300">app.estimateace.com</a>. No app store required. Install it as a Progressive Web App (PWA) on your phone or desktop and use it like a native app, online from the field or the office.
+                    <p class="max-w-xl text-base text-slate-400 mb-8">
+                        Built for painters, remodelers, HVAC, plumbing, and exterior crews who price from the truck.
+                        Open <a href="https://app.estimateace.com" class="text-emerald-400 underline underline-offset-2 hover:text-emerald-300">app.estimateace.com</a> in Safari or Chrome — no App Store required. Add to your home screen as a PWA when you want an app icon.
                     </p>
                     
                     <div class="flex flex-col sm:flex-row gap-4">
                         <a href="https://app.estimateace.com/trial" class="bg-white text-slate-900 px-8 py-4 rounded-3xl font-semibold text-lg flex items-center justify-center gap-x-2 hover:bg-slate-100">Start 14-day free trial</a>
-                        <a href="https://app.estimateace.com" class="border border-white/30 px-8 py-4 rounded-3xl font-semibold text-lg flex items-center justify-center gap-x-2 hover:bg-white/10">Log in to App</a>
+                        <a href="https://app.estimateace.com" class="border border-white/30 px-8 py-4 rounded-3xl font-semibold text-lg flex items-center justify-center gap-x-2 hover:bg-white/10">Log in</a>
                     </div>
+                    <p class="mt-4 text-sm text-slate-500">No credit card required · Cancel anytime</p>
                 </div>
 
-                <!-- Professional Phone Mockup -->
+                <!-- Phone mock: AI quote from photo -->
                 <div class="lg:col-span-5 flex justify-center lg:justify-end">
                     <div class="w-[300px] h-[590px] bg-[#0a0f1a] p-[14px] rounded-[60px] shadow-2xl border-[14px] border-[#111827]">
                         <div class="w-full h-full bg-[#0f172a] rounded-[46px] overflow-hidden border border-slate-800 relative">
@@ -76,48 +78,42 @@
                                 <div class="flex gap-x-1.5"><i class="fa-solid fa-signal"></i><i class="fa-solid fa-wifi"></i><span>87%</span></div>
                             </div>
 
-                            <div class="px-5 pt-5 pb-3 bg-[#0f172a]">
-                                <div class="flex justify-between items-center">
-                                    <div>
-                                        <div class="text-sm text-slate-400">Welcome back, Mike</div>
-                                        <div class="text-2xl font-semibold text-white tracking-tight">EstimateAce</div>
-                                    </div>
-                                    <div class="w-10 h-10 bg-slate-700 rounded-2xl flex items-center justify-center ring-2 ring-slate-600">
-                                        <span class="text-white text-sm font-bold">MR</span>
-                                    </div>
+                            <div class="px-5 pt-4 pb-2">
+                                <div class="text-xs text-emerald-400 font-semibold uppercase tracking-wide">AI Quote</div>
+                                <div class="text-xl font-semibold text-white tracking-tight mt-0.5">Exterior paint — EST-214</div>
+                                <div class="text-xs text-slate-400 mt-1">From driveway photo · just now</div>
+                            </div>
+
+                            <div class="mx-5 h-28 rounded-2xl bg-gradient-to-br from-slate-700 to-slate-800 border border-slate-600 flex items-center justify-center mb-4">
+                                <div class="text-center text-slate-300 text-xs">
+                                    <i class="fa-solid fa-camera text-2xl text-emerald-400 mb-1 block"></i>
+                                    Job photo attached
                                 </div>
                             </div>
 
-                            <div class="p-5 space-y-4 bg-[#0f172a]">
-                                <div class="grid grid-cols-2 gap-3">
-                                    <div class="bg-slate-800 border border-slate-700 rounded-2xl p-4">
-                                        <div class="text-xs text-slate-400">Jobs This Month</div>
-                                        <div class="text-3xl font-bold text-white mt-1">47</div>
-                                        <div class="text-emerald-400 text-xs mt-1">↑ 12 from last month</div>
-                                    </div>
-                                    <div class="bg-slate-800 border border-slate-700 rounded-2xl p-4">
-                                        <div class="text-xs text-slate-400">Revenue This Month</div>
-                                        <div class="text-xl font-bold text-white mt-1 tracking-tight">$128.4k</div>
-                                        <div class="text-emerald-400 text-xs mt-1">↑ 18%</div>
-                                    </div>
+                            <div class="px-5 space-y-2 text-sm">
+                                <div class="flex justify-between bg-slate-800/80 rounded-xl px-3 py-2 border border-slate-700">
+                                    <span class="text-slate-300">Prep &amp; scrape</span>
+                                    <span class="text-white font-medium">$420</span>
                                 </div>
-
-                                <div class="bg-slate-800 border border-slate-700 rounded-2xl p-4">
-                                    <div class="flex justify-between items-center">
-                                        <div>
-                                            <div class="text-xs text-slate-400">Outstanding Balance</div>
-                                            <div class="text-2xl font-bold text-white mt-1">$52,890</div>
-                                        </div>
-                                        <div>
-                                            <div class="text-xs px-2.5 py-1 bg-amber-900 text-amber-400 rounded-full w-fit ml-auto">12 invoices</div>
-                                        </div>
-                                    </div>
+                                <div class="flex justify-between bg-slate-800/80 rounded-xl px-3 py-2 border border-slate-700">
+                                    <span class="text-slate-300">Prime + 2 coats</span>
+                                    <span class="text-white font-medium">$1,850</span>
                                 </div>
+                                <div class="flex justify-between bg-slate-800/80 rounded-xl px-3 py-2 border border-slate-700">
+                                    <span class="text-slate-300">Trim &amp; doors</span>
+                                    <span class="text-white font-medium">$610</span>
+                                </div>
+                                <div class="flex justify-between px-3 py-3 mt-1">
+                                    <span class="text-slate-400 text-xs">Estimate total</span>
+                                    <span class="text-emerald-400 text-xl font-bold">$2,880</span>
+                                </div>
+                                <div class="text-center text-[10px] text-slate-500 pt-1">Send to client →</div>
                             </div>
 
                             <div class="absolute bottom-0 left-0 right-0 bg-[#0f172a] border-t border-slate-700 h-[58px] flex items-center justify-around text-xs">
-                                <div class="text-center text-white"><i class="fa-solid fa-home text-lg mb-0.5 block"></i><span class="text-[10px] font-semibold">Home</span></div>
-                                <div class="text-center text-slate-400"><i class="fa-solid fa-file-lines text-lg mb-0.5 block"></i><span class="text-[10px]">Estimates</span></div>
+                                <div class="text-center text-slate-400"><i class="fa-solid fa-home text-lg mb-0.5 block"></i><span class="text-[10px]">Home</span></div>
+                                <div class="text-center text-white"><i class="fa-solid fa-file-lines text-lg mb-0.5 block"></i><span class="text-[10px] font-semibold">Estimates</span></div>
                                 <div class="text-center text-slate-400"><i class="fa-solid fa-calendar text-lg mb-0.5 block"></i><span class="text-[10px]">Schedule</span></div>
                                 <div class="text-center text-slate-400"><i class="fa-solid fa-user text-lg mb-0.5 block"></i><span class="text-[10px]">Profile</span></div>
                             </div>
@@ -128,114 +124,87 @@
         </div>
     </section>
 
-    <!-- PRODUCT SECTION (Full) -->
-    <section id="product" class="max-w-screen-2xl mx-auto px-8 pt-16 pb-20">
+    <!-- Social proof strip -->
+    <section class="bg-white border-b border-slate-200">
+        <div class="max-w-screen-2xl mx-auto px-8 py-8 grid md:grid-cols-3 gap-6 text-center md:text-left">
+            <div>
+                <div class="text-sm font-semibold text-emerald-600 mb-1">Exterior painting</div>
+                <p class="text-slate-600 text-sm">“I snap the house face, tweak the AI lines, and email the estimate before I leave the driveway.”</p>
+            </div>
+            <div>
+                <div class="text-sm font-semibold text-emerald-600 mb-1">Remodeling</div>
+                <p class="text-slate-600 text-sm">Photo + rough notes become a client-ready scope — without rewriting every line by hand.</p>
+            </div>
+            <div>
+                <div class="text-sm font-semibold text-emerald-600 mb-1">HVAC &amp; plumbing</div>
+                <p class="text-slate-600 text-sm">Same app for the quote, the invoice, and tomorrow’s schedule — from your phone.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- AI WEDGE (lead) -->
+    <section id="product" class="max-w-screen-2xl mx-auto px-8 pt-16 pb-12">
         <div class="text-center mb-12">
-            <span class="px-4 py-1 bg-slate-100 text-slate-600 text-sm font-semibold rounded-3xl">PRODUCT</span>
-            <h2 class="section-header tracking-tighter mt-3">Powerful features for contractors</h2>
-            <p class="max-w-2xl mx-auto mt-4 text-slate-600">Built around Grok AI for faster pricing, clearer scopes, and smarter job docs — plus full estimating, invoicing, and field ops in a browser-based app.</p>
+            <span class="px-4 py-1 bg-emerald-50 text-emerald-700 text-sm font-semibold rounded-3xl">WHY ESTIMATEACE</span>
+            <h2 class="section-header tracking-tighter mt-3">Three AI moments that win the job</h2>
+            <p class="max-w-2xl mx-auto mt-4 text-slate-600">Category platforms sell “everything.” We lead with faster, sharper estimates — then give you the ops stack.</p>
         </div>
 
-        <div class="grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            <div class="bg-white border border-emerald-200 rounded-3xl p-6 ring-1 ring-emerald-100">
-                <div class="w-11 h-11 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mb-4"><i class="fa-solid fa-robot text-2xl"></i></div>
-                <h3 class="font-semibold text-lg mb-2">AI Auto Estimate &amp; price quotes</h3>
-                <p class="text-sm text-slate-600">Grok-powered AI suggests pricing and line items so you quote faster and more consistently.</p>
+        <div class="grid md:grid-cols-3 gap-6 mb-16">
+            <div class="bg-white border border-emerald-200 rounded-3xl p-8 ring-1 ring-emerald-100">
+                <div class="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mb-5"><i class="fa-solid fa-camera-retro text-2xl"></i></div>
+                <h3 class="font-semibold text-xl mb-2">1. Quote from a job photo</h3>
+                <p class="text-slate-600">Snap the site. AI drafts line items and pricing from what it sees so you start from a real estimate, not a blank page.</p>
             </div>
-            <div class="bg-white border border-emerald-200 rounded-3xl p-6 ring-1 ring-emerald-100">
-                <div class="w-11 h-11 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mb-4"><i class="fa-solid fa-camera-retro text-2xl"></i></div>
-                <h3 class="font-semibold text-lg mb-2">AI quote from job photos</h3>
-                <p class="text-sm text-slate-600">Snap a site photo and get AI price quotes on line items from what it sees.</p>
+            <div class="bg-white border border-emerald-200 rounded-3xl p-8 ring-1 ring-emerald-100">
+                <div class="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mb-5"><i class="fa-solid fa-robot text-2xl"></i></div>
+                <h3 class="font-semibold text-xl mb-2">2. Auto estimate &amp; price</h3>
+                <p class="text-slate-600">Grok-powered suggestions for materials and labor so quotes stay consistent when you’re busy between jobs.</p>
             </div>
-            <div class="bg-white border border-emerald-200 rounded-3xl p-6 ring-1 ring-emerald-100">
-                <div class="w-11 h-11 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mb-4"><i class="fa-solid fa-wand-magic-sparkles text-2xl"></i></div>
-                <h3 class="font-semibold text-lg mb-2">AI description enhancement</h3>
-                <p class="text-sm text-slate-600">Turn rough notes into clear, customer-ready scope language with Grok AI.</p>
+            <div class="bg-white border border-emerald-200 rounded-3xl p-8 ring-1 ring-emerald-100">
+                <div class="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mb-5"><i class="fa-solid fa-wand-magic-sparkles text-2xl"></i></div>
+                <h3 class="font-semibold text-xl mb-2">3. Polish the scope</h3>
+                <p class="text-slate-600">Turn rough notes into clear, customer-ready descriptions — professional language without rewriting every line.</p>
             </div>
-            <div class="bg-white border border-emerald-200 rounded-3xl p-6 ring-1 ring-emerald-100">
-                <div class="w-11 h-11 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mb-4"><i class="fa-solid fa-language text-2xl"></i></div>
-                <h3 class="font-semibold text-lg mb-2">AI translation</h3>
-                <p class="text-sm text-slate-600">Translate estimates and job text for clients in multiple languages.</p>
+        </div>
+
+        <div class="text-center mb-8">
+            <h3 class="text-2xl font-bold tracking-tight text-slate-900">Also a full ops stack</h3>
+            <p class="text-slate-600 mt-2 max-w-xl mx-auto">After the quote lands, finish the job in the same app — without paying Jobber/HCP platform prices.</p>
+        </div>
+
+        <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div class="bg-white border border-slate-200 rounded-2xl p-5">
+                <h4 class="font-semibold mb-1">Estimates &amp; invoices</h4>
+                <p class="text-sm text-slate-600">Unlimited docs, convert estimate → invoice, deposits &amp; balance due.</p>
             </div>
-            <div class="bg-white border border-emerald-200 rounded-3xl p-6 ring-1 ring-emerald-100">
-                <div class="w-11 h-11 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mb-4"><i class="fa-solid fa-headset text-2xl"></i></div>
-                <h3 class="font-semibold text-lg mb-2">AI Receptionist (beta)</h3>
-                <p class="text-sm text-slate-600">Knowledge base and test call in-app. Live phone answering / call forwarding coming soon.</p>
+            <div class="bg-white border border-slate-200 rounded-2xl p-5">
+                <h4 class="font-semibold mb-1">Schedule &amp; reminders</h4>
+                <p class="text-sm text-slate-600">Calendar jobs; optional SMS/email reminders for tomorrow’s work.</p>
             </div>
-            <div class="bg-white border border-slate-200 rounded-3xl p-6">
-                <div class="w-11 h-11 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mb-4"><i class="fa-solid fa-infinity text-2xl"></i></div>
-                <h3 class="font-semibold text-lg mb-2">Unlimited estimates &amp; invoices</h3>
-                <p class="text-sm text-slate-600">Create, send, and convert estimates to invoices with no limits.</p>
+            <div class="bg-white border border-slate-200 rounded-2xl p-5">
+                <h4 class="font-semibold mb-1">Get paid</h4>
+                <p class="text-sm text-slate-600">Stripe checkout links, Venmo/Zelle/PayPal options, client approve page.</p>
             </div>
-            <div class="bg-white border border-slate-200 rounded-3xl p-6">
-                <div class="w-11 h-11 bg-orange-100 text-orange-600 rounded-2xl flex items-center justify-center mb-4"><i class="fa-solid fa-camera text-2xl"></i></div>
-                <h3 class="font-semibold text-lg mb-2">Photos &amp; Video recording</h3>
-                <p class="text-sm text-slate-600">Attach photos and videos directly to jobs for documentation and AI quoting.</p>
+            <div class="bg-white border border-slate-200 rounded-2xl p-5">
+                <h4 class="font-semibold mb-1">Field docs</h4>
+                <p class="text-sm text-slate-600">Photos, video, receipts, labor &amp; mileage on every job.</p>
             </div>
-            <div class="bg-white border border-slate-200 rounded-3xl p-6">
-                <div class="w-11 h-11 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center mb-4"><i class="fa-solid fa-receipt text-2xl"></i></div>
-                <h3 class="font-semibold text-lg mb-2">Receipt tracking &amp; scan</h3>
-                <p class="text-sm text-slate-600">Upload or scan receipts for expense and tax tracking on each job.</p>
+            <div class="bg-white border border-slate-200 rounded-2xl p-5">
+                <h4 class="font-semibold mb-1">Reports &amp; profit</h4>
+                <p class="text-sm text-slate-600">Paid invoices, profit by month, tax helpers, CSV export.</p>
             </div>
-            <div class="bg-white border border-slate-200 rounded-3xl p-6">
-                <div class="w-11 h-11 bg-purple-100 text-purple-600 rounded-2xl flex items-center justify-center mb-4"><i class="fa-solid fa-user-clock text-2xl"></i></div>
-                <h3 class="font-semibold text-lg mb-2">Labor tracking</h3>
-                <p class="text-sm text-slate-600">Track labor hours, rates, and costs — with optional breakdowns on client estimates.</p>
+            <div class="bg-white border border-slate-200 rounded-2xl p-5">
+                <h4 class="font-semibold mb-1">Crew access</h4>
+                <p class="text-sm text-slate-600">Invite field crew with controlled access to estimates.</p>
             </div>
-            <div class="bg-white border border-slate-200 rounded-3xl p-6">
-                <div class="w-11 h-11 bg-fuchsia-100 text-fuchsia-600 rounded-2xl flex items-center justify-center mb-4"><i class="fa-solid fa-road text-2xl"></i></div>
-                <h3 class="font-semibold text-lg mb-2">Mileage logs</h3>
-                <p class="text-sm text-slate-600">Log job mileage and set your per-mile rate for expense tracking.</p>
+            <div class="bg-white border border-slate-200 rounded-2xl p-5">
+                <h4 class="font-semibold mb-1">Web app + PWA</h4>
+                <p class="text-sm text-slate-600">No App Store friction — install to home screen when you want.</p>
             </div>
-            <div class="bg-white border border-slate-200 rounded-3xl p-6">
-                <div class="w-11 h-11 bg-sky-100 text-sky-600 rounded-2xl flex items-center justify-center mb-4"><i class="fa-solid fa-calendar-check text-2xl"></i></div>
-                <h3 class="font-semibold text-lg mb-2">Scheduling &amp; calendar</h3>
-                <p class="text-sm text-slate-600">Schedule appointments and manage your job calendar from the app.</p>
-            </div>
-            <div class="bg-white border border-slate-200 rounded-3xl p-6">
-                <div class="w-11 h-11 bg-sky-100 text-sky-600 rounded-2xl flex items-center justify-center mb-4"><i class="fa-solid fa-bell text-2xl"></i></div>
-                <h3 class="font-semibold text-lg mb-2">Daily appointment reminders</h3>
-                <p class="text-sm text-slate-600">Get daily SMS + email reminders of tomorrow’s jobs when notifications are enabled.</p>
-            </div>
-            <div class="bg-white border border-slate-200 rounded-3xl p-6">
-                <div class="w-11 h-11 bg-rose-100 text-rose-600 rounded-2xl flex items-center justify-center mb-4"><i class="fa-solid fa-credit-card text-2xl"></i></div>
-                <h3 class="font-semibold text-lg mb-2">Payments</h3>
-                <p class="text-sm text-slate-600">Stripe, PayPal, Venmo, Zelle, eCheck/ACH, mail check, and crypto payment options.</p>
-            </div>
-            <div class="bg-white border border-slate-200 rounded-3xl p-6">
-                <div class="w-11 h-11 bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center mb-4"><i class="fa-solid fa-users text-2xl"></i></div>
-                <h3 class="font-semibold text-lg mb-2">Team &amp; crew login</h3>
-                <p class="text-sm text-slate-600">Add crew and sub-contractors with a dedicated crew login (email-based) for field access.</p>
-            </div>
-            <div class="bg-white border border-slate-200 rounded-3xl p-6">
-                <div class="w-11 h-11 bg-amber-100 text-amber-600 rounded-2xl flex items-center justify-center mb-4"><i class="fa-solid fa-calculator text-2xl"></i></div>
-                <h3 class="font-semibold text-lg mb-2">Tax calculation &amp; reporting</h3>
-                <p class="text-sm text-slate-600">Tax rates, tax-exempt jobs, labor tax options, and reporting.</p>
-            </div>
-            <div class="bg-white border border-slate-200 rounded-3xl p-6">
-                <div class="w-11 h-11 bg-cyan-100 text-cyan-600 rounded-2xl flex items-center justify-center mb-4"><i class="fa-solid fa-chart-line text-2xl"></i></div>
-                <h3 class="font-semibold text-lg mb-2">Profit tracking per job</h3>
-                <p class="text-sm text-slate-600">See real-time profit and cost breakdown on every job.</p>
-            </div>
-            <div class="bg-white border border-slate-200 rounded-3xl p-6">
-                <div class="w-11 h-11 bg-lime-100 text-lime-600 rounded-2xl flex items-center justify-center mb-4"><i class="fa-solid fa-bookmark text-2xl"></i></div>
-                <h3 class="font-semibold text-lg mb-2">Quick Lines &amp; templates</h3>
-                <p class="text-sm text-slate-600">Save reusable line items and load estimate templates in seconds.</p>
-            </div>
-            <div class="bg-white border border-slate-200 rounded-3xl p-6">
-                <div class="w-11 h-11 bg-teal-100 text-teal-600 rounded-2xl flex items-center justify-center mb-4"><i class="fa-solid fa-download text-2xl"></i></div>
-                <h3 class="font-semibold text-lg mb-2">Export data</h3>
-                <p class="text-sm text-slate-600">Export estimates, invoices, mileage, and reports to CSV.</p>
-            </div>
-            <div class="bg-white border border-slate-200 rounded-3xl p-6">
-                <div class="w-11 h-11 bg-slate-100 text-slate-700 rounded-2xl flex items-center justify-center mb-4"><i class="fa-solid fa-address-book text-2xl"></i></div>
-                <h3 class="font-semibold text-lg mb-2">Clients &amp; job addresses</h3>
-                <p class="text-sm text-slate-600">Store client details, job names, and addresses for invoices and scheduling.</p>
-            </div>
-            <div class="bg-white border border-slate-200 rounded-3xl p-6">
-                <div class="w-11 h-11 bg-violet-100 text-violet-600 rounded-2xl flex items-center justify-center mb-4"><i class="fa-solid fa-globe text-2xl"></i></div>
-                <h3 class="font-semibold text-lg mb-2">Web-based app + PWA</h3>
-                <p class="text-sm text-slate-600">Runs in the browser — no install required. Add to your home screen as a PWA for an app-like experience on phone or desktop.</p>
+            <div class="bg-white border border-slate-200 rounded-2xl p-5">
+                <h4 class="font-semibold mb-1">AI Receptionist (beta)</h4>
+                <p class="text-sm text-slate-600">Test call &amp; knowledge base now; live phone answering coming later.</p>
             </div>
         </div>
     </section>
@@ -320,15 +289,10 @@
                     <li class="flex items-center gap-x-3"><i class="fa-solid fa-check text-emerald-500"></i> AI Auto Estimate &amp; price quotes</li>
                     <li class="flex items-center gap-x-3"><i class="fa-solid fa-check text-emerald-500"></i> AI quote from job photos</li>
                     <li class="flex items-center gap-x-3"><i class="fa-solid fa-check text-emerald-500"></i> AI Description Enhancement</li>
-                    <li class="flex items-center gap-x-3"><i class="fa-solid fa-check text-emerald-500"></i> AI translation &amp; AI Receptionist</li>
-                    <li class="flex items-center gap-x-3"><i class="fa-solid fa-check text-emerald-500"></i> Photos, video &amp; receipt scan</li>
-                    <li class="flex items-center gap-x-3"><i class="fa-solid fa-check text-emerald-500"></i> Labor &amp; mileage tracking</li>
-                    <li class="flex items-center gap-x-3"><i class="fa-solid fa-check text-emerald-500"></i> Scheduling, calendar &amp; reminders</li>
-                    <li class="flex items-center gap-x-3"><i class="fa-solid fa-check text-emerald-500"></i> Payments (Stripe, PayPal, Venmo, Zelle, ACH &amp; more)</li>
-                    <li class="flex items-center gap-x-3"><i class="fa-solid fa-check text-emerald-500"></i> Team accounts &amp; crew login</li>
-                    <li class="flex items-center gap-x-3"><i class="fa-solid fa-check text-emerald-500"></i> Tax, profit tracking &amp; export</li>
-                    <li class="flex items-center gap-x-3"><i class="fa-solid fa-check text-emerald-500"></i> Quick Lines, templates &amp; clients</li>
-                    <li class="flex items-center gap-x-3"><i class="fa-solid fa-check text-emerald-500"></i> Web-based app + installable PWA</li>
+                    <li class="flex items-center gap-x-3"><i class="fa-solid fa-check text-emerald-500"></i> AI description polish &amp; translation</li>
+                    <li class="flex items-center gap-x-3"><i class="fa-solid fa-check text-emerald-500"></i> Photos, video, receipts, labor &amp; mileage</li>
+                    <li class="flex items-center gap-x-3"><i class="fa-solid fa-check text-emerald-500"></i> Schedule, reminders, payments &amp; reports</li>
+                    <li class="flex items-center gap-x-3"><i class="fa-solid fa-check text-emerald-500"></i> Crew access · web app + PWA</li>
                 </ul>
                 
                 <a href="https://app.estimateace.com/trial?plan=monthly" class="mt-8 block w-full text-center py-4 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl font-semibold">Start 14-day free trial</a>
@@ -350,15 +314,10 @@
                     <li class="flex items-center gap-x-3"><i class="fa-solid fa-check text-emerald-500"></i> AI Auto Estimate &amp; price quotes</li>
                     <li class="flex items-center gap-x-3"><i class="fa-solid fa-check text-emerald-500"></i> AI quote from job photos</li>
                     <li class="flex items-center gap-x-3"><i class="fa-solid fa-check text-emerald-500"></i> AI Description Enhancement</li>
-                    <li class="flex items-center gap-x-3"><i class="fa-solid fa-check text-emerald-500"></i> AI translation &amp; AI Receptionist</li>
-                    <li class="flex items-center gap-x-3"><i class="fa-solid fa-check text-emerald-500"></i> Photos, video &amp; receipt scan</li>
-                    <li class="flex items-center gap-x-3"><i class="fa-solid fa-check text-emerald-500"></i> Labor &amp; mileage tracking</li>
-                    <li class="flex items-center gap-x-3"><i class="fa-solid fa-check text-emerald-500"></i> Scheduling, calendar &amp; reminders</li>
-                    <li class="flex items-center gap-x-3"><i class="fa-solid fa-check text-emerald-500"></i> Payments (Stripe, PayPal, Venmo, Zelle, ACH &amp; more)</li>
-                    <li class="flex items-center gap-x-3"><i class="fa-solid fa-check text-emerald-500"></i> Team accounts &amp; crew login</li>
-                    <li class="flex items-center gap-x-3"><i class="fa-solid fa-check text-emerald-500"></i> Tax, profit tracking &amp; export</li>
-                    <li class="flex items-center gap-x-3"><i class="fa-solid fa-check text-emerald-500"></i> Quick Lines, templates &amp; clients</li>
-                    <li class="flex items-center gap-x-3"><i class="fa-solid fa-check text-emerald-500"></i> Web-based app + installable PWA</li>
+                    <li class="flex items-center gap-x-3"><i class="fa-solid fa-check text-emerald-500"></i> AI description polish &amp; translation</li>
+                    <li class="flex items-center gap-x-3"><i class="fa-solid fa-check text-emerald-500"></i> Photos, video, receipts, labor &amp; mileage</li>
+                    <li class="flex items-center gap-x-3"><i class="fa-solid fa-check text-emerald-500"></i> Schedule, reminders, payments &amp; reports</li>
+                    <li class="flex items-center gap-x-3"><i class="fa-solid fa-check text-emerald-500"></i> Crew access · web app + PWA</li>
                 </ul>
                 
                 <a href="https://app.estimateace.com/trial?plan=yearly" class="mt-8 block w-full text-center py-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-semibold">Start 14-day free trial</a>
@@ -407,7 +366,7 @@
                 <div class="bg-white/5 border border-white/10 hover:border-white/30 transition-colors rounded-3xl p-7">
                     <div class="text-emerald-400 mb-3"><i class="fa-solid fa-users text-2xl"></i></div>
                     <h4 class="font-semibold text-xl mb-2">Contractor Community</h4>
-                    <p class="text-slate-300 text-sm mb-4">Join thousands of other pros sharing tips and templates.</p>
+                    <p class="text-slate-300 text-sm mb-4">Share templates and field tips with other EstimateAce users.</p>
                     <a href="#" class="inline-flex items-center text-sm font-medium text-emerald-400 hover:text-emerald-300">Join the community →</a>
                 </div>
 
@@ -423,12 +382,13 @@
 
     <!-- Final CTA -->
     <div class="max-w-screen-2xl mx-auto px-8 py-16 text-center">
-        <h2 class="text-4xl font-bold tracking-tight mb-4">Ready to stop juggling tools?</h2>
-        <p class="text-xl text-slate-600 mb-8 max-w-md mx-auto">Join thousands of contractors running their business from one app.</p>
+        <h2 class="text-4xl font-bold tracking-tight mb-4">Quote from the truck this week.</h2>
+        <p class="text-xl text-slate-600 mb-2 max-w-lg mx-auto">14 days free. Then $29.99/mo or $249/yr — full AI estimating plus ops.</p>
+        <p class="text-sm text-slate-500 mb-8">Same story in the app: professional estimating for contractors who price on-site.</p>
         
         <div class="flex flex-col sm:flex-row gap-4 justify-center">
-            <a href="https://app.estimateace.com/trial" class="px-10 py-4 bg-slate-900 text-white font-semibold rounded-3xl text-lg">Start your free trial</a>
-            <a href="https://app.estimateace.com" class="px-10 py-4 border border-slate-300 font-semibold rounded-3xl text-lg">Log in to existing account</a>
+            <a href="https://app.estimateace.com/trial" class="px-10 py-4 bg-slate-900 text-white font-semibold rounded-3xl text-lg">Start 14-day free trial</a>
+            <a href="https://app.estimateace.com" class="px-10 py-4 border border-slate-300 font-semibold rounded-3xl text-lg">Log in</a>
         </div>
     </div>
 

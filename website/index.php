@@ -1,6 +1,6 @@
 <?php
-$page_title = 'EstimateAce | Field Service Management Software for Contractors';
-$page_description = 'Quote, schedule, invoice, and get paid from one platform. AI pricing, client notifications, and mobile-first tools built for home service pros.';
+$page_title = 'EstimateAce | AI Estimates That Start From a Job Photo';
+$page_description = 'Snap a job photo, get an AI-assisted estimate in minutes, then invoice, schedule, and get paid — in one web app. $29.99/mo. 14-day free trial.';
 include __DIR__ . '/includes/header.php';
 $app_url = 'https://app.estimateace.com';
 ?>
@@ -8,17 +8,17 @@ $app_url = 'https://app.estimateace.com';
 <section class="hero">
   <div class="container hero-grid">
     <div>
-      <h1>Run a stronger contracting business</h1>
-      <p class="lead">From first quote to final payment, EstimateAce keeps your estimates, schedule, team, and revenue moving forward—on the job site and after hours.</p>
+      <h1>AI estimates that start from a job photo</h1>
+      <p class="lead">Quote on-site in minutes, then invoice, schedule, and get paid — in one app. Built for painters, remodelers, HVAC, plumbing, and exterior crews.</p>
       <div class="hero-actions">
-        <a class="btn btn-primary btn-lg" href="<?= $app_url ?>">Start Free Trial</a>
-        <a class="btn btn-outline btn-lg" href="/pricing.php">Find Your Plan</a>
+        <a class="btn btn-primary btn-lg" href="<?= $app_url ?>/trial">Start 14-day free trial</a>
+        <a class="btn btn-outline btn-lg" href="/pricing.php">See pricing</a>
       </div>
-      <p class="hero-note">No credit card required · Works on phone, tablet, and desktop</p>
+      <p class="hero-note">No credit card required · Web app + PWA — no App Store required</p>
       <div class="trust-row">
-        <div class="trust-item"><strong>4.9</strong><span>Contractor-rated workflow</span></div>
-        <div class="trust-item"><strong>2 min</strong><span>Average estimate build</span></div>
-        <div class="trust-item"><strong>50+</strong><span>Trades supported</span></div>
+        <div class="trust-item"><strong>Photo → quote</strong><span>AI line items from the job</span></div>
+        <div class="trust-item"><strong>$29.99/mo</strong><span>Full platform, not a la carte</span></div>
+        <div class="trust-item"><strong>On-site</strong><span>Works on phone in the field</span></div>
       </div>
     </div>
     <div class="mockup-wrap">

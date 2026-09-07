@@ -1,6 +1,6 @@
 <?php
-$page_title = 'Pricing | EstimateAce — $29.99/mo or $249/yr';
-$page_description = 'Simple contractor software pricing. Full platform access for $29.99/month or $249/year.';
+$page_title = 'Pricing | EstimateAce — AI Estimates from $29.99/mo';
+$page_description = 'AI photo quotes, unlimited estimates & invoices, scheduling and payments. $29.99/month or $249/year. 14-day free trial.';
 include __DIR__ . '/includes/header.php';
 $app_url = 'https://app.estimateace.com';
 $monthly = 29.99;
@@ -11,8 +11,8 @@ $savings = round($monthly * 12 - $annual, 2);
 <section class="page-hero">
   <div class="container">
     <span class="eyebrow">Pricing</span>
-    <h1>One plan. Every feature.</h1>
-    <p class="lead">No per-estimate fees. No paid add-ons for AI or scheduling. Pick monthly flexibility or annual savings.</p>
+    <h1>AI estimating at a tool price</h1>
+    <p class="lead">Photo quotes, polished scopes, invoices, and ops — one plan. No per-estimate fees. No paid AI add-on.</p>
   </div>
 </section>
 
