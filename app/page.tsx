@@ -1057,13 +1057,6 @@ export default function Home() {
   const [tutorialTitle, setTutorialTitle] = useState('');
   const [tutorialDescription, setTutorialDescription] = useState('');
   const tutorialFileRef = useRef<HTMLInputElement>(null);
-  /** Unlisted signup welcome video (https://app.estimateace.com/welcome) */
-  const [welcomeVideoUrl, setWelcomeVideoUrl] = useState('');
-  const [welcomeVideoTitle, setWelcomeVideoTitle] = useState('Welcome to EstimateAce');
-  const [welcomeVideoDescription, setWelcomeVideoDescription] = useState(
-    'A quick walkthrough of EstimateAce — estimates, AI quoting, invoices, and getting paid.'
-  );
-  const [welcomeVideoBusy, setWelcomeVideoBusy] = useState(false);
   /** Skip profile auto-save while hydrating from server/local cache */
   const profileHydratingRef = useRef(false);
   /** Block autosave briefly after New Estimate so deposit/payment from the prior doc cannot be written onto the blank form. */
@@ -2482,67 +2475,9 @@ export default function Home() {
     }
   };
 
-  const refreshWelcomeVideoSettings = async () => {
-    try {
-      const res = await fetch('/api/welcome', { cache: 'no-store' });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) return;
-      setWelcomeVideoUrl(String(json.videoUrl || ''));
-      if (json.title) setWelcomeVideoTitle(String(json.title));
-      if (json.description) setWelcomeVideoDescription(String(json.description));
-    } catch {
-      /* optional */
-    }
-  };
-
-  const saveWelcomeVideoSettings = async () => {
-    if (!supabase || !user) return;
-    if (!tutorialsCanManage) {
-      showMessage('Only the EstimateAce owner can set the signup welcome video.');
-      return;
-    }
-    setWelcomeVideoBusy(true);
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token;
-      if (!token) {
-        showMessage('Please log in again.');
-        return;
-      }
-      const res = await fetch('/api/welcome', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          videoUrl: welcomeVideoUrl.trim(),
-          title: welcomeVideoTitle.trim() || 'Welcome to EstimateAce',
-          description: welcomeVideoDescription.trim(),
-        }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        showMessage(json.error || 'Could not save welcome video');
-        return;
-      }
-      showMessage(
-        welcomeVideoUrl.trim()
-          ? '✅ Signup welcome video saved. Share https://app.estimateace.com/welcome'
-          : '✅ Welcome video cleared. The /welcome page will show an empty state until you add a URL.'
-      );
-      await refreshWelcomeVideoSettings();
-    } catch {
-      showMessage('Network error saving welcome video.');
-    } finally {
-      setWelcomeVideoBusy(false);
-    }
-  };
-
   useEffect(() => {
     if (view === 'profileView' && profileTab === 'tutorials' && user?.id) {
       void refreshTutorials();
-      void refreshWelcomeVideoSettings();
     }
   }, [view, profileTab, user?.id]);
 
@@ -14333,65 +14268,8 @@ export default function Home() {
                     </div>
 
                     {tutorialsCanManage && (
-                      <div className="rounded-xl border-2 border-slate-800 bg-slate-900 text-white p-4 space-y-3">
-                        <h4 className="font-semibold">Signup welcome video (unlisted link)</h4>
-                        <p className="text-xs text-slate-300">
-                          Not shown on the marketing site. Send this private link to new signups:{' '}
-                          <a
-                            href="https://app.estimateace.com/welcome"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="underline text-emerald-300 break-all"
-                          >
-                            https://app.estimateace.com/welcome
-                          </a>
-                        </p>
-                        <Input
-                          placeholder="YouTube, Loom, Vimeo, or direct MP4 URL"
-                          value={welcomeVideoUrl}
-                          onChange={(e) => setWelcomeVideoUrl(e.target.value)}
-                          className="bg-white text-slate-900"
-                        />
-                        <Input
-                          placeholder="Page title"
-                          value={welcomeVideoTitle}
-                          onChange={(e) => setWelcomeVideoTitle(e.target.value)}
-                          className="bg-white text-slate-900"
-                        />
-                        <Textarea
-                          placeholder="Short intro under the title"
-                          value={welcomeVideoDescription}
-                          onChange={(e) => setWelcomeVideoDescription(e.target.value)}
-                          rows={2}
-                          className="bg-white text-slate-900"
-                        />
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            type="button"
-                            className="bg-emerald-600 hover:bg-emerald-500 text-white"
-                            disabled={welcomeVideoBusy}
-                            onClick={() => void saveWelcomeVideoSettings()}
-                          >
-                            {welcomeVideoBusy ? 'Saving…' : 'Save welcome video'}
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            className="bg-transparent border-slate-500 text-white hover:bg-slate-800"
-                            onClick={() => {
-                              void navigator.clipboard?.writeText('https://app.estimateace.com/welcome');
-                              showMessage('Copied https://app.estimateace.com/welcome');
-                            }}
-                          >
-                            Copy share link
-                          </Button>
-                        </div>
-                      </div>
-                    )}
-
-                    {tutorialsCanManage && (
                       <div className="rounded-xl border-2 border-emerald-300 bg-emerald-50/60 p-4 space-y-3">
-                        <h4 className="font-semibold text-emerald-900">Upload in-app tutorials (EstimateAce owner)</h4>
+                        <h4 className="font-semibold text-emerald-900">Upload (EstimateAce owner)</h4>
                         <p className="text-xs text-emerald-800">
                           Videos you upload here are available to all users under this tab. MP4 / WebM / MOV,
                           up to 200 MB.
