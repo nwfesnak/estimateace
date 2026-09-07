@@ -147,52 +147,14 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const twilioSid = process.env.TWILIO_ACCOUNT_SID;
-    const twilioToken = process.env.TWILIO_AUTH_TOKEN;
-    const twilioFrom = process.env.TWILIO_PHONE_NUMBER;
-
     if (clientPhones.length === 0) {
       result.errors.push('No client phone numbers on file for this estimate.');
-    } else if (!twilioSid || !twilioToken || !twilioFrom) {
-      result.errors.push('SMS service not configured. Add TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER to .env.local.');
     } else {
-      const twilioAuth = Buffer.from(`${twilioSid}:${twilioToken}`).toString('base64');
-
+      const { sendSmsNotification } = await import('@/lib/notifications');
       for (const phone of clientPhones) {
-        const to = formatPhoneE164(phone);
-        if (!to) {
-          result.errors.push(`Invalid phone number: ${phone}`);
-          continue;
-        }
-
-        try {
-          const params = new URLSearchParams({
-            To: to,
-            From: twilioFrom,
-            Body: smsText.slice(0, 1600),
-          });
-
-          const response = await fetch(
-            `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`,
-            {
-              method: 'POST',
-              headers: {
-                Authorization: `Basic ${twilioAuth}`,
-                'Content-Type': 'application/x-www-form-urlencoded',
-              },
-              body: params.toString(),
-            }
-          );
-
-          if (response.ok) {
-            result.smsSent.push(phone);
-          } else {
-            const errBody = await response.text();
-            result.errors.push(`Text to ${phone} failed: ${errBody}`);
-          }
-        } catch (err: unknown) {
-          result.errors.push(`Text to ${phone} failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
-        }
+        const smsResult = await sendSmsNotification(phone, smsText);
+        if (smsResult.ok) result.smsSent.push(phone);
+        else result.errors.push(`Text to ${phone} failed: ${smsResult.error || 'Unknown error'}`);
       }
     }
 
