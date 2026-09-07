@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
-import { ensureTrialEndsAt, getTrialDays, normalizeBillingSnapshot } from '@/lib/billing';
+import {
+  ensureTrialEndsAt,
+  normalizeBillingSnapshot,
+  resolveTrialDaysFromPromo,
+} from '@/lib/billing';
 
 /**
- * Seed 14-day trial + preferred plan (monthly|yearly) after signup from /trial page.
+ * Seed free trial + preferred plan (monthly|yearly) after signup from /trial page.
+ * Optional body.promo=2mo (or trialDays) for longer promo trials from special landers.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -18,6 +23,11 @@ export async function POST(request: NextRequest) {
     const company = String(body.company || '').trim().slice(0, 200);
     const name = String(body.name || '').trim().slice(0, 120);
     const phone = String(body.phone || '').trim().slice(0, 40);
+    const promo = String(body.promo || '').trim();
+    const trialDays = resolveTrialDaysFromPromo(
+      promo,
+      body.trialDays != null ? Number(body.trialDays) : null
+    );
 
     const admin = getSupabaseAdmin();
     if (!admin) {
@@ -48,7 +58,11 @@ export async function POST(request: NextRequest) {
     // Only seed trial if not already active paid
     if (snapshot.status !== 'active') {
       if (!snapshot.trialEndsAt) {
-        snapshot = ensureTrialEndsAt({ ...snapshot, status: 'none', trialEndsAt: null });
+        snapshot = ensureTrialEndsAt(
+          { ...snapshot, status: 'none', trialEndsAt: null },
+          new Date(),
+          trialDays
+        );
       } else if (snapshot.status === 'none') {
         snapshot = { ...snapshot, status: 'trialing' };
       }
@@ -108,7 +122,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       ok: true,
       plan,
-      trialDays: getTrialDays(),
+      promo: promo || null,
+      trialDays,
       trialEndsAt: snapshot.trialEndsAt,
       status: snapshot.status === 'active' ? 'active' : 'trialing',
     });

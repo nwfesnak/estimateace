@@ -2474,6 +2474,7 @@ export default function Home() {
     const billingParam = params.get('billing');
     const trialParam = params.get('trial');
     const planParam = params.get('plan');
+    const promoParam = params.get('promo');
     const stripeConnect = params.get('stripe_connect');
     const jobPaid = params.get('job_paid');
 
@@ -2482,6 +2483,7 @@ export default function Home() {
       url.searchParams.delete('billing');
       url.searchParams.delete('trial');
       url.searchParams.delete('plan');
+      url.searchParams.delete('promo');
       url.searchParams.delete('stripe_connect');
       url.searchParams.delete('job_paid');
       url.searchParams.delete('invoice');
@@ -2515,8 +2517,13 @@ export default function Home() {
 
     if (trialParam === 'started') {
       const planLabel = planParam === 'yearly' ? 'yearly ($249/yr after trial)' : 'monthly ($29.99/mo after trial)';
+      const promo = String(promoParam || '').toLowerCase();
+      const trialLabel =
+        promo === '2mo' || promo === '2months' || promo === '60'
+          ? '2-month (60-day)'
+          : '14-day';
       showMessage(
-        `✅ 14-day free trial started! After the trial you will be billed ${planLabel} unless you cancel in Billing / Contact Us.`
+        `✅ ${trialLabel} free trial started! After the trial you will be billed ${planLabel} unless you cancel in Billing / Contact Us.`
       );
       if (user?.id && supabase) void refreshBillingStatus();
       cleanUrl();

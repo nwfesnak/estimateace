@@ -98,6 +98,18 @@ export function getTrialDays(): number {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_TRIAL_DAYS;
 }
 
+/** Promo codes from marketing landers (e.g. ?promo=2mo → 60 days). */
+export function resolveTrialDaysFromPromo(promo?: string | null, explicitDays?: number | null): number {
+  if (explicitDays != null && Number.isFinite(explicitDays) && explicitDays > 0) {
+    return Math.min(365, Math.floor(Number(explicitDays)));
+  }
+  const p = String(promo || '')
+    .trim()
+    .toLowerCase();
+  if (p === '2mo' || p === '2months' || p === '60' || p === 'two-months') return 60;
+  return getTrialDays();
+}
+
 export function normalizeBillingSnapshot(raw: unknown): BillingSnapshot {
   const r = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
   const status = String(r.status || 'none') as SubscriptionStatus;
@@ -128,7 +140,8 @@ export function normalizeBillingSnapshot(raw: unknown): BillingSnapshot {
 /** Start a free trial clock from first login/signup if none set. */
 export function ensureTrialEndsAt(
   snapshot: BillingSnapshot,
-  now = new Date()
+  now = new Date(),
+  trialDaysOverride?: number
 ): BillingSnapshot {
   // Status stuck as "none" but trial date still in the future → show trialing
   if (snapshot.trialEndsAt) {
@@ -145,8 +158,12 @@ export function ensureTrialEndsAt(
   if (snapshot.status === 'active' || snapshot.status === 'trialing') return snapshot;
   // Don't start a new trial if account is scheduled to close or already canceled period
   if (snapshot.accountClosesAt) return snapshot;
+  const days =
+    trialDaysOverride != null && Number.isFinite(trialDaysOverride) && trialDaysOverride > 0
+      ? Math.min(365, Math.floor(trialDaysOverride))
+      : getTrialDays();
   const end = new Date(now);
-  end.setDate(end.getDate() + getTrialDays());
+  end.setDate(end.getDate() + days);
   return {
     ...snapshot,
     status: snapshot.status === 'none' ? 'trialing' : snapshot.status,

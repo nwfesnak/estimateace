@@ -6,14 +6,26 @@ import Link from 'next/link';
 import { getSupabaseClient, getSupabaseConfigHelpMessage } from '@/lib/supabase/client';
 
 const APP_HOME = '/';
-const TRIAL_DAYS = 14;
+const DEFAULT_TRIAL_DAYS = 14;
 
 type Plan = 'monthly' | 'yearly';
+
+function trialDaysForPromo(promo: string | null): number {
+  const p = String(promo || '')
+    .trim()
+    .toLowerCase();
+  if (p === '2mo' || p === '2months' || p === '60' || p === 'two-months') return 60;
+  return DEFAULT_TRIAL_DAYS;
+}
 
 function TrialForm() {
   const searchParams = useSearchParams();
   const initialPlan: Plan =
     searchParams.get('plan') === 'yearly' ? 'yearly' : 'monthly';
+  const promo = searchParams.get('promo');
+  const trialDays = trialDaysForPromo(promo);
+  const trialLabel =
+    trialDays >= 60 ? '2-month' : trialDays === 14 ? '14-day' : `${trialDays}-day`;
 
   const [plan, setPlan] = useState<Plan>(initialPlan);
   const [company, setCompany] = useState('');
@@ -32,8 +44,8 @@ function TrialForm() {
 
   const billingNote = useMemo(
     () =>
-      `After your ${TRIAL_DAYS}-day free trial, you will be billed ${planPrice} (${planLabel.toLowerCase()}) unless you cancel. You can change plans or cancel in Profile → Plan / Billing.`,
-    [plan, planPrice, planLabel]
+      `After your ${trialLabel} free trial (${trialDays} days), you will be billed ${planPrice} (${planLabel.toLowerCase()}) unless you cancel. You can change plans or cancel in Profile → Billing / Contact Us.`,
+    [plan, planPrice, planLabel, trialDays, trialLabel]
   );
 
   const startTrial = async () => {
@@ -107,6 +119,8 @@ function TrialForm() {
               company: trimmedCompany,
               name: trimmedName,
               phone: phone.trim(),
+              promo: promo || undefined,
+              trialDays,
             }),
           });
         } catch {
@@ -114,7 +128,9 @@ function TrialForm() {
         }
 
         setInfo('Account created — starting your free trial…');
-        window.location.href = `${APP_HOME}?trial=started&plan=${plan}`;
+        window.location.href = `${APP_HOME}?trial=started&plan=${plan}${
+          promo ? `&promo=${encodeURIComponent(promo)}` : ''
+        }`;
         return;
       }
 
@@ -155,16 +171,17 @@ function TrialForm() {
         <div className="bg-white border border-slate-200 rounded-3xl shadow-sm p-6 sm:p-8 space-y-6">
           <div>
             <p className="text-xs font-bold uppercase tracking-wide text-emerald-600">
-              {TRIAL_DAYS}-day free trial
+              {trialLabel} free trial
+              {promo === '2mo' || promo === '2months' ? ' · Limited offer' : ''}
             </p>
             <h1 className="text-2xl sm:text-3xl font-bold tracking-tight mt-1">
               Start free trial &amp; choose your plan
             </h1>
             <p className="text-sm text-slate-600 mt-2">
               This is the only place to create a new EstimateAce account (from the website or Sign
-              Up). Enter your details for a {TRIAL_DAYS}-day free trial. After the trial you will be
-              billed for the plan you choose below unless you cancel. Then use the same email and
-              password to log in at app.estimateace.com.
+              Up). Enter your details for a {trialLabel} free trial ({trialDays} days). After the
+              trial you will be billed for the plan you choose below unless you cancel. Then use the
+              same email and password to log in at app.estimateace.com.
             </p>
           </div>
 
@@ -284,9 +301,9 @@ function TrialForm() {
               onChange={(e) => setAgree(e.target.checked)}
             />
             <span>
-              I understand this is a <strong>{TRIAL_DAYS}-day free trial</strong>, and after that I
-              will be billed <strong>{planPrice}</strong> ({planLabel.toLowerCase()}) unless I
-              cancel. I agree to the{' '}
+              I understand this is a <strong>{trialLabel} free trial</strong> ({trialDays} days), and
+              after that I will be billed <strong>{planPrice}</strong> ({planLabel.toLowerCase()})
+              unless I cancel. I agree to the{' '}
               <Link href="/terms" className="text-emerald-700 underline">
                 Terms
               </Link>{' '}
@@ -315,7 +332,7 @@ function TrialForm() {
             onClick={() => void startTrial()}
             className="w-full h-12 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white font-semibold disabled:opacity-50"
           >
-            {busy ? 'Creating account…' : `Start ${TRIAL_DAYS}-day free trial`}
+            {busy ? 'Creating account…' : `Start ${trialLabel} free trial`}
           </button>
 
           <p className="text-center text-sm text-slate-500">
