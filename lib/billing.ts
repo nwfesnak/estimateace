@@ -107,6 +107,7 @@ export function resolveTrialDaysFromPromo(promo?: string | null, explicitDays?: 
     .trim()
     .toLowerCase();
   if (p === '2mo' || p === '2months' || p === '60' || p === 'two-months') return 60;
+  if (p === '6mo' || p === '6months' || p === '180' || p === 'six-months') return 180;
   return getTrialDays();
 }
 

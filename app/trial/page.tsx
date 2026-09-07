@@ -15,6 +15,7 @@ function trialDaysForPromo(promo: string | null): number {
     .trim()
     .toLowerCase();
   if (p === '2mo' || p === '2months' || p === '60' || p === 'two-months') return 60;
+  if (p === '6mo' || p === '6months' || p === '180' || p === 'six-months') return 180;
   return DEFAULT_TRIAL_DAYS;
 }
 
@@ -25,7 +26,13 @@ function TrialForm() {
   const promo = searchParams.get('promo');
   const trialDays = trialDaysForPromo(promo);
   const trialLabel =
-    trialDays >= 60 ? '2-month' : trialDays === 14 ? '14-day' : `${trialDays}-day`;
+    trialDays >= 180
+      ? '6-month'
+      : trialDays >= 60
+        ? '2-month'
+        : trialDays === 14
+          ? '14-day'
+          : `${trialDays}-day`;
 
   const [plan, setPlan] = useState<Plan>(initialPlan);
   const [company, setCompany] = useState('');
@@ -172,7 +179,12 @@ function TrialForm() {
           <div>
             <p className="text-xs font-bold uppercase tracking-wide text-emerald-600">
               {trialLabel} free trial
-              {promo === '2mo' || promo === '2months' ? ' · Limited offer' : ''}
+              {promo === '2mo' ||
+              promo === '2months' ||
+              promo === '6mo' ||
+              promo === '6months'
+                ? ' · Limited offer'
+                : ''}
             </p>
             <h1 className="text-2xl sm:text-3xl font-bold tracking-tight mt-1">
               Start free trial &amp; choose your plan

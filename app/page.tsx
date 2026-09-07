@@ -2519,9 +2519,11 @@ export default function Home() {
       const planLabel = planParam === 'yearly' ? 'yearly ($249/yr after trial)' : 'monthly ($29.99/mo after trial)';
       const promo = String(promoParam || '').toLowerCase();
       const trialLabel =
-        promo === '2mo' || promo === '2months' || promo === '60'
-          ? '2-month (60-day)'
-          : '14-day';
+        promo === '6mo' || promo === '6months' || promo === '180'
+          ? '6-month (180-day)'
+          : promo === '2mo' || promo === '2months' || promo === '60'
+            ? '2-month (60-day)'
+            : '14-day';
       showMessage(
         `✅ ${trialLabel} free trial started! After the trial you will be billed ${planLabel} unless you cancel in Billing / Contact Us.`
       );
