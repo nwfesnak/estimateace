@@ -1016,6 +1016,10 @@ export default function Home() {
     taxesEnabled: true,
     /** When false, hide AI Job Renderings in the editor and send flow */
     aiJobRenderingEnabled: true,
+    /** Included feature — show Email summaries on dashboard Leads when on */
+    emailLeadSummariesEnabled: true,
+    /** Paid add-on — AI Receptionist dashboard/inbox only when this is true AND receptionist is On */
+    aiReceptionistAddonActive: false,
     teammates: [] as {
       email: string;
       userId?: string;
@@ -1156,6 +1160,30 @@ export default function Home() {
     }
     return (profile as any).aiJobRenderingEnabled !== false;
   };
+
+  /** Included — email summaries on dashboard (default on) */
+  const getEmailLeadSummariesEnabled = (): boolean => {
+    const cached = getProfileSettingsCache();
+    if ('emailLeadSummariesEnabled' in cached) {
+      return cached.emailLeadSummariesEnabled !== false;
+    }
+    return (profile as any).emailLeadSummariesEnabled !== false;
+  };
+
+  /** Paid AI Receptionist add-on (Stripe/ops sets this; default off) */
+  const hasAiReceptionistAddon = (): boolean => {
+    const cached = getProfileSettingsCache();
+    if ('aiReceptionistAddonActive' in cached) {
+      return cached.aiReceptionistAddonActive === true;
+    }
+    return (profile as any).aiReceptionistAddonActive === true;
+  };
+
+  /** Show receptionist leads only when paid add-on is active AND user turned receptionist On */
+  const showReceptionistLeadsOnDashboard = (): boolean =>
+    hasAiReceptionistAddon() && receptionistSettings.enabled === true;
+
+  const showEmailLeadsOnDashboard = (): boolean => getEmailLeadSummariesEnabled();
 
   const estimateTotals = computeEstimateTotals({
     items,
@@ -1316,6 +1344,8 @@ export default function Home() {
     showDiscountOnEstimate: full.showDiscountOnEstimate === true,
     taxesEnabled: full.taxesEnabled !== false,
     aiJobRenderingEnabled: full.aiJobRenderingEnabled !== false,
+    emailLeadSummariesEnabled: full.emailLeadSummariesEnabled !== false,
+    aiReceptionistAddonActive: full.aiReceptionistAddonActive === true,
     paymentSettings: mergePaymentSettings(full.paymentSettings),
     // SMS 2FA forced off until phone line is active
     twoFactorEnabled: false,
@@ -2670,6 +2700,8 @@ export default function Home() {
         'showDiscountOnEstimate' in cached ||
         'taxesEnabled' in cached ||
         'aiJobRenderingEnabled' in cached ||
+        'emailLeadSummariesEnabled' in cached ||
+        'aiReceptionistAddonActive' in cached ||
         !!serverProfile;
 
       if (!hasSavedPrefs) return;
@@ -2688,11 +2720,25 @@ export default function Home() {
             : (serverProfile && 'aiJobRenderingEnabled' in serverProfile
               ? (serverProfile as any).aiJobRenderingEnabled !== false
               : (prev as any).aiJobRenderingEnabled !== false);
+        const emailLeadSummariesEnabled =
+          'emailLeadSummariesEnabled' in cached
+            ? cached.emailLeadSummariesEnabled !== false
+            : (serverProfile && 'emailLeadSummariesEnabled' in serverProfile
+              ? (serverProfile as any).emailLeadSummariesEnabled !== false
+              : (prev as any).emailLeadSummariesEnabled !== false);
+        const aiReceptionistAddonActive =
+          'aiReceptionistAddonActive' in cached
+            ? cached.aiReceptionistAddonActive === true
+            : (serverProfile && 'aiReceptionistAddonActive' in serverProfile
+              ? (serverProfile as any).aiReceptionistAddonActive === true
+              : (prev as any).aiReceptionistAddonActive === true);
         return {
           ...prev,
           ...displaySettings,
           taxesEnabled,
           aiJobRenderingEnabled,
+          emailLeadSummariesEnabled,
+          aiReceptionistAddonActive,
         };
       });
     })();
@@ -4280,6 +4326,20 @@ export default function Home() {
           : ('aiJobRenderingEnabled' in loadedProfile
             ? loadedProfile.aiJobRenderingEnabled !== false
             : (profile as any).aiJobRenderingEnabled !== false)),
+      emailLeadSummariesEnabled: 'emailLeadSummariesEnabled' in cached
+        ? cached.emailLeadSummariesEnabled !== false
+        : (serverProfile && 'emailLeadSummariesEnabled' in serverProfile
+          ? (serverProfile as any).emailLeadSummariesEnabled !== false
+          : ('emailLeadSummariesEnabled' in loadedProfile
+            ? loadedProfile.emailLeadSummariesEnabled !== false
+            : (profile as any).emailLeadSummariesEnabled !== false)),
+      aiReceptionistAddonActive: 'aiReceptionistAddonActive' in cached
+        ? cached.aiReceptionistAddonActive === true
+        : (serverProfile && 'aiReceptionistAddonActive' in serverProfile
+          ? (serverProfile as any).aiReceptionistAddonActive === true
+          : ('aiReceptionistAddonActive' in loadedProfile
+            ? loadedProfile.aiReceptionistAddonActive === true
+            : (profile as any).aiReceptionistAddonActive === true)),
       ...displaySettings,
       appointmentReminderEnabled: 'appointmentReminderEnabled' in loadedProfile
         ? !!loadedProfile.appointmentReminderEnabled
@@ -4496,6 +4556,20 @@ export default function Home() {
               : ('aiJobRenderingEnabled' in l
                 ? (l as any).aiJobRenderingEnabled !== false
                 : true)),
+          emailLeadSummariesEnabled: 'emailLeadSummariesEnabled' in cached
+            ? cached.emailLeadSummariesEnabled !== false
+            : (serverProfile && 'emailLeadSummariesEnabled' in serverProfile
+              ? (serverProfile as any).emailLeadSummariesEnabled !== false
+              : ('emailLeadSummariesEnabled' in l
+                ? (l as any).emailLeadSummariesEnabled !== false
+                : true)),
+          aiReceptionistAddonActive: 'aiReceptionistAddonActive' in cached
+            ? cached.aiReceptionistAddonActive === true
+            : (serverProfile && 'aiReceptionistAddonActive' in serverProfile
+              ? (serverProfile as any).aiReceptionistAddonActive === true
+              : ('aiReceptionistAddonActive' in l
+                ? (l as any).aiReceptionistAddonActive === true
+                : false)),
           ...displaySettings,
           appointmentReminderEnabled: 'appointmentReminderEnabled' in (s as any)
             ? !!(s as any).appointmentReminderEnabled
@@ -7719,6 +7793,17 @@ export default function Home() {
         (mergedProfile as any).aiReceptionistMessages ??
         (existing as any)?.aiReceptionistMessages ??
         receptionistMessages,
+      emailLeadSummaries:
+        (mergedProfile as any).emailLeadSummaries ??
+        (existing as any)?.emailLeadSummaries ??
+        emailLeadSummaries,
+      emailLeadSummariesEnabled:
+        (mergedProfile as any).emailLeadSummariesEnabled !== undefined
+          ? (mergedProfile as any).emailLeadSummariesEnabled !== false
+          : (existing as any)?.emailLeadSummariesEnabled !== false,
+      aiReceptionistAddonActive:
+        (mergedProfile as any).aiReceptionistAddonActive === true ||
+        (existing as any)?.aiReceptionistAddonActive === true,
     };
     await supabase.from('estimates').upsert({
       id: `SETTINGS-${workspaceUserId}`,
@@ -7763,6 +7848,8 @@ export default function Home() {
       showDiscountOnEstimate: nextProfile.showDiscountOnEstimate === true,
       taxesEnabled: nextProfile.taxesEnabled !== false,
       aiJobRenderingEnabled: nextProfile.aiJobRenderingEnabled !== false,
+      emailLeadSummariesEnabled: nextProfile.emailLeadSummariesEnabled !== false,
+      aiReceptionistAddonActive: nextProfile.aiReceptionistAddonActive === true,
     });
     await upsertUserSettingsProfile(nextProfile);
     // Keep open estimate's embedded profile in sync, but SETTINGS row is source of truth
@@ -10818,7 +10905,8 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Leads: AI Receptionist + Email summaries */}
+              {/* Leads: AI Receptionist (paid+on) and/or Email summaries (company toggle) */}
+              {(showReceptionistLeadsOnDashboard() || showEmailLeadsOnDashboard()) && (
               <Card className="mb-8 border-emerald-200 shadow-sm">
                 <CardContent className="p-6 space-y-6">
                   <div className="flex flex-wrap items-start justify-between gap-3">
@@ -10827,22 +10915,37 @@ export default function Home() {
                         🎯 Leads &amp; inbox
                       </h3>
                       <p className="text-sm text-gray-500 mt-1">
-                        New leads from your AI Receptionist and email summaries land here.
+                        {[
+                          showReceptionistLeadsOnDashboard() ? 'AI Receptionist leads' : null,
+                          showEmailLeadsOnDashboard() ? 'email summaries' : null,
+                        ]
+                          .filter(Boolean)
+                          .join(' and ')}{' '}
+                        land here.
                       </p>
                     </div>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="border-emerald-600 text-emerald-800"
-                      onClick={() => setView('receptionistView')}
-                    >
-                      Open AI Receptionist
-                    </Button>
+                    {showReceptionistLeadsOnDashboard() && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="border-emerald-600 text-emerald-800"
+                        onClick={() => setView('receptionistView')}
+                      >
+                        Open AI Receptionist
+                      </Button>
+                    )}
                   </div>
 
-                  <div className="grid md:grid-cols-2 gap-4">
-                    {/* AI Receptionist leads */}
+                  <div
+                    className={`grid gap-4 ${
+                      showReceptionistLeadsOnDashboard() && showEmailLeadsOnDashboard()
+                        ? 'md:grid-cols-2'
+                        : 'grid-cols-1'
+                    }`}
+                  >
+                    {/* AI Receptionist leads — paid add-on + On toggle only */}
+                    {showReceptionistLeadsOnDashboard() && (
                     <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 min-h-[180px]">
                       <div className="flex items-center justify-between gap-2 mb-3">
                         <h4 className="font-semibold text-sm text-slate-800">📞 AI Receptionist</h4>
@@ -10907,8 +11010,10 @@ export default function Home() {
                         )}
                       </div>
                     </div>
+                    )}
 
-                    {/* Email summaries */}
+                    {/* Email summaries — included feature, company toggle */}
+                    {showEmailLeadsOnDashboard() && (
                     <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 min-h-[180px]">
                       <div className="flex items-center justify-between gap-2 mb-3">
                         <h4 className="font-semibold text-sm text-slate-800">✉️ Email summaries</h4>
@@ -10925,7 +11030,7 @@ export default function Home() {
                               Connected inbox summaries will appear here when you link Gmail or Outlook.
                             </p>
                             <p className="text-xs text-gray-400">
-                              Not connected yet — this space is ready for new email leads.
+                              Included with your plan — turn off under Company Profile if you do not want this box.
                             </p>
                           </div>
                         ) : (
@@ -10968,9 +11073,11 @@ export default function Home() {
                         )}
                       </div>
                     </div>
+                    )}
                   </div>
                 </CardContent>
               </Card>
+              )}
 
               <Card className="mb-8">
                 <CardContent className="p-6">
@@ -13304,24 +13411,41 @@ export default function Home() {
                       <div className="min-w-0">
                         <h3 className="font-semibold text-lg flex items-center gap-2">
                           📞 AI Receptionist
-                          <span className="text-[10px] font-bold uppercase bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
-                            Beta
+                          <span className="text-[10px] font-bold uppercase bg-violet-100 text-violet-800 px-2 py-0.5 rounded-full">
+                            Paid add-on
                           </span>
-                          {receptionistSettings.enabled ? (
-                            <span className="text-[10px] font-bold uppercase bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
-                              On
-                            </span>
+                          {hasAiReceptionistAddon() ? (
+                            receptionistSettings.enabled ? (
+                              <span className="text-[10px] font-bold uppercase bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
+                                On
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-bold uppercase bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
+                                Off
+                              </span>
+                            )
                           ) : (
-                            <span className="text-[10px] font-bold uppercase bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
-                              Off
+                            <span className="text-[10px] font-bold uppercase bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
+                              Not subscribed
                             </span>
                           )}
                         </h3>
                         <p className="text-sm text-gray-600 mt-1 max-w-lg">
-                          Knowledge base + <strong>Test call</strong> + message inbox work now. Live phone
-                          forwarding is <strong>not</strong> available yet (Phase C).
+                          {hasAiReceptionistAddon() ? (
+                            <>
+                              Add-on is active. Turn the receptionist <strong>On</strong> in its settings to show
+                              leads on your dashboard. Live phone forwarding rolls out with the add-on.
+                            </>
+                          ) : (
+                            <>
+                              AI Receptionist is a <strong>paid add-on</strong>. Until it is purchased, it will not
+                              appear on your dashboard. Email summaries stay included with your plan (toggle under
+                              Company Profile).
+                            </>
+                          )}
                         </p>
-                        {receptionistMessages.filter((m) => m.status === 'new' && !m.spam).length > 0 && (
+                        {hasAiReceptionistAddon() &&
+                          receptionistMessages.filter((m) => m.status === 'new' && !m.spam).length > 0 && (
                           <p className="text-xs font-semibold text-sky-700 mt-2">
                             {receptionistMessages.filter((m) => m.status === 'new' && !m.spam).length} new message
                             {receptionistMessages.filter((m) => m.status === 'new' && !m.spam).length === 1
@@ -13330,15 +13454,29 @@ export default function Home() {
                           </p>
                         )}
                       </div>
-                      <Button
-                        className="bg-[#10b981] hover:bg-[#059669] text-white shrink-0"
-                        onClick={() => {
-                          void loadReceptionistFromSettings();
-                          setView('receptionistView');
-                        }}
-                      >
-                        Open receptionist
-                      </Button>
+                      {hasAiReceptionistAddon() ? (
+                        <Button
+                          className="bg-[#10b981] hover:bg-[#059669] text-white shrink-0"
+                          onClick={() => {
+                            void loadReceptionistFromSettings();
+                            setView('receptionistView');
+                          }}
+                        >
+                          Open receptionist
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="outline"
+                          className="shrink-0 border-violet-300 text-violet-900"
+                          onClick={() =>
+                            showMessage(
+                              'AI Receptionist is a paid add-on. Contact EstimateAce billing to activate it on your account.'
+                            )
+                          }
+                        >
+                          How to subscribe
+                        </Button>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
@@ -14306,6 +14444,37 @@ export default function Home() {
                                 checked
                                   ? '✅ AI Job Renderings enabled.'
                                   : '✅ AI Job Renderings turned off in the app.'
+                              );
+                            }}
+                            className="sr-only peer"
+                          />
+                          <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]"></div>
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="border rounded-xl p-4 space-y-4 bg-gray-50">
+                      <div className="flex items-center justify-between gap-4">
+                        <div>
+                          <p className="font-semibold">Email summaries on dashboard</p>
+                          <p className="text-sm text-gray-500">
+                            Included with your plan. When on, the dashboard Leads box shows email summaries
+                            (after you connect an inbox later). Turn off to hide that column.
+                          </p>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                          <input
+                            type="checkbox"
+                            checked={getEmailLeadSummariesEnabled()}
+                            onChange={async (e) => {
+                              const checked = e.target.checked;
+                              const nextProfile = { ...profile, emailLeadSummariesEnabled: checked };
+                              setProfile(nextProfile);
+                              await saveProfileSettings(nextProfile);
+                              showMessage(
+                                checked
+                                  ? '✅ Email summaries shown on the dashboard.'
+                                  : '✅ Email summaries hidden from the dashboard.'
                               );
                             }}
                             className="sr-only peer"
@@ -15644,7 +15813,31 @@ export default function Home() {
             />
           )}
 
-          {view === 'receptionistView' && (
+          {view === 'receptionistView' && !hasAiReceptionistAddon() && (
+            <div className="max-w-lg mx-auto mt-12">
+              <Card>
+                <CardContent className="p-8 space-y-4 text-center">
+                  <h2 className="text-2xl font-semibold">AI Receptionist — paid add-on</h2>
+                  <p className="text-sm text-gray-600">
+                    This feature is not on your plan yet. Email summaries on the dashboard stay available
+                    (Company Profile toggle). Contact EstimateAce to add AI Receptionist.
+                  </p>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setProfileTab('billing');
+                      setBillingPanel('overview');
+                      setView('profileView');
+                    }}
+                  >
+                    Back to Billing
+                  </Button>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {view === 'receptionistView' && hasAiReceptionistAddon() && (
             <AIReceptionist
               companyName={profile.company || 'Your Company'}
               companyPhone={profile.phone || ''}
