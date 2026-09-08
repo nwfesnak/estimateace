@@ -259,6 +259,7 @@ export async function GET(request: NextRequest) {
       payLabel: due.payLabel,
       paymentStatus: row.paymentStatus || row.payment_status || 'unpaid',
       terms: String(row.terms || profile.disclosure || '').slice(0, 8000),
+      termsDisplayMode: profile.termsDisplayMode === 'printed' ? 'printed' : 'link',
       chargeCCFee: chargeFees,
       ccFeePercentage: feePercent,
       paymentOptions,

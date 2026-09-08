@@ -63,6 +63,7 @@ export async function POST(request: NextRequest) {
     const zipCode = String(body.zipCode || '').trim();
     const date = String(body.date || '').trim();
     const terms = String(body.terms || '').trim();
+    const termsDisplayMode = body.termsDisplayMode === 'printed' ? 'printed' : 'link';
     const grandTotal = Number(body.grandTotal) || 0;
     const amountPaid = Number(body.amountPaid) || 0;
     const balanceDue = Math.max(0, grandTotal - amountPaid);
@@ -214,7 +215,10 @@ export async function POST(request: NextRequest) {
         : '',
       '',
       `Pay / approve: ${actionUrl}`,
-      terms ? `Terms & Conditions: ${termsUrl}` : '',
+      terms && termsDisplayMode === 'link' ? `Terms & Conditions: ${termsUrl}` : '',
+      terms && termsDisplayMode === 'printed'
+        ? `Terms & Conditions (printed on document):\n${terms.slice(0, 2500)}${terms.length > 2500 ? '\n…' : ''}`
+        : '',
       hasCertificate ? `Certificate of Insurance: ${certificateUrl}` : '',
       '',
       `Grand total: ${money(grandTotal)}`,
@@ -333,7 +337,7 @@ export async function POST(request: NextRequest) {
         </a>
         <!--<![endif]-->
         ${
-          terms
+          terms && termsDisplayMode === 'link'
             ? `
         <div style="height:12px;line-height:12px;font-size:12px;">&nbsp;</div>
         <!--[if mso]>
@@ -348,6 +352,16 @@ export async function POST(request: NextRequest) {
           View Terms &amp; Conditions
         </a>
         <!--<![endif]-->
+        `
+            : ''
+        }
+        ${
+          terms && termsDisplayMode === 'printed'
+            ? `
+        <div style="margin:20px 0 8px;padding:14px;border:1px solid #cbd5e1;border-radius:12px;background:#f8fafc;text-align:left;">
+          <p style="margin:0 0 8px;font-size:14px;font-weight:700;color:#0f172a;">Terms &amp; Conditions</p>
+          <p style="margin:0;font-size:12px;color:#334155;white-space:pre-wrap;line-height:1.45;">${escapeHtml(terms.slice(0, 3500))}${terms.length > 3500 ? '…' : ''}</p>
+        </div>
         `
             : ''
         }

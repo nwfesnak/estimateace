@@ -993,6 +993,12 @@ export default function Home() {
     name: '', company: '', address: '', phone: '', email: '', slogan: '',
     city: '', state: '', zipCode: '',
     disclosure: '',
+    /**
+     * How clients see Terms & Conditions:
+     * - link: hyperlink to full terms page (current default)
+     * - printed: full terms text shown below the estimate/invoice
+     */
+    termsDisplayMode: 'link' as 'link' | 'printed',
     certificateUrl: '',
     logoUrl: '',
     logoSize: 'medium',
@@ -1329,6 +1335,7 @@ export default function Home() {
     logoSize: full.logoSize || 'medium',
     certificateUrl: full.certificateUrl || '',
     disclosure: full.disclosure || '', // terms
+    termsDisplayMode: full.termsDisplayMode === 'printed' ? 'printed' : 'link',
     city: full.city || '',
     state: full.state || '',
     zipCode: full.zipCode || '',
@@ -4340,6 +4347,14 @@ export default function Home() {
           : ('aiReceptionistAddonActive' in loadedProfile
             ? loadedProfile.aiReceptionistAddonActive === true
             : (profile as any).aiReceptionistAddonActive === true)),
+      termsDisplayMode:
+        (cached.termsDisplayMode === 'printed' || cached.termsDisplayMode === 'link'
+          ? cached.termsDisplayMode
+          : serverProfile && ((serverProfile as any).termsDisplayMode === 'printed' || (serverProfile as any).termsDisplayMode === 'link')
+            ? (serverProfile as any).termsDisplayMode
+            : loadedProfile.termsDisplayMode === 'printed'
+              ? 'printed'
+              : 'link') as 'link' | 'printed',
       ...displaySettings,
       appointmentReminderEnabled: 'appointmentReminderEnabled' in loadedProfile
         ? !!loadedProfile.appointmentReminderEnabled
@@ -4570,6 +4585,14 @@ export default function Home() {
               : ('aiReceptionistAddonActive' in l
                 ? (l as any).aiReceptionistAddonActive === true
                 : false)),
+          termsDisplayMode:
+            (cached.termsDisplayMode === 'printed' || cached.termsDisplayMode === 'link'
+              ? cached.termsDisplayMode
+              : serverProfile && ((serverProfile as any).termsDisplayMode === 'printed' || (serverProfile as any).termsDisplayMode === 'link')
+                ? (serverProfile as any).termsDisplayMode
+                : (l as any).termsDisplayMode === 'printed'
+                  ? 'printed'
+                  : 'link') as 'link' | 'printed',
           ...displaySettings,
           appointmentReminderEnabled: 'appointmentReminderEnabled' in (s as any)
             ? !!(s as any).appointmentReminderEnabled
@@ -7804,6 +7827,11 @@ export default function Home() {
       aiReceptionistAddonActive:
         (mergedProfile as any).aiReceptionistAddonActive === true ||
         (existing as any)?.aiReceptionistAddonActive === true,
+      termsDisplayMode:
+        (mergedProfile as any).termsDisplayMode === 'printed' ||
+        (existing as any)?.termsDisplayMode === 'printed'
+          ? 'printed'
+          : 'link',
     };
     await supabase.from('estimates').upsert({
       id: `SETTINGS-${workspaceUserId}`,
@@ -7850,6 +7878,7 @@ export default function Home() {
       aiJobRenderingEnabled: nextProfile.aiJobRenderingEnabled !== false,
       emailLeadSummariesEnabled: nextProfile.emailLeadSummariesEnabled !== false,
       aiReceptionistAddonActive: nextProfile.aiReceptionistAddonActive === true,
+      termsDisplayMode: nextProfile.termsDisplayMode === 'printed' ? 'printed' : 'link',
     });
     await upsertUserSettingsProfile(nextProfile);
     // Keep open estimate's embedded profile in sync, but SETTINGS row is source of truth
@@ -8852,12 +8881,37 @@ export default function Home() {
     }
   };
 
-  /** Terms as a hyperlink on client-facing docs (full text lives on /client/terms) */
+  const getTermsDisplayMode = (): 'link' | 'printed' => {
+    const cached = getProfileSettingsCache();
+    if (cached.termsDisplayMode === 'printed' || cached.termsDisplayMode === 'link') {
+      return cached.termsDisplayMode;
+    }
+    return profile.termsDisplayMode === 'printed' ? 'printed' : 'link';
+  };
+
+  /** Terms on client-facing docs: hyperlink OR full text printed below the estimate */
   const renderPaySectionDisclosures = (options?: { className?: string }) => {
     const disclosureText = (terms || profile.disclosure || '').trim();
     if (!disclosureText) return null;
     const label = t('termsConditions') || 'Terms & Conditions';
+    const mode = getTermsDisplayMode();
     const href = documentTermsUrl || undefined;
+
+    if (mode === 'printed') {
+      return (
+        <div className={`text-left ${options?.className || ''}`}>
+          <div className="rounded-xl border border-gray-300 bg-white p-4 sm:p-5">
+            <h3 className="text-base sm:text-lg font-bold text-[#1e293b] mb-3 border-b pb-2">
+              {label}
+            </h3>
+            <div className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">
+              {disclosureText}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className={`text-left ${options?.className || ''}`}>
         <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 sm:p-5">
@@ -8876,15 +8930,16 @@ export default function Home() {
                 type="button"
                 className="font-semibold text-[#0f766e] underline underline-offset-2 hover:text-[#115e59]"
                 onClick={() => {
-                  void refreshDocumentTermsLink().then(() => {
-                    // open after brief refresh if URL set
-                  });
+                  void refreshDocumentTermsLink();
                   setIsTermsModalOpen(true);
                 }}
               >
                 {label}
               </button>
             )}
+            <span className="block text-xs text-gray-500 mt-1">
+              Tap the link to read the full Terms &amp; Conditions
+            </span>
           </p>
         </div>
       </div>
@@ -14164,6 +14219,54 @@ export default function Home() {
                         placeholder="Enter your standard terms and conditions here..."
                       />
                       <p className="text-xs text-gray-500 mt-2">Terms auto-save with your company profile.</p>
+
+                      <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+                        <p className="text-sm font-semibold text-[#1e293b]">How clients see Terms &amp; Conditions</p>
+                        <p className="text-xs text-gray-500">
+                          Choose one. Applies to estimates and invoices you send, print, and the client approve page.
+                        </p>
+                        <label className="flex items-start gap-3 cursor-pointer rounded-lg border border-slate-200 bg-white p-3">
+                          <input
+                            type="radio"
+                            name="termsDisplayMode"
+                            className="mt-1 accent-[#10b981]"
+                            checked={getTermsDisplayMode() === 'link'}
+                            onChange={async () => {
+                              const nextProfile = { ...profile, termsDisplayMode: 'link' as const };
+                              setProfile(nextProfile);
+                              await saveProfileSettings(nextProfile);
+                              showMessage('✅ Clients will see a hyperlink to Terms & Conditions.');
+                            }}
+                          />
+                          <span className="text-sm text-slate-800">
+                            <strong>Hyperlink</strong>
+                            <span className="block text-xs text-gray-500 mt-0.5">
+                              Show a “Terms &amp; Conditions” link. Client opens the full text in a separate page.
+                            </span>
+                          </span>
+                        </label>
+                        <label className="flex items-start gap-3 cursor-pointer rounded-lg border border-slate-200 bg-white p-3">
+                          <input
+                            type="radio"
+                            name="termsDisplayMode"
+                            className="mt-1 accent-[#10b981]"
+                            checked={getTermsDisplayMode() === 'printed'}
+                            onChange={async () => {
+                              const nextProfile = { ...profile, termsDisplayMode: 'printed' as const };
+                              setProfile(nextProfile);
+                              await saveProfileSettings(nextProfile);
+                              showMessage('✅ Full Terms & Conditions will print below the estimate for clients to read.');
+                            }}
+                          />
+                          <span className="text-sm text-slate-800">
+                            <strong>Printed below the estimate</strong>
+                            <span className="block text-xs text-gray-500 mt-0.5">
+                              List the full terms under the document so the client must see them on the estimate /
+                              approve page (and when printing).
+                            </span>
+                          </span>
+                        </label>
+                      </div>
                     </div>
 
                     <div>
@@ -16655,7 +16758,14 @@ export default function Home() {
                   <strong>${grandTotal.toFixed(2)}</strong>
                 </li>
                 <li>Approve / pay link included in the message</li>
-                {(terms || profile.disclosure) && <li>Terms &amp; Conditions link included</li>}
+                {(terms || profile.disclosure) && (
+                  <li>
+                    Terms &amp; Conditions{' '}
+                    {getTermsDisplayMode() === 'printed'
+                      ? 'printed below the document'
+                      : 'link included'}
+                  </li>
+                )}
               </ul>
             </div>
 
@@ -16941,6 +17051,7 @@ export default function Home() {
                       depositPercent: Number(profile.depositPercentage) || 0,
                       showDepositOnApproval: profile.showDepositOnApproval !== false,
                       depositMinimumAmount: Math.max(0, Number(profile.depositMinimumAmount) || 0),
+                      termsDisplayMode: getTermsDisplayMode(),
                       chargeCCFee: profile.chargeCCFee === true,
                       ccFeePercentage: Number(profile.ccFeePercentage) || 0,
                       breakdownSettings: {

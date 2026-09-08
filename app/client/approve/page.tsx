@@ -55,6 +55,7 @@ type DocPayload = {
   payLabel?: string;
   paymentStatus?: string;
   terms?: string;
+  termsDisplayMode?: 'link' | 'printed';
   chargeCCFee?: boolean;
   ccFeePercentage?: number;
   estimateApproved?: boolean;
@@ -532,19 +533,28 @@ function ApprovePayInner() {
           {/* Terms must be accepted before approve/pay when contractor set them up */}
           {hasTerms && (
             <div className="rounded-xl border-2 border-teal-300 bg-teal-50/80 p-4 space-y-3">
-              <div className="text-center">
-                <a
-                  href={`/client/terms?token=${encodeURIComponent(token)}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sm font-semibold text-teal-900 underline underline-offset-2"
-                >
-                  View Terms &amp; Conditions
-                </a>
-                <p className="text-[11px] text-teal-800/80 mt-1">
-                  Opens full terms in a new tab — please read before continuing
-                </p>
-              </div>
+              {doc?.termsDisplayMode === 'printed' ? (
+                <div className="rounded-lg border border-teal-200 bg-white p-3 max-h-64 overflow-y-auto">
+                  <p className="text-sm font-bold text-teal-950 mb-2">Terms &amp; Conditions</p>
+                  <p className="text-xs text-slate-800 whitespace-pre-wrap leading-relaxed">
+                    {String(doc?.terms || '').trim()}
+                  </p>
+                </div>
+              ) : (
+                <div className="text-center">
+                  <a
+                    href={`/client/terms?token=${encodeURIComponent(token)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm font-semibold text-teal-900 underline underline-offset-2"
+                  >
+                    View Terms &amp; Conditions
+                  </a>
+                  <p className="text-[11px] text-teal-800/80 mt-1">
+                    Opens full terms in a new tab — please read before continuing
+                  </p>
+                </div>
+              )}
               <label className="flex items-start gap-3 cursor-pointer select-none rounded-lg border border-teal-200 bg-white p-3">
                 <input
                   type="checkbox"
