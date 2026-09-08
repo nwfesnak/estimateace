@@ -8073,6 +8073,28 @@ export default function Home() {
     setCalendarView('schedule');
   };
 
+  const deleteAppointment = (appt: (typeof appointments)[0]) => {
+    const label = appt.jobName || appt.invoiceNumber || 'this appointment';
+    const when = appt.datetime
+      ? new Date(appt.datetime).toLocaleString(
+          profile.language === 'es' ? 'es-ES' : profile.language === 'fr' ? 'fr-FR' : 'en-US',
+          { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }
+        )
+      : '';
+    if (
+      !confirm(
+        `Delete appointment for ${label}${when ? ` (${when})` : ''}?\n\nThis cannot be undone.`
+      )
+    ) {
+      return;
+    }
+    persistAppointments(appointments.filter((a) => a.id !== appt.id));
+    if (editingAppointmentId === appt.id) {
+      resetAppointmentForm();
+    }
+    showMessage('✅ Appointment deleted');
+  };
+
   const goToPreviousAppointmentsMonth = () => {
     if (appointmentsMonth === 0) {
       setAppointmentsMonth(11);
@@ -17608,14 +17630,26 @@ export default function Home() {
                             )}
                           </div>
                         </div>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="shrink-0"
-                          onClick={() => openEditAppointment(appt)}
-                        >
-                          {t('edit')}
-                        </Button>
+                        <div className="flex flex-col gap-2 shrink-0">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openEditAppointment(appt)}
+                          >
+                            {t('edit')}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="border-red-300 text-red-700 hover:bg-red-50"
+                            title="Delete appointment"
+                            aria-label="Delete appointment"
+                            onClick={() => deleteAppointment(appt)}
+                          >
+                            ✕ Delete
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   ))}
