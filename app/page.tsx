@@ -8007,14 +8007,13 @@ export default function Home() {
   const scheduleAppointment = async () => {
     const isEdit = !!editingAppointmentId;
     const isStillEstimate = selectedEstimateForCalendar &&
-      (selectedEstimateForCalendar.documentType === 'estimate' || selectedEstimateForCalendar.invoiceNumber?.startsWith('EST'));
-    if (!selectedEstimateForCalendar || !isStillEstimate || !selectedDateTime) {
-      return showMessage(isEdit ? 'Select estimate and date/time to save changes' : 'Select estimate and date/time');
+      (selectedEstimateForCalendar.documentType === 'estimate' ||
+        String(selectedEstimateForCalendar.invoiceNumber || '').toUpperCase().startsWith('EST'));
+    if (!selectedEstimateForCalendar || !isStillEstimate) {
+      return showMessage('Pick an estimate from the list, then tap Save appointment.');
     }
-    if (!isEstimateApproved(selectedEstimateForCalendar)) {
-      return showMessage(
-        'Only approved estimates can be scheduled. Open the estimate and tap Mark Approved first (or have the client approve).'
-      );
+    if (!selectedDateTime) {
+      return showMessage('Pick a date and time, then tap Save appointment.');
     }
     if (schedulingAppointment) return;
 
@@ -8101,17 +8100,15 @@ export default function Home() {
 
     showMessage(
       isEdit
-        ? `✅ Appointment updated for ${appointmentTime}\n\n${notificationSummary}`
-        : `✅ Appointment scheduled for ${appointmentTime}\n\n${notificationSummary}`
+        ? `✅ Appointment saved for ${appointmentTime}\n\n${notificationSummary}`
+        : `✅ Appointment saved for ${appointmentTime}\n\n${notificationSummary}`
     );
 
-    if (isEdit) {
-      setCalendarView('appointments');
-    } else {
-      setIsCalendarModalOpen(false);
-      setCalendarView('schedule');
-    }
+    // Stay in calendar and show the list so the saved time is obvious
+    setAppointmentsMonth(appointmentDate.getMonth());
+    setAppointmentsYear(appointmentDate.getFullYear());
     resetAppointmentForm();
+    setCalendarView('appointments');
   };
 
   const saveAsQuickLine = (item: any) => {
@@ -17253,7 +17250,7 @@ export default function Home() {
           }
         }}
       >
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto sm:max-w-md">
           {calendarView === 'schedule' ? (
             <>
               <DialogHeader>
@@ -17261,59 +17258,81 @@ export default function Home() {
                   📅 {editingAppointmentId ? t('editAppointment') : t('scheduleAppointment')}
                 </DialogTitle>
               </DialogHeader>
-              <div className="space-y-6 py-4">
+              <div className="space-y-5 py-2">
                 <div>
-                  <label className="block text-sm font-semibold mb-2">Select approved estimate</label>
+                  <label className="block text-sm font-semibold mb-2">Select estimate</label>
                   <p className="text-xs text-gray-500 mb-2">
-                    Only estimates marked <strong>Approved</strong> (by you or the client) appear here —
-                    still estimates, not invoices. Mark Approved on the estimate first if the list is empty.
+                    Approved estimates are listed first. You can still schedule any open estimate.
                   </p>
                   <select 
                     className="w-full border rounded-xl p-3"
                     value={selectedEstimateForCalendar?.id || ''}
                     onChange={e => {
                       const selected = savedEstimatesList.find(
-                        est =>
+                        (est) =>
                           est.id === e.target.value &&
-                          (est.documentType === 'estimate' || est.invoiceNumber?.startsWith('EST')) &&
-                          isEstimateApproved(est)
+                          (est.documentType === 'estimate' ||
+                            String(est.invoiceNumber || '').toUpperCase().startsWith('EST'))
                       );
                       setSelectedEstimateForCalendar(selected || null);
                     }}
                   >
-                    <option value="">— Choose an approved estimate —</option>
+                    <option value="">— Choose an estimate —</option>
                     {savedEstimatesList
                       .filter(
                         (est) =>
-                          (est.documentType === 'estimate' || est.invoiceNumber?.startsWith('EST')) &&
-                          isEstimateApproved(est)
+                          est.documentType === 'estimate' ||
+                          String(est.invoiceNumber || '').toUpperCase().startsWith('EST')
                       )
+                      .slice()
+                      .sort((a, b) => Number(isEstimateApproved(b)) - Number(isEstimateApproved(a)))
                       .map((est) => (
                         <option key={est.id} value={est.id}>
-                          {est.jobName || 'Untitled'} — {est.invoiceNumber} ✓ Approved
+                          {est.jobName || 'Untitled'} — {est.invoiceNumber}
+                          {isEstimateApproved(est) ? ' ✓ Approved' : ''}
                         </option>
                       ))}
                   </select>
                   {savedEstimatesList.filter(
                     (est) =>
-                      (est.documentType === 'estimate' || est.invoiceNumber?.startsWith('EST')) &&
-                      isEstimateApproved(est)
+                      est.documentType === 'estimate' ||
+                      String(est.invoiceNumber || '').toUpperCase().startsWith('EST')
                   ).length === 0 && (
                     <p className="text-xs text-amber-800 mt-2 bg-amber-50 border border-amber-200 rounded-lg p-2">
-                      No approved estimates yet. Open an estimate → <strong>Mark Approved</strong>, or have the
-                      client approve from their link.
+                      No estimates yet. Create an estimate first, then come back to schedule it.
                     </p>
                   )}
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold mb-2">Date & Time</label>
+                  <label className="block text-sm font-semibold mb-2">Date &amp; time</label>
                   <Input 
                     type="datetime-local" 
                     value={selectedDateTime} 
                     onChange={e => setSelectedDateTime(e.target.value)} 
                   />
                 </div>
+
+                <Button
+                  type="button"
+                  onClick={() => void scheduleAppointment()}
+                  className="w-full py-6 text-base font-bold bg-[#10b981] hover:bg-[#0d9668] text-white"
+                  disabled={schedulingAppointment}
+                >
+                  {schedulingAppointment
+                    ? editingAppointmentId
+                      ? 'Saving…'
+                      : 'Saving appointment…'
+                    : editingAppointmentId
+                      ? `💾 ${t('saveChanges')}`
+                      : '💾 Save appointment'}
+                </Button>
+                <p className="text-[11px] text-gray-500 text-center -mt-2">
+                  Saves the job and time to your calendar
+                  {selectedEstimateForCalendar && selectedDateTime
+                    ? ` · ${selectedEstimateForCalendar.jobName || selectedEstimateForCalendar.invoiceNumber}`
+                    : ''}
+                </p>
 
                 <Button
                   variant="outline"
@@ -17323,7 +17342,7 @@ export default function Home() {
                   📋 {t('viewAppointments')}
                 </Button>
               </div>
-              <DialogFooter>
+              <DialogFooter className="gap-2 sm:gap-2">
                 <Button
                   variant="outline"
                   onClick={() => {
@@ -17337,14 +17356,17 @@ export default function Home() {
                 >
                   Cancel
                 </Button>
-                <Button onClick={scheduleAppointment} className="bg-[#10b981]" disabled={schedulingAppointment}>
+                <Button
+                  type="button"
+                  onClick={() => void scheduleAppointment()}
+                  className="bg-[#10b981] hover:bg-[#0d9668] text-white"
+                  disabled={schedulingAppointment}
+                >
                   {schedulingAppointment
-                    ? editingAppointmentId
-                      ? 'Saving...'
-                      : 'Scheduling...'
+                    ? 'Saving…'
                     : editingAppointmentId
                       ? t('saveChanges')
-                      : t('scheduleAppointment')}
+                      : 'Save appointment'}
                 </Button>
               </DialogFooter>
             </>
