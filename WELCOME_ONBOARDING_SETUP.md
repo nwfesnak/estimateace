@@ -45,9 +45,13 @@ Welcome + “Watch the walkthrough” button + app login link + Add to Home Scre
 
 ---
 
-## 4) Sent only once
+## 4) Sent only once — only on landing-page signup
 
-Stored on their settings profile as `welcomeOnboardingSentAt` so re-opening trial / calling start-trial again does not spam them.
+Sent **only** from `/api/billing/start-trial` (trial / 2mo / 6mo landing signups).
+
+**Not** sent on normal login or billing status checks.
+
+Stored on their settings profile as `welcomeOnboardingSentAt` (preserved across company profile saves).
 
 ---
 

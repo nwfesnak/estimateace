@@ -169,8 +169,8 @@ export async function sendWelcomeOnboarding(input: {
 }
 
 /**
- * Load SETTINGS profile, send welcome once, persist welcomeOnboardingSentAt.
- * Safe to call from start-trial and first billing/status after email confirm.
+ * Send welcome once after landing-page signup (/api/billing/start-trial only).
+ * Persists welcomeOnboardingSentAt on SETTINGS profile so later saves/logins never re-send.
  */
 export async function maybeSendAndPersistWelcomeOnboarding(input: {
   admin: any;
@@ -181,6 +181,7 @@ export async function maybeSendAndPersistWelcomeOnboarding(input: {
   company?: string | null;
 }): Promise<WelcomeSendResult> {
   const settingsId = `SETTINGS-${input.userId}`;
+
   const { data: settings } = await input.admin
     .from('estimates')
     .select('profile')
@@ -203,17 +204,26 @@ export async function maybeSendAndPersistWelcomeOnboarding(input: {
 
   const emailed = result.email?.ok === true;
   const texted = result.sms?.ok === true;
-  if (!emailed && !texted) {
+  // Mark as sent whenever we attempted delivery with a configured video URL + contact,
+  // even if one channel failed — so later logins never spam.
+  const hasDestination = Boolean(
+    input.email || input.phone || (prev as any).email || (prev as any).phone
+  );
+  const shouldMarkSent =
+    emailed || texted || (result.attempted && Boolean(getWelcomeVideoUrl()) && hasDestination);
+
+  if (!shouldMarkSent) {
     return result;
   }
 
+  const sentAt = new Date().toISOString();
   const profile = {
     ...prev,
     email: input.email || (prev as any).email || '',
     phone: input.phone || (prev as any).phone || '',
     name: input.name || (prev as any).name || '',
     company: input.company || (prev as any).company || '',
-    welcomeOnboardingSentAt: new Date().toISOString(),
+    welcomeOnboardingSentAt: sentAt,
     welcomeOnboardingChannels: { email: emailed, sms: texted },
   };
 
@@ -224,7 +234,7 @@ export async function maybeSendAndPersistWelcomeOnboarding(input: {
     documentType: 'settings',
     items: [],
     profile,
-    updated_at: new Date().toISOString(),
+    updated_at: sentAt,
   });
 
   return result;

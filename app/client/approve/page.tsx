@@ -541,21 +541,22 @@ function ApprovePayInner() {
                   </p>
                 </div>
               ) : (
-                <div className="text-center">
+                <div className="text-center space-y-2">
+                  <p className="text-sm font-semibold text-teal-950">Step 1 — Read the Terms</p>
                   <a
                     href={`/client/terms?token=${encodeURIComponent(token)}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-sm font-semibold text-teal-900 underline underline-offset-2"
+                    className="inline-flex items-center justify-center w-full sm:w-auto px-4 py-3 rounded-xl bg-teal-800 text-white text-sm font-bold hover:bg-teal-900"
                   >
-                    View Terms &amp; Conditions
+                    Open Terms &amp; Conditions
                   </a>
-                  <p className="text-[11px] text-teal-800/80 mt-1">
-                    Opens full terms in a new tab — please read before continuing
+                  <p className="text-[11px] text-teal-800/80">
+                    Opens in a new tab. After reading, check the box below.
                   </p>
                 </div>
               )}
-              <label className="flex items-start gap-3 cursor-pointer select-none rounded-lg border border-teal-200 bg-white p-3">
+              <label className="flex items-start gap-3 cursor-pointer select-none rounded-lg border-2 border-teal-400 bg-white p-3 shadow-sm">
                 <input
                   type="checkbox"
                   className="mt-1 h-5 w-5 shrink-0 accent-teal-700"
@@ -566,8 +567,21 @@ function ApprovePayInner() {
                   }}
                 />
                 <span className="text-sm text-slate-800 leading-snug">
-                  <strong>I have read and agree</strong> to the Terms &amp; Conditions for this{' '}
-                  {isEstimate ? 'estimate' : 'invoice'}.
+                  <strong>
+                    {doc?.termsDisplayMode === 'printed' ? 'Step 2 — ' : 'Step 2 — '}I have read and
+                    agree
+                  </strong>{' '}
+                  to the Terms &amp; Conditions for this {isEstimate ? 'estimate' : 'invoice'}.
+                  {doc?.termsDisplayMode !== 'printed' ? (
+                    <span className="block text-xs text-teal-900 mt-1 font-medium">
+                      Required after opening the Terms link above. Approve / pay stay locked until
+                      you check this box.
+                    </span>
+                  ) : (
+                    <span className="block text-xs text-teal-900 mt-1 font-medium">
+                      Required. Approve / pay stay locked until you check this box.
+                    </span>
+                  )}
                 </span>
               </label>
               {!termsAccepted && (

@@ -7816,6 +7816,15 @@ export default function Home() {
         (mergedProfile as any).aiReceptionistMessages ??
         (existing as any)?.aiReceptionistMessages ??
         receptionistMessages,
+      // Never wipe signup welcome flag (prevents re-texting on every login/profile save)
+      welcomeOnboardingSentAt:
+        (existing as any)?.welcomeOnboardingSentAt ||
+        (mergedProfile as any).welcomeOnboardingSentAt ||
+        undefined,
+      welcomeOnboardingChannels:
+        (existing as any)?.welcomeOnboardingChannels ||
+        (mergedProfile as any).welcomeOnboardingChannels ||
+        undefined,
       emailLeadSummaries:
         (mergedProfile as any).emailLeadSummaries ??
         (existing as any)?.emailLeadSummaries ??
