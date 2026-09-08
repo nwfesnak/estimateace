@@ -21,8 +21,10 @@ import { AIReceptionist } from '@/components/AIReceptionist';
 import { SubscriptionGate } from '@/components/SubscriptionGate';
 import {
   DEFAULT_RECEPTIONIST_SETTINGS,
+  normalizeEmailLeadSummaries,
   normalizeReceptionistMessages,
   normalizeReceptionistSettings,
+  type EmailLeadSummary,
   type ReceptionistMessage,
   type ReceptionistSettings,
 } from '@/lib/ai-receptionist';
@@ -1646,6 +1648,8 @@ export default function Home() {
   );
   const [receptionistMessages, setReceptionistMessages] = useState<ReceptionistMessage[]>([]);
   const [receptionistSaving, setReceptionistSaving] = useState(false);
+  /** Email lead summaries (dashboard Leads — filled when email connect is live) */
+  const [emailLeadSummaries, setEmailLeadSummaries] = useState<EmailLeadSummary[]>([]);
   /** SaaS product subscription (Phase A) */
   const [billing, setBilling] = useState<BillingSnapshot>(DEFAULT_BILLING_SNAPSHOT);
   const [billingEnforced, setBillingEnforced] = useState(false);
@@ -7130,6 +7134,42 @@ export default function Home() {
     if (serverProfile.aiReceptionistMessages) {
       setReceptionistMessages(normalizeReceptionistMessages(serverProfile.aiReceptionistMessages));
     }
+    if (serverProfile.emailLeadSummaries) {
+      setEmailLeadSummaries(normalizeEmailLeadSummaries(serverProfile.emailLeadSummaries));
+    }
+  };
+
+  const markReceptionistLeadRead = async (id: string) => {
+    const next = receptionistMessages.map((m) =>
+      m.id === id && m.status === 'new' ? { ...m, status: 'read' as const } : m
+    );
+    setReceptionistMessages(next);
+    await saveReceptionistData(receptionistSettings, next);
+  };
+
+  const markEmailLeadRead = async (id: string) => {
+    if (!workspaceUserId || !supabase) return;
+    const next = emailLeadSummaries.map((m) =>
+      m.id === id && m.status === 'new' ? { ...m, status: 'read' as const } : m
+    );
+    setEmailLeadSummaries(next);
+    try {
+      const existing = (await fetchServerProfileSettings()) || {};
+      await supabase.from('estimates').upsert({
+        id: `SETTINGS-${workspaceUserId}`,
+        user_id: workspaceUserId,
+        jobName: '__settings__',
+        documentType: 'settings',
+        items: [],
+        profile: {
+          ...existing,
+          emailLeadSummaries: next.slice(0, 200),
+        },
+        updated_at: new Date().toISOString(),
+      });
+    } catch (e) {
+      console.warn('markEmailLeadRead:', e);
+    }
   };
 
   const refreshBillingStatus = async () => {
@@ -10780,6 +10820,160 @@ export default function Home() {
                   <p className="text-gray-600 mt-1">{profile.slogan || t('dashboard')}</p>
                 </div>
               </div>
+
+              {/* Leads: AI Receptionist + Email summaries */}
+              <Card className="mb-8 border-emerald-200 shadow-sm">
+                <CardContent className="p-6 space-y-6">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h3 className="font-semibold text-lg flex items-center gap-2 text-[#1e293b]">
+                        🎯 Leads &amp; inbox
+                      </h3>
+                      <p className="text-sm text-gray-500 mt-1">
+                        New leads from your AI Receptionist and email summaries land here.
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="border-emerald-600 text-emerald-800"
+                      onClick={() => setView('receptionistView')}
+                    >
+                      Open AI Receptionist
+                    </Button>
+                  </div>
+
+                  <div className="grid md:grid-cols-2 gap-4">
+                    {/* AI Receptionist leads */}
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 min-h-[180px]">
+                      <div className="flex items-center justify-between gap-2 mb-3">
+                        <h4 className="font-semibold text-sm text-slate-800">📞 AI Receptionist</h4>
+                        {receptionistMessages.filter((m) => m.status === 'new' && !m.spam).length > 0 && (
+                          <span className="text-[11px] font-bold uppercase tracking-wide bg-emerald-600 text-white px-2 py-0.5 rounded-full">
+                            {receptionistMessages.filter((m) => m.status === 'new' && !m.spam).length} new
+                          </span>
+                        )}
+                      </div>
+                      <div className="space-y-2 max-h-64 overflow-y-auto">
+                        {receptionistMessages.filter((m) => !m.spam).length === 0 ? (
+                          <p className="text-sm text-gray-500 py-6 text-center">
+                            No receptionist leads yet. Run a test call or connect live phone answering later —
+                            summaries will show here.
+                          </p>
+                        ) : (
+                          receptionistMessages
+                            .filter((m) => !m.spam)
+                            .slice()
+                            .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
+                            .slice(0, 8)
+                            .map((m) => (
+                              <button
+                                key={m.id}
+                                type="button"
+                                className={`w-full text-left rounded-xl border p-3 transition hover:bg-white ${
+                                  m.status === 'new'
+                                    ? 'border-emerald-300 bg-emerald-50/80'
+                                    : 'border-slate-200 bg-white'
+                                }`}
+                                onClick={() => {
+                                  void markReceptionistLeadRead(m.id);
+                                  setView('receptionistView');
+                                }}
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <div className="font-semibold text-sm text-slate-900 truncate">
+                                      {m.callerName || 'Unknown caller'}
+                                      {m.urgent ? (
+                                        <span className="ml-2 text-[10px] font-bold text-red-700 uppercase">
+                                          Urgent
+                                        </span>
+                                      ) : null}
+                                    </div>
+                                    <div className="text-xs text-gray-500 truncate">
+                                      {m.callerPhone || 'No phone'} ·{' '}
+                                      {m.createdAt
+                                        ? new Date(m.createdAt).toLocaleString()
+                                        : ''}
+                                    </div>
+                                  </div>
+                                  {m.status === 'new' && (
+                                    <span className="shrink-0 text-[10px] font-bold text-emerald-700">NEW</span>
+                                  )}
+                                </div>
+                                <p className="text-sm text-slate-700 mt-1 line-clamp-2">
+                                  {m.summary || 'No summary yet.'}
+                                </p>
+                              </button>
+                            ))
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Email summaries */}
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 min-h-[180px]">
+                      <div className="flex items-center justify-between gap-2 mb-3">
+                        <h4 className="font-semibold text-sm text-slate-800">✉️ Email summaries</h4>
+                        {emailLeadSummaries.filter((m) => m.status === 'new').length > 0 && (
+                          <span className="text-[11px] font-bold uppercase tracking-wide bg-sky-600 text-white px-2 py-0.5 rounded-full">
+                            {emailLeadSummaries.filter((m) => m.status === 'new').length} new
+                          </span>
+                        )}
+                      </div>
+                      <div className="space-y-2 max-h-64 overflow-y-auto">
+                        {emailLeadSummaries.length === 0 ? (
+                          <div className="text-sm text-gray-500 py-4 text-center space-y-2">
+                            <p>
+                              Connected inbox summaries will appear here when you link Gmail or Outlook.
+                            </p>
+                            <p className="text-xs text-gray-400">
+                              Not connected yet — this space is ready for new email leads.
+                            </p>
+                          </div>
+                        ) : (
+                          emailLeadSummaries
+                            .slice()
+                            .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
+                            .slice(0, 8)
+                            .map((m) => (
+                              <button
+                                key={m.id}
+                                type="button"
+                                className={`w-full text-left rounded-xl border p-3 transition hover:bg-white ${
+                                  m.status === 'new'
+                                    ? 'border-sky-300 bg-sky-50/80'
+                                    : 'border-slate-200 bg-white'
+                                }`}
+                                onClick={() => void markEmailLeadRead(m.id)}
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <div className="font-semibold text-sm text-slate-900 truncate">
+                                      {m.fromName || m.fromEmail || 'Unknown sender'}
+                                    </div>
+                                    <div className="text-xs text-gray-500 truncate">
+                                      {m.subject} ·{' '}
+                                      {m.createdAt
+                                        ? new Date(m.createdAt).toLocaleString()
+                                        : ''}
+                                    </div>
+                                  </div>
+                                  {m.status === 'new' && (
+                                    <span className="shrink-0 text-[10px] font-bold text-sky-700">NEW</span>
+                                  )}
+                                </div>
+                                <p className="text-sm text-slate-700 mt-1 line-clamp-2">
+                                  {m.summary || 'No summary yet.'}
+                                </p>
+                              </button>
+                            ))
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
 
               <Card className="mb-8">
                 <CardContent className="p-6">

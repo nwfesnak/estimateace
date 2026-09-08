@@ -31,7 +31,18 @@ export type ReceptionistMessage = {
   spam: boolean;
   language: string;
   status: 'new' | 'read' | 'handled';
-  source: 'test' | 'forwarded' | 'manual';
+  source: 'test' | 'forwarded' | 'manual' | 'email';
+};
+
+/** Email lead summaries (future: Gmail/Outlook connect). Shown on dashboard Leads. */
+export type EmailLeadSummary = {
+  id: string;
+  createdAt: string;
+  fromName: string;
+  fromEmail: string;
+  subject: string;
+  summary: string;
+  status: 'new' | 'read' | 'handled';
 };
 
 export const DEFAULT_RECEPTIONIST_SETTINGS: ReceptionistSettings = {
@@ -102,12 +113,32 @@ export function normalizeReceptionistMessages(raw: unknown): ReceptionistMessage
         status: (['new', 'read', 'handled'].includes(row.status)
           ? row.status
           : 'new') as ReceptionistMessage['status'],
-        source: (['test', 'forwarded', 'manual'].includes(row.source)
+        source: (['test', 'forwarded', 'manual', 'email'].includes(row.source)
           ? row.source
           : 'manual') as ReceptionistMessage['source'],
       } as ReceptionistMessage;
     })
     .filter(Boolean) as ReceptionistMessage[];
+}
+
+export function normalizeEmailLeadSummaries(raw: unknown): EmailLeadSummary[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((row: any, i: number) => {
+      if (!row || typeof row !== 'object') return null;
+      return {
+        id: String(row.id || `email-${i}`),
+        createdAt: String(row.createdAt || new Date().toISOString()),
+        fromName: String(row.fromName || row.from || 'Unknown'),
+        fromEmail: String(row.fromEmail || ''),
+        subject: String(row.subject || '(no subject)'),
+        summary: String(row.summary || ''),
+        status: (['new', 'read', 'handled'].includes(row.status)
+          ? row.status
+          : 'new') as EmailLeadSummary['status'],
+      } as EmailLeadSummary;
+    })
+    .filter(Boolean) as EmailLeadSummary[];
 }
 
 export function fillGreeting(template: string, company: string): string {
