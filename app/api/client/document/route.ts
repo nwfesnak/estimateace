@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyClientActionToken } from '@/lib/client-action-token';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { extractMediaStoragePath, isMediaPdfRef } from '@/lib/media-url';
+import { readEstimateApproval } from '@/lib/estimate-approval';
 
 /**
  * Public (token-gated) document summary for client approve / pay page.
@@ -261,6 +262,11 @@ export async function GET(request: NextRequest) {
       chargeCCFee: chargeFees,
       ccFeePercentage: feePercent,
       paymentOptions,
+      ...((a) => ({
+        estimateApproved: Boolean(a.approvedAt),
+        approvedAt: a.approvedAt,
+        approvedBy: a.approvedBy,
+      }))(readEstimateApproval(row)),
       hasCertificate,
       certificateUrl,
       certificateIsPdf,

@@ -33,6 +33,13 @@ import {
   type BillingSnapshot,
 } from '@/lib/billing';
 import { isPlatformAdminEmail } from '@/lib/platform-tutorials';
+import {
+  approvalBadgeLabel,
+  isEstimateApproved,
+  readEstimateApproval,
+  withEstimateApproval,
+  type EstimateApprovedBy,
+} from '@/lib/estimate-approval';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { getSupabaseClient, getSupabaseConfigHelpMessage } from '@/lib/supabase/client';
@@ -371,6 +378,9 @@ export default function Home() {
       sendEstimate: "Send Estimate",
       convertToInvoice: "Convert to Invoice",
       convertToEstimate: "Convert back to Estimate",
+      markEstimateApproved: "Mark Approved",
+      unmarkEstimateApproved: "Undo Approval",
+      estimateApprovedBadge: "Approved — ready to schedule",
       takePhoto: "Take Photo",
       addPhoto: "Add Photo",
       addPhotos: "Add Photos",
@@ -515,6 +525,9 @@ export default function Home() {
       sendEstimate: "Enviar Presupuesto",
       convertToInvoice: "Convertir a Factura",
       convertToEstimate: "Volver a Presupuesto",
+      markEstimateApproved: "Marcar aprobado",
+      unmarkEstimateApproved: "Deshacer aprobación",
+      estimateApprovedBadge: "Aprobado — listo para programar",
       takePhoto: "Tomar Foto",
       addPhoto: "Agregar Foto",
       addPhotos: "Agregar Fotos",
@@ -659,6 +672,9 @@ export default function Home() {
       sendEstimate: "Envoyer le Devis",
       convertToInvoice: "Convertir en Facture",
       convertToEstimate: "Reconvertir en Devis",
+      markEstimateApproved: "Marquer approuvé",
+      unmarkEstimateApproved: "Annuler l'approbation",
+      estimateApprovedBadge: "Approuvé — prêt à planifier",
       takePhoto: "Prendre Photo",
       addPhoto: "Ajouter Photo",
       addPhotos: "Ajouter Photos",
@@ -773,6 +789,9 @@ export default function Home() {
 
   // Document states
   const [documentType, setDocumentType] = useState<'estimate' | 'invoice'>('estimate');
+  /** Won job — can schedule on calendar without converting to invoice */
+  const [estimateApprovedAt, setEstimateApprovedAt] = useState<string | null>(null);
+  const [estimateApprovedBy, setEstimateApprovedBy] = useState<EstimateApprovedBy | null>(null);
   const [jobName, setJobName] = useState('');
   const [address, setAddress] = useState('');
   const [city, setCity] = useState('');
@@ -1357,6 +1376,13 @@ export default function Home() {
     _mileageLogs: mileageForJob,
     // AI before→after renderings linked to description lines
     _jobRenderings: jobRenderings,
+    // Approved estimate (schedule without invoicing)
+    ...(estimateApprovedAt
+      ? {
+          _estimateApprovedAt: estimateApprovedAt,
+          _estimateApprovedBy: estimateApprovedBy || 'owner',
+        }
+      : {}),
   });
 
   // Payment modal states
@@ -4313,6 +4339,11 @@ export default function Home() {
       }
     }
     setDocumentType(est.documentType || 'estimate');
+    {
+      const a = readEstimateApproval(est);
+      setEstimateApprovedAt(a.approvedAt);
+      setEstimateApprovedBy(a.approvedBy);
+    }
     setDueDate(est.dueDate || '');
     setPaymentStatus(est.paymentStatus || 'pending');
     setAmountPaid(est.amountPaid || 0);
@@ -4567,6 +4598,8 @@ export default function Home() {
     profileHydratingRef.current = true;
 
     setDocumentType(nextType);
+    setEstimateApprovedAt(null);
+    setEstimateApprovedBy(null);
     setJobName(''); setAddress(''); setCity(''); setState(''); setZipCode('');
     setPhones(['']); setEmails(['']); setTerms('');
     setPhotoUrls([]); setVideoUrls([]); setReceiptUrls([]); setReceiptDetails([]); setJobMileageLogs([]);
@@ -5857,6 +5890,108 @@ export default function Home() {
       setSavedEstimatesList((prev) =>
         (prev || []).filter((r: any) => !deletedIds.includes(String(r.id)))
       );
+    }
+  };
+
+  const persistEstimateApprovalOnRow = async (
+    est: any,
+    approval: { approvedAt: string | null; approvedBy: EstimateApprovedBy | null }
+  ) => {
+    if (!est || !supabase || !workspaceUserId) {
+      return { ok: false as const, error: 'Not logged in' };
+    }
+    const id = String(est.id || est.invoiceNumber || '').trim();
+    if (!id) return { ok: false as const, error: 'Missing estimate id' };
+    const prevProfile = est.profile && typeof est.profile === 'object' ? est.profile : {};
+    const nextProfile = withEstimateApproval(prevProfile, approval);
+    const { error } = await supabase
+      .from('estimates')
+      .update({ profile: nextProfile, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('user_id', workspaceUserId);
+    if (error) {
+      // Server save fallback
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) return { ok: false as const, error: error.message };
+      const res = await fetch('/api/documents/save', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          id,
+          invoiceNumber: est.invoiceNumber || id,
+          documentType: 'estimate',
+          profile: nextProfile,
+          jobName: est.jobName || est.jobname || '',
+          items: est.items || [],
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.ok) {
+        return { ok: false as const, error: json.error || error.message };
+      }
+    }
+    setSavedEstimatesList((prev) =>
+      (prev || []).map((r: any) =>
+        String(r.id) === id || String(r.invoiceNumber ?? r.invoicenumber ?? '') === id
+          ? { ...r, profile: nextProfile }
+          : r
+      )
+    );
+    if (String(invoiceNumber) === id) {
+      setEstimateApprovedAt(approval.approvedAt);
+      setEstimateApprovedBy(approval.approvedBy);
+    }
+    return { ok: true as const, profile: nextProfile };
+  };
+
+  const markEstimateApproved = async (by: EstimateApprovedBy = 'owner', sourceRow?: any) => {
+    if (!sourceRow && documentType === 'invoice') {
+      showMessage('This is already an invoice. Approval is for estimates you want to schedule first.');
+      return;
+    }
+    const approvedAt = new Date().toISOString();
+    const row =
+      sourceRow ||
+      ({
+        id: invoiceNumber,
+        invoiceNumber,
+        profile: getDocumentProfileSnapshot(),
+        jobName,
+        items,
+      } as any);
+    const result = await persistEstimateApprovalOnRow(row, {
+      approvedAt,
+      approvedBy: by,
+    });
+    if (result.ok) {
+      showMessage(
+        '✅ Estimate marked Approved — still an estimate (not an invoice). You can schedule it on the Calendar.'
+      );
+    } else {
+      showMessage(result.error || 'Could not save approval.');
+    }
+  };
+
+  const unmarkEstimateApproved = async () => {
+    const row = {
+      id: invoiceNumber,
+      invoiceNumber,
+      profile: getDocumentProfileSnapshot(),
+      jobName,
+      items,
+    };
+    const result = await persistEstimateApprovalOnRow(row, {
+      approvedAt: null,
+      approvedBy: null,
+    });
+    if (result.ok) {
+      showMessage('Approval removed. Estimate is back to draft.');
+    } else {
+      showMessage(result.error || 'Could not clear approval.');
     }
   };
 
@@ -7835,6 +7970,11 @@ export default function Home() {
       (selectedEstimateForCalendar.documentType === 'estimate' || selectedEstimateForCalendar.invoiceNumber?.startsWith('EST'));
     if (!selectedEstimateForCalendar || !isStillEstimate || !selectedDateTime) {
       return showMessage(isEdit ? 'Select estimate and date/time to save changes' : 'Select estimate and date/time');
+    }
+    if (!isEstimateApproved(selectedEstimateForCalendar)) {
+      return showMessage(
+        'Only approved estimates can be scheduled. Open the estimate and tap Mark Approved first (or have the client approve).'
+      );
     }
     if (schedulingAppointment) return;
 
@@ -10933,13 +11073,20 @@ export default function Home() {
                         className="shrink-0"
                       />
                       <div className="min-w-0">
-                        <button
-                          type="button"
-                          className="font-medium break-words text-left text-[#0f766e] underline underline-offset-2 hover:text-emerald-800"
-                          onClick={() => void openDocumentFromList(est)}
-                        >
-                          {est.jobName || 'Untitled'}
-                        </button>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            className="font-medium break-words text-left text-[#0f766e] underline underline-offset-2 hover:text-emerald-800"
+                            onClick={() => void openDocumentFromList(est)}
+                          >
+                            {est.jobName || 'Untitled'}
+                          </button>
+                          {approvalBadgeLabel(est) && (
+                            <span className="inline-flex items-center rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-semibold px-2 py-0.5">
+                              ✓ {approvalBadgeLabel(est)}
+                            </span>
+                          )}
+                        </div>
                         <div className="text-sm text-gray-500 break-words">
                           <button
                             type="button"
@@ -10956,6 +11103,16 @@ export default function Home() {
                     </div>
                     <div className="flex flex-wrap gap-2 sm:gap-3 shrink-0">
                       <Button size="sm" onClick={() => void openDocumentFromList(est)}>{t('open')}</Button>
+                      {!isEstimateApproved(est) && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="border-emerald-600 text-emerald-800"
+                          onClick={() => void markEstimateApproved('owner', est)}
+                        >
+                          ✓ Approve
+                        </Button>
+                      )}
                       <Button size="sm" variant="outline" onClick={() => archiveEstimate(est.id)}>{t('archive')}</Button>
                       <Button size="sm" variant="destructive" onClick={() => deleteSelectedEstimate(est.id)}>{t('delete')}</Button>
                     </div>
@@ -11790,25 +11947,61 @@ export default function Home() {
                   )}
                 </div>
               ) : (
-                <div className="flex flex-wrap items-center gap-3 mb-8">
-                  <Button onClick={() => void saveNamedEstimate()} className="bg-[#1e293b]">
-                    {t('saveEstimate')}
-                  </Button>
-                  <Button onClick={printDocument} className="bg-[#3b82f6]">{t('printPreview')}</Button>
-                  <Button onClick={openSendPreview} className="bg-[#8b5cf6]">{t('sendEstimate')}</Button>
-                  <Button onClick={convertToInvoice} className="bg-[#f59e0b]">{t('convertToInvoice')}</Button>
-                  <span className="text-xs text-gray-500 self-center">
-                    {saveStatus === 'saving' && 'Saving…'}
-                    {saveStatus === 'saved' && lastSaved && `Saved ${lastSaved}`}
-                    {saveStatus === 'error' && (
-                      <span className="text-red-600 font-medium">
-                        Save failed{saveErrorDetail ? `: ${saveErrorDetail.slice(0, 80)}` : ''}
-                      </span>
+                <>
+                  <div className="flex flex-wrap items-center gap-3 mb-8">
+                    <Button onClick={() => void saveNamedEstimate()} className="bg-[#1e293b]">
+                      {t('saveEstimate')}
+                    </Button>
+                    <Button onClick={printDocument} className="bg-[#3b82f6]">{t('printPreview')}</Button>
+                    <Button onClick={openSendPreview} className="bg-[#8b5cf6]">{t('sendEstimate')}</Button>
+                    {!estimateApprovedAt ? (
+                      <Button
+                        type="button"
+                        onClick={() => void markEstimateApproved('owner')}
+                        className="bg-emerald-700 hover:bg-emerald-800 text-white"
+                        title="Mark this estimate approved so you can schedule it — does not create an invoice"
+                      >
+                        ✓ {t('markEstimateApproved')}
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => void unmarkEstimateApproved()}
+                        className="border-emerald-600 text-emerald-800"
+                        title="Remove approval mark"
+                      >
+                        {t('unmarkEstimateApproved')}
+                      </Button>
                     )}
-                    {saveStatus === 'idle' && profile.autoSaveEnabled !== false && 'Auto-save on'}
-                    {profile.autoSaveEnabled === false && saveStatus === 'idle' && 'Auto-save off — use Save'}
-                  </span>
-                </div>
+                    <Button onClick={convertToInvoice} className="bg-[#f59e0b]">{t('convertToInvoice')}</Button>
+                    <span className="text-xs text-gray-500 self-center">
+                      {saveStatus === 'saving' && 'Saving…'}
+                      {saveStatus === 'saved' && lastSaved && `Saved ${lastSaved}`}
+                      {saveStatus === 'error' && (
+                        <span className="text-red-600 font-medium">
+                          Save failed{saveErrorDetail ? `: ${saveErrorDetail.slice(0, 80)}` : ''}
+                        </span>
+                      )}
+                      {saveStatus === 'idle' && profile.autoSaveEnabled !== false && 'Auto-save on'}
+                      {profile.autoSaveEnabled === false && saveStatus === 'idle' && 'Auto-save off — use Save'}
+                    </span>
+                  </div>
+                  {estimateApprovedAt && documentType === 'estimate' && (
+                    <div className="mb-6 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+                      <strong>✓ {t('estimateApprovedBadge')}</strong>
+                      <span className="text-emerald-800">
+                        {' '}
+                        ({estimateApprovedBy === 'client' ? 'client' : 'owner'}
+                        {estimateApprovedAt
+                          ? ` · ${new Date(estimateApprovedAt).toLocaleDateString()}`
+                          : ''}
+                        ). Still an estimate — not invoiced yet. Use Calendar to schedule, or Convert to
+                        Invoice when ready to bill.
+                      </span>
+                    </div>
+                  )}
+                </>
               )}
 
               {/* Gallery pickers — include HEIC for iPhone camera roll; live camera uses DeviceCamera */}
@@ -16876,27 +17069,47 @@ export default function Home() {
               </DialogHeader>
               <div className="space-y-6 py-4">
                 <div>
-                  <label className="block text-sm font-semibold mb-2">Select Estimate</label>
+                  <label className="block text-sm font-semibold mb-2">Select approved estimate</label>
+                  <p className="text-xs text-gray-500 mb-2">
+                    Only estimates marked <strong>Approved</strong> (by you or the client) appear here —
+                    still estimates, not invoices. Mark Approved on the estimate first if the list is empty.
+                  </p>
                   <select 
                     className="w-full border rounded-xl p-3"
                     value={selectedEstimateForCalendar?.id || ''}
                     onChange={e => {
                       const selected = savedEstimatesList.find(
-                        est => est.id === e.target.value && 
-                               (est.documentType === 'estimate' || est.invoiceNumber?.startsWith('EST'))
+                        est =>
+                          est.id === e.target.value &&
+                          (est.documentType === 'estimate' || est.invoiceNumber?.startsWith('EST')) &&
+                          isEstimateApproved(est)
                       );
                       setSelectedEstimateForCalendar(selected || null);
                     }}
                   >
-                    <option value="">— Choose an estimate —</option>
+                    <option value="">— Choose an approved estimate —</option>
                     {savedEstimatesList
-                      .filter(est => est.documentType === 'estimate' || est.invoiceNumber?.startsWith('EST'))
-                      .map(est => (
+                      .filter(
+                        (est) =>
+                          (est.documentType === 'estimate' || est.invoiceNumber?.startsWith('EST')) &&
+                          isEstimateApproved(est)
+                      )
+                      .map((est) => (
                         <option key={est.id} value={est.id}>
-                          {est.jobName || 'Untitled'} — {est.invoiceNumber}
+                          {est.jobName || 'Untitled'} — {est.invoiceNumber} ✓ Approved
                         </option>
                       ))}
                   </select>
+                  {savedEstimatesList.filter(
+                    (est) =>
+                      (est.documentType === 'estimate' || est.invoiceNumber?.startsWith('EST')) &&
+                      isEstimateApproved(est)
+                  ).length === 0 && (
+                    <p className="text-xs text-amber-800 mt-2 bg-amber-50 border border-amber-200 rounded-lg p-2">
+                      No approved estimates yet. Open an estimate → <strong>Mark Approved</strong>, or have the
+                      client approve from their link.
+                    </p>
+                  )}
                 </div>
 
                 <div>

@@ -57,6 +57,9 @@ type DocPayload = {
   terms?: string;
   chargeCCFee?: boolean;
   ccFeePercentage?: number;
+  estimateApproved?: boolean;
+  approvedAt?: string | null;
+  approvedBy?: string | null;
   items?: Array<{ description: string; qty: number; total: number }>;
   paymentOptions?: PayOption[];
   message?: string;
@@ -183,7 +186,7 @@ function ApprovePayInner() {
           return;
         }
         setDoc(json);
-        if (paidFlag === '1') setApproved(true);
+        if (paidFlag === '1' || json.estimateApproved) setApproved(true);
       } catch {
         if (!cancelled) setError('Network error loading document.');
       } finally {
@@ -194,6 +197,42 @@ function ApprovePayInner() {
       cancelled = true;
     };
   }, [token, paidFlag]);
+
+  const persistClientApproval = async () => {
+    if (!token) return false;
+    setBusy(true);
+    setError('');
+    try {
+      const res = await fetch('/api/client/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(json.error || 'Could not save approval. Try again.');
+        return false;
+      }
+      setApproved(true);
+      setDoc((prev) =>
+        prev
+          ? {
+              ...prev,
+              estimateApproved: true,
+              approvedAt: json.approvedAt || prev.approvedAt,
+              approvedBy: 'client',
+            }
+          : prev
+      );
+      setInfoBanner('Estimate approved — your contractor can schedule the job. It is not an invoice yet.');
+      return true;
+    } catch {
+      setError('Network error saving approval.');
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const isEstimate = (doc?.documentType || 'estimate') !== 'invoice';
   const depositDue = Number(doc?.depositDue) || 0;
@@ -535,8 +574,7 @@ function ApprovePayInner() {
               disabled={busy || !termsGateOk}
               onClick={() => {
                 if (!requireTermsOrError()) return;
-                setApproved(true);
-                setError('');
+                void persistClientApproval();
               }}
             >
               ✓ Approve estimate
@@ -546,7 +584,10 @@ function ApprovePayInner() {
           {isEstimate && approved && (
             <div className="rounded-xl border-2 border-emerald-500 bg-emerald-50 p-3 text-center">
               <p className="text-emerald-800 font-semibold">Estimate approved</p>
-              <p className="text-sm text-emerald-700">Choose how you want to pay the deposit below.</p>
+              <p className="text-sm text-emerald-700">
+                Your contractor can schedule this job. It is not an invoice yet.
+                {doc?.showDeposit ? ' Choose how you want to pay the deposit below.' : ''}
+              </p>
             </div>
           )}
 
