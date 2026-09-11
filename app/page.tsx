@@ -1024,6 +1024,8 @@ export default function Home() {
     aiJobRenderingEnabled: true,
     /** Included feature — show Email summaries on dashboard Leads when on */
     emailLeadSummariesEnabled: true,
+    /** Inbox address the email bot should monitor (user-entered; OAuth connect comes later) */
+    monitoredEmail: '',
     /** Paid add-on — AI Receptionist dashboard/inbox only when this is true AND receptionist is On */
     aiReceptionistAddonActive: false,
     teammates: [] as {
@@ -1352,6 +1354,7 @@ export default function Home() {
     taxesEnabled: full.taxesEnabled !== false,
     aiJobRenderingEnabled: full.aiJobRenderingEnabled !== false,
     emailLeadSummariesEnabled: full.emailLeadSummariesEnabled !== false,
+    monitoredEmail: String(full.monitoredEmail || '').trim(),
     aiReceptionistAddonActive: full.aiReceptionistAddonActive === true,
     paymentSettings: mergePaymentSettings(full.paymentSettings),
     // SMS 2FA forced off until phone line is active
@@ -4340,6 +4343,13 @@ export default function Home() {
           : ('emailLeadSummariesEnabled' in loadedProfile
             ? loadedProfile.emailLeadSummariesEnabled !== false
             : (profile as any).emailLeadSummariesEnabled !== false)),
+      monitoredEmail: pickFilled(
+        cached.monitoredEmail,
+        serverProfile && (serverProfile as any).monitoredEmail,
+        loadedProfile.monitoredEmail,
+        (profile as any).monitoredEmail,
+        ''
+      ),
       aiReceptionistAddonActive: 'aiReceptionistAddonActive' in cached
         ? cached.aiReceptionistAddonActive === true
         : (serverProfile && 'aiReceptionistAddonActive' in serverProfile
@@ -4578,6 +4588,12 @@ export default function Home() {
               : ('emailLeadSummariesEnabled' in l
                 ? (l as any).emailLeadSummariesEnabled !== false
                 : true)),
+          monitoredEmail: pickFilled(
+            cached.monitoredEmail,
+            serverProfile && (serverProfile as any).monitoredEmail,
+            (l as any).monitoredEmail,
+            ''
+          ),
           aiReceptionistAddonActive: 'aiReceptionistAddonActive' in cached
             ? cached.aiReceptionistAddonActive === true
             : (serverProfile && 'aiReceptionistAddonActive' in serverProfile
@@ -7833,6 +7849,11 @@ export default function Home() {
         (mergedProfile as any).emailLeadSummariesEnabled !== undefined
           ? (mergedProfile as any).emailLeadSummariesEnabled !== false
           : (existing as any)?.emailLeadSummariesEnabled !== false,
+      monitoredEmail: pickFilled(
+        (mergedProfile as any).monitoredEmail,
+        (existing as any)?.monitoredEmail,
+        ''
+      ),
       aiReceptionistAddonActive:
         (mergedProfile as any).aiReceptionistAddonActive === true ||
         (existing as any)?.aiReceptionistAddonActive === true,
@@ -7885,8 +7906,9 @@ export default function Home() {
       showDiscountOnEstimate: nextProfile.showDiscountOnEstimate === true,
       taxesEnabled: nextProfile.taxesEnabled !== false,
       aiJobRenderingEnabled: nextProfile.aiJobRenderingEnabled !== false,
-      emailLeadSummariesEnabled: nextProfile.emailLeadSummariesEnabled !== false,
-      aiReceptionistAddonActive: nextProfile.aiReceptionistAddonActive === true,
+      emailLeadSummariesEnabled: (nextProfile as any).emailLeadSummariesEnabled !== false,
+      monitoredEmail: String((nextProfile as any).monitoredEmail || '').trim(),
+      aiReceptionistAddonActive: (nextProfile as any).aiReceptionistAddonActive === true,
       termsDisplayMode: nextProfile.termsDisplayMode === 'printed' ? 'printed' : 'link',
     });
     await upsertUserSettingsProfile(nextProfile);
@@ -11112,12 +11134,29 @@ export default function Home() {
                       <div className="space-y-2 max-h-64 overflow-y-auto">
                         {emailLeadSummaries.length === 0 ? (
                           <div className="text-sm text-gray-500 py-4 text-center space-y-2">
-                            <p>
-                              Connected inbox summaries will appear here when you link Gmail or Outlook.
-                            </p>
-                            <p className="text-xs text-gray-400">
-                              Included with your plan — turn off under Company Profile if you do not want this box.
-                            </p>
+                            {(profile as any).monitoredEmail ? (
+                              <>
+                                <p>
+                                  Watching{' '}
+                                  <strong className="text-slate-700">
+                                    {String((profile as any).monitoredEmail)}
+                                  </strong>
+                                </p>
+                                <p className="text-xs text-gray-400">
+                                  Summaries will show here as new emails arrive (inbox bot connection coming next).
+                                </p>
+                              </>
+                            ) : (
+                              <>
+                                <p>
+                                  Add the email you want monitored under{' '}
+                                  <strong>Profile → Company Info → Email for the bot to monitor</strong>.
+                                </p>
+                                <p className="text-xs text-gray-400">
+                                  Included with your plan — turn off under Company Profile if you do not want this box.
+                                </p>
+                              </>
+                            )}
                           </div>
                         ) : (
                           emailLeadSummaries
@@ -14592,8 +14631,8 @@ export default function Home() {
                         <div>
                           <p className="font-semibold">Email summaries on dashboard</p>
                           <p className="text-sm text-gray-500">
-                            Included with your plan. When on, the dashboard Leads box shows email summaries
-                            (after you connect an inbox later). Turn off to hide that column.
+                            Included with your plan. When on, the dashboard Leads box shows email summaries.
+                            Turn off to hide that column.
                           </p>
                         </div>
                         <label className="relative inline-flex items-center cursor-pointer shrink-0">
@@ -14615,6 +14654,41 @@ export default function Home() {
                           />
                           <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]"></div>
                         </label>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-semibold mb-2">
+                          Email for the bot to monitor
+                        </label>
+                        <Input
+                          type="email"
+                          placeholder="leads@yourcompany.com"
+                          value={(profile as any).monitoredEmail || ''}
+                          onChange={(e) =>
+                            setProfile((prev) => ({ ...prev, monitoredEmail: e.target.value }))
+                          }
+                          onBlur={async () => {
+                            const raw = String((profile as any).monitoredEmail || '').trim();
+                            const nextProfile = { ...profile, monitoredEmail: raw };
+                            setProfile(nextProfile);
+                            await saveProfileSettings(nextProfile, { quiet: true });
+                            if (raw && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw)) {
+                              showMessage('Enter a valid email address for the bot to monitor.');
+                              return;
+                            }
+                            if (raw) {
+                              showMessage(
+                                `✅ Monitoring email saved: ${raw}. Summaries will appear on the dashboard when the inbox bot is connected.`
+                              );
+                            }
+                          }}
+                          className="bg-white max-w-md"
+                        />
+                        <p className="text-xs text-gray-500 mt-2 leading-relaxed">
+                          Enter the inbox you want EstimateAce to watch (business Gmail, Outlook, etc.).
+                          New messages will be summarized on <strong>Dashboard → Leads &amp; inbox</strong>.
+                          Secure Google/Microsoft login connect can be added next; for now this registers
+                          which address you want monitored.
+                        </p>
                       </div>
                     </div>
 
