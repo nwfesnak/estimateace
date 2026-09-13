@@ -17,6 +17,12 @@ import {
   DEFAULT_MILEAGE_RATE,
   type MileageLog,
 } from '@/components/MileageTracker';
+import {
+  laborLogsFromDoc,
+  sumLaborHours,
+  sumLaborLogs,
+  type LaborLog,
+} from '@/lib/labor-logs';
 import { AIReceptionist } from '@/components/AIReceptionist';
 import { SubscriptionGate } from '@/components/SubscriptionGate';
 import {
@@ -939,14 +945,25 @@ export default function Home() {
   const [amountPaid, setAmountPaid] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState('');
 
-  // Labor states
+  // Labor states — multi-entry log (hours × rate + memo); laborAmount = sum of entries
   const [isLaborModalOpen, setIsLaborModalOpen] = useState(false);
   const [isMileageModalOpen, setIsMileageModalOpen] = useState(false);
-  const [laborHours, setLaborHours] = useState(0);
-  const [laborRate, setLaborRate] = useState(0);
-  const [laborFixedAmount, setLaborFixedAmount] = useState(0);
-  const [useHourlyLabor, setUseHourlyLabor] = useState(true);
-  const laborAmount = useHourlyLabor ? laborHours * laborRate : laborFixedAmount;
+  const [jobLaborLogs, setJobLaborLogs] = useState<LaborLog[]>([]);
+  const [laborDraftHours, setLaborDraftHours] = useState(0);
+  const [laborDraftRate, setLaborDraftRate] = useState(0);
+  const [laborDraftMemo, setLaborDraftMemo] = useState('');
+  const [laborSaving, setLaborSaving] = useState(false);
+  /** Legacy fields kept in sync for older saves / reports */
+  const laborHours = sumLaborHours(jobLaborLogs);
+  const laborRate =
+    jobLaborLogs.length > 0
+      ? Number(jobLaborLogs[jobLaborLogs.length - 1].rate) || 0
+      : 0;
+  const laborFixedAmount = 0;
+  const useHourlyLabor = true;
+  const laborAmount = sumLaborLogs(jobLaborLogs);
+  const laborDraftTotal =
+    Math.round((Number(laborDraftHours) || 0) * (Number(laborDraftRate) || 0) * 100) / 100;
 
   // Tax states
   const [isTaxExempt, setIsTaxExempt] = useState(false);
@@ -1401,7 +1418,8 @@ export default function Home() {
   const getDocumentProfileSnapshot = (
     fullProfile = profile,
     breakdown = estimateBreakdownSettings,
-    mileageForJob: MileageLog[] = jobMileageLogs
+    mileageForJob: MileageLog[] = jobMileageLogs,
+    laborForJob: LaborLog[] = jobLaborLogs
   ) => ({
     ...getSafeProfileSnapshot(fullProfile),
     ...breakdown,
@@ -1416,6 +1434,8 @@ export default function Home() {
     },
     // Per-job miles for gas write-off (lives with the document)
     _mileageLogs: mileageForJob,
+    // Per-job labor entries (hours × rate + memo)
+    _laborLogs: laborForJob,
     // AI before→after renderings linked to description lines
     _jobRenderings: jobRenderings,
     // Approved estimate (schedule without invoicing)
@@ -3093,6 +3113,8 @@ export default function Home() {
     jobRenderings?: JobRendering[];
     /** Per-job mileage log (avoids stale state after Add trip) */
     mileageLogs?: MileageLog[];
+    /** Override labor logs so save after add/delete isn't stale */
+    laborLogs?: LaborLog[];
     /** Override payment fields when state may still be stale (e.g. reverse deposit) */
     amountPaid?: number;
     paymentStatus?: 'pending' | 'paid';
@@ -3127,7 +3149,12 @@ export default function Home() {
     const receiptsToSave = options?.receiptUrls ?? receiptUrls;
     const receiptDetailsToSave = options?.receiptDetails ?? receiptDetails;
     const milesToSave = options?.mileageLogs ?? jobMileageLogs;
+    const laborToSave = options?.laborLogs ?? jobLaborLogs;
     const renderingsToSave = options?.jobRenderings ?? jobRenderings;
+    const laborAmountToSave = sumLaborLogs(laborToSave);
+    const laborHoursToSave = sumLaborHours(laborToSave);
+    const laborRateToSave =
+      laborToSave.length > 0 ? Number(laborToSave[laborToSave.length - 1].rate) || 0 : 0;
     const payload = {
       id: docId,
       user_id: workspaceUserId,
@@ -3143,7 +3170,7 @@ export default function Home() {
       items: items || [],
       terms: terms || '',
       profile: {
-        ...getDocumentProfileSnapshot(profileToSave, breakdownToSave, milesToSave),
+        ...getDocumentProfileSnapshot(profileToSave, breakdownToSave, milesToSave, laborToSave),
         _jobRenderings: renderingsToSave,
       },
       documentType: options?.documentType || documentType || 'estimate',
@@ -3157,11 +3184,11 @@ export default function Home() {
       videoUrls: videosToSave || [],
       receiptUrls: receiptsToSave || [],
       receiptDetails: receiptDetailsToSave || [],
-      laborHours: laborHours || 0,
-      laborRate: laborRate || 0,
-      laborFixedAmount: laborFixedAmount || 0,
-      useHourlyLabor: useHourlyLabor !== false,
-      laborAmount: laborAmount || 0,
+      laborHours: laborHoursToSave || 0,
+      laborRate: laborRateToSave || 0,
+      laborFixedAmount: 0,
+      useHourlyLabor: true,
+      laborAmount: laborAmountToSave || 0,
       taxRate: baseTaxRate,
       taxAmount,
       isTaxExempt: !!isTaxExempt,
@@ -3514,6 +3541,60 @@ export default function Home() {
       (receiptDetails || []).reduce((sum: number, r: any) => sum + (Number(r?.amount) || 0), 0),
     [receiptDetails]
   );
+
+  const laborFolderTotal = laborAmount;
+  const receiptsAndLaborTotal =
+    Math.round((receiptsFolderTotal + laborFolderTotal) * 100) / 100;
+
+  const saveLaborEntry = async () => {
+    const hours = Math.max(0, Number(laborDraftHours) || 0);
+    const rate = Math.max(0, Number(laborDraftRate) || 0);
+    const memo = String(laborDraftMemo || '').trim();
+    const total = Math.round(hours * rate * 100) / 100;
+    if (hours <= 0 || rate <= 0) {
+      showMessage('Enter hours and hourly rate before saving labor.');
+      return;
+    }
+    const entry: LaborLog = {
+      id: `labor-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      hours,
+      rate,
+      memo,
+      total,
+      createdAt: new Date().toISOString(),
+    };
+    const next = [...jobLaborLogs, entry];
+    setJobLaborLogs(next);
+    setLaborDraftHours(0);
+    setLaborDraftRate(rate); // keep last rate for next entry convenience
+    setLaborDraftMemo('');
+    setLaborSaving(true);
+    try {
+      const result = await saveToDB({ quiet: false, laborLogs: next });
+      if (result.ok) {
+        showMessage(
+          `✅ Labor saved: ${hours} hrs × $${rate.toFixed(2)} = $${total.toFixed(2)}${memo ? ` (${memo})` : ''}`
+        );
+      } else {
+        showMessage(result.error || 'Labor saved on screen but cloud save failed.');
+      }
+    } finally {
+      setLaborSaving(false);
+    }
+  };
+
+  const deleteLaborEntry = async (id: string) => {
+    if (!confirm('Delete this labor entry?')) return;
+    const next = jobLaborLogs.filter((l) => l.id !== id);
+    setJobLaborLogs(next);
+    setLaborSaving(true);
+    try {
+      await saveToDB({ quiet: true, laborLogs: next });
+      showMessage('Labor entry deleted.');
+    } finally {
+      setLaborSaving(false);
+    }
+  };
 
   const findReceiptDetail = (path: string, index: number) => {
     const byPath = (receiptDetails || []).find(
@@ -4471,10 +4552,10 @@ export default function Home() {
       setJobRenderRefineBusyId(null);
     }
     setJobMileageLogs(mileageLogsFromDoc(est));
-    setLaborHours(est.laborHours || 0);
-    setLaborRate(est.laborRate || 0);
-    setLaborFixedAmount(est.laborFixedAmount || 0);
-    setUseHourlyLabor(est.useHourlyLabor !== false);
+    setJobLaborLogs(laborLogsFromDoc(est));
+    setLaborDraftHours(0);
+    setLaborDraftRate(0);
+    setLaborDraftMemo('');
     setIsTaxExempt(est.isTaxExempt || false);
     setTaxLabor(est.taxLabor !== false);
     const loadedDiscount = getDiscountFromDoc(est);
@@ -4728,7 +4809,10 @@ export default function Home() {
     setJobRenderRefineBusyId(null);
     setPhotosFolderOpen(false);
     setItems([{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }]);
-    setLaborHours(0); setLaborRate(0); setLaborFixedAmount(0); setUseHourlyLabor(true);
+    setJobLaborLogs([]);
+    setLaborDraftHours(0);
+    setLaborDraftRate(0);
+    setLaborDraftMemo('');
     setIsTaxExempt(false);
     setTaxLabor(true);
     setDiscountDescription('');
@@ -12972,13 +13056,33 @@ export default function Home() {
                     <h3 className="text-xl font-semibold">
                       {t('receiptsSection')} ({receiptUrls.length})
                     </h3>
-                    {receiptUrls.length > 0 && (
-                      <div className="text-right">
-                        <div className="text-xs uppercase tracking-wide text-gray-500 font-semibold">
-                          Receipts total
-                        </div>
-                        <div className="text-2xl font-bold text-emerald-700">
-                          ${receiptsFolderTotal.toFixed(2)}
+                    {(receiptUrls.length > 0 || jobLaborLogs.length > 0) && (
+                      <div className="text-right space-y-1">
+                        <div className="flex flex-wrap justify-end gap-4 text-sm">
+                          <div>
+                            <div className="text-[10px] uppercase tracking-wide text-gray-500 font-semibold">
+                              Receipts total
+                            </div>
+                            <div className="text-lg font-bold text-emerald-700">
+                              ${receiptsFolderTotal.toFixed(2)}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-[10px] uppercase tracking-wide text-gray-500 font-semibold">
+                              Labor total
+                            </div>
+                            <div className="text-lg font-bold text-teal-700">
+                              ${laborFolderTotal.toFixed(2)}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-[10px] uppercase tracking-wide text-gray-500 font-semibold">
+                              Receipts + labor
+                            </div>
+                            <div className="text-xl font-bold text-slate-900">
+                              ${receiptsAndLaborTotal.toFixed(2)}
+                            </div>
+                          </div>
                         </div>
                       </div>
                     )}
@@ -13022,7 +13126,15 @@ export default function Home() {
                       className="bg-[#14b8a6] text-white h-auto min-h-[5.5rem] flex flex-col gap-1 py-3"
                     >
                       <span className="text-xl">💼</span>
-                      <span className="text-xs sm:text-sm">{t('laborButton')}</span>
+                      <span className="text-xs sm:text-sm">
+                        {t('laborButton')}
+                        {jobLaborLogs.length > 0 ? ` (${jobLaborLogs.length})` : ''}
+                      </span>
+                      {laborFolderTotal > 0 && (
+                        <span className="text-[10px] font-semibold opacity-90">
+                          ${laborFolderTotal.toFixed(2)}
+                        </span>
+                      )}
                     </Button>
                     <Button
                       type="button"
@@ -15887,7 +15999,18 @@ export default function Home() {
                         <div className="bg-white border rounded-2xl p-6 text-center">
                           <div className="text-sm text-gray-500">Labor Cost</div>
                           <div className="text-5xl font-bold text-[#14b8a6] mt-2">
-                            ${selectedReportJob.laborAmount ? selectedReportJob.laborAmount.toFixed(2) : '0.00'}
+                            ${sumLaborLogs(laborLogsFromDoc(selectedReportJob)).toFixed(2)}
+                          </div>
+                        </div>
+                        <div className="bg-white border rounded-2xl p-6 text-center col-span-2">
+                          <div className="text-sm text-gray-500">Receipts + labor</div>
+                          <div className="text-4xl font-bold text-slate-900 mt-2">
+                            ${(
+                              (selectedReportJob.receiptDetails || []).reduce(
+                                (sum: number, r: any) => sum + (Number(r.amount) || 0),
+                                0
+                              ) + sumLaborLogs(laborLogsFromDoc(selectedReportJob))
+                            ).toFixed(2)}
                           </div>
                         </div>
                       </div>
@@ -15908,8 +16031,11 @@ export default function Home() {
                       <div className="text-center text-4xl font-bold text-[#10b981]">
                         Net Profit: ${(
                           (selectedReportJob.grandTotal || 0) -
-                          (selectedReportJob.receiptDetails || []).reduce((sum: number, r: any) => sum + (r.amount || 0), 0) -
-                          (selectedReportJob.laborAmount || 0)
+                          (selectedReportJob.receiptDetails || []).reduce(
+                            (sum: number, r: any) => sum + (Number(r.amount) || 0),
+                            0
+                          ) -
+                          sumLaborLogs(laborLogsFromDoc(selectedReportJob))
                         ).toFixed(2)}
                       </div>
                     </div>
@@ -17205,48 +17331,108 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* Labor Modal */}
+      {/* Labor Modal — multi-entry: hours, hourly rate, memo; list all saved */}
       <Dialog open={isLaborModalOpen} onOpenChange={setIsLaborModalOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>💼 Add Labor to Job</DialogTitle>
+            <DialogTitle>💼 Labor on this job</DialogTitle>
+            <DialogDescription>
+              Enter hours, hourly rate, and a memo (who you paid). Save each entry — a new blank line starts for the next worker.
+            </DialogDescription>
           </DialogHeader>
-          <div className="space-y-6 py-4">
-            <div className="flex items-center gap-4">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input type="radio" checked={useHourlyLabor} onChange={() => setUseHourlyLabor(true)} />
-                Hourly
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input type="radio" checked={!useHourlyLabor} onChange={() => setUseHourlyLabor(false)} />
-                Fixed Amount
-              </label>
-            </div>
-
-            {useHourlyLabor ? (
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-semibold mb-1">Hours</label>
-                  <Input type="number" value={laborHours} onChange={e => setLaborHours(parseFloat(e.target.value) || 0)} />
+          <div className="space-y-5 py-2">
+            {jobLaborLogs.length > 0 && (
+              <div className="rounded-xl border border-teal-200 bg-teal-50/50 p-3 space-y-2 max-h-48 overflow-y-auto">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-semibold text-teal-950">Saved labor</p>
+                  <p className="text-sm font-bold text-teal-800">${laborFolderTotal.toFixed(2)}</p>
                 </div>
-                <div>
-                  <label className="block text-sm font-semibold mb-1">Hourly Rate</label>
-                  <Input type="number" value={laborRate} onChange={e => setLaborRate(parseFloat(e.target.value) || 0)} />
-                </div>
-                <div className="col-span-2 text-right text-xl font-semibold">
-                  Labor Total: <span className="text-[#14b8a6]">${(laborHours * laborRate).toFixed(2)}</span>
-                </div>
-              </div>
-            ) : (
-              <div>
-                <label className="block text-sm font-semibold mb-1">Fixed Labor Amount</label>
-                <Input type="number" value={laborFixedAmount} onChange={e => setLaborFixedAmount(parseFloat(e.target.value) || 0)} />
+                {jobLaborLogs.map((entry) => (
+                  <div
+                    key={entry.id}
+                    className="flex items-start justify-between gap-2 rounded-lg border border-teal-100 bg-white p-2.5 text-sm"
+                  >
+                    <div className="min-w-0">
+                      <div className="font-semibold text-slate-900">
+                        {entry.hours} hrs × ${Number(entry.rate).toFixed(2)} = ${Number(entry.total).toFixed(2)}
+                      </div>
+                      {entry.memo ? (
+                        <div className="text-xs text-gray-600 mt-0.5 break-words">Memo: {entry.memo}</div>
+                      ) : (
+                        <div className="text-xs text-gray-400 mt-0.5">No memo</div>
+                      )}
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="shrink-0 border-red-300 text-red-700 hover:bg-red-50"
+                      disabled={laborSaving}
+                      onClick={() => void deleteLaborEntry(entry.id)}
+                    >
+                      ✕
+                    </Button>
+                  </div>
+                ))}
               </div>
             )}
+
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+              <p className="text-sm font-semibold text-slate-800">Add labor entry</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-semibold mb-1">Hours</label>
+                  <Input
+                    type="number"
+                    min={0}
+                    step="0.25"
+                    value={laborDraftHours || ''}
+                    onChange={(e) => setLaborDraftHours(parseFloat(e.target.value) || 0)}
+                    placeholder="0"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold mb-1">Hourly rate</label>
+                  <Input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={laborDraftRate || ''}
+                    onChange={(e) => setLaborDraftRate(parseFloat(e.target.value) || 0)}
+                    placeholder="0.00"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold mb-1">Memo (who you paid)</label>
+                <Input
+                  type="text"
+                  value={laborDraftMemo}
+                  onChange={(e) => setLaborDraftMemo(e.target.value)}
+                  placeholder="e.g. Paid John for framing"
+                />
+              </div>
+              <div className="text-right text-base font-semibold">
+                This entry:{' '}
+                <span className="text-[#14b8a6]">${laborDraftTotal.toFixed(2)}</span>
+              </div>
+              <Button
+                type="button"
+                className="w-full bg-[#14b8a6] hover:bg-teal-600 text-white font-bold"
+                disabled={laborSaving}
+                onClick={() => void saveLaborEntry()}
+              >
+                {laborSaving ? 'Saving…' : '💾 Save labor entry'}
+              </Button>
+              <p className="text-[11px] text-gray-500 text-center">
+                Saves this line and clears the form so you can add the next labor entry.
+              </p>
+            </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsLaborModalOpen(false)}>Cancel</Button>
-            <Button onClick={() => { setIsLaborModalOpen(false); showMessage(`✅ Labor of $${laborAmount.toFixed(2)} added`); }} className="bg-[#14b8a6]">Save Labor</Button>
+            <Button variant="outline" onClick={() => setIsLaborModalOpen(false)}>
+              Done
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
