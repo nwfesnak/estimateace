@@ -952,6 +952,7 @@ export default function Home() {
   const [laborDraftHours, setLaborDraftHours] = useState(0);
   const [laborDraftRate, setLaborDraftRate] = useState(0);
   const [laborDraftMemo, setLaborDraftMemo] = useState('');
+  const [laborEditingId, setLaborEditingId] = useState<string | null>(null);
   const [laborSaving, setLaborSaving] = useState(false);
   /** Legacy fields kept in sync for older saves / reports */
   const laborHours = sumLaborHours(jobLaborLogs);
@@ -3546,6 +3547,20 @@ export default function Home() {
   const receiptsAndLaborTotal =
     Math.round((receiptsFolderTotal + laborFolderTotal) * 100) / 100;
 
+  const clearLaborDraft = (keepRate?: number) => {
+    setLaborDraftHours(0);
+    setLaborDraftRate(keepRate != null ? keepRate : laborDraftRate);
+    setLaborDraftMemo('');
+    setLaborEditingId(null);
+  };
+
+  const startEditLaborEntry = (entry: LaborLog) => {
+    setLaborEditingId(entry.id);
+    setLaborDraftHours(Number(entry.hours) || 0);
+    setLaborDraftRate(Number(entry.rate) || 0);
+    setLaborDraftMemo(String(entry.memo || ''));
+  };
+
   const saveLaborEntry = async () => {
     const hours = Math.max(0, Number(laborDraftHours) || 0);
     const rate = Math.max(0, Number(laborDraftRate) || 0);
@@ -3555,25 +3570,43 @@ export default function Home() {
       showMessage('Enter hours and hourly rate before saving labor.');
       return;
     }
-    const entry: LaborLog = {
-      id: `labor-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      hours,
-      rate,
-      memo,
-      total,
-      createdAt: new Date().toISOString(),
-    };
-    const next = [...jobLaborLogs, entry];
+
+    const editingId = laborEditingId;
+    let next: LaborLog[];
+    if (editingId) {
+      next = jobLaborLogs.map((l) =>
+        l.id === editingId
+          ? {
+              ...l,
+              hours,
+              rate,
+              memo,
+              total,
+            }
+          : l
+      );
+    } else {
+      const entry: LaborLog = {
+        id: `labor-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        hours,
+        rate,
+        memo,
+        total,
+        createdAt: new Date().toISOString(),
+      };
+      next = [...jobLaborLogs, entry];
+    }
+
     setJobLaborLogs(next);
-    setLaborDraftHours(0);
-    setLaborDraftRate(rate); // keep last rate for next entry convenience
-    setLaborDraftMemo('');
+    clearLaborDraft(rate);
     setLaborSaving(true);
     try {
       const result = await saveToDB({ quiet: false, laborLogs: next });
       if (result.ok) {
         showMessage(
-          `✅ Labor saved: ${hours} hrs × $${rate.toFixed(2)} = $${total.toFixed(2)}${memo ? ` (${memo})` : ''}`
+          editingId
+            ? `✅ Labor updated: ${hours} hrs × $${rate.toFixed(2)} = $${total.toFixed(2)}${memo ? ` (${memo})` : ''}`
+            : `✅ Labor saved: ${hours} hrs × $${rate.toFixed(2)} = $${total.toFixed(2)}${memo ? ` (${memo})` : ''}`
         );
       } else {
         showMessage(result.error || 'Labor saved on screen but cloud save failed.');
@@ -3587,6 +3620,7 @@ export default function Home() {
     if (!confirm('Delete this labor entry?')) return;
     const next = jobLaborLogs.filter((l) => l.id !== id);
     setJobLaborLogs(next);
+    if (laborEditingId === id) clearLaborDraft();
     setLaborSaving(true);
     try {
       await saveToDB({ quiet: true, laborLogs: next });
@@ -4556,6 +4590,7 @@ export default function Home() {
     setLaborDraftHours(0);
     setLaborDraftRate(0);
     setLaborDraftMemo('');
+    setLaborEditingId(null);
     setIsTaxExempt(est.isTaxExempt || false);
     setTaxLabor(est.taxLabor !== false);
     const loadedDiscount = getDiscountFromDoc(est);
@@ -4813,6 +4848,7 @@ export default function Home() {
     setLaborDraftHours(0);
     setLaborDraftRate(0);
     setLaborDraftMemo('');
+    setLaborEditingId(null);
     setIsTaxExempt(false);
     setTaxLabor(true);
     setDiscountDescription('');
@@ -17350,7 +17386,11 @@ export default function Home() {
                 {jobLaborLogs.map((entry) => (
                   <div
                     key={entry.id}
-                    className="flex items-start justify-between gap-2 rounded-lg border border-teal-100 bg-white p-2.5 text-sm"
+                    className={`flex items-start justify-between gap-2 rounded-lg border p-2.5 text-sm ${
+                      laborEditingId === entry.id
+                        ? 'border-teal-400 bg-teal-50 ring-1 ring-teal-300'
+                        : 'border-teal-100 bg-white'
+                    }`}
                   >
                     <div className="min-w-0">
                       <div className="font-semibold text-slate-900">
@@ -17362,23 +17402,37 @@ export default function Home() {
                         <div className="text-xs text-gray-400 mt-0.5">No memo</div>
                       )}
                     </div>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="shrink-0 border-red-300 text-red-700 hover:bg-red-50"
-                      disabled={laborSaving}
-                      onClick={() => void deleteLaborEntry(entry.id)}
-                    >
-                      ✕
-                    </Button>
+                    <div className="flex flex-col gap-1.5 shrink-0">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="border-teal-400 text-teal-800"
+                        disabled={laborSaving}
+                        onClick={() => startEditLaborEntry(entry)}
+                      >
+                        Edit
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="border-red-300 text-red-700 hover:bg-red-50"
+                        disabled={laborSaving}
+                        onClick={() => void deleteLaborEntry(entry.id)}
+                      >
+                        ✕
+                      </Button>
+                    </div>
                   </div>
                 ))}
               </div>
             )}
 
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
-              <p className="text-sm font-semibold text-slate-800">Add labor entry</p>
+              <p className="text-sm font-semibold text-slate-800">
+                {laborEditingId ? 'Edit labor entry' : 'Add labor entry'}
+              </p>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-semibold mb-1">Hours</label>
@@ -17416,16 +17470,35 @@ export default function Home() {
                 This entry:{' '}
                 <span className="text-[#14b8a6]">${laborDraftTotal.toFixed(2)}</span>
               </div>
-              <Button
-                type="button"
-                className="w-full bg-[#14b8a6] hover:bg-teal-600 text-white font-bold"
-                disabled={laborSaving}
-                onClick={() => void saveLaborEntry()}
-              >
-                {laborSaving ? 'Saving…' : '💾 Save labor entry'}
-              </Button>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <Button
+                  type="button"
+                  className="flex-1 bg-[#14b8a6] hover:bg-teal-600 text-white font-bold"
+                  disabled={laborSaving}
+                  onClick={() => void saveLaborEntry()}
+                >
+                  {laborSaving
+                    ? 'Saving…'
+                    : laborEditingId
+                      ? '💾 Update labor entry'
+                      : '💾 Save labor entry'}
+                </Button>
+                {laborEditingId && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="sm:w-auto"
+                    disabled={laborSaving}
+                    onClick={() => clearLaborDraft(laborDraftRate)}
+                  >
+                    Cancel edit
+                  </Button>
+                )}
+              </div>
               <p className="text-[11px] text-gray-500 text-center">
-                Saves this line and clears the form so you can add the next labor entry.
+                {laborEditingId
+                  ? 'Update saves changes to this labor line.'
+                  : 'Saves this line and clears the form so you can add the next labor entry.'}
               </p>
             </div>
           </div>
