@@ -13727,29 +13727,15 @@ export default function Home() {
                           </p>
                         )}
                       </div>
-                      {hasAiReceptionistAddon() ? (
-                        <Button
-                          className="bg-[#10b981] hover:bg-[#059669] text-white shrink-0"
-                          onClick={() => {
-                            void loadReceptionistFromSettings();
-                            setView('receptionistView');
-                          }}
-                        >
-                          Open receptionist
-                        </Button>
-                      ) : (
-                        <Button
-                          variant="outline"
-                          className="shrink-0 border-violet-300 text-violet-900"
-                          onClick={() =>
-                            showMessage(
-                              'AI Receptionist is a paid add-on. Contact EstimateAce billing to activate it on your account.'
-                            )
-                          }
-                        >
-                          How to subscribe
-                        </Button>
-                      )}
+                      <Button
+                        className="bg-[#10b981] hover:bg-[#059669] text-white shrink-0"
+                        onClick={() => {
+                          void loadReceptionistFromSettings();
+                          setView('receptionistView');
+                        }}
+                      >
+                        {hasAiReceptionistAddon() ? 'Open receptionist' : 'Set up AI line'}
+                      </Button>
                     </div>
                   </CardContent>
                 </Card>
@@ -16183,31 +16169,7 @@ export default function Home() {
             />
           )}
 
-          {view === 'receptionistView' && !hasAiReceptionistAddon() && (
-            <div className="max-w-lg mx-auto mt-12">
-              <Card>
-                <CardContent className="p-8 space-y-4 text-center">
-                  <h2 className="text-2xl font-semibold">AI Receptionist — paid add-on</h2>
-                  <p className="text-sm text-gray-600">
-                    This feature is not on your plan yet. Email summaries on the dashboard stay available
-                    (Company Profile toggle). Contact EstimateAce to add AI Receptionist.
-                  </p>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setProfileTab('billing');
-                      setBillingPanel('overview');
-                      setView('profileView');
-                    }}
-                  >
-                    Back to Billing
-                  </Button>
-                </CardContent>
-              </Card>
-            </div>
-          )}
-
-          {view === 'receptionistView' && hasAiReceptionistAddon() && (
+          {view === 'receptionistView' && (
             <AIReceptionist
               companyName={profile.company || 'Your Company'}
               companyPhone={profile.phone || ''}

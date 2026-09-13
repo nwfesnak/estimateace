@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getXaiApiKey, getXaiChatModel } from '@/lib/xai-config';
+import { getSupabaseAdmin } from '@/lib/supabase/admin';
+import {
+  normalizeReceptionistConfig,
+  toPublicReceptionistConfig,
+} from '@/lib/receptionist-config';
+import { loadReceptionistConfig, saveReceptionistConfig } from '@/lib/receptionist-store';
 
 async function verifyUser(request: NextRequest) {
   const authHeader = request.headers.get('authorization');
@@ -22,6 +28,101 @@ async function verifyUser(request: NextRequest) {
   } = await supabase.auth.getUser();
   if (error || !user) return { user: null, error: 'Unauthorized' };
   return { user, error: null };
+}
+
+/**
+ * GET /api/receptionist — public config + phone number (no Twilio secrets)
+ */
+export async function GET(request: NextRequest) {
+  try {
+    const { user, error: authError } = await verifyUser(request);
+    if (!user) {
+      return NextResponse.json({ error: authError || 'Unauthorized' }, { status: 401 });
+    }
+    const admin = getSupabaseAdmin();
+    let businessName = '';
+    if (admin) {
+      const { data } = await admin
+        .from('estimates')
+        .select('profile')
+        .eq('id', `SETTINGS-${user.id}`)
+        .maybeSingle();
+      businessName = String((data?.profile as any)?.company || '');
+    }
+    const config = await loadReceptionistConfig(user.id, businessName);
+    return NextResponse.json({
+      ok: true,
+      config: toPublicReceptionistConfig(config),
+      phoneNumber: config.twilio?.phoneNumber || null,
+      status: config.status,
+    });
+  } catch (e: any) {
+    console.error('receptionist GET:', e);
+    return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 });
+  }
+}
+
+/**
+ * PATCH /api/receptionist — update branding / hours / transfer / afterHours / enabled
+ */
+export async function PATCH(request: NextRequest) {
+  try {
+    const { user, error: authError } = await verifyUser(request);
+    if (!user) {
+      return NextResponse.json({ error: authError || 'Unauthorized' }, { status: 401 });
+    }
+    const body = await request.json().catch(() => ({}));
+    const current = await loadReceptionistConfig(user.id);
+    const next = normalizeReceptionistConfig(
+      {
+        ...current,
+        enabled: typeof body.enabled === 'boolean' ? body.enabled : current.enabled,
+        branding: {
+          ...current.branding,
+          ...(body.branding && typeof body.branding === 'object' ? body.branding : {}),
+        },
+        services: Array.isArray(body.services) ? body.services.map(String) : current.services,
+        serviceArea:
+          body.serviceArea !== undefined ? String(body.serviceArea) : current.serviceArea,
+        hours: body.hours && typeof body.hours === 'object'
+          ? {
+              timezone: String(body.hours.timezone || current.hours.timezone),
+              weekly: { ...current.hours.weekly, ...(body.hours.weekly || {}) },
+            }
+          : current.hours,
+        transferNumber:
+          body.transferNumber !== undefined
+            ? String(body.transferNumber)
+            : current.transferNumber,
+        afterHours: body.afterHours || current.afterHours,
+      },
+      user.id,
+      current.branding.businessName
+    );
+
+    // Can't enable without a provisioned number
+    if (next.enabled && !next.twilio?.phoneNumber) {
+      return NextResponse.json(
+        {
+          error: 'No AI phone number yet. Tap Enable receptionist to provision a Twilio line first.',
+        },
+        { status: 400 }
+      );
+    }
+    if (next.enabled && next.twilio?.phoneNumber) next.status = 'active';
+    if (!next.enabled && next.twilio?.phoneNumber) next.status = 'disabled';
+
+    await saveReceptionistConfig(user.id, next);
+    return NextResponse.json({
+      ok: true,
+      config: toPublicReceptionistConfig(next),
+      phoneNumber: next.twilio?.phoneNumber || null,
+      status: next.status,
+    });
+  } catch (e: any) {
+    console.error('receptionist PATCH:', e);
+    return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 });
+  }
 }
 
 /**

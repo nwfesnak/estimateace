@@ -58,18 +58,109 @@ export function AIReceptionist({
   saving = false,
   onBack,
 }: AIReceptionistProps) {
-  const [tab, setTab] = React.useState<'inbox' | 'setup' | 'knowledge' | 'test'>('inbox');
+  const [tab, setTab] = React.useState<'inbox' | 'phone' | 'setup' | 'knowledge' | 'test'>('inbox');
   const [chat, setChat] = React.useState<ChatLine[]>([]);
   const [callerInput, setCallerInput] = React.useState('');
   const [testBusy, setTestBusy] = React.useState(false);
   const [testError, setTestError] = React.useState<string | null>(null);
   const [filter, setFilter] = React.useState<'all' | 'new' | 'urgent'>('all');
+  const [linePhone, setLinePhone] = React.useState<string | null>(null);
+  const [lineStatus, setLineStatus] = React.useState<string>('none');
+  const [lineBusy, setLineBusy] = React.useState(false);
+  const [lineError, setLineError] = React.useState<string | null>(null);
+  const [areaCode, setAreaCode] = React.useState('');
+  const [transferNumber, setTransferNumber] = React.useState(companyPhone || '');
 
   const inHours = isWithinBusinessHours(settings);
   const activeGreeting = fillGreeting(
     inHours ? settings.greeting : settings.afterHoursGreeting,
     companyName
   );
+
+  const refreshLine = React.useCallback(async () => {
+    try {
+      const token = await getAccessToken();
+      if (!token) return;
+      const res = await fetch('/api/receptionist', {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return;
+      setLinePhone(json.phoneNumber || json.config?.phoneNumber || null);
+      setLineStatus(String(json.status || json.config?.status || 'none'));
+      if (json.config?.transferNumber) setTransferNumber(String(json.config.transferNumber));
+    } catch {
+      /* ignore */
+    }
+  }, [getAccessToken]);
+
+  React.useEffect(() => {
+    void refreshLine();
+  }, [refreshLine]);
+
+  const enableLine = async () => {
+    setLineBusy(true);
+    setLineError(null);
+    try {
+      const token = await getAccessToken();
+      if (!token) {
+        setLineError('Please log in again.');
+        return;
+      }
+      const res = await fetch('/api/receptionist/enable', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ areaCode: areaCode.trim() || undefined }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setLineError(json.error || 'Could not provision AI phone number.');
+        return;
+      }
+      setLinePhone(json.phoneNumber || null);
+      setLineStatus(String(json.status || 'active'));
+      onChangeSettings({ ...settings, enabled: true });
+      await onSave({ ...settings, enabled: true }, messages);
+    } catch {
+      setLineError('Network error provisioning number.');
+    } finally {
+      setLineBusy(false);
+    }
+  };
+
+  const saveTransfer = async () => {
+    setLineBusy(true);
+    setLineError(null);
+    try {
+      const token = await getAccessToken();
+      if (!token) return;
+      const res = await fetch('/api/receptionist', {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          transferNumber,
+          branding: { businessName: companyName, greeting: settings.greeting },
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setLineError(json.error || 'Could not save line settings.');
+        return;
+      }
+      await refreshLine();
+    } catch {
+      setLineError('Network error saving line settings.');
+    } finally {
+      setLineBusy(false);
+    }
+  };
 
   const filtered = messages.filter((m) => {
     if (filter === 'new') return m.status === 'new';
@@ -261,15 +352,23 @@ export function AIReceptionist({
         <div>
           <h2 className="text-3xl font-semibold text-[#1e293b]">
             📞 AI Receptionist{' '}
-            <span className="text-xs align-middle font-bold uppercase bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
-              Beta
+            <span className="text-xs align-middle font-bold uppercase bg-violet-100 text-violet-800 px-2 py-0.5 rounded-full">
+              Paid add-on
             </span>
           </h2>
           <p className="text-sm text-gray-500 mt-1 max-w-xl">
-            Knowledge base, test call, and message inbox work now. Live phone answering and carrier
-            call forwarding are <strong>not available yet</strong> — do not market as a live phone
-            line until Phase C.
+            Provision your own AI phone line (Twilio), set knowledge + greeting, and collect leads in
+            your inbox. Full live AI conversation on the call is the next phase — Phase 1 gives you
+            the number and basic answer/SMS intake.
           </p>
+          {linePhone && (
+            <p className="mt-2 text-sm font-semibold text-emerald-800">
+              Your AI line:{' '}
+              <a className="underline" href={`tel:${linePhone}`}>
+                {linePhone}
+              </a>
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <label className="flex items-center gap-2 text-sm font-medium bg-white border rounded-full px-4 py-2 cursor-pointer">
@@ -330,6 +429,7 @@ export function AIReceptionist({
         {(
           [
             ['inbox', 'Inbox'],
+            ['phone', 'Phone line'],
             ['setup', 'Setup'],
             ['knowledge', 'Knowledge base'],
             ['test', 'Test call'],
@@ -451,30 +551,106 @@ export function AIReceptionist({
         </div>
       )}
 
+      {tab === 'phone' && (
+        <div className="space-y-6">
+          <Card className="border-emerald-200">
+            <CardContent className="p-6 space-y-4">
+              <h3 className="font-semibold text-lg">Your AI phone line</h3>
+              <p className="text-sm text-gray-600">
+                EstimateAce provisions a Twilio number for your business. Callers dial this line; SMS to
+                it lands in your Inbox. Full live AI conversation on the call ships next.
+              </p>
+
+              {linePhone ? (
+                <div className="rounded-2xl border-2 border-emerald-300 bg-emerald-50 p-5 text-center">
+                  <div className="text-xs uppercase tracking-wide text-emerald-800 font-semibold">
+                    Status: {lineStatus}
+                  </div>
+                  <div className="text-3xl font-bold text-emerald-950 mt-1 tracking-tight">
+                    {linePhone}
+                  </div>
+                  <a
+                    href={`tel:${linePhone}`}
+                    className="inline-block mt-3 text-sm font-semibold text-emerald-800 underline"
+                  >
+                    Call to test
+                  </a>
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-5 space-y-3">
+                  <p className="text-sm text-slate-700">
+                    No AI line yet. Enable to create a Twilio subaccount and buy a US local number.
+                  </p>
+                  <div>
+                    <label className="block text-sm font-semibold mb-1">Preferred area code (optional)</label>
+                    <Input
+                      value={areaCode}
+                      onChange={(e) => setAreaCode(e.target.value.replace(/\D/g, '').slice(0, 3))}
+                      placeholder="e.g. 305"
+                      className="max-w-[8rem]"
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    className="bg-[#10b981] hover:bg-[#059669] text-white font-bold"
+                    disabled={lineBusy}
+                    onClick={() => void enableLine()}
+                  >
+                    {lineBusy ? 'Provisioning…' : 'Enable AI receptionist line'}
+                  </Button>
+                </div>
+              )}
+
+              {lineError && (
+                <p className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+                  {lineError}
+                </p>
+              )}
+
+              <div>
+                <label className="block text-sm font-semibold mb-1">Transfer / owner cell (human handoff)</label>
+                <Input
+                  value={transferNumber}
+                  onChange={(e) => setTransferNumber(e.target.value)}
+                  placeholder={companyPhone || '(555) 123-4567'}
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Used when the AI needs to transfer to a person (Phase 2+).
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="mt-2"
+                  disabled={lineBusy}
+                  onClick={() => void saveTransfer()}
+                >
+                  Save transfer number
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       {tab === 'setup' && (
         <div className="space-y-6">
           <Card>
             <CardContent className="p-6 space-y-3">
-              <h3 className="font-semibold text-lg">Call forwarding (coming Phase C)</h3>
-              <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-3">
-                There is <strong>no live forward-to number</strong> in Phase A. Use <strong>Test call</strong>{' '}
-                to practice. When voice is shipped, you will forward unanswered calls from your existing
-                number to a Twilio line shown here (no porting).
-              </p>
+              <h3 className="font-semibold text-lg">Getting started</h3>
               <ol className="text-sm text-gray-700 list-decimal pl-5 space-y-1">
+                <li>
+                  Open <strong>Phone line</strong> and tap <strong>Enable AI receptionist line</strong>.
+                </li>
                 <li>Turn AI Receptionist <strong>On</strong> and save settings.</li>
                 <li>Fill your knowledge base (services, pricing ranges, service area, hours).</li>
-                <li>Set notify phone/email for alerts (SMS/email when Twilio/Resend configured).</li>
-                <li>Practice with <strong>Test call</strong> and review the Inbox summary.</li>
-                <li>Live carrier forwarding will be enabled in a later release.</li>
+                <li>Set notify phone/email for alerts.</li>
+                <li>Practice with <strong>Test call</strong>, then dial your AI line to verify Twilio.</li>
               </ol>
               <div className="rounded-xl bg-slate-50 border p-3 text-sm">
-                <div className="font-medium text-gray-700">Your business line</div>
+                <div className="font-medium text-gray-700">Company phone (profile)</div>
                 <div className="text-gray-600">{companyPhone || 'Add company phone in Profile'}</div>
-                <div className="font-medium text-gray-700 mt-2">Notify</div>
-                <div className="text-gray-600">
-                  {settings.notifyPhone || companyPhone || '—'} / {settings.notifyEmail || companyEmail || '—'}
-                </div>
+                <div className="font-medium text-gray-700 mt-2">AI line</div>
+                <div className="text-gray-600">{linePhone || 'Not provisioned yet — use Phone line tab'}</div>
               </div>
             </CardContent>
           </Card>
