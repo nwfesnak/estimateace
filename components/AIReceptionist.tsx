@@ -231,8 +231,12 @@ export function AIReceptionist({
       setLinePhone(json.phoneNumber || null);
       setLineStatus(String(json.status || 'active'));
       setAddonActive(true);
+      if (json.alreadyProvisioned) {
+        setLineError(null);
+      }
       onChangeSettings({ ...settings, enabled: true });
       await onSave({ ...settings, enabled: true }, messages);
+      await refreshLine();
     } catch {
       setLineError('Network error provisioning number.');
     } finally {
@@ -709,7 +713,9 @@ export function AIReceptionist({
                 <div className="rounded-2xl border-2 border-emerald-400 bg-emerald-50 p-5 text-center">
                   <p className="text-lg font-bold text-emerald-900">✓ Subscribed — {addonAmountDisplay}/mo</p>
                   <p className="text-sm text-emerald-800 mt-1">
-                    Payment confirmed. Enable your AI phone line below if you have not already.
+                    {linePhone
+                      ? 'Your AI phone line is ready below. Forward your business number to it.'
+                      : 'Payment confirmed. Next: enable your AI phone line (only needed once).'}
                   </p>
                 </div>
               ) : (
@@ -734,11 +740,14 @@ export function AIReceptionist({
               {linePhone ? (
                 <div className="rounded-2xl border-2 border-emerald-300 bg-emerald-50 p-5 text-center">
                   <div className="text-xs uppercase tracking-wide text-emerald-800 font-semibold">
-                    Status: {lineStatus}
+                    AI line ready · {lineStatus}
                   </div>
                   <div className="text-3xl font-bold text-emerald-950 mt-1 tracking-tight">
                     {linePhone}
                   </div>
+                  <p className="text-xs text-emerald-800 mt-2">
+                    You only need one AI line. Do not tap Enable again — that can buy extra numbers.
+                  </p>
                   <a
                     href={`tel:${linePhone}`}
                     className="inline-block mt-3 text-sm font-semibold text-emerald-800 underline"
@@ -749,8 +758,8 @@ export function AIReceptionist({
               ) : addonActive ? (
                 <div className="rounded-2xl border border-dashed border-emerald-300 bg-emerald-50/50 p-5 space-y-3">
                   <p className="text-sm text-slate-700">
-                    Step 2 — Payment confirmed. Enable your AI line to create a Twilio number for your
-                    business.
+                    Step 2 — Enable your AI line <strong>once</strong>. This buys one Twilio number for
+                    your account (not each time you open this page).
                   </p>
                   <div>
                     <label className="block text-sm font-semibold mb-1">Preferred area code (optional)</label>
@@ -767,7 +776,7 @@ export function AIReceptionist({
                     disabled={lineBusy}
                     onClick={() => void enableLine()}
                   >
-                    {lineBusy ? 'Provisioning…' : 'Enable AI receptionist line'}
+                    {lineBusy ? 'Provisioning…' : 'Enable AI receptionist line (one time)'}
                   </Button>
                 </div>
               ) : null}

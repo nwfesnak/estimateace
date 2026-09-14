@@ -14,6 +14,29 @@ function settingsId(userId: string) {
   return `SETTINGS-${userId}`;
 }
 
+export async function loadReceptionistSecretsRow(userId: string): Promise<{
+  secrets: ReceptionistTwilioSecrets | null;
+  phoneNumber: string;
+  subaccountSid: string;
+  numberSid: string;
+} | null> {
+  const admin = getSupabaseAdmin();
+  if (!admin) return null;
+  const { data } = await admin
+    .from('estimates')
+    .select('profile')
+    .eq('id', receptionistSecretsRowId(userId))
+    .maybeSingle();
+  const p = (data?.profile || {}) as any;
+  const token = String(p.subaccountAuthToken || '').trim();
+  return {
+    secrets: token ? { subaccountAuthToken: token } : null,
+    phoneNumber: String(p.phoneNumber || '').trim(),
+    subaccountSid: String(p.subaccountSid || '').trim(),
+    numberSid: String(p.numberSid || '').trim(),
+  };
+}
+
 export async function loadReceptionistConfig(
   userId: string,
   businessName = ''
@@ -28,22 +51,42 @@ export async function loadReceptionistConfig(
     .eq('id', settingsId(userId))
     .maybeSingle();
   const profile = (data?.profile || {}) as any;
-  return normalizeReceptionistConfig(profile.receptionistConfig, userId, businessName);
+  let config = normalizeReceptionistConfig(profile.receptionistConfig, userId, businessName);
+
+  // Recover Twilio line from secrets row if SETTINGS config was wiped by a profile save
+  if (!config.twilio?.phoneNumber) {
+    const secretsRow = await loadReceptionistSecretsRow(userId);
+    if (secretsRow?.phoneNumber) {
+      config = normalizeReceptionistConfig(
+        {
+          ...config,
+          status: config.status === 'none' ? 'active' : config.status,
+          twilio: {
+            subaccountSid: secretsRow.subaccountSid || config.twilio?.subaccountSid || '',
+            numberSid: secretsRow.numberSid || config.twilio?.numberSid || '',
+            phoneNumber: secretsRow.phoneNumber,
+          },
+        },
+        userId,
+        businessName
+      );
+      // Heal SETTINGS so UI stops asking to enable again
+      try {
+        await saveReceptionistConfig(userId, { ...config, status: 'active' });
+      } catch (e) {
+        console.warn('heal receptionistConfig from secrets:', e);
+      }
+    }
+  }
+
+  return config;
 }
 
 export async function loadReceptionistSecrets(
   userId: string
 ): Promise<ReceptionistTwilioSecrets | null> {
-  const admin = getSupabaseAdmin();
-  if (!admin) return null;
-  const { data } = await admin
-    .from('estimates')
-    .select('profile')
-    .eq('id', receptionistSecretsRowId(userId))
-    .maybeSingle();
-  const token = String((data?.profile as any)?.subaccountAuthToken || '').trim();
-  if (!token) return null;
-  return { subaccountAuthToken: token };
+  const row = await loadReceptionistSecretsRow(userId);
+  return row?.secrets || null;
 }
 
 export async function saveReceptionistConfig(

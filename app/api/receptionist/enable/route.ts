@@ -64,13 +64,22 @@ export async function POST(request: NextRequest) {
     );
 
     const existing = await loadReceptionistConfig(user.id, businessName);
-    if (existing.twilio?.phoneNumber && existing.status === 'active') {
+    // Any existing Twilio number = already provisioned (do NOT buy another)
+    if (existing.twilio?.phoneNumber) {
+      const reused = {
+        ...existing,
+        enabled: true,
+        status: 'active' as const,
+        provisionError: undefined,
+      };
+      await saveReceptionistConfig(user.id, reused);
       return NextResponse.json({
         ok: true,
         status: 'active',
+        alreadyProvisioned: true,
         phoneNumber: existing.twilio.phoneNumber,
-        config: toPublicReceptionistConfig({ ...existing, enabled: true }),
-        message: 'Receptionist line already provisioned.',
+        config: toPublicReceptionistConfig(reused),
+        message: `Your AI line is already set up: ${existing.twilio.phoneNumber}`,
       });
     }
 
