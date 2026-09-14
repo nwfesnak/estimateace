@@ -539,8 +539,8 @@ export function AIReceptionist({
           </div>
           {!settings.enabled && (
             <p className="text-xs text-amber-800 max-w-xs text-right">
-              Off = callers hear “please hold” and we try your cell. Turn <strong>ON</strong> for the AI
-              to answer.
+              Off = AI stays silent and the call rings your host/business number (no announcement). Turn{' '}
+              <strong>ON</strong> for AI to answer.
             </p>
           )}
         </div>
@@ -883,9 +883,9 @@ export function AIReceptionist({
                     placeholder={companyPhone || '(555) 123-4567'}
                   />
                   <p className="text-xs text-gray-500 mt-1">
-                    Use your <strong>personal cell</strong> — not your public business number and not the
-                    AI line. (Forwarding your business number back into itself causes “please hold” loops.)
-                    AI can also transfer here when someone asks for a person.
+                    When AI is <strong>Off</strong>, calls ring this number (or your public business
+                    number) with no AI announcement. Prefer a desk/cell that actually answers. Do not put
+                    the Twilio AI number here.
                   </p>
                 </div>
                 <Button

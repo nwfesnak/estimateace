@@ -56,11 +56,21 @@ export function sayHangupTwiml(say: string) {
   );
 }
 
-export function transferTwiml(opts: { say: string; transferTo: string; callerId?: string }) {
+export function transferTwiml(opts: {
+  say?: string;
+  transferTo: string;
+  callerId?: string;
+  /** Silent connect — no prompt (used when AI is Off) */
+  silent?: boolean;
+  timeoutSec?: number;
+}) {
   const to = escapeXml(opts.transferTo);
-  const say = escapeXml(opts.say.slice(0, 300));
   const callerId = opts.callerId ? ` callerId="${escapeXml(opts.callerId)}"` : '';
-  return twimlResponse(
-    `  <Say voice="Polly.Joanna">${say}</Say>\n  <Dial${callerId}>${to}</Dial>`
-  );
+  const timeout = Math.min(60, Math.max(10, Number(opts.timeoutSec) || 30));
+  const dial = `  <Dial${callerId} timeout="${timeout}" answerOnBridge="true">${to}</Dial>`;
+  if (opts.silent || !opts.say) {
+    return twimlResponse(dial);
+  }
+  const say = escapeXml(opts.say.slice(0, 300));
+  return twimlResponse(`  <Say voice="Polly.Joanna">${say}</Say>\n${dial}`);
 }

@@ -22,12 +22,16 @@ function sameNumber(a: string, b: string) {
   return da === db || da.slice(-10) === db.slice(-10);
 }
 
+function toE164(phone: string): string | null {
+  const raw = String(phone || '').trim();
+  if (!raw) return null;
+  return formatPhoneE164(raw) || (raw.startsWith('+') ? raw : null);
+}
+
 /**
  * POST /api/webhooks/twilio/voice
- *
- * Customers advertise their business number and forward it here.
- * - Receptionist On (or paid + line provisioned and not explicitly Off) → AI answers
- * - Explicitly Off → dial owner CELL (never the business/AI number — that causes a loop)
+ * - AI On  → live receptionist
+ * - AI Off → silent Dial to host/business/cell (no “AI is off” prompt)
  */
 export async function POST(request: NextRequest) {
   try {
@@ -80,11 +84,7 @@ export async function POST(request: NextRequest) {
     }
 
     const hasAiLine = Boolean(tenant.config.twilio?.phoneNumber);
-    // Answer with AI when:
-    // - toggle explicitly On, OR
-    // - toggle never set / true via config.enabled, OR
-    // - paid + line exists and not explicitly Off
-    const explicitlyOff = classicEnabled === false && tenant.config.enabled === false;
+    const explicitlyOff = classicEnabled === false;
     const aiSettingsEnabled =
       !explicitlyOff &&
       (classicEnabled === true ||
@@ -92,39 +92,41 @@ export async function POST(request: NextRequest) {
         (classicEnabled !== false && hasAiLine && (addonActive || tenant.config.status === 'active')));
 
     const aiLine = tenant.config.twilio?.phoneNumber || to;
-    const publicBiz = tenant.config.publicBusinessNumber || '';
 
-    // Owner ring target must NOT be the AI line or the public business number
-    // (business number usually forwards back here → endless "please hold")
-    const ownerCandidates = [tenant.config.transferNumber || '', profilePhone].filter(Boolean);
-    const ownerRing =
-      ownerCandidates
-        .map((n) => formatPhoneE164(n) || n)
-        .find((n) => n && !sameNumber(n, aiLine) && !sameNumber(n, publicBiz) && !sameNumber(n, to)) ||
-      '';
+    // When AI is Off: ring host numbers. Never dial the Twilio AI line itself.
+    // Priority: transfer/cell → public business → company profile phone
+    const hostCandidates = [
+      tenant.config.transferNumber || '',
+      tenant.config.publicBusinessNumber || '',
+      profilePhone || '',
+    ];
+    const hostRing =
+      hostCandidates
+        .map((n) => toE164(n))
+        .find((n) => n && !sameNumber(n, aiLine) && !sameNumber(n, to)) || '';
 
     if (!aiSettingsEnabled) {
-      console.info('twilio voice AI off', {
+      console.info('twilio voice AI off → silent dial host', {
         to,
         from,
         callSid,
         contractorId: tenant.userId,
-        classicEnabled,
-        configEnabled: tenant.config.enabled,
-        ownerRing: ownerRing || null,
+        hostRing: hostRing || null,
       });
-      if (ownerRing) {
+      if (hostRing) {
+        // No prompt — just connect to the business/host line
         return xml(
           transferTwiml({
-            say: 'The AI receptionist is turned off. Please hold while we connect you to the business.',
-            transferTo: ownerRing,
+            silent: true,
+            transferTo: hostRing,
             callerId: to || undefined,
+            timeoutSec: 45,
           })
         );
       }
       return xml(
         sayHangupTwiml(
-          'Thanks for calling. The AI receptionist is turned off right now, and no backup number is set. Please try again later.'
+          'Thanks for calling. No one is available to take your call right now. Please try again later.'
         )
       );
     }
@@ -136,6 +138,12 @@ export async function POST(request: NextRequest) {
       `Thanks for calling {company}. This is the AI receptionist. How can I help you today?`;
     const greeting = fillGreeting(rawGreeting, business).slice(0, 400);
 
+    // For AI transfers mid-call, prefer cell that is not the AI line
+    const transferForAi =
+      [tenant.config.transferNumber || '', profilePhone]
+        .map((n) => toE164(n))
+        .find((n) => n && !sameNumber(n, aiLine) && !sameNumber(n, to)) || '';
+
     if (callSid) {
       await saveCallSession({
         callSid,
@@ -143,7 +151,7 @@ export async function POST(request: NextRequest) {
         from,
         to,
         businessName: business,
-        transferNumber: ownerRing || tenant.config.transferNumber || '',
+        transferNumber: transferForAi || tenant.config.transferNumber || '',
         knowledgeBase,
         greeting: rawGreeting,
         urgentKeywords,
