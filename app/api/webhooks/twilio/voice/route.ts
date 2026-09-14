@@ -3,16 +3,21 @@ import { findReceptionistByPhoneNumber } from '@/lib/receptionist-store';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { saveCallSession } from '@/lib/receptionist-call-session';
 import { getReceptionistWebhookBase } from '@/lib/twilio-receptionist-provision';
-import { sayGatherTwiml, sayHangupTwiml } from '@/lib/receptionist-twiml';
+import { sayGatherTwiml, sayHangupTwiml, transferTwiml } from '@/lib/receptionist-twiml';
 import { fillGreeting } from '@/lib/ai-receptionist';
+import { formatPhoneE164 } from '@/lib/notifications';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
 
 /**
  * POST /api/webhooks/twilio/voice
- * Phase 2: start live AI receptionist via Gather speech loop (Vercel-friendly).
- * Tenant resolved by To → ReceptionistConfig.twilio.phoneNumber
+ *
+ * Customers keep advertising their existing business number and forward that
+ * carrier line to this Twilio AI number. We always answer on the Twilio "To"
+ * number, then:
+ * - AI On  → live Gather + Grok receptionist
+ * - AI Off → ring the owner/transfer number so calls are not dropped
  */
 export async function POST(request: NextRequest) {
   try {
@@ -27,10 +32,10 @@ export async function POST(request: NextRequest) {
     const callSid = params.CallSid || '';
 
     const tenant = to ? await findReceptionistByPhoneNumber(to) : null;
-    if (!tenant || !tenant.config.enabled) {
+    if (!tenant) {
       return xml(
         sayHangupTwiml(
-          'Thanks for calling. This AI receptionist line is not active right now. Please try again later.'
+          'Thanks for calling. This line is not set up yet. Please try again later.'
         )
       );
     }
@@ -41,6 +46,10 @@ export async function POST(request: NextRequest) {
       'emergency, leak, no heat, no ac, flooding, urgent, asap, fire, smoke';
     let languages = ['en', 'es'];
     let aiGreeting = '';
+    let profilePhone = '';
+    // AI answers only when the in-app Receptionist toggle is On
+    let aiSettingsEnabled = tenant.config.enabled === true;
+
     if (admin) {
       const { data } = await admin
         .from('estimates')
@@ -53,11 +62,42 @@ export async function POST(request: NextRequest) {
       if (ai.urgentKeywords) urgentKeywords = String(ai.urgentKeywords);
       if (Array.isArray(ai.languages) && ai.languages.length) languages = ai.languages.map(String);
       aiGreeting = String(ai.greeting || '');
+      profilePhone = String(profile.phone || '');
+      if (typeof ai.enabled === 'boolean') {
+        aiSettingsEnabled = ai.enabled === true;
+      }
     }
 
-    const business =
-      tenant.config.branding.businessName ||
-      'our company';
+    const ownerRing =
+      formatPhoneE164(tenant.config.transferNumber || '') ||
+      formatPhoneE164(profilePhone) ||
+      formatPhoneE164(tenant.config.publicBusinessNumber || '');
+
+    // AI turned Off — still ring the owner so forwarded calls are not lost
+    if (!aiSettingsEnabled) {
+      if (ownerRing) {
+        console.info('twilio voice AI off → dial owner', {
+          to,
+          from,
+          callSid,
+          contractorId: tenant.userId,
+        });
+        return xml(
+          transferTwiml({
+            say: 'Please hold while we connect you.',
+            transferTo: ownerRing,
+            callerId: to || undefined,
+          })
+        );
+      }
+      return xml(
+        sayHangupTwiml(
+          'Thanks for calling. No one is available to take your call right now. Please try again later.'
+        )
+      );
+    }
+
+    const business = tenant.config.branding.businessName || 'our company';
     const rawGreeting =
       (tenant.config.branding.greeting || '').trim() ||
       aiGreeting ||
@@ -71,7 +111,7 @@ export async function POST(request: NextRequest) {
         from,
         to,
         businessName: business,
-        transferNumber: tenant.config.transferNumber || '',
+        transferNumber: tenant.config.transferNumber || profilePhone || '',
         knowledgeBase,
         greeting: rawGreeting,
         urgentKeywords,
@@ -85,7 +125,7 @@ export async function POST(request: NextRequest) {
     }
 
     const gatherUrl = `${getReceptionistWebhookBase()}/api/webhooks/twilio/voice/gather`;
-    console.info('twilio voice start:', { to, from, callSid, contractorId: tenant.userId });
+    console.info('twilio voice AI on:', { to, from, callSid, contractorId: tenant.userId });
 
     return xml(
       sayGatherTwiml({
@@ -95,9 +135,7 @@ export async function POST(request: NextRequest) {
     );
   } catch (e: any) {
     console.error('twilio voice webhook:', e);
-    return xml(
-      sayHangupTwiml('We are sorry. This line is temporarily unavailable.')
-    );
+    return xml(sayHangupTwiml('We are sorry. This line is temporarily unavailable.'));
   }
 }
 

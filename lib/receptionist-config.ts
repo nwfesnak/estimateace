@@ -27,6 +27,11 @@ export type ReceptionistConfig = {
   serviceArea: string;
   hours: { timezone: string; weekly: WeeklyHours };
   transferNumber?: string;
+  /**
+   * Public business number customers already call / advertise.
+   * They forward this carrier line to twilio.phoneNumber so only one number is public.
+   */
+  publicBusinessNumber?: string;
   afterHours: 'voicemail' | 'transfer' | 'ai';
   leadDestination: 'estimateace_lead';
   provisionError?: string;
@@ -65,6 +70,7 @@ export const DEFAULT_RECEPTIONIST_CONFIG = (
     },
   },
   transferNumber: '',
+  publicBusinessNumber: '',
   afterHours: 'ai',
   leadDestination: 'estimateace_lead',
 });
@@ -105,6 +111,7 @@ export function normalizeReceptionistConfig(
       weekly: { ...base.hours.weekly, ...(r.hours?.weekly || {}) },
     },
     transferNumber: String(r.transferNumber || ''),
+    publicBusinessNumber: String(r.publicBusinessNumber || ''),
     afterHours: (['voicemail', 'transfer', 'ai'].includes(r.afterHours)
       ? r.afterHours
       : 'ai') as ReceptionistConfig['afterHours'],
@@ -127,6 +134,7 @@ export function toPublicReceptionistConfig(config: ReceptionistConfig) {
     serviceArea: config.serviceArea,
     hours: config.hours,
     transferNumber: config.transferNumber || '',
+    publicBusinessNumber: config.publicBusinessNumber || '',
     afterHours: config.afterHours,
     leadDestination: config.leadDestination,
     provisionError: config.provisionError || null,

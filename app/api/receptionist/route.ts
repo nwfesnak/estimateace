@@ -108,6 +108,10 @@ export async function PATCH(request: NextRequest) {
           body.transferNumber !== undefined
             ? String(body.transferNumber)
             : current.transferNumber,
+        publicBusinessNumber:
+          body.publicBusinessNumber !== undefined
+            ? String(body.publicBusinessNumber)
+            : current.publicBusinessNumber,
         afterHours: body.afterHours || current.afterHours,
       },
       user.id,

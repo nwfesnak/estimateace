@@ -72,6 +72,8 @@ export function AIReceptionist({
   const [transferNumber, setTransferNumber] = React.useState(companyPhone || '');
   const [addonActive, setAddonActive] = React.useState(false);
   const [addonAmountDisplay, setAddonAmountDisplay] = React.useState('$49.99');
+  const [publicBusinessNumber, setPublicBusinessNumber] = React.useState(companyPhone || '');
+  const [copiedForward, setCopiedForward] = React.useState(false);
 
   const inHours = isWithinBusinessHours(settings);
   const activeGreeting = fillGreeting(
@@ -94,10 +96,15 @@ export function AIReceptionist({
       setAddonActive(Boolean(json.addonActive));
       if (json.addonAmountDisplay) setAddonAmountDisplay(String(json.addonAmountDisplay));
       if (json.config?.transferNumber) setTransferNumber(String(json.config.transferNumber));
+      if (json.config?.publicBusinessNumber) {
+        setPublicBusinessNumber(String(json.config.publicBusinessNumber));
+      } else if (companyPhone) {
+        setPublicBusinessNumber(companyPhone);
+      }
     } catch {
       /* ignore */
     }
-  }, [getAccessToken]);
+  }, [getAccessToken, companyPhone]);
 
   React.useEffect(() => {
     void refreshLine();
@@ -192,7 +199,7 @@ export function AIReceptionist({
     }
   };
 
-  const saveTransfer = async () => {
+  const saveLineSettings = async () => {
     setLineBusy(true);
     setLineError(null);
     try {
@@ -206,6 +213,7 @@ export function AIReceptionist({
         },
         body: JSON.stringify({
           transferNumber,
+          publicBusinessNumber,
           branding: { businessName: companyName, greeting: settings.greeting },
         }),
       });
@@ -219,6 +227,17 @@ export function AIReceptionist({
       setLineError('Network error saving line settings.');
     } finally {
       setLineBusy(false);
+    }
+  };
+
+  const copyAiNumber = async () => {
+    if (!linePhone) return;
+    try {
+      await navigator.clipboard.writeText(linePhone);
+      setCopiedForward(true);
+      window.setTimeout(() => setCopiedForward(false), 2000);
+    } catch {
+      setLineError(`Copy this number manually: ${linePhone}`);
     }
   };
 
@@ -417,9 +436,9 @@ export function AIReceptionist({
             </span>
           </h2>
           <p className="text-sm text-gray-500 mt-1 max-w-xl">
-            Provision your Twilio AI line, fill the knowledge base, then callers can talk live with
-            the receptionist (speech). Leads land in your Inbox and dashboard. Set a transfer number
-            for human handoff when someone asks for a person.
+            Keep your existing business number. Forward it to your private Twilio AI line. When this
+            receptionist is <strong>On</strong>, AI answers; when <strong>Off</strong>, calls ring your
+            phone. Leads land in Inbox and dashboard.
           </p>
           {linePhone && (
             <p className="mt-2 text-sm font-semibold text-emerald-800">
@@ -695,24 +714,85 @@ export function AIReceptionist({
                 </p>
               )}
 
-              <div>
-                <label className="block text-sm font-semibold mb-1">Transfer / owner cell (human handoff)</label>
-                <Input
-                  value={transferNumber}
-                  onChange={(e) => setTransferNumber(e.target.value)}
-                  placeholder={companyPhone || '(555) 123-4567'}
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  Used when the AI needs to transfer to a person (Phase 2+).
-                </p>
+              {linePhone && (
+                <div className="rounded-2xl border-2 border-sky-300 bg-sky-50 p-5 space-y-3">
+                  <h4 className="font-semibold text-sky-950 text-base">
+                    Keep advertising one number — forward to AI
+                  </h4>
+                  <p className="text-sm text-sky-900">
+                    Customers keep calling your <strong>existing business number</strong>. You forward
+                    that line to your private Twilio AI number. When Receptionist is <strong>On</strong>,
+                    AI answers. When it is <strong>Off</strong>, calls ring your transfer/owner phone
+                    instead so nothing is dropped.
+                  </p>
+                  <div>
+                    <label className="block text-sm font-semibold mb-1">
+                      Your public business number (what customers dial)
+                    </label>
+                    <Input
+                      value={publicBusinessNumber}
+                      onChange={(e) => setPublicBusinessNumber(e.target.value)}
+                      placeholder={companyPhone || '(555) 123-4567'}
+                    />
+                  </div>
+                  <div className="rounded-xl bg-white border border-sky-200 p-3 text-sm space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <div className="text-xs uppercase text-gray-500 font-semibold">
+                          Forward calls to (private AI line)
+                        </div>
+                        <div className="font-bold text-lg text-slate-900 tracking-tight">{linePhone}</div>
+                      </div>
+                      <Button type="button" variant="outline" size="sm" onClick={() => void copyAiNumber()}>
+                        {copiedForward ? 'Copied!' : 'Copy AI number'}
+                      </Button>
+                    </div>
+                    <ol className="list-decimal pl-5 text-xs text-slate-700 space-y-1.5 pt-1">
+                      <li>Copy the AI number above.</li>
+                      <li>
+                        On your phone carrier or business line settings, turn on{' '}
+                        <strong>call forwarding</strong> to that AI number (always forward, or
+                        busy / no-answer only — your choice).
+                      </li>
+                      <li>
+                        Keep showing <strong>{publicBusinessNumber || 'your business number'}</strong> on
+                        your website, trucks, and Google Business — do not advertise the Twilio number.
+                      </li>
+                      <li>
+                        Turn AI Receptionist <strong>On</strong> (top of this page) and Save when you want
+                        AI to answer forwarded calls.
+                      </li>
+                    </ol>
+                    <p className="text-[11px] text-slate-500">
+                      Tip: many US carriers use *72 + AI number to turn forwarding on, and *73 to turn it
+                      off — check your carrier if those codes differ.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-sm font-semibold mb-1">
+                    Owner / cell for human handoff (and when AI is Off)
+                  </label>
+                  <Input
+                    value={transferNumber}
+                    onChange={(e) => setTransferNumber(e.target.value)}
+                    placeholder={companyPhone || '(555) 123-4567'}
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    AI can transfer here when someone asks for a person. If Receptionist is Off but
+                    forwarding is still on, calls ring this number so you don’t miss them.
+                  </p>
+                </div>
                 <Button
                   type="button"
                   variant="outline"
-                  className="mt-2"
                   disabled={lineBusy}
-                  onClick={() => void saveTransfer()}
+                  onClick={() => void saveLineSettings()}
                 >
-                  Save transfer number
+                  Save phone settings
                 </Button>
               </div>
             </CardContent>
@@ -727,18 +807,23 @@ export function AIReceptionist({
               <h3 className="font-semibold text-lg">Getting started</h3>
               <ol className="text-sm text-gray-700 list-decimal pl-5 space-y-1">
                 <li>
-                  Open <strong>Phone line</strong> and tap <strong>Enable AI receptionist line</strong>.
+                  <strong>Phone line</strong> → pay add-on → <strong>Enable AI receptionist line</strong>.
                 </li>
-                <li>Turn AI Receptionist <strong>On</strong> and save settings.</li>
-                <li>Fill your knowledge base (services, pricing ranges, service area, hours).</li>
-                <li>Set notify phone/email for alerts.</li>
-                <li>Practice with <strong>Test call</strong>, then dial your AI line to verify Twilio.</li>
+                <li>
+                  Forward your <strong>existing business number</strong> to the private AI line (instructions
+                  on Phone line).
+                </li>
+                <li>Turn AI Receptionist <strong>On</strong> and save.</li>
+                <li>Fill knowledge base (services, area, hours).</li>
+                <li>Call your business number to test — it should reach the AI when On.</li>
               </ol>
               <div className="rounded-xl bg-slate-50 border p-3 text-sm">
-                <div className="font-medium text-gray-700">Company phone (profile)</div>
-                <div className="text-gray-600">{companyPhone || 'Add company phone in Profile'}</div>
-                <div className="font-medium text-gray-700 mt-2">AI line</div>
-                <div className="text-gray-600">{linePhone || 'Not provisioned yet — use Phone line tab'}</div>
+                <div className="font-medium text-gray-700">Public business number</div>
+                <div className="text-gray-600">
+                  {publicBusinessNumber || companyPhone || 'Add in Phone line / Profile'}
+                </div>
+                <div className="font-medium text-gray-700 mt-2">Private AI forward-to number</div>
+                <div className="text-gray-600">{linePhone || 'Not provisioned yet'}</div>
               </div>
             </CardContent>
           </Card>
