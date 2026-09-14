@@ -110,6 +110,19 @@ export function AIReceptionist({
     void refreshLine();
   }, [refreshLine]);
 
+  const autoEnabledRef = React.useRef(false);
+  // One-time: if AI line exists but toggle was left Off (default), turn On so calls get AI not "please hold"
+  React.useEffect(() => {
+    if (autoEnabledRef.current) return;
+    if (!linePhone || settings.enabled) return;
+    if (!addonActive && lineStatus !== 'active') return;
+    autoEnabledRef.current = true;
+    const next = { ...settings, enabled: true };
+    onChangeSettings(next);
+    void onSave(next, messages);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linePhone, addonActive, lineStatus, settings.enabled]);
+
   const refreshSubscriptionStatus = async () => {
     setLineBusy(true);
     setLineError(null);
@@ -494,27 +507,42 @@ export function AIReceptionist({
             </p>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          <label className="flex items-center gap-2 text-sm font-medium bg-white border rounded-full px-4 py-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={settings.enabled}
-              onChange={(e) => patch({ enabled: e.target.checked })}
-              className="rounded"
-            />
-            {settings.enabled ? (
-              <span className="text-emerald-700">On</span>
-            ) : (
-              <span className="text-gray-500">Off</span>
-            )}
-          </label>
-          <Button
-            className="bg-[#10b981] hover:bg-[#059669] text-white"
-            onClick={save}
-            disabled={saving}
-          >
-            {saving ? 'Saving…' : 'Save'}
-          </Button>
+        <div className="flex flex-col items-end gap-2">
+          <div className="flex items-center gap-2">
+            <label
+              className={`flex items-center gap-2 text-sm font-bold border rounded-full px-4 py-2 cursor-pointer ${
+                settings.enabled
+                  ? 'bg-emerald-600 text-white border-emerald-700'
+                  : 'bg-amber-100 text-amber-950 border-amber-300'
+              }`}
+            >
+              <input
+                type="checkbox"
+                checked={settings.enabled}
+                onChange={async (e) => {
+                  const on = e.target.checked;
+                  const next = { ...settings, enabled: on };
+                  onChangeSettings(next);
+                  await onSave(next, messages);
+                }}
+                className="rounded"
+              />
+              {settings.enabled ? 'AI answering: ON' : 'AI answering: OFF'}
+            </label>
+            <Button
+              className="bg-[#10b981] hover:bg-[#059669] text-white"
+              onClick={save}
+              disabled={saving}
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </Button>
+          </div>
+          {!settings.enabled && (
+            <p className="text-xs text-amber-800 max-w-xs text-right">
+              Off = callers hear “please hold” and we try your cell. Turn <strong>ON</strong> for the AI
+              to answer.
+            </p>
+          )}
         </div>
       </div>
 
@@ -855,8 +883,9 @@ export function AIReceptionist({
                     placeholder={companyPhone || '(555) 123-4567'}
                   />
                   <p className="text-xs text-gray-500 mt-1">
-                    AI can transfer here when someone asks for a person. If Receptionist is Off but
-                    forwarding is still on, calls ring this number so you don’t miss them.
+                    Use your <strong>personal cell</strong> — not your public business number and not the
+                    AI line. (Forwarding your business number back into itself causes “please hold” loops.)
+                    AI can also transfer here when someone asks for a person.
                   </p>
                 </div>
                 <Button

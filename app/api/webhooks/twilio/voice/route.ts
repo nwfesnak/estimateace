@@ -6,18 +6,28 @@ import { getReceptionistWebhookBase } from '@/lib/twilio-receptionist-provision'
 import { sayGatherTwiml, sayHangupTwiml, transferTwiml } from '@/lib/receptionist-twiml';
 import { fillGreeting } from '@/lib/ai-receptionist';
 import { formatPhoneE164 } from '@/lib/notifications';
+import { receptionistAddonHasAccess } from '@/lib/receptionist-billing';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
 
+function digitsOnly(phone: string) {
+  return String(phone || '').replace(/\D/g, '');
+}
+
+function sameNumber(a: string, b: string) {
+  const da = digitsOnly(a);
+  const db = digitsOnly(b);
+  if (!da || !db) return false;
+  return da === db || da.slice(-10) === db.slice(-10);
+}
+
 /**
  * POST /api/webhooks/twilio/voice
  *
- * Customers keep advertising their existing business number and forward that
- * carrier line to this Twilio AI number. We always answer on the Twilio "To"
- * number, then:
- * - AI On  → live Gather + Grok receptionist
- * - AI Off → ring the owner/transfer number so calls are not dropped
+ * Customers advertise their business number and forward it here.
+ * - Receptionist On (or paid + line provisioned and not explicitly Off) → AI answers
+ * - Explicitly Off → dial owner CELL (never the business/AI number — that causes a loop)
  */
 export async function POST(request: NextRequest) {
   try {
@@ -47,8 +57,8 @@ export async function POST(request: NextRequest) {
     let languages = ['en', 'es'];
     let aiGreeting = '';
     let profilePhone = '';
-    // AI answers only when the in-app Receptionist toggle is On
-    let aiSettingsEnabled = tenant.config.enabled === true;
+    let classicEnabled: boolean | null = null;
+    let addonActive = false;
 
     if (admin) {
       const { data } = await admin
@@ -63,28 +73,50 @@ export async function POST(request: NextRequest) {
       if (Array.isArray(ai.languages) && ai.languages.length) languages = ai.languages.map(String);
       aiGreeting = String(ai.greeting || '');
       profilePhone = String(profile.phone || '');
-      if (typeof ai.enabled === 'boolean') {
-        aiSettingsEnabled = ai.enabled === true;
-      }
+      if (typeof ai.enabled === 'boolean') classicEnabled = ai.enabled;
+      addonActive =
+        profile.aiReceptionistAddonActive === true ||
+        receptionistAddonHasAccess(profile.receptionistBilling);
     }
 
-    const ownerRing =
-      formatPhoneE164(tenant.config.transferNumber || '') ||
-      formatPhoneE164(profilePhone) ||
-      formatPhoneE164(tenant.config.publicBusinessNumber || '');
+    const hasAiLine = Boolean(tenant.config.twilio?.phoneNumber);
+    // Answer with AI when:
+    // - toggle explicitly On, OR
+    // - toggle never set / true via config.enabled, OR
+    // - paid + line exists and not explicitly Off
+    const explicitlyOff = classicEnabled === false && tenant.config.enabled === false;
+    const aiSettingsEnabled =
+      !explicitlyOff &&
+      (classicEnabled === true ||
+        tenant.config.enabled === true ||
+        (classicEnabled !== false && hasAiLine && (addonActive || tenant.config.status === 'active')));
 
-    // AI turned Off — still ring the owner so forwarded calls are not lost
+    const aiLine = tenant.config.twilio?.phoneNumber || to;
+    const publicBiz = tenant.config.publicBusinessNumber || '';
+
+    // Owner ring target must NOT be the AI line or the public business number
+    // (business number usually forwards back here → endless "please hold")
+    const ownerCandidates = [tenant.config.transferNumber || '', profilePhone].filter(Boolean);
+    const ownerRing =
+      ownerCandidates
+        .map((n) => formatPhoneE164(n) || n)
+        .find((n) => n && !sameNumber(n, aiLine) && !sameNumber(n, publicBiz) && !sameNumber(n, to)) ||
+      '';
+
     if (!aiSettingsEnabled) {
+      console.info('twilio voice AI off', {
+        to,
+        from,
+        callSid,
+        contractorId: tenant.userId,
+        classicEnabled,
+        configEnabled: tenant.config.enabled,
+        ownerRing: ownerRing || null,
+      });
       if (ownerRing) {
-        console.info('twilio voice AI off → dial owner', {
-          to,
-          from,
-          callSid,
-          contractorId: tenant.userId,
-        });
         return xml(
           transferTwiml({
-            say: 'Please hold while we connect you.',
+            say: 'The AI receptionist is turned off. Please hold while we connect you to the business.',
             transferTo: ownerRing,
             callerId: to || undefined,
           })
@@ -92,7 +124,7 @@ export async function POST(request: NextRequest) {
       }
       return xml(
         sayHangupTwiml(
-          'Thanks for calling. No one is available to take your call right now. Please try again later.'
+          'Thanks for calling. The AI receptionist is turned off right now, and no backup number is set. Please try again later.'
         )
       );
     }
@@ -111,7 +143,7 @@ export async function POST(request: NextRequest) {
         from,
         to,
         businessName: business,
-        transferNumber: tenant.config.transferNumber || profilePhone || '',
+        transferNumber: ownerRing || tenant.config.transferNumber || '',
         knowledgeBase,
         greeting: rawGreeting,
         urgentKeywords,
