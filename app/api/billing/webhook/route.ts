@@ -9,6 +9,11 @@ import {
   isCrewSeatSubscription,
   upsertCrewSeatFromStripe,
 } from '@/lib/crew-billing';
+import {
+  RECEPTIONIST_ADDON_PURPOSE,
+  isReceptionistAddonSubscription,
+  upsertReceptionistAddonFromStripe,
+} from '@/lib/receptionist-billing';
 
 export const runtime = 'nodejs';
 
@@ -70,6 +75,23 @@ export async function POST(request: NextRequest) {
           break;
         }
 
+        // AI Receptionist add-on ($49.99/mo)
+        if (session.metadata?.purpose === RECEPTIONIST_ADDON_PURPOSE) {
+          if (session.subscription) {
+            const subId =
+              typeof session.subscription === 'string'
+                ? session.subscription
+                : session.subscription.id;
+            const sub = await stripe.subscriptions.retrieve(subId);
+            const result = await upsertReceptionistAddonFromStripe(
+              sub,
+              session.client_reference_id || session.metadata?.supabase_user_id
+            );
+            if (!result.ok) console.error('webhook receptionist addon:', result.error);
+          }
+          break;
+        }
+
         // SaaS subscription checkout only (EstimateAce monthly/yearly)
         if (session.metadata?.saas_billing === 'false') {
           break;
@@ -90,6 +112,11 @@ export async function POST(request: NextRequest) {
             if (!result.ok) console.error('webhook crew seat:', result.error);
             break;
           }
+          if (isReceptionistAddonSubscription(sub)) {
+            const result = await upsertReceptionistAddonFromStripe(sub, userId || null);
+            if (!result.ok) console.error('webhook receptionist addon:', result.error);
+            break;
+          }
           const result = await upsertSubscriptionFromStripe(sub, userId || null);
           if (!result.ok) console.error('webhook checkout upsert:', result.error);
         }
@@ -105,6 +132,11 @@ export async function POST(request: NextRequest) {
         if (isCrewSeatSubscription(sub)) {
           const result = await upsertCrewSeatFromStripe(sub);
           if (!result.ok) console.error('webhook crew seat sub:', result.error);
+          break;
+        }
+        if (isReceptionistAddonSubscription(sub)) {
+          const result = await upsertReceptionistAddonFromStripe(sub);
+          if (!result.ok) console.error('webhook receptionist addon sub:', result.error);
           break;
         }
         const result = await upsertSubscriptionFromStripe(sub);

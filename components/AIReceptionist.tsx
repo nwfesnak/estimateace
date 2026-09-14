@@ -70,6 +70,8 @@ export function AIReceptionist({
   const [lineError, setLineError] = React.useState<string | null>(null);
   const [areaCode, setAreaCode] = React.useState('');
   const [transferNumber, setTransferNumber] = React.useState(companyPhone || '');
+  const [addonActive, setAddonActive] = React.useState(false);
+  const [addonAmountDisplay, setAddonAmountDisplay] = React.useState('$49.99');
 
   const inHours = isWithinBusinessHours(settings);
   const activeGreeting = fillGreeting(
@@ -89,6 +91,8 @@ export function AIReceptionist({
       if (!res.ok) return;
       setLinePhone(json.phoneNumber || json.config?.phoneNumber || null);
       setLineStatus(String(json.status || json.config?.status || 'none'));
+      setAddonActive(Boolean(json.addonActive));
+      if (json.addonAmountDisplay) setAddonAmountDisplay(String(json.addonAmountDisplay));
       if (json.config?.transferNumber) setTransferNumber(String(json.config.transferNumber));
     } catch {
       /* ignore */
@@ -98,6 +102,53 @@ export function AIReceptionist({
   React.useEffect(() => {
     void refreshLine();
   }, [refreshLine]);
+
+  const startAddonCheckout = async () => {
+    setLineBusy(true);
+    setLineError(null);
+    try {
+      const token = await getAccessToken();
+      if (!token) {
+        setLineError('Please log in again.');
+        return;
+      }
+      if (
+        !confirm(
+          `AI Receptionist add-on is ${addonAmountDisplay}/month.\n\nYou’ll confirm payment on the next Stripe screen. After payment, come back here to enable your AI phone line.`
+        )
+      ) {
+        return;
+      }
+      const res = await fetch('/api/receptionist/checkout', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({}),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setLineError(json.error || 'Could not start checkout.');
+        return;
+      }
+      if (json.alreadyActive) {
+        setAddonActive(true);
+        setLineError(null);
+        await refreshLine();
+        return;
+      }
+      if (json.url) {
+        window.location.href = json.url;
+        return;
+      }
+      setLineError('No checkout URL returned.');
+    } catch {
+      setLineError('Network error starting checkout.');
+    } finally {
+      setLineBusy(false);
+    }
+  };
 
   const enableLine = async () => {
     setLineBusy(true);
@@ -118,11 +169,20 @@ export function AIReceptionist({
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
+        if (json.needsPayment) {
+          setAddonActive(false);
+          setLineError(
+            json.error ||
+              `Pay for the add-on (${json.amountDisplay || addonAmountDisplay}/mo) before enabling the phone line.`
+          );
+          return;
+        }
         setLineError(json.error || 'Could not provision AI phone number.');
         return;
       }
       setLinePhone(json.phoneNumber || null);
       setLineStatus(String(json.status || 'active'));
+      setAddonActive(true);
       onChangeSettings({ ...settings, enabled: true });
       await onSave({ ...settings, enabled: true }, messages);
     } catch {
@@ -562,6 +622,32 @@ export function AIReceptionist({
                 going live.
               </p>
 
+              <div className="rounded-xl border border-violet-200 bg-violet-50/80 p-4 text-sm text-violet-950">
+                <strong>Paid add-on:</strong> {addonAmountDisplay}/month. You must confirm payment before
+                EstimateAce provisions your Twilio AI number.
+                {addonActive ? (
+                  <span className="block mt-1 font-semibold text-emerald-800">✓ Subscription active</span>
+                ) : (
+                  <span className="block mt-1 text-amber-900">Not subscribed yet</span>
+                )}
+              </div>
+
+              {!addonActive && (
+                <div className="rounded-2xl border-2 border-violet-300 bg-white p-5 space-y-3">
+                  <p className="text-sm text-slate-800">
+                    Step 1 — Confirm payment for AI Receptionist ({addonAmountDisplay}/mo).
+                  </p>
+                  <Button
+                    type="button"
+                    className="w-full bg-violet-700 hover:bg-violet-800 text-white font-bold py-6 text-base"
+                    disabled={lineBusy}
+                    onClick={() => void startAddonCheckout()}
+                  >
+                    {lineBusy ? 'Opening Stripe…' : `Confirm & pay ${addonAmountDisplay}/mo`}
+                  </Button>
+                </div>
+              )}
+
               {linePhone ? (
                 <div className="rounded-2xl border-2 border-emerald-300 bg-emerald-50 p-5 text-center">
                   <div className="text-xs uppercase tracking-wide text-emerald-800 font-semibold">
@@ -577,10 +663,11 @@ export function AIReceptionist({
                     Call to test
                   </a>
                 </div>
-              ) : (
-                <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-5 space-y-3">
+              ) : addonActive ? (
+                <div className="rounded-2xl border border-dashed border-emerald-300 bg-emerald-50/50 p-5 space-y-3">
                   <p className="text-sm text-slate-700">
-                    No AI line yet. Enable to create a Twilio subaccount and buy a US local number.
+                    Step 2 — Payment confirmed. Enable your AI line to create a Twilio number for your
+                    business.
                   </p>
                   <div>
                     <label className="block text-sm font-semibold mb-1">Preferred area code (optional)</label>
@@ -593,14 +680,14 @@ export function AIReceptionist({
                   </div>
                   <Button
                     type="button"
-                    className="bg-[#10b981] hover:bg-[#059669] text-white font-bold"
+                    className="w-full bg-[#10b981] hover:bg-[#059669] text-white font-bold"
                     disabled={lineBusy}
                     onClick={() => void enableLine()}
                   >
                     {lineBusy ? 'Provisioning…' : 'Enable AI receptionist line'}
                   </Button>
                 </div>
-              )}
+              ) : null}
 
               {lineError && (
                 <p className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">

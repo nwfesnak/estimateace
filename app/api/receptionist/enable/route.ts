@@ -8,13 +8,18 @@ import {
 } from '@/lib/receptionist-config';
 import { loadReceptionistConfig, saveReceptionistConfig } from '@/lib/receptionist-store';
 import { provisionContractorReceptionistLine } from '@/lib/twilio-receptionist-provision';
+import {
+  loadReceptionistBilling,
+  receptionistAddonHasAccess,
+  RECEPTIONIST_ADDON_AMOUNT_DISPLAY,
+} from '@/lib/receptionist-billing';
 
 export const dynamic = 'force-dynamic';
 
 /**
  * POST /api/receptionist/enable
- * Creates Twilio subaccount + buys a local number, saves config.
- * Requires paid add-on flag OR allow first provision to activate add-on (Phase 1).
+ * Creates Twilio subaccount + buys a local number.
+ * Requires active paid add-on subscription ($49.99/mo) first.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -28,6 +33,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: 'Server missing SUPABASE_SERVICE_ROLE_KEY.' },
         { status: 503 }
+      );
+    }
+
+    const billing = await loadReceptionistBilling(user.id);
+    if (!receptionistAddonHasAccess(billing)) {
+      return NextResponse.json(
+        {
+          error: `AI Receptionist is a paid add-on (${RECEPTIONIST_ADDON_AMOUNT_DISPLAY}/mo). Confirm payment first, then enable your phone line.`,
+          needsPayment: true,
+          amountDisplay: RECEPTIONIST_ADDON_AMOUNT_DISPLAY,
+        },
+        { status: 402 }
       );
     }
 

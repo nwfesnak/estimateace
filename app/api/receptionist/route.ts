@@ -7,6 +7,11 @@ import {
   toPublicReceptionistConfig,
 } from '@/lib/receptionist-config';
 import { loadReceptionistConfig, saveReceptionistConfig } from '@/lib/receptionist-store';
+import {
+  loadReceptionistBilling,
+  receptionistAddonHasAccess,
+  RECEPTIONIST_ADDON_AMOUNT_DISPLAY,
+} from '@/lib/receptionist-billing';
 
 async function verifyUser(request: NextRequest) {
   const authHeader = request.headers.get('authorization');
@@ -50,11 +55,20 @@ export async function GET(request: NextRequest) {
       businessName = String((data?.profile as any)?.company || '');
     }
     const config = await loadReceptionistConfig(user.id, businessName);
+    const billing = await loadReceptionistBilling(user.id);
+    const addonActive = receptionistAddonHasAccess(billing);
     return NextResponse.json({
       ok: true,
       config: toPublicReceptionistConfig(config),
       phoneNumber: config.twilio?.phoneNumber || null,
       status: config.status,
+      addonActive,
+      addonAmountDisplay: RECEPTIONIST_ADDON_AMOUNT_DISPLAY,
+      billing: {
+        status: billing.status || null,
+        currentPeriodEnd: billing.currentPeriodEnd || null,
+        cancelAtPeriodEnd: Boolean(billing.cancelAtPeriodEnd),
+      },
     });
   } catch (e: any) {
     console.error('receptionist GET:', e);

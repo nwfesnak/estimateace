@@ -1196,9 +1196,18 @@ export default function Home() {
     return (profile as any).emailLeadSummariesEnabled !== false;
   };
 
-  /** Paid AI Receptionist add-on (Stripe/ops sets this; default off) */
+  /** Paid AI Receptionist add-on (Stripe subscription or flag) */
   const hasAiReceptionistAddon = (): boolean => {
     const cached = getProfileSettingsCache();
+    const billing = (cached as any).receptionistBilling || (profile as any).receptionistBilling;
+    if (billing && typeof billing === 'object') {
+      const status = String(billing.status || '').toLowerCase();
+      const periodEnd = billing.currentPeriodEnd
+        ? new Date(billing.currentPeriodEnd).getTime()
+        : 0;
+      if (status === 'active' || status === 'trialing' || status === 'past_due') return true;
+      if ((status === 'canceled' || billing.cancelAtPeriodEnd) && periodEnd > Date.now()) return true;
+    }
     if ('aiReceptionistAddonActive' in cached) {
       return cached.aiReceptionistAddonActive === true;
     }
@@ -2657,6 +2666,19 @@ export default function Home() {
         await refreshBillingStatus();
         showMessage('✅ Billing status refreshed. Open Profile → Billing / Contact Us if needed.');
       })();
+    } else if (billingParam === 'receptionist_success') {
+      showMessage(
+        '✅ AI Receptionist payment confirmed. Open Billing → Set up AI line → Phone line → Enable AI receptionist line.'
+      );
+      setProfileTab('billing');
+      setBillingPanel('overview');
+      setView('profileView');
+      void loadReceptionistFromSettings();
+      window.setTimeout(() => setView('receptionistView'), 400);
+    } else if (billingParam === 'receptionist_cancel') {
+      showMessage('AI Receptionist checkout canceled — no charge was made.');
+      setProfileTab('billing');
+      setView('profileView');
     } else if (billingParam === 'crew_seat_success') {
       const crew = params.get('crew') || 'crew member';
       showMessage(
@@ -13706,14 +13728,14 @@ export default function Home() {
                         <p className="text-sm text-gray-600 mt-1 max-w-lg">
                           {hasAiReceptionistAddon() ? (
                             <>
-                              Add-on is active. Turn the receptionist <strong>On</strong> in its settings to show
-                              leads on your dashboard. Live phone forwarding rolls out with the add-on.
+                              Add-on is active ($49.99/mo). Open Phone line to enable your Twilio AI number, then
+                              turn the receptionist <strong>On</strong> so leads show on the dashboard.
                             </>
                           ) : (
                             <>
-                              AI Receptionist is a <strong>paid add-on</strong>. Until it is purchased, it will not
-                              appear on your dashboard. Email summaries stay included with your plan (toggle under
-                              Company Profile).
+                              AI Receptionist is <strong>$49.99/mo</strong>. Open setup → Phone line →{' '}
+                              <strong>Confirm &amp; pay</strong> on Stripe, then enable your AI phone line.
+                              Email summaries stay included with your plan.
                             </>
                           )}
                         </p>
