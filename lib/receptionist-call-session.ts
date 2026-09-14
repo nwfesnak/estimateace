@@ -20,6 +20,9 @@ export type ReceptionistCallSession = {
   transcript: CallTurn[];
   leadIds: string[];
   turn: number;
+  /** Stashed SpeechResult while we ack Twilio quickly, then /think runs Grok */
+  pendingCallerText?: string;
+  emptyListenCount?: number;
   createdAt: string;
   updatedAt: string;
 };

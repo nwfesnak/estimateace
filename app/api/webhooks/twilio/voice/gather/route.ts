@@ -1,127 +1,82 @@
 import { NextRequest, NextResponse } from 'next/server';
-import {
-  loadCallSession,
-  saveCallSession,
-  transcriptToText,
-} from '@/lib/receptionist-call-session';
-import { runReceptionistVoiceTurn } from '@/lib/receptionist-voice-agent';
-import { appendReceptionistLead } from '@/lib/receptionist-leads';
-import { sayGatherTwiml, sayHangupTwiml, transferTwiml } from '@/lib/receptionist-twiml';
+import { loadCallSession, saveCallSession } from '@/lib/receptionist-call-session';
+import { sayGatherTwiml, sayHangupTwiml, sayThenRedirectTwiml } from '@/lib/receptionist-twiml';
 import { getReceptionistWebhookBase } from '@/lib/twilio-receptionist-provision';
-import { formatPhoneE164 } from '@/lib/notifications';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
-
-const MAX_TURNS = 14;
+export const maxDuration = 15;
 
 /**
  * POST /api/webhooks/twilio/voice/gather
- * SpeechResult from <Gather> → Grok receptionist turn → Say + Gather / Dial / Hangup
+ * Fast path: capture SpeechResult, stash on session, ack Twilio immediately,
+ * then Redirect to /think (where Grok runs). Avoids Twilio's ~15s action timeout.
  */
 export async function POST(request: NextRequest) {
   try {
     const form = await request.formData();
     const callSid = String(form.get('CallSid') || '');
-    const speech = String(form.get('SpeechResult') || form.get('UnstableSpeechResult') || '').trim();
-    const from = String(form.get('From') || '');
+    const speech = String(
+      form.get('SpeechResult') ||
+        form.get('UnstableSpeechResult') ||
+        form.get('StableSpeechResult') ||
+        ''
+    ).trim();
+    const digits = String(form.get('Digits') || '').trim();
+    const confidence = String(form.get('Confidence') || '');
 
-    const session = callSid ? await loadCallSession(callSid) : null;
-    const gatherUrl = `${getReceptionistWebhookBase()}/api/webhooks/twilio/voice/gather`;
-
-    if (!session) {
-      return xml(
-        sayHangupTwiml('Thanks for calling. Please try again in a moment.')
-      );
-    }
-
-    const callerText = speech || '(no speech detected)';
-    if (speech) {
-      session.transcript.push({ role: 'caller', text: speech });
-    }
-    session.turn = (session.turn || 0) + 1;
-
-    if (session.turn > MAX_TURNS) {
-      const bye =
-        'Thanks for calling. I have your information and we will follow up soon. Goodbye.';
-      session.transcript.push({ role: 'agent', text: bye });
-      await saveCallSession(session);
-      await finalizeLeadFromSession(session);
-      return xml(sayHangupTwiml(bye));
-    }
-
-    const transferE164 = formatPhoneE164(session.transferNumber || '') || '';
-    const result = await runReceptionistVoiceTurn({
-      businessName: session.businessName,
-      knowledgeBase: session.knowledgeBase,
-      greetingStyle: session.greeting,
-      languages: session.languages,
-      urgentKeywords: session.urgentKeywords,
-      callerPhone: session.from || from,
-      transcript: session.transcript,
-      callerMessage: callerText,
-      transferAvailable: Boolean(transferE164),
+    console.info('voice gather:', {
+      callSid,
+      speech: speech.slice(0, 120),
+      digits,
+      confidence,
     });
 
-    session.transcript.push({ role: 'agent', text: result.say });
+    const session = callSid ? await loadCallSession(callSid) : null;
+    const base = getReceptionistWebhookBase();
+    const gatherUrl = `${base}/api/webhooks/twilio/voice/gather`;
+    const thinkUrl = `${base}/api/webhooks/twilio/voice/think`;
 
-    if (result.lead && (result.lead.notes || result.lead.name)) {
-      const lead = await appendReceptionistLead({
-        userId: session.userId,
-        callerName: result.lead.name || '',
-        callerPhone: session.from || from,
-        summary: [result.lead.notes, result.lead.address].filter(Boolean).join(' · ') || result.say,
-        actionItems: ['Follow up from live AI call'],
-        transcript: transcriptToText(session.transcript),
-        urgent: Boolean(result.lead.urgent),
-        source: 'voice',
-      });
-      if (lead?.id) session.leadIds = [...(session.leadIds || []), lead.id];
+    if (!session) {
+      return xml(sayHangupTwiml('Thanks for calling. Please try again in a moment.'));
     }
 
-    await saveCallSession(session);
+    // DTMF 0 / * → treat as request for human (handled in think)
+    const callerText = speech || (digits ? `Pressed ${digits}` : '');
 
-    if (result.action === 'transfer' && transferE164) {
+    if (!callerText) {
+      const emptyCount = (session.emptyListenCount || 0) + 1;
+      session.emptyListenCount = emptyCount;
+      await saveCallSession(session);
+
+      if (emptyCount >= 3) {
+        const bye =
+          'I am having trouble hearing you. Please call back, or leave a message with your name and number. Goodbye.';
+        return xml(sayHangupTwiml(bye));
+      }
+
       return xml(
-        transferTwiml({
-          say: result.say || 'Please hold while I connect you.',
-          transferTo: transferE164,
-          callerId: session.to || undefined,
+        sayGatherTwiml({
+          say: "Sorry, I didn't catch that. Please speak clearly after the beep — for example, say your name and what you need.",
+          gatherActionUrl: gatherUrl,
         })
       );
     }
 
-    if (result.action === 'end') {
-      if (!(session.leadIds || []).length) {
-        await finalizeLeadFromSession(session);
-      }
-      return xml(sayHangupTwiml(result.say || 'Thanks for calling. Goodbye.'));
-    }
+    session.pendingCallerText = callerText;
+    session.emptyListenCount = 0;
+    await saveCallSession(session);
 
+    // Quick ack so Twilio does not time out while Grok thinks
     return xml(
-      sayGatherTwiml({
-        say: result.say,
-        gatherActionUrl: gatherUrl,
+      sayThenRedirectTwiml({
+        say: 'One moment please.',
+        redirectUrl: thinkUrl,
       })
     );
   } catch (e: any) {
     console.error('voice gather:', e);
     return xml(sayHangupTwiml('We are sorry. Something went wrong. Please try again later.'));
   }
-}
-
-async function finalizeLeadFromSession(session: NonNullable<Awaited<ReturnType<typeof loadCallSession>>>) {
-  if ((session.leadIds || []).length > 0) return;
-  const text = transcriptToText(session.transcript);
-  if (!text.trim()) return;
-  await appendReceptionistLead({
-    userId: session.userId,
-    callerPhone: session.from,
-    summary: text.slice(0, 280),
-    transcript: text,
-    actionItems: ['Review live call'],
-    source: 'voice',
-  });
 }
 
 function xml(twiml: string) {

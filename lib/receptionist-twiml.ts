@@ -13,19 +13,41 @@ export function twimlResponse(inner: string) {
   return `<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n${inner}\n</Response>`;
 }
 
+/**
+ * Speak a prompt, then listen for speech.
+ * Tuned for phone calls: longer listen window, always POST back (even if silent).
+ */
 export function sayGatherTwiml(opts: {
   say: string;
   gatherActionUrl: string;
   language?: string;
+  /** Extra recognition hints (comma-separated phrases) */
+  hints?: string;
 }) {
   const say = escapeXml(opts.say.slice(0, 500));
   const action = escapeXml(opts.gatherActionUrl);
-  // Nested Say inside Gather plays prompt then listens
-  return twimlResponse(`  <Gather input="speech" speechTimeout="auto" timeout="4" action="${action}" method="POST" enhanced="true" speechModel="phone_call" language="${escapeXml(opts.language || 'en-US')}">
+  const lang = escapeXml(opts.language || 'en-US');
+  const hints = escapeXml(
+    opts.hints ||
+      'yes, no, estimate, quote, appointment, schedule, price, pricing, service, address, name, phone, callback, transfer, speak to someone, human, owner'
+  );
+
+  // speechTimeout = silence after caller stops talking (seconds)
+  // timeout = max wait for them to start speaking
+  // actionOnEmptyResult = always hit action URL so we can re-prompt
+  // phone_call + enhanced = most reliable on Twilio voice
+  return twimlResponse(`  <Gather input="speech dtmf" language="${lang}" speechTimeout="auto" timeout="10" action="${action}" method="POST" actionOnEmptyResult="true" enhanced="true" speechModel="phone_call" hints="${hints}" bargeIn="true" numDigits="1">
     <Say voice="Polly.Joanna">${say}</Say>
+    <Pause length="1"/>
   </Gather>
-  <Say voice="Polly.Joanna">Sorry, I did not catch that.</Say>
+  <Say voice="Polly.Joanna">I am still here. Please say that again.</Say>
   <Redirect method="POST">${action}</Redirect>`);
+}
+
+export function sayThenRedirectTwiml(opts: { say: string; redirectUrl: string }) {
+  return twimlResponse(
+    `  <Say voice="Polly.Joanna">${escapeXml(opts.say.slice(0, 300))}</Say>\n  <Redirect method="POST">${escapeXml(opts.redirectUrl)}</Redirect>`
+  );
 }
 
 export function sayHangupTwiml(say: string) {
