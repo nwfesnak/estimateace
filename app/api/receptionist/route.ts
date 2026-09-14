@@ -11,6 +11,7 @@ import {
   loadReceptionistBilling,
   receptionistAddonHasAccess,
   RECEPTIONIST_ADDON_AMOUNT_DISPLAY,
+  syncReceptionistAddonForUser,
 } from '@/lib/receptionist-billing';
 
 async function verifyUser(request: NextRequest) {
@@ -55,14 +56,27 @@ export async function GET(request: NextRequest) {
       businessName = String((data?.profile as any)?.company || '');
     }
     const config = await loadReceptionistConfig(user.id, businessName);
-    const billing = await loadReceptionistBilling(user.id);
-    const addonActive = receptionistAddonHasAccess(billing);
+    let billing = await loadReceptionistBilling(user.id);
+    let addonActive = receptionistAddonHasAccess(billing);
+
+    // After Stripe pay, webhook can lag — sync from Stripe so UI shows Subscribed
+    if (!addonActive) {
+      try {
+        const synced = await syncReceptionistAddonForUser(user.id);
+        billing = synced.billing || billing;
+        addonActive = synced.active;
+      } catch (e) {
+        console.warn('receptionist GET sync:', e);
+      }
+    }
+
     return NextResponse.json({
       ok: true,
       config: toPublicReceptionistConfig(config),
       phoneNumber: config.twilio?.phoneNumber || null,
       status: config.status,
       addonActive,
+      subscribed: addonActive,
       addonAmountDisplay: RECEPTIONIST_ADDON_AMOUNT_DISPLAY,
       billing: {
         status: billing.status || null,

@@ -91,7 +91,7 @@ export async function POST(request: NextRequest) {
       customer: customerId,
       client_reference_id: user.id,
       line_items: lineItems,
-      success_url: `${appUrl}/?billing=receptionist_success`,
+      success_url: `${appUrl}/?billing=receptionist_success&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${appUrl}/?billing=receptionist_cancel`,
       allow_promotion_codes: true,
       subscription_data: {

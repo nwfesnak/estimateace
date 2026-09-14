@@ -110,6 +110,47 @@ export function AIReceptionist({
     void refreshLine();
   }, [refreshLine]);
 
+  const refreshSubscriptionStatus = async () => {
+    setLineBusy(true);
+    setLineError(null);
+    try {
+      const token = await getAccessToken();
+      if (!token) {
+        setLineError('Please log in again.');
+        return;
+      }
+      const params = new URLSearchParams(window.location.search);
+      const sessionId = params.get('session_id') || '';
+      const res = await fetch('/api/receptionist/sync', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ sessionId: sessionId || undefined }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setLineError(json.error || 'Could not refresh subscription.');
+        return;
+      }
+      setAddonActive(Boolean(json.addonActive || json.subscribed));
+      await refreshLine();
+      if (!(json.addonActive || json.subscribed)) {
+        setLineError(
+          json.message ||
+            'Stripe has not marked this subscription active yet. Wait a few seconds and tap Refresh again.'
+        );
+      } else {
+        setLineError(null);
+      }
+    } catch {
+      setLineError('Network error refreshing subscription.');
+    } finally {
+      setLineBusy(false);
+    }
+  };
+
   const startAddonCheckout = async () => {
     setLineBusy(true);
     setLineError(null);
@@ -642,16 +683,36 @@ export function AIReceptionist({
               </p>
 
               <div className="rounded-xl border border-violet-200 bg-violet-50/80 p-4 text-sm text-violet-950">
-                <strong>Paid add-on:</strong> {addonAmountDisplay}/month. You must confirm payment before
-                EstimateAce provisions your Twilio AI number.
+                <strong>Paid add-on:</strong> {addonAmountDisplay}/month.
                 {addonActive ? (
-                  <span className="block mt-1 font-semibold text-emerald-800">✓ Subscription active</span>
+                  <span className="mt-2 inline-flex items-center rounded-full bg-emerald-600 text-white text-xs font-bold uppercase tracking-wide px-3 py-1">
+                    Subscribed
+                  </span>
                 ) : (
-                  <span className="block mt-1 text-amber-900">Not subscribed yet</span>
+                  <span className="block mt-1 text-amber-900">Not subscribed yet — confirm payment below.</span>
                 )}
+                <div className="mt-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="text-xs"
+                    disabled={lineBusy}
+                    onClick={() => void refreshSubscriptionStatus()}
+                  >
+                    {lineBusy ? 'Checking…' : 'Refresh subscription'}
+                  </Button>
+                </div>
               </div>
 
-              {!addonActive && (
+              {addonActive ? (
+                <div className="rounded-2xl border-2 border-emerald-400 bg-emerald-50 p-5 text-center">
+                  <p className="text-lg font-bold text-emerald-900">✓ Subscribed — {addonAmountDisplay}/mo</p>
+                  <p className="text-sm text-emerald-800 mt-1">
+                    Payment confirmed. Enable your AI phone line below if you have not already.
+                  </p>
+                </div>
+              ) : (
                 <div className="rounded-2xl border-2 border-violet-300 bg-white p-5 space-y-3">
                   <p className="text-sm text-slate-800">
                     Step 1 — Confirm payment for AI Receptionist ({addonAmountDisplay}/mo).
@@ -664,6 +725,9 @@ export function AIReceptionist({
                   >
                     {lineBusy ? 'Opening Stripe…' : `Confirm & pay ${addonAmountDisplay}/mo`}
                   </Button>
+                  <p className="text-xs text-gray-500 text-center">
+                    Already paid? Tap <strong>Refresh subscription</strong> above.
+                  </p>
                 </div>
               )}
 

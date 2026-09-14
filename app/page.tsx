@@ -2667,14 +2667,54 @@ export default function Home() {
         showMessage('✅ Billing status refreshed. Open Profile → Billing / Contact Us if needed.');
       })();
     } else if (billingParam === 'receptionist_success') {
-      showMessage(
-        '✅ AI Receptionist payment confirmed. Open Billing → Set up AI line → Phone line → Enable AI receptionist line.'
-      );
+      const sessionId = new URLSearchParams(window.location.search).get('session_id') || '';
+      showMessage('✅ Payment received — confirming subscription…');
       setProfileTab('billing');
       setBillingPanel('overview');
       setView('profileView');
-      void loadReceptionistFromSettings();
-      window.setTimeout(() => setView('receptionistView'), 400);
+      void (async () => {
+        try {
+          if (!supabase) return;
+          const { data: sessionData } = await supabase.auth.getSession();
+          const token = sessionData.session?.access_token;
+          if (!token) return;
+          const res = await fetch('/api/receptionist/sync', {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ sessionId: sessionId || undefined }),
+          });
+          const json = await res.json().catch(() => ({}));
+          if (json.addonActive || json.subscribed) {
+            showMessage(
+              '✅ Subscribed to AI Receptionist. Open Phone line → Enable AI receptionist line.'
+            );
+            // Refresh local profile flag
+            setProfile((prev) => ({ ...prev, aiReceptionistAddonActive: true }));
+            setProfileSettingsCache({
+              ...getProfileSettingsCache(),
+              aiReceptionistAddonActive: true,
+            });
+          } else {
+            showMessage(
+              json.message ||
+                'Payment received. If Phone line still asks to pay, tap Refresh subscription there.'
+            );
+          }
+        } catch {
+          showMessage('Payment received. Open Phone line and tap Refresh subscription if needed.');
+        }
+        void loadReceptionistFromSettings();
+        setView('receptionistView');
+      })();
+      // Clean query params so refresh doesn't re-fire
+      try {
+        window.history.replaceState({}, '', window.location.pathname);
+      } catch {
+        /* ignore */
+      }
     } else if (billingParam === 'receptionist_cancel') {
       showMessage('AI Receptionist checkout canceled — no charge was made.');
       setProfileTab('billing');
