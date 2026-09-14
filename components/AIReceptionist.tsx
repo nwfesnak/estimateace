@@ -357,9 +357,9 @@ export function AIReceptionist({
             </span>
           </h2>
           <p className="text-sm text-gray-500 mt-1 max-w-xl">
-            Provision your own AI phone line (Twilio), set knowledge + greeting, and collect leads in
-            your inbox. Full live AI conversation on the call is the next phase — Phase 1 gives you
-            the number and basic answer/SMS intake.
+            Provision your Twilio AI line, fill the knowledge base, then callers can talk live with
+            the receptionist (speech). Leads land in your Inbox and dashboard. Set a transfer number
+            for human handoff when someone asks for a person.
           </p>
           {linePhone && (
             <p className="mt-2 text-sm font-semibold text-emerald-800">
@@ -557,8 +557,9 @@ export function AIReceptionist({
             <CardContent className="p-6 space-y-4">
               <h3 className="font-semibold text-lg">Your AI phone line</h3>
               <p className="text-sm text-gray-600">
-                EstimateAce provisions a Twilio number for your business. Callers dial this line; SMS to
-                it lands in your Inbox. Full live AI conversation on the call ships next.
+                EstimateAce provisions a Twilio number for your business. Callers dial this line and
+                talk with the AI (speech). SMS also lands in your Inbox. Fill Knowledge base before
+                going live.
               </p>
 
               {linePhone ? (

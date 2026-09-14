@@ -31,7 +31,7 @@ export type ReceptionistMessage = {
   spam: boolean;
   language: string;
   status: 'new' | 'read' | 'handled';
-  source: 'test' | 'forwarded' | 'manual' | 'email';
+  source: 'test' | 'forwarded' | 'manual' | 'email' | 'voice' | 'sms';
 };
 
 /** Email lead summaries (future: Gmail/Outlook connect). Shown on dashboard Leads. */
@@ -113,7 +113,7 @@ export function normalizeReceptionistMessages(raw: unknown): ReceptionistMessage
         status: (['new', 'read', 'handled'].includes(row.status)
           ? row.status
           : 'new') as ReceptionistMessage['status'],
-        source: (['test', 'forwarded', 'manual', 'email'].includes(row.source)
+        source: (['test', 'forwarded', 'manual', 'email', 'voice', 'sms'].includes(row.source)
           ? row.source
           : 'manual') as ReceptionistMessage['source'],
       } as ReceptionistMessage;

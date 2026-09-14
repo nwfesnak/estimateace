@@ -1,13 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findReceptionistByPhoneNumber } from '@/lib/receptionist-store';
-import { validateTwilioSignature, twilioWebhookUrl } from '@/lib/twilio-signature';
+import { getSupabaseAdmin } from '@/lib/supabase/admin';
+import { saveCallSession } from '@/lib/receptionist-call-session';
+import { getReceptionistWebhookBase } from '@/lib/twilio-receptionist-provision';
+import { sayGatherTwiml, sayHangupTwiml } from '@/lib/receptionist-twiml';
+import { fillGreeting } from '@/lib/ai-receptionist';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 30;
 
 /**
  * POST /api/webhooks/twilio/voice
- * Phase 1: resolve contractor by To number and return simple TwiML greeting.
- * Phase 2 will connect Media Stream / ConversationRelay to the AI agent.
+ * Phase 2: start live AI receptionist via Gather speech loop (Vercel-friendly).
+ * Tenant resolved by To → ReceptionistConfig.twilio.phoneNumber
  */
 export async function POST(request: NextRequest) {
   try {
@@ -19,56 +24,86 @@ export async function POST(request: NextRequest) {
 
     const to = params.To || '';
     const from = params.From || '';
-    const authToken = (process.env.TWILIO_AUTH_TOKEN || '').trim();
-    const signature = request.headers.get('x-twilio-signature') || '';
-
-    // Master token validates platform webhooks; subaccount calls still hit this URL.
-    // Phase 2: validate with subaccount token from TenantResolver.
-    if (authToken && signature) {
-      const url = twilioWebhookUrl(request, '/api/webhooks/twilio/voice');
-      const ok = validateTwilioSignature({ authToken, signature, url, params });
-      if (!ok) {
-        console.warn('twilio voice: signature mismatch (continuing in Phase 1 for subaccount calls)');
-      }
-    }
+    const callSid = params.CallSid || '';
 
     const tenant = to ? await findReceptionistByPhoneNumber(to) : null;
+    if (!tenant || !tenant.config.enabled) {
+      return xml(
+        sayHangupTwiml(
+          'Thanks for calling. This AI receptionist line is not active right now. Please try again later.'
+        )
+      );
+    }
+
+    const admin = getSupabaseAdmin();
+    let knowledgeBase = '';
+    let urgentKeywords =
+      'emergency, leak, no heat, no ac, flooding, urgent, asap, fire, smoke';
+    let languages = ['en', 'es'];
+    let aiGreeting = '';
+    if (admin) {
+      const { data } = await admin
+        .from('estimates')
+        .select('profile')
+        .eq('id', `SETTINGS-${tenant.userId}`)
+        .maybeSingle();
+      const profile = (data?.profile || {}) as any;
+      const ai = profile.aiReceptionist || {};
+      knowledgeBase = String(ai.knowledgeBase || '').slice(0, 10000);
+      if (ai.urgentKeywords) urgentKeywords = String(ai.urgentKeywords);
+      if (Array.isArray(ai.languages) && ai.languages.length) languages = ai.languages.map(String);
+      aiGreeting = String(ai.greeting || '');
+    }
+
     const business =
-      tenant?.config.branding.businessName ||
-      tenant?.config.branding.businessName ||
-      'this business';
-    const greeting =
-      (tenant?.config.branding.greeting || '').trim() ||
-      `Thanks for calling ${business}. Our AI receptionist line is active. Please leave your name, phone number, and a short message after the tone, and we will get back to you soon.`;
+      tenant.config.branding.businessName ||
+      'our company';
+    const rawGreeting =
+      (tenant.config.branding.greeting || '').trim() ||
+      aiGreeting ||
+      `Thanks for calling {company}. This is the AI receptionist. How can I help you today?`;
+    const greeting = fillGreeting(rawGreeting, business).slice(0, 400);
 
-    const say = escapeXml(greeting.slice(0, 500));
-    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Say voice="Polly.Joanna">${say}</Say>
-  <Pause length="1"/>
-  <Say voice="Polly.Joanna">Full live AI conversation is coming next. Goodbye.</Say>
-  <Hangup/>
-</Response>`;
+    if (callSid) {
+      await saveCallSession({
+        callSid,
+        userId: tenant.userId,
+        from,
+        to,
+        businessName: business,
+        transferNumber: tenant.config.transferNumber || '',
+        knowledgeBase,
+        greeting: rawGreeting,
+        urgentKeywords,
+        languages,
+        transcript: [{ role: 'agent', text: greeting }],
+        leadIds: [],
+        turn: 0,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+    }
 
-    console.info('twilio voice:', { to, from, contractorId: tenant?.userId || null });
+    const gatherUrl = `${getReceptionistWebhookBase()}/api/webhooks/twilio/voice/gather`;
+    console.info('twilio voice start:', { to, from, callSid, contractorId: tenant.userId });
 
-    return new NextResponse(twiml, {
-      status: 200,
-      headers: { 'Content-Type': 'text/xml' },
-    });
+    return xml(
+      sayGatherTwiml({
+        say: greeting,
+        gatherActionUrl: gatherUrl,
+      })
+    );
   } catch (e: any) {
     console.error('twilio voice webhook:', e);
-    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
-<Response><Say>We are sorry. This line is temporarily unavailable.</Say><Hangup/></Response>`;
-    return new NextResponse(twiml, { status: 200, headers: { 'Content-Type': 'text/xml' } });
+    return xml(
+      sayHangupTwiml('We are sorry. This line is temporarily unavailable.')
+    );
   }
 }
 
-function escapeXml(s: string) {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
+function xml(twiml: string) {
+  return new NextResponse(twiml, {
+    status: 200,
+    headers: { 'Content-Type': 'text/xml' },
+  });
 }
