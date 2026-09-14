@@ -62,13 +62,13 @@ export async function upsertReceptionistAddonFromStripe(
   if (!userId) return { ok: false, error: 'Missing supabase_user_id on subscription' };
 
   const status = String(sub.status || 'incomplete');
-  const periodEnd = getSubscriptionPeriodEnd(sub);
+  const periodEndIso = getSubscriptionPeriodEnd(sub);
   const billing: ReceptionistBilling = {
     stripeCustomerId:
       typeof sub.customer === 'string' ? sub.customer : sub.customer?.id || null,
     stripeSubscriptionId: sub.id,
     status,
-    currentPeriodEnd: periodEnd ? new Date(periodEnd * 1000).toISOString() : null,
+    currentPeriodEnd: periodEndIso,
     cancelAtPeriodEnd: Boolean(sub.cancel_at_period_end),
   };
   const active = receptionistAddonHasAccess(billing);
