@@ -109,20 +109,23 @@ export async function POST(request: NextRequest) {
       });
     } catch (e) {
       console.error('voice think grok:', e);
+      // Heuristic fallback lives inside runReceptionistVoiceTurn; this is last resort
       result = {
-        say: !session.collectedName
-          ? 'Thanks for calling. Can I get your full name please?'
-          : !session.collectedPhone
-            ? 'Thanks. What is the best phone number to reach you?'
-            : !session.collectedAddress
-              ? 'And what is the job site address, including the city?'
-              : 'Thanks. How can I help you today?',
+        say: !session.collectedNotes
+          ? 'Thanks for calling — what can we help you with today?'
+          : !session.collectedName
+            ? 'Happy to help — who am I speaking with?'
+            : !session.collectedPhone
+              ? 'Got it — is this the best number to call you back on?'
+              : !session.collectedAddress
+                ? 'And what is the job address, including the city?'
+                : 'Thanks — we will follow up soon.',
         action: 'continue' as const,
         lead: {
           name: session.collectedName || '',
           phone: session.collectedPhone || '',
           address: session.collectedAddress || '',
-          notes: session.collectedNotes || '',
+          notes: session.collectedNotes || callerText,
         },
       };
     }
@@ -132,36 +135,56 @@ export async function POST(request: NextRequest) {
       if (result.lead.name) session.collectedName = String(result.lead.name).trim();
       if (result.lead.phone) session.collectedPhone = String(result.lead.phone).trim();
       if (result.lead.address) session.collectedAddress = String(result.lead.address).trim();
-      if (result.lead.notes) session.collectedNotes = String(result.lead.notes).trim();
+      const noteBits = [
+        result.lead.jobType ? String(result.lead.jobType).trim() : '',
+        result.lead.notes ? String(result.lead.notes).trim() : '',
+        result.lead.preferredTime ? `Preferred: ${String(result.lead.preferredTime).trim()}` : '',
+      ].filter(Boolean);
+      if (noteBits.length) {
+        const prev = String(session.collectedNotes || '').trim();
+        const merged = [...new Set([prev, ...noteBits].filter(Boolean))].join(' | ');
+        session.collectedNotes = merged.slice(0, 1500);
+      }
     }
 
     let speak = String(result.say || '').trim();
     if (!speak || speak.startsWith('{') || speak.includes('"action"')) {
-      speak = !session.collectedName
-        ? 'Thanks for calling. Can I get your full name please?'
-        : !session.collectedPhone
-          ? 'Thanks. What is the best phone number to reach you?'
-          : !session.collectedAddress
-            ? 'And what is the job site address, including the city?'
-            : 'Thanks. How can I help you today?';
+      const first = (session.collectedName || '').split(/\s+/)[0];
+      const hi = first ? `${first}, ` : '';
+      speak = !session.collectedNotes && !session.collectedName
+        ? 'Thanks for calling — what can we help you with today?'
+        : !session.collectedName
+          ? 'Happy to help — who am I speaking with?'
+          : !session.collectedPhone
+            ? `${hi}is ${session.from || 'this number'} the best one to call you back on?`
+            : !session.collectedAddress
+              ? `${hi}what's the job address, including the city?`
+              : `${hi}anything else we should know before we follow up?`;
     }
     speak = speak.slice(0, 280);
 
     session.transcript.push({ role: 'agent', text: speak });
 
     const complete = contactComplete(session);
-    // Never end the call until name + phone + address are collected
+    // Need name + phone + address; also prefer having a need/notes when ending
     if (result.action === 'end' && !complete) {
       result.action = 'continue';
-      if (!session.collectedName) speak = 'Before we wrap up, can I get your full name?';
+      const first = (session.collectedName || '').split(/\s+/)[0];
+      const hi = first ? `${first}, ` : '';
+      if (!session.collectedName) speak = 'Before we wrap up — who am I speaking with?';
       else if (!session.collectedPhone)
-        speak = 'And what is the best phone number to call you back?';
-      else speak = 'Last thing — what is the job site address, including the city?';
+        speak = `${hi}what's the best number to reach you?`;
+      else speak = `${hi}and what's the job address, including the city?`;
     }
 
     // Save / update lead once we have at least a name, and again when complete
     try {
-      if (session.collectedName || session.collectedPhone || session.collectedAddress) {
+      if (
+        session.collectedName ||
+        session.collectedPhone ||
+        session.collectedAddress ||
+        session.collectedNotes
+      ) {
         const summary = formatLeadSummary({
           name: session.collectedName,
           phone: session.collectedPhone || session.from,
