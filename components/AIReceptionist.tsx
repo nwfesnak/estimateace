@@ -31,6 +31,8 @@ type AIReceptionistProps = {
   getAccessToken: () => Promise<string | null>;
   saving?: boolean;
   onBack: () => void;
+  /** Keep Billing / Profile subscription badge in sync when Stripe status changes */
+  onAddonStatusChange?: (active: boolean, billing?: Record<string, unknown> | null) => void;
 };
 
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -57,6 +59,7 @@ export function AIReceptionist({
   getAccessToken,
   saving = false,
   onBack,
+  onAddonStatusChange,
 }: AIReceptionistProps) {
   const [tab, setTab] = React.useState<'inbox' | 'phone' | 'setup' | 'knowledge' | 'test'>('inbox');
   const [chat, setChat] = React.useState<ChatLine[]>([]);
@@ -93,7 +96,8 @@ export function AIReceptionist({
       if (!res.ok) return;
       setLinePhone(json.phoneNumber || json.config?.phoneNumber || null);
       setLineStatus(String(json.status || json.config?.status || 'none'));
-      setAddonActive(Boolean(json.addonActive));
+      const active = Boolean(json.addonActive || json.subscribed);
+      setAddonActive(active);
       if (json.addonAmountDisplay) setAddonAmountDisplay(String(json.addonAmountDisplay));
       if (json.config?.transferNumber) setTransferNumber(String(json.config.transferNumber));
       if (json.config?.publicBusinessNumber) {
@@ -101,10 +105,11 @@ export function AIReceptionist({
       } else if (companyPhone) {
         setPublicBusinessNumber(companyPhone);
       }
+      onAddonStatusChange?.(active, json.billing || null);
     } catch {
       /* ignore */
     }
-  }, [getAccessToken, companyPhone]);
+  }, [getAccessToken, companyPhone, onAddonStatusChange]);
 
   React.useEffect(() => {
     void refreshLine();
@@ -147,9 +152,11 @@ export function AIReceptionist({
         setLineError(json.error || 'Could not refresh subscription.');
         return;
       }
-      setAddonActive(Boolean(json.addonActive || json.subscribed));
+      const active = Boolean(json.addonActive || json.subscribed);
+      setAddonActive(active);
+      onAddonStatusChange?.(active, json.billing || null);
       await refreshLine();
-      if (!(json.addonActive || json.subscribed)) {
+      if (!active) {
         setLineError(
           json.message ||
             'Stripe has not marked this subscription active yet. Wait a few seconds and tap Refresh again.'

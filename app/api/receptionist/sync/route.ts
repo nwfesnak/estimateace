@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import {
   RECEPTIONIST_ADDON_AMOUNT_DISPLAY,
+  loadReceptionistBilling,
   syncReceptionistAddonForUser,
   syncReceptionistAddonFromCheckoutSession,
 } from '@/lib/receptionist-billing';
@@ -29,12 +30,15 @@ export async function POST(request: NextRequest) {
       result = await syncReceptionistAddonForUser(user.id);
     }
 
+    const billing =
+      ('billing' in result && result.billing) || (await loadReceptionistBilling(user.id));
+
     return NextResponse.json({
       ok: result.ok,
       addonActive: result.active,
       subscribed: result.active,
       amountDisplay: RECEPTIONIST_ADDON_AMOUNT_DISPLAY,
-      billing: 'billing' in result ? (result as any).billing : undefined,
+      billing,
       error: result.error || null,
       message: result.active
         ? 'AI Receptionist add-on is active (Subscribed).'

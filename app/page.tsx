@@ -1048,6 +1048,14 @@ export default function Home() {
     monitoredEmail: '',
     /** Paid add-on — AI Receptionist dashboard/inbox only when this is true AND receptionist is On */
     aiReceptionistAddonActive: false,
+    /** Stripe sync for AI Receptionist add-on (shared by Billing + Profile) */
+    receptionistBilling: null as null | {
+      stripeCustomerId?: string | null;
+      stripeSubscriptionId?: string | null;
+      status?: string | null;
+      currentPeriodEnd?: string | null;
+      cancelAtPeriodEnd?: boolean;
+    },
     teammates: [] as {
       email: string;
       userId?: string;
@@ -1402,6 +1410,10 @@ export default function Home() {
     aiReceptionistDashboardEnabled: full.aiReceptionistDashboardEnabled !== false,
     monitoredEmail: String(full.monitoredEmail || '').trim(),
     aiReceptionistAddonActive: full.aiReceptionistAddonActive === true,
+    receptionistBilling:
+      full.receptionistBilling && typeof full.receptionistBilling === 'object'
+        ? full.receptionistBilling
+        : null,
     paymentSettings: mergePaymentSettings(full.paymentSettings),
     // SMS 2FA forced off until phone line is active
     twoFactorEnabled: false,
@@ -2499,8 +2511,18 @@ export default function Home() {
     if (profileTab === 'billing' && billingPanel === 'manage' && user?.id && !currentCrew) {
       void refreshCrewMembers();
       void refreshCrewSeats();
+      void syncReceptionistBillingToProfile({ quiet: true });
     }
   }, [profileTab, billingPanel, user?.id, currentCrew]);
+
+  // Sync AI Receptionist subscription whenever Billing or Company Info is opened
+  useEffect(() => {
+    if (!user?.id || currentCrew) return;
+    if (profileTab === 'billing' || profileTab === 'info') {
+      void syncReceptionistBillingToProfile({ quiet: true });
+      void loadReceptionistFromSettings();
+    }
+  }, [profileTab, user?.id, currentCrew]);
 
   const refreshTutorials = async () => {
     if (!supabase || !user) return;
@@ -7449,6 +7471,50 @@ export default function Home() {
     }
   };
 
+  /** Pull Stripe AI Receptionist subscription into profile so Billing + Company Profile match */
+  const syncReceptionistBillingToProfile = async (opts?: { quiet?: boolean }) => {
+    if (!supabase || !user) return false;
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) return false;
+      const res = await fetch('/api/receptionist/sync', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({}),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (!opts?.quiet) console.warn('syncReceptionistBillingToProfile', json.error);
+        return false;
+      }
+      const active = Boolean(json.addonActive || json.subscribed);
+      const billingInfo =
+        json.billing && typeof json.billing === 'object'
+          ? json.billing
+          : active
+            ? { status: 'active' }
+            : null;
+      setProfile((prev) => ({
+        ...prev,
+        aiReceptionistAddonActive: active,
+        receptionistBilling: billingInfo,
+      }));
+      setProfileSettingsCache({
+        ...getProfileSettingsCache(),
+        aiReceptionistAddonActive: active,
+        receptionistBilling: billingInfo,
+      });
+      return active;
+    } catch (e) {
+      console.warn('syncReceptionistBillingToProfile', e);
+      return false;
+    }
+  };
+
   const loadReceptionistFromSettings = async () => {
     if (!workspaceUserId) return;
     try {
@@ -7473,6 +7539,19 @@ export default function Home() {
     if (serverProfile.emailLeadSummaries) {
       setEmailLeadSummaries(normalizeEmailLeadSummaries(serverProfile.emailLeadSummaries));
     }
+    // Keep Billing / Profile subscription badge in sync with SETTINGS
+    if (serverProfile.receptionistBilling || serverProfile.aiReceptionistAddonActive) {
+      setProfile((prev) => ({
+        ...prev,
+        aiReceptionistAddonActive: serverProfile.aiReceptionistAddonActive === true,
+        receptionistBilling:
+          serverProfile.receptionistBilling && typeof serverProfile.receptionistBilling === 'object'
+            ? serverProfile.receptionistBilling
+            : prev.receptionistBilling,
+      }));
+    }
+    // Also pull from Stripe in case webhook lagged
+    await syncReceptionistBillingToProfile({ quiet: true });
   };
 
   const markReceptionistLeadRead = async (id: string) => {
@@ -8084,6 +8163,10 @@ export default function Home() {
       aiReceptionistAddonActive:
         (mergedProfile as any).aiReceptionistAddonActive === true ||
         (existing as any)?.aiReceptionistAddonActive === true,
+      receptionistBilling:
+        (mergedProfile as any).receptionistBilling ||
+        (existing as any)?.receptionistBilling ||
+        null,
       termsDisplayMode:
         (mergedProfile as any).termsDisplayMode === 'printed' ||
         (existing as any)?.termsDisplayMode === 'printed'
@@ -13835,15 +13918,31 @@ export default function Home() {
                           </p>
                         )}
                       </div>
-                      <Button
-                        className="bg-[#10b981] hover:bg-[#059669] text-white shrink-0"
-                        onClick={() => {
-                          void loadReceptionistFromSettings();
-                          setView('receptionistView');
-                        }}
-                      >
-                        {hasAiReceptionistAddon() ? 'Open receptionist' : 'Set up AI line'}
-                      </Button>
+                      <div className="flex flex-col gap-2 shrink-0">
+                        <Button
+                          className="bg-[#10b981] hover:bg-[#059669] text-white"
+                          onClick={() => {
+                            void loadReceptionistFromSettings();
+                            setView('receptionistView');
+                          }}
+                        >
+                          {hasAiReceptionistAddon() ? 'Open receptionist' : 'Set up AI line'}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={async () => {
+                            const ok = await syncReceptionistBillingToProfile();
+                            showMessage(
+                              ok
+                                ? '✅ AI Receptionist subscription linked — Subscribed.'
+                                : 'No active AI Receptionist subscription found on Stripe yet. Tap Refresh again in a few seconds.'
+                            );
+                          }}
+                        >
+                          Refresh subscription
+                        </Button>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
@@ -13967,6 +14066,54 @@ export default function Home() {
                               </div>
                             </div>
                             <div className="text-sm font-semibold text-emerald-700">Main plan</div>
+                          </li>
+                          <li className="p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                            <div>
+                              <div className="font-semibold text-[#1e293b]">AI Receptionist</div>
+                              <div className="text-sm text-gray-500">
+                                {hasAiReceptionistAddon() ? (
+                                  <>
+                                    Status:{' '}
+                                    <span className="capitalize font-medium text-emerald-700">
+                                      {(profile as any).receptionistBilling?.status || 'active'}
+                                    </span>
+                                    {(profile as any).receptionistBilling?.currentPeriodEnd
+                                      ? ` · Period ends ${formatPeriodEnd(
+                                          (profile as any).receptionistBilling.currentPeriodEnd
+                                        )}`
+                                      : ''}
+                                    {(profile as any).receptionistBilling?.cancelAtPeriodEnd
+                                      ? ' · Cancels at period end'
+                                      : ''}
+                                  </>
+                                ) : (
+                                  <>Not subscribed · $49.99/month add-on</>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap gap-2 items-center">
+                              {hasAiReceptionistAddon() ? (
+                                <span className="text-sm font-semibold text-emerald-700">Subscribed</span>
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  className="bg-violet-700 hover:bg-violet-800 text-white"
+                                  onClick={() => {
+                                    void loadReceptionistFromSettings();
+                                    setView('receptionistView');
+                                  }}
+                                >
+                                  Subscribe
+                                </Button>
+                              )}
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => void syncReceptionistBillingToProfile()}
+                              >
+                                Refresh
+                              </Button>
+                            </div>
                           </li>
                           {crewSeatsLoading && (
                             <li className="p-4 text-sm text-gray-500">Loading crew seats…</li>
@@ -16341,7 +16488,28 @@ export default function Home() {
               onChangeMessages={setReceptionistMessages}
               onSave={saveReceptionistData}
               saving={receptionistSaving}
+              onAddonStatusChange={(active, billingInfo) => {
+                setProfile((prev) => ({
+                  ...prev,
+                  aiReceptionistAddonActive: active,
+                  receptionistBilling:
+                    billingInfo && typeof billingInfo === 'object'
+                      ? (billingInfo as any)
+                      : active
+                        ? { status: 'active', ...(prev as any).receptionistBilling }
+                        : (prev as any).receptionistBilling,
+                }));
+                setProfileSettingsCache({
+                  ...getProfileSettingsCache(),
+                  aiReceptionistAddonActive: active,
+                  receptionistBilling:
+                    billingInfo && typeof billingInfo === 'object'
+                      ? billingInfo
+                      : getProfileSettingsCache().receptionistBilling,
+                });
+              }}
               onBack={() => {
+                void syncReceptionistBillingToProfile({ quiet: true });
                 setProfileTab('billing');
                 setBillingPanel('overview');
                 setView('profileView');
