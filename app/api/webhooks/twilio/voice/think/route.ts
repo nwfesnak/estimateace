@@ -5,7 +5,10 @@ import {
   saveCallSession,
   transcriptToText,
 } from '@/lib/receptionist-call-session';
-import { runReceptionistVoiceTurn } from '@/lib/receptionist-voice-agent';
+import {
+  looksLikePersonName,
+  runReceptionistVoiceTurn,
+} from '@/lib/receptionist-voice-agent';
 import { appendReceptionistLead, formatLeadSummary } from '@/lib/receptionist-leads';
 import {
   sayGatherTwiml,
@@ -147,6 +150,18 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Break the name loop: Twilio STT often returns lowercase single/full names
+    if (!session.collectedName && looksLikePersonName(callerText)) {
+      session.collectedName = callerText
+        .replace(/[.,!?]/g, '')
+        .trim()
+        .split(/\s+/)
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+        .join(' ')
+        .slice(0, 120);
+      if (result.lead) result.lead.name = session.collectedName;
+    }
+
     let speak = String(result.say || '').trim();
     if (!speak || speak.startsWith('{') || speak.includes('"action"')) {
       const first = (session.collectedName || '').split(/\s+/)[0];
@@ -162,6 +177,22 @@ export async function POST(request: NextRequest) {
               : `${hi}anything else we should know before we follow up?`;
     }
     speak = speak.slice(0, 280);
+
+    // If we just captured the name, don't re-ask "who am I speaking with?"
+    if (
+      session.collectedName &&
+      /who am i speaking with|can i get your (full )?name|what('s| is) your name/i.test(speak)
+    ) {
+      const first = session.collectedName.split(/\s+/)[0];
+      const hi = first ? `${first}, ` : '';
+      if (!session.collectedPhone) {
+        speak = `${hi}is ${session.from || 'this number'} the best one to call you back on?`;
+      } else if (!session.collectedAddress) {
+        speak = `${hi}what's the job address, including the city?`;
+      } else {
+        speak = `${hi}got it — we'll follow up shortly.`;
+      }
+    }
 
     session.transcript.push({ role: 'agent', text: speak });
 

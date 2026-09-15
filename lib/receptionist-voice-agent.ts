@@ -27,86 +27,145 @@ export type VoiceAgentResult = {
 
 const MAX_SAY = 320;
 
+const NAME_STOP = new Set(
+  'yes yeah yep yup no nope ok okay hi hello hey thanks thank you please calling looking need needs wanted want help hiya um uh so well my the a an it is this that'.split(
+    ' '
+  )
+);
+
+function titleCaseName(s: string): string {
+  return String(s || '')
+    .trim()
+    .split(/\\s+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ')
+    .slice(0, 120);
+}
+
+/** True if utterance is plausibly just a person name (Twilio STT is often lowercase). */
+export function looksLikePersonName(text: string): boolean {
+  const raw = String(text || '').replace(/\\s+/g, ' ').trim();
+  if (!raw || raw.length > 60) return false;
+  if (/\\d/.test(raw)) return false;
+  if (/[@#/\\\\]|https?:/i.test(raw)) return false;
+  const words = raw.replace(/[.,!?']/g, '').split(/\\s+/).filter(Boolean);
+  if (words.length < 1 || words.length > 4) return false;
+  if (words.every((w) => NAME_STOP.has(w.toLowerCase()))) return false;
+  // reject clear job phrases
+  if (
+    /\\b(pressure\\s*wash|roof|paint|plumb|hvac|estimate|quote|address|street|avenue|phone|number|call me)\\b/i.test(
+      raw
+    )
+  ) {
+    return false;
+  }
+  return words.every((w) => /^[A-Za-z][A-Za-z'-]*$/.test(w));
+}
+
 /** Pull contact + job hints from messy speech-to-text when Grok is down or incomplete. */
 export function extractLeadHintsFromSpeech(
   text: string,
-  aniPhone = ''
+  aniPhone = '',
+  opts?: { expectName?: boolean; expectPhone?: boolean; expectAddress?: boolean }
 ): VoiceAgentLead {
-  const raw = String(text || '').replace(/\s+/g, ' ').trim();
+  const raw = String(text || '').replace(/\\s+/g, ' ').trim();
   if (!raw) return {};
 
   const lead: VoiceAgentLead = {};
+  const expectName = Boolean(opts?.expectName);
 
   // Phone numbers in speech
   const phoneMatch = raw.match(
-    /(?:\+?1[-.\s]?)?(?:\(?\d{3}\)?[-.\s]?)\d{3}[-.\s]?\d{4}\b/
+    /(?:\\+?1[-.\\s]?)?(?:\\(?\\d{3}\\)?[-.\\s]?)\\d{3}[-.\\s]?\\d{4}\\b/
   );
   if (phoneMatch) {
-    lead.phone = phoneMatch[0].replace(/[^\d+]/g, '');
+    lead.phone = phoneMatch[0].replace(/[^\\d+]/g, '');
   } else if (
     aniPhone &&
-    /\b(yes|yeah|yep|correct|that's (me|right|fine)|that is|this (number|one)|calling from)\b/i.test(
+    /\\b(yes|yeah|yep|yup|correct|that's (me|right|fine)|that is|this (number|one)|calling from)\\b/i.test(
       raw
     )
   ) {
     lead.phone = aniPhone;
   }
 
-  // "my name is X" / "this is X" / "I am X"
+  // "my name is X" / "this is X" / "I am X" — case-insensitive capture
   const namePatterns = [
-    /(?:my name is|this is|i am|i'm|it's|it is)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})/i,
-    /(?:name'?s)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})/i,
+    /(?:my name is|my name's|name is|this is|i am|i'm|it's|it is)\\s+([A-Za-z][A-Za-z'-]*(?:\\s+[A-Za-z][A-Za-z'-]*){0,3})/i,
+    /(?:name'?s)\\s+([A-Za-z][A-Za-z'-]*(?:\\s+[A-Za-z][A-Za-z'-]*){0,3})/i,
   ];
   for (const re of namePatterns) {
     const m = raw.match(re);
     if (m?.[1]) {
-      const n = m[1].trim();
-      if (!/^(yes|yeah|no|okay|ok|hi|hello|calling|looking)$/i.test(n)) {
+      const n = titleCaseName(m[1]);
+      if (n && !NAME_STOP.has(n.toLowerCase())) {
         lead.name = n;
         break;
       }
     }
   }
-  // Bare "First Last" as whole utterance
-  if (!lead.name) {
-    const bare = raw.match(/^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\.?$/);
-    if (bare) lead.name = bare[1];
+
+  // Whole utterance is a name (common when we just asked "who am I speaking with?")
+  if (!lead.name && (expectName || looksLikePersonName(raw))) {
+    if (looksLikePersonName(raw) || expectName) {
+      const cleaned = raw.replace(/[.,!?]/g, '').trim();
+      // If expectName, accept almost any short alphabetic answer
+      const words = cleaned.split(/\\s+/).filter(Boolean);
+      const okExpect =
+        expectName &&
+        words.length >= 1 &&
+        words.length <= 4 &&
+        words.every((w) => /^[A-Za-z][A-Za-z'-]*$/.test(w)) &&
+        !words.every((w) => NAME_STOP.has(w.toLowerCase()));
+      if (looksLikePersonName(raw) || okExpect) {
+        lead.name = titleCaseName(cleaned);
+      }
+    }
   }
 
   // Address-ish: number + street word, or "in City"
   const addr = raw.match(
-    /\b(\d{1,6}\s+[A-Za-z0-9 .'-]{3,40}\s+(?:st|street|ave|avenue|rd|road|blvd|boulevard|dr|drive|ln|lane|ct|court|way|circle|cir|hwy|highway)\.?(?:\s*,?\s*[A-Za-z .']+)?)(?:\b|$)/i
+    /\\b(\\d{1,6}\\s+[A-Za-z0-9 .'-]{3,40}\\s+(?:st|street|ave|avenue|rd|road|blvd|boulevard|dr|drive|ln|lane|ct|court|way|circle|cir|hwy|highway)\\.?(?:\\s*,?\\s*[A-Za-z .']+)?)(?:\\b|$)/i
   );
   if (addr) {
-    lead.address = addr[1].replace(/\s+/g, ' ').trim();
+    lead.address = addr[1].replace(/\\s+/g, ' ').trim();
+  } else if (opts?.expectAddress) {
+    // When we asked for address, take a reasonable whole utterance
+    if (raw.length >= 5 && raw.length <= 120 && !looksLikePersonName(raw)) {
+      lead.address = raw;
+    }
   } else {
     const city = raw.match(
-      /\b(?:in|at|near|around)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2})\b/
+      /\\b(?:in|at|near|around)\\s+([A-Za-z][A-Za-z]+(?:\\s+[A-Za-z][A-Za-z]+){0,2})\\b/i
     );
-    if (city && !lead.address) lead.address = city[1];
+    if (city && !lead.address) lead.address = titleCaseName(city[1]);
   }
 
   // Job / need keywords → notes
   const jobBits: string[] = [];
   const jobRe =
-    /\b(pressure\s*wash(?:ing)?|roof(?:ing)?|paint(?:ing)?|plumb(?:ing|er)?|hvac|ac|air\s*condition(?:ing|er)?|electric(?:al|ian)?|landscap(?:e|ing)|lawn|mow(?:ing)?|fence|concrete|driveway|sidewalk|gutters?|windows?|clean(?:ing)?|repair|install|estimate|quote|remodel|leak|flood)\b/gi;
+    /\\b(pressure\\s*wash(?:ing)?|roof(?:ing)?|paint(?:ing)?|plumb(?:ing|er)?|hvac|ac|air\\s*condition(?:ing|er)?|electric(?:al|ian)?|landscap(?:e|ing)|lawn|mow(?:ing)?|fence|concrete|driveway|sidewalk|gutters?|windows?|clean(?:ing)?|repair|install|estimate|quote|remodel|leak|flood)\\b/gi;
   let jm: RegExpExecArray | null;
   while ((jm = jobRe.exec(raw))) {
     jobBits.push(jm[1].toLowerCase());
   }
-  if (jobBits.length) {
-    lead.jobType = [...new Set(jobBits)].join(', ');
-    lead.notes = raw.slice(0, 500);
-  } else if (raw.length > 12) {
-    lead.notes = raw.slice(0, 500);
+  // Don't treat a pure name answer as notes
+  if (!lead.name || jobBits.length || raw.length > 20) {
+    if (jobBits.length) {
+      lead.jobType = [...new Set(jobBits)].join(', ');
+      lead.notes = raw.slice(0, 500);
+    } else if (raw.length > 12 && !looksLikePersonName(raw) && !expectName) {
+      lead.notes = raw.slice(0, 500);
+    }
   }
 
-  if (/\b(emergency|urgent|asap|right away|flooding|no heat|no ac|leak)\b/i.test(raw)) {
+  if (/\\b(emergency|urgent|asap|right away|flooding|no heat|no ac|leak)\\b/i.test(raw)) {
     lead.urgent = true;
   }
 
   const when = raw.match(
-    /\b((?:today|tomorrow|this (?:week|weekend|morning|afternoon|evening)|monday|tuesday|wednesday|thursday|friday|saturday|sunday|next week)(?:\s+(?:morning|afternoon|evening|at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?))?)/i
+    /\\b((?:today|tomorrow|this (?:week|weekend|morning|afternoon|evening)|monday|tuesday|wednesday|thursday|friday|saturday|sunday|next week)(?:\\s+(?:morning|afternoon|evening|at\\s+\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)?))?)/i
   );
   if (when) lead.preferredTime = when[1];
 
@@ -190,8 +249,6 @@ export async function runReceptionistVoiceTurn(input: {
   const apiKey = getXaiApiKey();
   const company = String(input.businessName || 'our company').slice(0, 120);
   const aniPhone = String(input.callerPhone || '').trim();
-  const speechHints = extractLeadHintsFromSpeech(input.callerMessage, aniPhone);
-
   const prior: VoiceAgentLead = {
     name: input.collectedName || '',
     phone: input.collectedPhone || '',
@@ -199,12 +256,23 @@ export async function runReceptionistVoiceTurn(input: {
     notes: input.collectedNotes || '',
   };
 
+  const speechHints = extractLeadHintsFromSpeech(input.callerMessage, aniPhone, {
+    expectName: !String(prior.name || '').trim(),
+    expectPhone: !String(prior.phone || '').trim(),
+    expectAddress: !String(prior.address || '').trim(),
+  });
+
   // Seed phone from caller ID early so we usually only confirm it
   if (!prior.phone && aniPhone && /^\+?\d{10,15}$/.test(aniPhone.replace(/[^\d+]/g, ''))) {
     // don't auto-commit ANI as final until confirmed OR used as fallback at end
   }
 
   let lead = mergeLead(prior, speechHints, {});
+
+  // Hard stop the "who am I speaking with" loop — trust short name answers
+  if (!lead.name && looksLikePersonName(input.callerMessage)) {
+    lead = { ...lead, name: titleCaseName(String(input.callerMessage).replace(/[.,!?]/g, '')) };
+  }
 
   const buildResult = (
     say: string,
