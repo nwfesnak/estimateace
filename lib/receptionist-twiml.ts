@@ -1,5 +1,8 @@
 /** Small TwiML helpers for AI receptionist voice. */
 
+/** Warm, natural Amazon Polly neural voice (friendlier than classic alice). */
+export const SAY_VOICE = 'Polly.Joanna-Neural';
+
 export function escapeXml(s: string) {
   return String(s || '')
     .replace(/&/g, '&amp;')
@@ -59,9 +62,9 @@ export function sayGatherTwiml(opts: {
   return twimlResponse(
     [
       `  <Gather input="dtmf speech" language="${lang}" timeout="8" speechTimeout="3" action="${action}" method="POST" actionOnEmptyResult="true" hints="${hints}">`,
-      `    <Say voice="alice">${say}</Say>`,
+      `    <Say voice="${SAY_VOICE}">${say}</Say>`,
       `  </Gather>`,
-      `  <Say voice="alice">Sorry, I did not catch that.</Say>`,
+      `  <Say voice="${SAY_VOICE}">Sorry, I did not catch that.</Say>`,
       `  <Redirect method="POST">${action}</Redirect>`,
     ].join('\n')
   );
@@ -70,7 +73,7 @@ export function sayGatherTwiml(opts: {
 export function sayThenRedirectTwiml(opts: { say: string; redirectUrl: string }) {
   return twimlResponse(
     [
-      `  <Say voice="alice">${escapeXml(String(opts.say || '').slice(0, 200))}</Say>`,
+      `  <Say voice="${SAY_VOICE}">${escapeXml(String(opts.say || '').slice(0, 200))}</Say>`,
       `  <Redirect method="POST">${escapeXml(opts.redirectUrl)}</Redirect>`,
     ].join('\n')
   );
@@ -78,7 +81,7 @@ export function sayThenRedirectTwiml(opts: { say: string; redirectUrl: string })
 
 export function sayHangupTwiml(say: string) {
   return twimlResponse(
-    `  <Say voice="alice">${escapeXml(String(say || 'Goodbye.').slice(0, 400))}</Say>\n  <Hangup/>`
+    `  <Say voice="${SAY_VOICE}">${escapeXml(String(say || 'Goodbye.').slice(0, 400))}</Say>\n  <Hangup/>`
   );
 }
 
@@ -97,7 +100,7 @@ export function transferTwiml(opts: {
     return twimlResponse(dial);
   }
   const say = escapeXml(opts.say.slice(0, 300));
-  return twimlResponse(`  <Say voice="alice">${say}</Say>\n${dial}`);
+  return twimlResponse(`  <Say voice="${SAY_VOICE}">${say}</Say>\n${dial}`);
 }
 
 export function twimlXmlResponse(twiml: string) {
