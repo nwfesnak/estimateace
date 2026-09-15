@@ -1,9 +1,10 @@
 import { NextRequest } from 'next/server';
 import {
-  contactComplete,
   loadCallSession,
   saveCallSession,
+  scriptComplete,
   transcriptToText,
+  type CallStage,
 } from '@/lib/receptionist-call-session';
 import {
   looksLikePersonName,
@@ -28,7 +29,7 @@ const MAX_TURNS = 14;
 
 /**
  * POST /api/webhooks/twilio/voice/think
- * Grok turn after gather stashed pendingCallerText.
+ * Staged script turn after gather stashed pendingCallerText.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -47,7 +48,7 @@ export async function POST(request: NextRequest) {
     if (!session) {
       return twimlXmlResponse(
         sayGatherTwiml({
-          say: 'Thanks for calling. How can I help you?',
+          say: 'Thanks for calling. What are you calling about today?',
           gatherActionUrl: VOICE_GATHER_PATH,
         })
       );
@@ -57,9 +58,20 @@ export async function POST(request: NextRequest) {
     session.pendingCallerText = '';
 
     if (!callerText) {
+      const stage = session.callStage || 'need';
+      const prompt =
+        stage === 'name'
+          ? 'Who am I speaking with?'
+          : stage === 'phone'
+            ? 'Is this the best number to call you back on?'
+            : stage === 'anything_else'
+              ? 'Is there anything else you would like to add?'
+              : stage === 'techs_sms'
+                ? 'Are you okay with us texting you as well?'
+                : 'What are you calling about today?';
       return twimlXmlResponse(
         sayGatherTwiml({
-          say: 'How can I help you today?',
+          say: prompt,
           gatherActionUrl: VOICE_GATHER_PATH,
         })
       );
@@ -82,8 +94,9 @@ export async function POST(request: NextRequest) {
     session.turn = (session.turn || 0) + 1;
 
     if (session.turn > MAX_TURNS) {
-      const bye = `Thanks for calling ${session.businessName || 'us'}. A member of the team will follow up with you within 24 hours. Goodbye.`;
+      const bye = `Thanks so much for calling ${session.businessName || 'us'}. We'll be in contact with you as soon as possible. Goodbye!`;
       session.transcript.push({ role: 'agent', text: bye });
+      session.callStage = 'thanks';
       try {
         await saveCallSession(session);
       } catch {
@@ -110,28 +123,45 @@ export async function POST(request: NextRequest) {
         collectedPhone: session.collectedPhone,
         collectedAddress: session.collectedAddress,
         collectedNotes: session.collectedNotes,
+        callStage: (session.callStage as CallStage) || 'need',
+        smsOk: session.smsOk,
       });
     } catch (e) {
-      console.error('voice think grok:', e);
-      // Heuristic fallback lives inside runReceptionistVoiceTurn; this is last resort
+      console.error('voice think staged:', e);
+      const stage = (session.callStage as CallStage) || 'need';
       result = {
-        say: !session.collectedNotes
-          ? 'Thanks for calling — what can we help you with today?'
-          : !session.collectedName
-            ? 'Happy to help — who am I speaking with?'
-            : !session.collectedPhone
-              ? 'Got it — is this the best number to call you back on?'
-              : !session.collectedAddress
-                ? 'And what is the job address, including the city?'
-                : `Thanks — a member of the ${session.businessName || 'team'} team will follow up with you within 24 hours.`,
-        action: 'continue' as const,
+        say:
+          stage === 'need'
+            ? 'Thanks for calling — what are you calling about today?'
+            : stage === 'name'
+              ? 'Happy to help — who am I speaking with?'
+              : stage === 'phone'
+                ? 'Got it — is this the best number to call you back on?'
+                : stage === 'anything_else'
+                  ? 'Is there anything else you would like to add about why you are calling today?'
+                  : stage === 'techs_sms'
+                    ? 'Are you okay with us texting you as well?'
+                    : `Thanks so much for calling ${session.businessName || 'us'}. We'll be in contact with you as soon as possible. Goodbye!`,
+        action: (stage === 'thanks' || stage === 'techs_sms' ? 'end' : 'continue') as
+          | 'continue'
+          | 'end',
         lead: {
           name: session.collectedName || '',
           phone: session.collectedPhone || '',
           address: session.collectedAddress || '',
           notes: session.collectedNotes || callerText,
         },
+        callStage: stage,
+        smsOk: session.smsOk,
       };
+    }
+
+    // Persist stage + SMS preference from agent
+    if (result.callStage) {
+      session.callStage = result.callStage;
+    }
+    if (result.smsOk === true || result.smsOk === false) {
+      session.smsOk = result.smsOk;
     }
 
     // Merge collected contact fields from this turn
@@ -146,12 +176,18 @@ export async function POST(request: NextRequest) {
       ].filter(Boolean);
       if (noteBits.length) {
         const prev = String(session.collectedNotes || '').trim();
-        const merged = [...new Set([prev, ...noteBits].filter(Boolean))].join(' | ');
-        session.collectedNotes = merged.slice(0, 1500);
+        // Prefer the agent's merged notes string when present
+        const fromNotes = result.lead.notes ? String(result.lead.notes).trim() : '';
+        if (fromNotes && fromNotes.length >= prev.length) {
+          session.collectedNotes = fromNotes.slice(0, 1500);
+        } else {
+          const merged = [...new Set([prev, ...noteBits].filter(Boolean))].join(' | ');
+          session.collectedNotes = merged.slice(0, 1500);
+        }
       }
     }
 
-    // Break the name loop: Twilio STT often returns lowercase single/full names
+    // Break the name loop: Twilio STT often returns lowercase names
     if (!session.collectedName && looksLikePersonName(callerText)) {
       session.collectedName = callerText
         .replace(/[.,!?]/g, '')
@@ -167,53 +203,62 @@ export async function POST(request: NextRequest) {
     if (!speak || speak.startsWith('{') || speak.includes('"action"')) {
       const first = (session.collectedName || '').split(/\s+/)[0];
       const hi = first ? `${first}, ` : '';
-      speak = !session.collectedNotes && !session.collectedName
-        ? 'Thanks for calling — what can we help you with today?'
-        : !session.collectedName
-          ? 'Happy to help — who am I speaking with?'
-          : !session.collectedPhone
-            ? `${hi}is ${session.from ? formatPhoneForSpeech(session.from) : 'this number'} the best one to call you back on?`
-            : !session.collectedAddress
-              ? `${hi}what's the job address, including the city?`
-              : `${hi}anything else we should know before we follow up?`;
+      const stage = session.callStage || 'need';
+      speak =
+        stage === 'need'
+          ? 'What are you calling about today?'
+          : stage === 'name'
+            ? 'Happy to help — who am I speaking with?'
+            : stage === 'phone'
+              ? `${hi}is ${session.from ? formatPhoneForSpeech(session.from) : 'this number'} the best one to call you back on?`
+              : stage === 'anything_else'
+                ? `Just to make sure I've got it — is there anything else you'd like to add about why you're calling today?`
+                : stage === 'techs_sms'
+                  ? `All of our technicians are helping other customers right now, so we'll call you back as soon as we can. Are you okay with us texting you as well?`
+                  : `Thanks so much for calling ${session.businessName || 'us'}. We'll be in contact with you as soon as possible. Goodbye!`;
     }
+
     // Rewrite any raw +1… / long digit runs so <Say> speaks digits
     speak = speak.replace(/\+?1?\D*(\d{3})\D*(\d{3})\D*(\d{4})\b/g, (_m, a, b, c) =>
       formatPhoneForSpeech(`${a}${b}${c}`)
     );
     speak = speak.slice(0, 280);
 
-    // If we just captured the name, don't re-ask "who am I speaking with?"
-    if (
-      session.collectedName &&
-      /who am i speaking with|can i get your (full )?name|what('s| is) your name/i.test(speak)
-    ) {
-      const first = session.collectedName.split(/\s+/)[0];
+    session.transcript.push({ role: 'agent', text: speak });
+
+    const complete = scriptComplete(session);
+    // Do not require address; only hang up when script is complete (or agent ends after SMS)
+    if (result.action === 'end' && !complete && session.callStage !== 'thanks') {
+      // Soft guard: if agent tried to end early, keep gathering
+      result.action = 'continue';
+      const stage = session.callStage || 'need';
+      const first = (session.collectedName || '').split(/\s+/)[0];
       const hi = first ? `${first}, ` : '';
-      if (!session.collectedPhone) {
-        speak = `${hi}is ${session.from ? formatPhoneForSpeech(session.from) : 'this number'} the best one to call you back on?`;
-      } else if (!session.collectedAddress) {
-        speak = `${hi}what's the job address, including the city?`;
-      } else {
-        speak = `${hi}perfect — a member of the ${session.businessName || 'team'} team will follow up with you within 24 hours. Thanks for calling!`;
+      if (!session.collectedNotes) {
+        speak = 'Before we wrap up — what are you calling about today?';
+        session.callStage = 'need';
+      } else if (!session.collectedName) {
+        speak = 'Before we wrap up — who am I speaking with?';
+        session.callStage = 'name';
+      } else if (!session.collectedPhone) {
+        speak = `${hi}what's the best number to reach you?`;
+        session.callStage = 'phone';
+      } else if (session.smsOk !== true && session.smsOk !== false) {
+        speak =
+          `All of our technicians are helping other customers right now, so we'll call you back as soon as we can. Are you okay with us texting you as well?`;
+        session.callStage = 'techs_sms';
       }
     }
 
-    session.transcript.push({ role: 'agent', text: speak });
-
-    const complete = contactComplete(session);
-    // Need name + phone + address; also prefer having a need/notes when ending
-    if (result.action === 'end' && !complete) {
-      result.action = 'continue';
-      const first = (session.collectedName || '').split(/\s+/)[0];
-      const hi = first ? `${first}, ` : '';
-      if (!session.collectedName) speak = 'Before we wrap up — who am I speaking with?';
-      else if (!session.collectedPhone)
-        speak = `${hi}what's the best number to reach you?`;
-      else speak = `${hi}and what's the job address, including the city?`;
+    // Allow end when stage is thanks (final goodbye) even if smsOk race
+    if (session.callStage === 'thanks') {
+      result.action = 'end';
+      if (session.smsOk !== true && session.smsOk !== false) {
+        session.smsOk = true;
+      }
     }
 
-    // Save / update lead once we have at least a name, and again when complete
+    // Save / update lead once we have useful fields
     try {
       if (
         session.collectedName ||
@@ -221,11 +266,21 @@ export async function POST(request: NextRequest) {
         session.collectedAddress ||
         session.collectedNotes
       ) {
+        const done = scriptComplete(session) || session.callStage === 'thanks';
         const summary = formatLeadSummary({
           name: session.collectedName,
           phone: session.collectedPhone || session.from,
           address: session.collectedAddress,
-          notes: session.collectedNotes,
+          notes: [
+            session.collectedNotes || '',
+            session.smsOk === true
+              ? 'SMS OK: yes'
+              : session.smsOk === false
+                ? 'SMS OK: no'
+                : '',
+          ]
+            .filter(Boolean)
+            .join(' | '),
         });
         const lead = await appendReceptionistLead({
           userId: session.userId,
@@ -233,9 +288,9 @@ export async function POST(request: NextRequest) {
           callerPhone: session.collectedPhone || session.from,
           address: session.collectedAddress || '',
           summary,
-          actionItems: complete
-            ? ['Follow up — name, phone, and address collected']
-            : ['Follow up — finish collecting missing contact fields'],
+          actionItems: done
+            ? ['Follow up ASAP — staged script complete (address optional)']
+            : ['Follow up — finish staged script fields'],
           transcript: transcriptToText(session.transcript),
           urgent: Boolean(result.lead?.urgent),
           source: 'voice',
@@ -262,11 +317,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (result.action === 'end' && complete) {
+    if (result.action === 'end' && (scriptComplete(session) || session.callStage === 'thanks')) {
       return twimlXmlResponse(
         sayHangupTwiml(
           speak ||
-            `Thanks for calling ${session.businessName || 'us'}. A member of the team will follow up with you within 24 hours.`
+            `Thanks so much for calling ${session.businessName || 'us'}. We'll be in contact with you as soon as possible. Goodbye!`
         )
       );
     }
@@ -281,7 +336,7 @@ export async function POST(request: NextRequest) {
     console.error('voice think fatal:', e?.message || e);
     return twimlXmlResponse(
       sayGatherTwiml({
-        say: 'Sorry about that. How can I help you?',
+        say: 'Sorry about that. What are you calling about today?',
         gatherActionUrl: VOICE_GATHER_PATH,
       })
     );

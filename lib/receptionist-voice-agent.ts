@@ -1,11 +1,15 @@
 /**
- * Live voice turn agent (Grok) for Twilio Gather speech loops.
- * Casual conversation that still captures a solid contractor lead:
- * name, phone, address, what they need, urgency, preferred callback.
+ * Staged voice receptionist for Twilio Gather speech loops.
+ * Deterministic stage machine (need → name → phone → anything_else → techs_sms → thanks).
+ * Reliability of ORDER matters more than free-form LLM replies.
  */
 import { getXaiApiKey, getXaiChatModel } from '@/lib/xai-config';
 import { formatPhoneForSpeech } from '@/lib/receptionist-twiml';
-import { transcriptToText, type CallTurn } from '@/lib/receptionist-call-session';
+import {
+  transcriptToText,
+  type CallStage,
+  type CallTurn,
+} from '@/lib/receptionist-call-session';
 
 export type VoiceAgentAction = 'continue' | 'transfer' | 'end';
 
@@ -24,6 +28,8 @@ export type VoiceAgentResult = {
   say: string;
   action: VoiceAgentAction;
   lead?: VoiceAgentLead | null;
+  callStage?: CallStage;
+  smsOk?: boolean;
 };
 
 const MAX_SAY = 320;
@@ -53,7 +59,6 @@ export function looksLikePersonName(text: string): boolean {
   const words = raw.replace(/[.,!?']/g, '').split(/\s+/).filter(Boolean);
   if (words.length < 1 || words.length > 4) return false;
   if (words.every((w) => NAME_STOP.has(w.toLowerCase()))) return false;
-  // reject clear job phrases
   if (
     /\b(pressure\s*wash|roof|paint|plumb|hvac|estimate|quote|address|street|avenue|phone|number|call me)\b/i.test(
       raw
@@ -64,7 +69,7 @@ export function looksLikePersonName(text: string): boolean {
   return words.every((w) => /^[A-Za-z][A-Za-z'-]*$/.test(w));
 }
 
-/** Pull contact + job hints from messy speech-to-text when Grok is down or incomplete. */
+/** Pull contact + job hints from messy speech-to-text. */
 export function extractLeadHintsFromSpeech(
   text: string,
   aniPhone = '',
@@ -76,7 +81,6 @@ export function extractLeadHintsFromSpeech(
   const lead: VoiceAgentLead = {};
   const expectName = Boolean(opts?.expectName);
 
-  // Phone numbers in speech
   const phoneMatch = raw.match(
     /(?:\+?1[-.\s]?)?(?:\(?\d{3}\)?[-.\s]?)\d{3}[-.\s]?\d{4}\b/
   );
@@ -91,7 +95,6 @@ export function extractLeadHintsFromSpeech(
     lead.phone = aniPhone;
   }
 
-  // "my name is X" / "this is X" / "I am X" — case-insensitive capture
   const namePatterns = [
     /(?:my name is|my name's|name is|this is|i am|i'm|it's|it is)\s+([A-Za-z][A-Za-z'-]*(?:\s+[A-Za-z][A-Za-z'-]*){0,3})/i,
     /(?:name'?s)\s+([A-Za-z][A-Za-z'-]*(?:\s+[A-Za-z][A-Za-z'-]*){0,3})/i,
@@ -107,11 +110,9 @@ export function extractLeadHintsFromSpeech(
     }
   }
 
-  // Whole utterance is a name (common when we just asked "who am I speaking with?")
   if (!lead.name && (expectName || looksLikePersonName(raw))) {
     if (looksLikePersonName(raw) || expectName) {
       const cleaned = raw.replace(/[.,!?]/g, '').trim();
-      // If expectName, accept almost any short alphabetic answer
       const words = cleaned.split(/\s+/).filter(Boolean);
       const okExpect =
         expectName &&
@@ -125,14 +126,12 @@ export function extractLeadHintsFromSpeech(
     }
   }
 
-  // Address-ish: number + street word, or "in City"
   const addr = raw.match(
     /\b(\d{1,6}\s+[A-Za-z0-9 .'-]{3,40}\s+(?:st|street|ave|avenue|rd|road|blvd|boulevard|dr|drive|ln|lane|ct|court|way|circle|cir|hwy|highway)\.?(?:\s*,?\s*[A-Za-z .']+)?)(?:\b|$)/i
   );
   if (addr) {
     lead.address = addr[1].replace(/\s+/g, ' ').trim();
   } else if (opts?.expectAddress) {
-    // When we asked for address, take a reasonable whole utterance
     if (raw.length >= 5 && raw.length <= 120 && !looksLikePersonName(raw)) {
       lead.address = raw;
     }
@@ -143,18 +142,21 @@ export function extractLeadHintsFromSpeech(
     if (city && !lead.address) lead.address = titleCaseName(city[1]);
   }
 
-  // Job / need keywords → notes
   const jobBits: string[] = [];
   const jobRe =
-    /\b(pressure\s*wash(?:ing)?|roof(?:ing)?|paint(?:ing)?|plumb(?:ing|er)?|hvac|ac|air\s*condition(?:ing|er)?|electric(?:al|ian)?|landscap(?:e|ing)|lawn|mow(?:ing)?|fence|concrete|driveway|sidewalk|gutters?|windows?|clean(?:ing)?|repair|install|estimate|quote|remodel|leak|flood)\b/gi;
+    /\b(pressure\s*wash(?:ing|ed)?|roof(?:ing)?|paint(?:ing)?|plumb(?:ing|er)?|hvac|ac|air\s*condition(?:ing|er)?|electric(?:al|ian)?|landscap(?:e|ing)|lawn|mow(?:ing)?|fence|concrete|driveway|sidewalk|gutters?|windows?|clean(?:ing)?|repair|install|estimate|quote|remodel|leak|flood)\b/gi;
   let jm: RegExpExecArray | null;
   while ((jm = jobRe.exec(raw))) {
     jobBits.push(jm[1].toLowerCase());
   }
-  // Don't treat a pure name answer as notes
   if (!lead.name || jobBits.length || raw.length > 20) {
     if (jobBits.length) {
-      lead.jobType = [...new Set(jobBits)].join(', ');
+      const normalized = [...new Set(jobBits)].map((b) =>
+        /^pressure\s*washed$/i.test(b) ? 'pressure washing' : b
+      );
+      // Prefer longer / more specific phrases first for recap
+      normalized.sort((a, b) => b.length - a.length);
+      lead.jobType = normalized.join(', ');
       lead.notes = raw.slice(0, 500);
     } else if (raw.length > 12 && !looksLikePersonName(raw) && !expectName) {
       lead.notes = raw.slice(0, 500);
@@ -191,47 +193,76 @@ function mergeLead(
   };
 }
 
-function missingFields(lead: VoiceAgentLead): string[] {
-  const m: string[] = [];
-  if (!String(lead.name || '').trim()) m.push('name');
-  if (!String(lead.phone || '').trim()) m.push('phone');
-  if (!String(lead.address || '').trim()) m.push('address');
-  if (!String(lead.notes || lead.jobType || '').trim()) m.push('need');
-  return m;
+function firstName(name?: string): string {
+  return String(name || '')
+    .trim()
+    .split(/\s+/)[0] || '';
 }
 
-function casualAskNext(
-  missing: string[],
-  lead: VoiceAgentLead,
-  aniPhone: string,
-  company: string
-): string {
-  const next = missing[0] || '';
-  const first = (lead.name || '').split(/\s+/)[0];
-  const hi = first ? `${first}, ` : '';
-
-  if (next === 'need') {
-    return `${hi}what can we help you with today?`;
+function shortReason(lead: VoiceAgentLead): string {
+  const jt = String(lead.jobType || '').trim();
+  if (jt) {
+    // Use the most specific (first) job phrase for a natural recap
+    return jt.split(',')[0].trim().slice(0, 80);
   }
-  if (next === 'name') {
-    return lead.jobType || lead.notes
-      ? `Happy to help with that — who am I speaking with?`
-      : `Thanks for calling ${company}. Who am I speaking with?`;
-  }
-  if (next === 'phone') {
-    if (aniPhone) {
-      return `${hi}is ${formatPhoneForSpeech(aniPhone)} the best number to call you back on?`;
-    }
-    return `${hi}what's the best number to reach you?`;
-  }
-  if (next === 'address') {
-    return `${hi}what's the job address, including the city?`;
-  }
-  // All set — wrap up casually
-  const job = lead.jobType ? ` about the ${lead.jobType}` : '';
-  return `${hi}perfect${job}. A member of the ${company} team will follow up with you within 24 hours. Thanks for calling!`;
+  let notes = String(lead.notes || '').trim().replace(/\s+/g, ' ');
+  if (!notes) return 'that';
+  // Prefer first segment before " | " extras
+  notes = notes.split(' | ')[0].trim();
+  notes = notes.replace(/^(i need|i want|i'?m (calling|looking) (for|about)|need|want)\s+/i, '');
+  if (!notes) return 'that';
+  if (notes.length <= 80) return notes;
+  return `${notes.slice(0, 77)}...`;
 }
 
+function isSubstantiveNeed(text: string, hints: VoiceAgentLead): boolean {
+  const raw = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!raw) return false;
+  if (hints.notes || hints.jobType) return true;
+  // Any non-empty utterance that isn't pure filler
+  if (raw.length >= 3 && !/^(um+|uh+|hm+|hello|hi|hey|thanks|thank you)\.?$/i.test(raw)) {
+    return true;
+  }
+  return false;
+}
+
+function isClearNo(text: string): boolean {
+  return /\b(no|nope|nah|nothing|not really|that's all|that is all|i'm good|im good|no thanks)\b/i.test(
+    text || ''
+  );
+}
+
+/** Parse yes/no for SMS consent. Unclear → true (opt-in bias for callback texts). */
+function parseSmsOk(text: string): boolean {
+  const raw = String(text || '');
+  if (/\b(no|nope|nah|don't|do not|negative|prefer not|no text|no sms)\b/i.test(raw)) {
+    return false;
+  }
+  if (/\b(yes|yeah|yep|yup|sure|ok|okay|fine|absolutely|please|go ahead|sounds good)\b/i.test(raw)) {
+    return true;
+  }
+  // Default: treat any other reply as okay with texts so we don't stall
+  return true;
+}
+
+function wantsHuman(text: string): boolean {
+  return /\b(operator|human|real person|press 0|transfer|speak to (someone|a person|rep))\b/i.test(
+    text || ''
+  );
+}
+
+function appendNotes(existing: string, extra: string): string {
+  const prev = String(existing || '').trim();
+  const add = String(extra || '').trim();
+  if (!add) return prev;
+  if (!prev) return add.slice(0, 1500);
+  if (prev.includes(add)) return prev.slice(0, 1500);
+  return `${prev} | ${add}`.slice(0, 1500);
+}
+
+/**
+ * Deterministic staged turn. Skips free-form Grok so script ORDER stays reliable.
+ */
 export async function runReceptionistVoiceTurn(input: {
   businessName: string;
   knowledgeBase: string;
@@ -246,235 +277,160 @@ export async function runReceptionistVoiceTurn(input: {
   collectedPhone?: string;
   collectedAddress?: string;
   collectedNotes?: string;
+  callStage?: CallStage;
+  smsOk?: boolean;
 }): Promise<VoiceAgentResult> {
-  const apiKey = getXaiApiKey();
   const company = String(input.businessName || 'our company').slice(0, 120);
   const aniPhone = String(input.callerPhone || '').trim();
-  const prior: VoiceAgentLead = {
+  const msg = String(input.callerMessage || '').trim();
+  let stage: CallStage = input.callStage || 'need';
+
+  // Re-derive jobType from stored notes so recap can stay short/natural
+  const priorNotes = String(input.collectedNotes || '').trim();
+  const priorFromNotes = priorNotes
+    ? extractLeadHintsFromSpeech(priorNotes, '')
+    : {};
+  let lead: VoiceAgentLead = {
     name: input.collectedName || '',
     phone: input.collectedPhone || '',
     address: input.collectedAddress || '',
-    notes: input.collectedNotes || '',
+    notes: priorNotes,
+    jobType: priorFromNotes.jobType || '',
+    urgent: Boolean(priorFromNotes.urgent),
   };
 
-  const speechHints = extractLeadHintsFromSpeech(input.callerMessage, aniPhone, {
-    expectName: !String(prior.name || '').trim(),
-    expectPhone: !String(prior.phone || '').trim(),
-    expectAddress: !String(prior.address || '').trim(),
-  });
+  let smsOk = input.smsOk;
+  let action: VoiceAgentAction = 'continue';
 
-  // Seed phone from caller ID early so we usually only confirm it
-  if (!prior.phone && aniPhone && /^\+?\d{10,15}$/.test(aniPhone.replace(/[^\d+]/g, ''))) {
-    // don't auto-commit ANI as final until confirmed OR used as fallback at end
-  }
-
-  let lead = mergeLead(prior, speechHints, {});
-
-  // Hard stop the "who am I speaking with" loop — trust short name answers
-  if (!lead.name && looksLikePersonName(input.callerMessage)) {
-    lead = { ...lead, name: titleCaseName(String(input.callerMessage).replace(/[.,!?]/g, '')) };
-  }
-
-  const buildResult = (
-    say: string,
-    action: VoiceAgentAction,
-    L: VoiceAgentLead
-  ): VoiceAgentResult => ({
+  const build = (say: string, nextStage: CallStage): VoiceAgentResult => ({
     say: say.slice(0, MAX_SAY),
     action,
-    lead: L,
+    lead,
+    callStage: nextStage,
+    smsOk,
   });
 
-  if (!apiKey) {
-    // Progress without Grok using speech heuristics + casual prompts
-    const miss = missingFields(lead);
-    // If still missing phone at wrap-up time, use ANI
-    if (!lead.phone && aniPhone && miss.filter((x) => x !== 'phone').length === 0) {
-      lead = { ...lead, phone: aniPhone };
-    }
-    const miss2 = missingFields(lead);
-    if (!miss2.length) {
-      return buildResult(casualAskNext([], lead, aniPhone, company), 'end', lead);
-    }
-    return buildResult(casualAskNext(miss2, lead, aniPhone, company), 'continue', lead);
+  // Transfer escape hatch
+  if (wantsHuman(msg) && input.transferAvailable) {
+    action = 'transfer';
+    return build('Connecting you now.', stage);
   }
 
-  const model = getXaiChatModel();
-  const kb = String(input.knowledgeBase || '').slice(0, 8000);
-  const langs = (input.languages || ['en']).join(', ');
-  const urgent = String(
-    input.urgentKeywords || 'emergency,urgent,leak,flooding,no heat,no ac'
-  ).slice(0, 400);
-  const history = transcriptToText(input.transcript).slice(0, 10000);
-  const missNow = missingFields(lead);
-
-  const system = `You are the friendly phone receptionist for "${company}" (contractor / field service).
-Sound like a real receptionist on the phone — friendly, warm, natural, brief (1–2 short sentences). Use everyday language and contractions. No markdown. Never put JSON in "say".
-
-GOAL: Capture a solid lead through natural conversation, not an interrogation.
-Ideal lead fields:
-1) Full name
-2) Callback phone (caller ID is ${aniPhone || 'unknown'} — confirm it casually when phone is missing).
-CRITICAL for "say": when you speak any phone number, write EACH digit separated by spaces (example: "9 8 0, 5 5 5, 1 2 3 4") so text-to-speech does NOT say "nine million". Never read a phone as a whole integer.
-3) Job / service address (street + city)
-4) What they need (job type / problem) — put in notes + jobType
-5) Urgency and preferred time if they mention it
-
-Already collected:
-- name: ${lead.name || 'MISSING'}
-- phone: ${lead.phone || 'MISSING'}
-- address: ${lead.address || 'MISSING'}
-- need/notes: ${lead.notes || lead.jobType || 'MISSING'}
-Still need: ${missNow.length ? missNow.join(', ') : 'none — you may wrap up'}.
-
-Style:
-- Sound like a real, friendly front-desk person — warm, natural, never robotic or scripted.
-- Use contractions (I'm, we'll, that's). Keep it conversational.
-- Acknowledge what they just said first ("got it", "sounds good", "happy to help with that").
-- Ask for at most ONE missing thing per turn, woven in casually.
-- If they volunteer several fields at once, accept them all.
-- Do NOT invent name, phone, or address.
-- If they ask for a human / press 0 and transfer is ${input.transferAvailable ? 'available' : 'NOT available'}, use action "transfer" only when available.
-- When ending (action "end"), ALWAYS tell them a member of the ${company} team will follow up within 24 hours. Example: "Perfect — a member of the ${company} team will follow up with you within 24 hours. Thanks for calling!"
-
-Languages: ${langs}.
-Urgent keywords: ${urgent}.
-
-Return ONLY valid JSON:
-{
-  "say": "spoken reply under 220 chars",
-  "action": "continue" | "transfer" | "end",
-  "lead": {
-    "name": "",
-    "phone": "",
-    "address": "",
-    "notes": "what they need",
-    "jobType": "",
-    "preferredTime": "",
-    "urgent": false
+  // --- Stage machine ---
+  if (stage === 'need') {
+    const hints = extractLeadHintsFromSpeech(msg, aniPhone, { expectName: false });
+    if (!isSubstantiveNeed(msg, hints)) {
+      return build(
+        `Sorry, I didn't quite catch that. What are you calling about today?`,
+        'need'
+      );
+    }
+    lead = mergeLead(lead, hints, {});
+    if (!lead.notes && !lead.jobType) {
+      lead.notes = msg.slice(0, 500);
+    }
+    return build(`Happy to help with that — who am I speaking with?`, 'name');
   }
-}
 
-Rules:
-- Merge lead with already-collected values; never wipe known fields with empty strings.
-- action "end" ONLY when name, phone, address, AND what they need are all known.
-- On "end", the spoken "say" MUST mention that a member of the company team will follow up within 24 hours.
-- Keep "say" under 220 characters.
-
-KNOWLEDGE BASE:
-${kb || '(empty — take a message and promise a callback)'}
-`;
-
-  const userContent = `Conversation so far:
-${history || '(just started)'}
-
-Caller just said (speech-to-text may be imperfect): "${String(input.callerMessage || '').slice(0, 1500)}"
-
-Speech hints already parsed: ${JSON.stringify(speechHints)}
-Update lead fields from what they said. Respond with JSON only.`;
-
-  try {
-    const res = await fetch('https://api.x.ai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      // Twilio webhooks ~15s — leave headroom
-      signal: AbortSignal.timeout(10000),
-      body: JSON.stringify({
-        model,
-        temperature: 0.45,
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: userContent },
-        ],
-      }),
-    });
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      console.error('voice agent grok:', json);
-      const miss = missingFields(lead);
-      return buildResult(
-        casualAskNext(miss, lead, aniPhone, company),
-        miss.length ? 'continue' : 'end',
-        lead
+  if (stage === 'name') {
+    const hints = extractLeadHintsFromSpeech(msg, aniPhone, { expectName: true });
+    lead = mergeLead(lead, hints, {});
+    if (!lead.name && looksLikePersonName(msg)) {
+      lead.name = titleCaseName(msg.replace(/[.,!?]/g, ''));
+    }
+    if (!lead.name) {
+      // Accept short alphabetic answers when we asked for a name
+      const cleaned = msg.replace(/[.,!?]/g, '').trim();
+      const words = cleaned.split(/\s+/).filter(Boolean);
+      if (
+        words.length >= 1 &&
+        words.length <= 4 &&
+        words.every((w) => /^[A-Za-z][A-Za-z'-]*$/.test(w)) &&
+        !words.every((w) => NAME_STOP.has(w.toLowerCase()))
+      ) {
+        lead.name = titleCaseName(cleaned);
+      }
+    }
+    if (!lead.name) {
+      return build(`I want to make sure I get it right — who am I speaking with?`, 'name');
+    }
+    const first = firstName(lead.name);
+    const hi = first ? `${first}, ` : '';
+    if (aniPhone) {
+      return build(
+        `${hi}is ${formatPhoneForSpeech(aniPhone)} the best number to call you back on?`,
+        'phone'
       );
     }
-    const raw = String(json.choices?.[0]?.message?.content || '').trim();
-    const parsed = parseAgentJson(raw);
-    if (!parsed) {
-      const miss = missingFields(lead);
-      return buildResult(
-        casualAskNext(miss, lead, aniPhone, company),
-        miss.length ? 'continue' : 'end',
-        lead
-      );
-    }
+    return build(`${hi}what's the best number to reach you?`, 'phone');
+  }
 
-    const fromModel: VoiceAgentLead = {
-      name: String(parsed.lead?.name || '').trim().slice(0, 120),
-      phone: String(parsed.lead?.phone || '').trim().slice(0, 40),
-      address: String(parsed.lead?.address || '').trim().slice(0, 200),
-      notes: String(parsed.lead?.notes || '').trim().slice(0, 1000),
-      jobType: String(parsed.lead?.jobType || '').trim().slice(0, 120),
-      preferredTime: String(parsed.lead?.preferredTime || '').trim().slice(0, 80),
-      urgent: Boolean(parsed.lead?.urgent),
-    };
-
-    lead = mergeLead(lead, fromModel, speechHints);
-
-    // Confirm ANI as phone on yes
+  if (stage === 'phone') {
+    const hints = extractLeadHintsFromSpeech(msg, aniPhone, { expectPhone: true });
+    lead = mergeLead(lead, hints, {});
     if (
       !lead.phone &&
       aniPhone &&
-      /\b(yes|yeah|yep|correct|that's (me|right|fine)|that is|this (number|one))\b/i.test(
-        input.callerMessage || ''
+      /\b(yes|yeah|yep|yup|correct|that's (me|right|fine)|that is|this (number|one)|sure|ok|okay)\b/i.test(
+        msg
       )
     ) {
       lead.phone = aniPhone;
     }
-
-    let action: VoiceAgentAction =
-      parsed.action === 'transfer' || parsed.action === 'end' ? parsed.action : 'continue';
-    if (action === 'transfer' && !input.transferAvailable) action = 'continue';
-
-    const still = missingFields(lead);
-    if (action === 'end' && still.length) action = 'continue';
-
-    let say = String(parsed.say || '').trim();
-    if (!say || say.startsWith('{') || say.includes('"action"')) {
-      say = casualAskNext(still, lead, aniPhone, company);
+    if (!lead.phone && aniPhone && !/\b(no|nope|different|other|new)\b/i.test(msg)) {
+      // Soft fallback: if they didn't reject, use ANI when no spoken number
+      if (!hints.phone) lead.phone = aniPhone;
     }
-    // Do NOT replace a good casual reply just because it lacks "?".
-    // Only fill in if the model ignored a still-missing critical field entirely
-    // and gave an ending-style goodbye too early.
-    if (
-      action === 'continue' &&
-      still.length &&
-      /\b(goodbye|good bye|talk soon|we'll (be in )?touch)\b/i.test(say)
-    ) {
-      say = casualAskNext(still, lead, aniPhone, company);
+    if (!lead.phone) {
+      const first = firstName(lead.name);
+      const hi = first ? `${first}, ` : '';
+      return build(
+        `${hi}I didn't catch a number — what's the best number to call you back on?`,
+        'phone'
+      );
     }
-
-    if (!still.length && action === 'continue') {
-      // Model forgot to end — wrap politely
-      action = 'end';
-      if (!/\b(thanks|thank you|follow up|talk soon|goodbye)\b/i.test(say)) {
-        say = casualAskNext([], lead, aniPhone, company);
-      }
-    }
-
-    return buildResult(say, action, lead);
-  } catch (e) {
-    console.error('voice agent error:', e);
-    const miss = missingFields(lead);
-    return buildResult(
-      casualAskNext(miss, lead, aniPhone, company),
-      miss.length ? 'continue' : 'end',
-      lead
+    // Combined recap + anything_else ask; wait for reply on anything_else
+    const reason = shortReason(lead);
+    return build(
+      `Just to make sure I've got it — you're calling about ${reason}. Is there anything else you'd like to add about why you're calling today?`,
+      'anything_else'
     );
   }
+
+  if (stage === 'anything_else') {
+    if (!isClearNo(msg) && msg.length >= 2) {
+      const hints = extractLeadHintsFromSpeech(msg, aniPhone);
+      if (hints.jobType) {
+        lead.jobType = [lead.jobType, hints.jobType].filter(Boolean).join(', ');
+      }
+      if (hints.address && !lead.address) lead.address = hints.address;
+      if (hints.urgent) lead.urgent = true;
+      // Append their extra notes
+      const extra = hints.notes || msg;
+      lead.notes = appendNotes(lead.notes || '', extra);
+    }
+    return build(
+      `All of our technicians are helping other customers right now, so we'll call you back as soon as we can. Are you okay with us texting you as well?`,
+      'techs_sms'
+    );
+  }
+
+  if (stage === 'techs_sms') {
+    smsOk = parseSmsOk(msg);
+    action = 'end';
+    return build(
+      `Thanks so much for calling ${company}. We'll be in contact with you as soon as possible. Goodbye!`,
+      'thanks'
+    );
+  }
+
+  // thanks / unknown — end politely
+  action = 'end';
+  smsOk = smsOk === true || smsOk === false ? smsOk : true;
+  return build(
+    `Thanks so much for calling ${company}. We'll be in contact with you as soon as possible. Goodbye!`,
+    'thanks'
+  );
 }
 
 export async function summarizeVoiceCall(input: {

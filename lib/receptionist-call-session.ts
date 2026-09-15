@@ -6,6 +6,15 @@ import { getSupabaseAdmin } from '@/lib/supabase/admin';
 
 export type CallTurn = { role: 'agent' | 'caller'; text: string };
 
+/** Staged receptionist script order */
+export type CallStage =
+  | 'need'
+  | 'name'
+  | 'phone'
+  | 'anything_else'
+  | 'techs_sms'
+  | 'thanks';
+
 export type ReceptionistCallSession = {
   callSid: string;
   userId: string;
@@ -20,18 +29,23 @@ export type ReceptionistCallSession = {
   transcript: CallTurn[];
   leadIds: string[];
   turn: number;
-  /** Contact fields the AI must collect before ending the call */
+  /** Contact fields collected during the staged script */
   collectedName?: string;
   collectedPhone?: string;
   collectedAddress?: string;
   collectedNotes?: string;
-  /** Stashed SpeechResult while we ack Twilio quickly, then /think runs Grok */
+  /** Current position in the staged call script */
+  callStage?: CallStage;
+  /** Whether caller consented to SMS (set after techs_sms reply) */
+  smsOk?: boolean;
+  /** Stashed SpeechResult while we ack Twilio quickly, then /think runs */
   pendingCallerText?: string;
   emptyListenCount?: number;
   createdAt: string;
   updatedAt: string;
 };
 
+/** Legacy: name + phone + address (address no longer required to end). */
 export function contactComplete(session: {
   collectedName?: string;
   collectedPhone?: string;
@@ -42,6 +56,25 @@ export function contactComplete(session: {
       String(session.collectedPhone || '').trim() &&
       String(session.collectedAddress || '').trim()
   );
+}
+
+/**
+ * Script is complete when we have need + name + phone and have asked/received SMS preference.
+ * Address is NOT required to end the call.
+ */
+export function scriptComplete(session: {
+  collectedName?: string;
+  collectedPhone?: string;
+  collectedNotes?: string;
+  smsOk?: boolean;
+  callStage?: CallStage | string;
+}): boolean {
+  const hasNeed = Boolean(String(session.collectedNotes || '').trim());
+  const hasName = Boolean(String(session.collectedName || '').trim());
+  const hasPhone = Boolean(String(session.collectedPhone || '').trim());
+  const smsAsked = session.smsOk === true || session.smsOk === false;
+  const atThanks = session.callStage === 'thanks';
+  return hasNeed && hasName && hasPhone && (smsAsked || atThanks);
 }
 
 function sessionRowId(callSid: string) {
