@@ -13,46 +13,51 @@ export function twimlResponse(inner: string) {
   return `<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n${inner}\n</Response>`;
 }
 
+/** Prefer relative webhook paths — Twilio resolves them against the current call webhook host. */
+export const VOICE_GATHER_PATH = '/api/webhooks/twilio/voice/gather';
+export const VOICE_THINK_PATH = '/api/webhooks/twilio/voice/think';
+
 /**
  * Speak a prompt, then listen for speech.
- * Tuned for phone calls: longer listen window, always POST back (even if silent).
+ * Keep attributes conservative — invalid Gather attrs cause Twilio "application error".
  */
 export function sayGatherTwiml(opts: {
   say: string;
-  gatherActionUrl: string;
+  gatherActionUrl?: string;
   language?: string;
-  /** Extra recognition hints (comma-separated phrases) */
   hints?: string;
 }) {
-  const say = escapeXml(opts.say.slice(0, 500));
-  const action = escapeXml(opts.gatherActionUrl);
+  const say = escapeXml(String(opts.say || 'How can I help you?').slice(0, 400));
+  const action = escapeXml(opts.gatherActionUrl || VOICE_GATHER_PATH);
   const lang = escapeXml(opts.language || 'en-US');
   const hints = escapeXml(
     opts.hints ||
-      'yes, no, estimate, quote, appointment, schedule, price, pricing, service, address, name, phone, callback, transfer, speak to someone, human, owner'
+      'yes, no, estimate, quote, appointment, schedule, price, service, address, name, phone, callback, transfer'
   );
 
-  // speechTimeout = silence after caller stops talking (seconds)
-  // timeout = max wait for them to start speaking
-  // actionOnEmptyResult = always hit action URL so we can re-prompt
-  // phone_call + enhanced = most reliable on Twilio voice
-  return twimlResponse(`  <Gather input="speech dtmf" language="${lang}" speechTimeout="auto" timeout="10" action="${action}" method="POST" actionOnEmptyResult="true" enhanced="true" speechModel="phone_call" hints="${hints}" bargeIn="true" numDigits="1">
-    <Say voice="Polly.Joanna">${say}</Say>
-    <Pause length="1"/>
-  </Gather>
-  <Say voice="Polly.Joanna">I am still here. Please say that again.</Say>
-  <Redirect method="POST">${action}</Redirect>`);
+  return twimlResponse(
+    [
+      `  <Gather input="speech dtmf" language="${lang}" timeout="8" speechTimeout="3" action="${action}" method="POST" actionOnEmptyResult="true" hints="${hints}">`,
+      `    <Say voice="alice">${say}</Say>`,
+      `  </Gather>`,
+      `  <Say voice="alice">Sorry, I did not catch that.</Say>`,
+      `  <Redirect method="POST">${action}</Redirect>`,
+    ].join('\n')
+  );
 }
 
 export function sayThenRedirectTwiml(opts: { say: string; redirectUrl: string }) {
   return twimlResponse(
-    `  <Say voice="Polly.Joanna">${escapeXml(opts.say.slice(0, 300))}</Say>\n  <Redirect method="POST">${escapeXml(opts.redirectUrl)}</Redirect>`
+    [
+      `  <Say voice="alice">${escapeXml(String(opts.say || '').slice(0, 200))}</Say>`,
+      `  <Redirect method="POST">${escapeXml(opts.redirectUrl)}</Redirect>`,
+    ].join('\n')
   );
 }
 
 export function sayHangupTwiml(say: string) {
   return twimlResponse(
-    `  <Say voice="Polly.Joanna">${escapeXml(say.slice(0, 500))}</Say>\n  <Hangup/>`
+    `  <Say voice="alice">${escapeXml(String(say || 'Goodbye.').slice(0, 400))}</Say>\n  <Hangup/>`
   );
 }
 
@@ -60,17 +65,26 @@ export function transferTwiml(opts: {
   say?: string;
   transferTo: string;
   callerId?: string;
-  /** Silent connect — no prompt (used when AI is Off) */
   silent?: boolean;
   timeoutSec?: number;
 }) {
   const to = escapeXml(opts.transferTo);
   const callerId = opts.callerId ? ` callerId="${escapeXml(opts.callerId)}"` : '';
   const timeout = Math.min(60, Math.max(10, Number(opts.timeoutSec) || 30));
-  const dial = `  <Dial${callerId} timeout="${timeout}" answerOnBridge="true">${to}</Dial>`;
+  const dial = `  <Dial${callerId} timeout="${timeout}">${to}</Dial>`;
   if (opts.silent || !opts.say) {
     return twimlResponse(dial);
   }
   const say = escapeXml(opts.say.slice(0, 300));
-  return twimlResponse(`  <Say voice="Polly.Joanna">${say}</Say>\n${dial}`);
+  return twimlResponse(`  <Say voice="alice">${say}</Say>\n${dial}`);
+}
+
+export function twimlXmlResponse(twiml: string) {
+  return new Response(twiml, {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/xml; charset=utf-8',
+      'Cache-Control': 'no-store',
+    },
+  });
 }

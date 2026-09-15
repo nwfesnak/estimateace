@@ -1,20 +1,26 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { loadCallSession, saveCallSession } from '@/lib/receptionist-call-session';
-import { sayGatherTwiml, sayHangupTwiml, sayThenRedirectTwiml } from '@/lib/receptionist-twiml';
-import { getReceptionistWebhookBase } from '@/lib/twilio-receptionist-provision';
+import {
+  sayGatherTwiml,
+  sayHangupTwiml,
+  sayThenRedirectTwiml,
+  twimlXmlResponse,
+  VOICE_GATHER_PATH,
+  VOICE_THINK_PATH,
+} from '@/lib/receptionist-twiml';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 15;
+export const maxDuration = 20;
+export const runtime = 'nodejs';
 
 /**
  * POST /api/webhooks/twilio/voice/gather
- * Fast path: capture SpeechResult, stash on session, ack Twilio immediately,
- * then Redirect to /think (where Grok runs). Avoids Twilio's ~15s action timeout.
+ * Capture speech quickly → redirect to /think?CallSid=... (Grok runs there).
  */
 export async function POST(request: NextRequest) {
   try {
     const form = await request.formData();
-    const callSid = String(form.get('CallSid') || '');
+    const callSid = String(form.get('CallSid') || '').trim();
     const speech = String(
       form.get('SpeechResult') ||
         form.get('UnstableSpeechResult') ||
@@ -22,66 +28,76 @@ export async function POST(request: NextRequest) {
         ''
     ).trim();
     const digits = String(form.get('Digits') || '').trim();
-    const confidence = String(form.get('Confidence') || '');
 
-    console.info('voice gather:', {
-      callSid,
-      speech: speech.slice(0, 120),
+    console.info('voice gather ok', {
+      callSid: callSid.slice(0, 34),
+      speechLen: speech.length,
+      speechPreview: speech.slice(0, 80),
       digits,
-      confidence,
     });
 
     const session = callSid ? await loadCallSession(callSid) : null;
-    const base = getReceptionistWebhookBase();
-    const gatherUrl = `${base}/api/webhooks/twilio/voice/gather`;
-    const thinkUrl = `${base}/api/webhooks/twilio/voice/think`;
 
     if (!session) {
-      return xml(sayHangupTwiml('Thanks for calling. Please try again in a moment.'));
+      // Still listen again instead of hard-failing the call
+      return twimlXmlResponse(
+        sayGatherTwiml({
+          say: 'Thanks for calling. How can I help you today?',
+          gatherActionUrl: VOICE_GATHER_PATH,
+        })
+      );
     }
 
-    // DTMF 0 / * → treat as request for human (handled in think)
     const callerText = speech || (digits ? `Pressed ${digits}` : '');
 
     if (!callerText) {
       const emptyCount = (session.emptyListenCount || 0) + 1;
       session.emptyListenCount = emptyCount;
-      await saveCallSession(session);
-
-      if (emptyCount >= 3) {
-        const bye =
-          'I am having trouble hearing you. Please call back, or leave a message with your name and number. Goodbye.';
-        return xml(sayHangupTwiml(bye));
+      try {
+        await saveCallSession(session);
+      } catch (e) {
+        console.warn('gather save empty count:', e);
       }
 
-      return xml(
+      if (emptyCount >= 3) {
+        return twimlXmlResponse(
+          sayHangupTwiml(
+            'I am having trouble hearing you. Please call back later. Goodbye.'
+          )
+        );
+      }
+
+      return twimlXmlResponse(
         sayGatherTwiml({
-          say: "Sorry, I didn't catch that. Please speak clearly after the beep — for example, say your name and what you need.",
-          gatherActionUrl: gatherUrl,
+          say: "Sorry, I didn't catch that. Please say your name and what you need.",
+          gatherActionUrl: VOICE_GATHER_PATH,
         })
       );
     }
 
-    session.pendingCallerText = callerText;
+    session.pendingCallerText = callerText.slice(0, 2000);
     session.emptyListenCount = 0;
-    await saveCallSession(session);
+    try {
+      await saveCallSession(session);
+    } catch (e) {
+      console.warn('gather save pending speech:', e);
+    }
 
-    // Quick ack so Twilio does not time out while Grok thinks
-    return xml(
+    // Pass CallSid in query so /think always has it even if form body is odd
+    const thinkUrl = `${VOICE_THINK_PATH}?CallSid=${encodeURIComponent(callSid)}`;
+    return twimlXmlResponse(
       sayThenRedirectTwiml({
-        say: 'One moment please.',
+        say: 'One moment.',
         redirectUrl: thinkUrl,
       })
     );
   } catch (e: any) {
-    console.error('voice gather:', e);
-    return xml(sayHangupTwiml('We are sorry. Something went wrong. Please try again later.'));
+    console.error('voice gather fatal:', e?.message || e);
+    return twimlXmlResponse(
+      sayGatherTwiml({
+        say: 'Sorry about that. How can I help you?',
+        gatherActionUrl: VOICE_GATHER_PATH,
+      })
+    );
   }
-}
-
-function xml(twiml: string) {
-  return new NextResponse(twiml, {
-    status: 200,
-    headers: { 'Content-Type': 'text/xml' },
-  });
 }

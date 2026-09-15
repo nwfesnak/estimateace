@@ -1,15 +1,21 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { findReceptionistByPhoneNumber } from '@/lib/receptionist-store';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { saveCallSession } from '@/lib/receptionist-call-session';
-import { getReceptionistWebhookBase } from '@/lib/twilio-receptionist-provision';
-import { sayGatherTwiml, sayHangupTwiml, transferTwiml } from '@/lib/receptionist-twiml';
+import {
+  sayGatherTwiml,
+  sayHangupTwiml,
+  transferTwiml,
+  twimlXmlResponse,
+  VOICE_GATHER_PATH,
+} from '@/lib/receptionist-twiml';
 import { fillGreeting } from '@/lib/ai-receptionist';
 import { formatPhoneE164 } from '@/lib/notifications';
 import { receptionistAddonHasAccess } from '@/lib/receptionist-billing';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
+export const runtime = 'nodejs';
 
 function digitsOnly(phone: string) {
   return String(phone || '').replace(/\D/g, '');
@@ -30,8 +36,8 @@ function toE164(phone: string): string | null {
 
 /**
  * POST /api/webhooks/twilio/voice
- * - AI On  → live receptionist
- * - AI Off → silent Dial to host/business/cell (no “AI is off” prompt)
+ * - AI On  → live receptionist (relative Gather URLs — avoids bad NEXT_PUBLIC_APP_URL)
+ * - AI Off → silent Dial to host/business/cell
  */
 export async function POST(request: NextRequest) {
   try {
@@ -47,7 +53,7 @@ export async function POST(request: NextRequest) {
 
     const tenant = to ? await findReceptionistByPhoneNumber(to) : null;
     if (!tenant) {
-      return xml(
+      return twimlXmlResponse(
         sayHangupTwiml(
           'Thanks for calling. This line is not set up yet. Please try again later.'
         )
@@ -89,12 +95,12 @@ export async function POST(request: NextRequest) {
       !explicitlyOff &&
       (classicEnabled === true ||
         tenant.config.enabled === true ||
-        (classicEnabled !== false && hasAiLine && (addonActive || tenant.config.status === 'active')));
+        (classicEnabled !== false &&
+          hasAiLine &&
+          (addonActive || tenant.config.status === 'active')));
 
     const aiLine = tenant.config.twilio?.phoneNumber || to;
 
-    // When AI is Off: ring host numbers. Never dial the Twilio AI line itself.
-    // Priority: transfer/cell → public business → company profile phone
     const hostCandidates = [
       tenant.config.transferNumber || '',
       tenant.config.publicBusinessNumber || '',
@@ -114,8 +120,7 @@ export async function POST(request: NextRequest) {
         hostRing: hostRing || null,
       });
       if (hostRing) {
-        // No prompt — just connect to the business/host line
-        return xml(
+        return twimlXmlResponse(
           transferTwiml({
             silent: true,
             transferTo: hostRing,
@@ -124,7 +129,7 @@ export async function POST(request: NextRequest) {
           })
         );
       }
-      return xml(
+      return twimlXmlResponse(
         sayHangupTwiml(
           'Thanks for calling. No one is available to take your call right now. Please try again later.'
         )
@@ -138,50 +143,47 @@ export async function POST(request: NextRequest) {
       `Thanks for calling {company}. This is the AI receptionist. How can I help you today?`;
     const greeting = fillGreeting(rawGreeting, business).slice(0, 400);
 
-    // For AI transfers mid-call, prefer cell that is not the AI line
     const transferForAi =
       [tenant.config.transferNumber || '', profilePhone]
         .map((n) => toE164(n))
         .find((n) => n && !sameNumber(n, aiLine) && !sameNumber(n, to)) || '';
 
     if (callSid) {
-      await saveCallSession({
-        callSid,
-        userId: tenant.userId,
-        from,
-        to,
-        businessName: business,
-        transferNumber: transferForAi || tenant.config.transferNumber || '',
-        knowledgeBase,
-        greeting: rawGreeting,
-        urgentKeywords,
-        languages,
-        transcript: [{ role: 'agent', text: greeting }],
-        leadIds: [],
-        turn: 0,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      });
+      try {
+        await saveCallSession({
+          callSid,
+          userId: tenant.userId,
+          from,
+          to,
+          businessName: business,
+          transferNumber: transferForAi || tenant.config.transferNumber || '',
+          knowledgeBase,
+          greeting: rawGreeting,
+          urgentKeywords,
+          languages,
+          transcript: [{ role: 'agent', text: greeting }],
+          leadIds: [],
+          turn: 0,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+      } catch (e) {
+        console.warn('voice save session:', e);
+      }
     }
 
-    const gatherUrl = `${getReceptionistWebhookBase()}/api/webhooks/twilio/voice/gather`;
     console.info('twilio voice AI on:', { to, from, callSid, contractorId: tenant.userId });
 
-    return xml(
+    return twimlXmlResponse(
       sayGatherTwiml({
         say: greeting,
-        gatherActionUrl: gatherUrl,
+        gatherActionUrl: VOICE_GATHER_PATH,
       })
     );
   } catch (e: any) {
     console.error('twilio voice webhook:', e);
-    return xml(sayHangupTwiml('We are sorry. This line is temporarily unavailable.'));
+    return twimlXmlResponse(
+      sayHangupTwiml('We are sorry. This line is temporarily unavailable.')
+    );
   }
-}
-
-function xml(twiml: string) {
-  return new NextResponse(twiml, {
-    status: 200,
-    headers: { 'Content-Type': 'text/xml' },
-  });
 }
