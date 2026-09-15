@@ -9,7 +9,6 @@ import {
   twimlXmlResponse,
   VOICE_GATHER_PATH,
 } from '@/lib/receptionist-twiml';
-import { fillGreeting } from '@/lib/ai-receptionist';
 import { formatPhoneE164 } from '@/lib/notifications';
 import { receptionistAddonHasAccess } from '@/lib/receptionist-billing';
 
@@ -140,13 +139,10 @@ export async function POST(request: NextRequest) {
     const rawGreeting =
       (tenant.config.branding.greeting || '').trim() ||
       aiGreeting ||
-      `Thanks for calling {company}. This is the AI receptionist.`;
-    // Casual open — gather name/phone/address/need naturally across turns
-    const greetingBase = fillGreeting(rawGreeting, business).replace(/\s+/g, ' ').trim();
+      `Thanks for calling {company}. What are you calling about today?`;
+    // Staged script open — ask why they are calling (need stage)
     const greeting = (
-      /\?\s*$/.test(greetingBase)
-        ? greetingBase
-        : `${greetingBase} How can I help you today?`
+      `Thanks for calling ${business}. What are you calling about today?`
     ).slice(0, 400);
 
     const transferForAi =
@@ -170,6 +166,7 @@ export async function POST(request: NextRequest) {
           transcript: [{ role: 'agent', text: greeting }],
           leadIds: [],
           turn: 0,
+          callStage: 'need',
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         });
