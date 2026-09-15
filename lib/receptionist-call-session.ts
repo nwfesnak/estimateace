@@ -23,6 +23,10 @@ export type ReceptionistCallSession = {
   businessName: string;
   transferNumber: string;
   knowledgeBase: string;
+  /** Business website for live Q&A (from aiReceptionist.websiteUrl) */
+  websiteUrl?: string;
+  /** Cached scraped website text for this call (avoid re-fetch) */
+  websiteText?: string;
   greeting: string;
   urgentKeywords: string;
   languages: string[];
