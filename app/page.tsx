@@ -1042,6 +1042,8 @@ export default function Home() {
     aiJobRenderingEnabled: true,
     /** Included feature — show Email summaries on dashboard Leads when on */
     emailLeadSummariesEnabled: true,
+    /** Show AI Receptionist leads column on dashboard (requires paid add-on + receptionist On) */
+    aiReceptionistDashboardEnabled: true,
     /** Inbox address the email bot should monitor (user-entered; OAuth connect comes later) */
     monitoredEmail: '',
     /** Paid add-on — AI Receptionist dashboard/inbox only when this is true AND receptionist is On */
@@ -1196,6 +1198,15 @@ export default function Home() {
     return (profile as any).emailLeadSummariesEnabled !== false;
   };
 
+  /** Company Profile toggle — show AI Receptionist column on dashboard Leads */
+  const getAiReceptionistDashboardEnabled = (): boolean => {
+    const cached = getProfileSettingsCache();
+    if ('aiReceptionistDashboardEnabled' in cached) {
+      return cached.aiReceptionistDashboardEnabled !== false;
+    }
+    return (profile as any).aiReceptionistDashboardEnabled !== false;
+  };
+
   /** Paid AI Receptionist add-on (Stripe subscription or flag) */
   const hasAiReceptionistAddon = (): boolean => {
     const cached = getProfileSettingsCache();
@@ -1214,11 +1225,18 @@ export default function Home() {
     return (profile as any).aiReceptionistAddonActive === true;
   };
 
-  /** Show receptionist leads only when paid add-on is active AND user turned receptionist On */
+  /** Show receptionist leads when dashboard toggle On + paid add-on + receptionist answering On */
   const showReceptionistLeadsOnDashboard = (): boolean =>
-    hasAiReceptionistAddon() && receptionistSettings.enabled === true;
+    getAiReceptionistDashboardEnabled() &&
+    hasAiReceptionistAddon() &&
+    receptionistSettings.enabled === true;
 
   const showEmailLeadsOnDashboard = (): boolean => getEmailLeadSummariesEnabled();
+
+  const openAiReceptionistSetup = () => {
+    void loadReceptionistFromSettings();
+    setView('receptionistView');
+  };
 
   const estimateTotals = computeEstimateTotals({
     items,
@@ -1381,6 +1399,7 @@ export default function Home() {
     taxesEnabled: full.taxesEnabled !== false,
     aiJobRenderingEnabled: full.aiJobRenderingEnabled !== false,
     emailLeadSummariesEnabled: full.emailLeadSummariesEnabled !== false,
+    aiReceptionistDashboardEnabled: full.aiReceptionistDashboardEnabled !== false,
     monitoredEmail: String(full.monitoredEmail || '').trim(),
     aiReceptionistAddonActive: full.aiReceptionistAddonActive === true,
     paymentSettings: mergePaymentSettings(full.paymentSettings),
@@ -2794,6 +2813,7 @@ export default function Home() {
         'taxesEnabled' in cached ||
         'aiJobRenderingEnabled' in cached ||
         'emailLeadSummariesEnabled' in cached ||
+        'aiReceptionistDashboardEnabled' in cached ||
         'aiReceptionistAddonActive' in cached ||
         !!serverProfile;
 
@@ -2819,6 +2839,12 @@ export default function Home() {
             : (serverProfile && 'emailLeadSummariesEnabled' in serverProfile
               ? (serverProfile as any).emailLeadSummariesEnabled !== false
               : (prev as any).emailLeadSummariesEnabled !== false);
+        const aiReceptionistDashboardEnabled =
+          'aiReceptionistDashboardEnabled' in cached
+            ? cached.aiReceptionistDashboardEnabled !== false
+            : (serverProfile && 'aiReceptionistDashboardEnabled' in serverProfile
+              ? (serverProfile as any).aiReceptionistDashboardEnabled !== false
+              : (prev as any).aiReceptionistDashboardEnabled !== false);
         const aiReceptionistAddonActive =
           'aiReceptionistAddonActive' in cached
             ? cached.aiReceptionistAddonActive === true
@@ -2831,6 +2857,7 @@ export default function Home() {
           taxesEnabled,
           aiJobRenderingEnabled,
           emailLeadSummariesEnabled,
+          aiReceptionistDashboardEnabled,
           aiReceptionistAddonActive,
         };
       });
@@ -4520,6 +4547,13 @@ export default function Home() {
           : ('emailLeadSummariesEnabled' in loadedProfile
             ? loadedProfile.emailLeadSummariesEnabled !== false
             : (profile as any).emailLeadSummariesEnabled !== false)),
+      aiReceptionistDashboardEnabled: 'aiReceptionistDashboardEnabled' in cached
+        ? cached.aiReceptionistDashboardEnabled !== false
+        : (serverProfile && 'aiReceptionistDashboardEnabled' in serverProfile
+          ? (serverProfile as any).aiReceptionistDashboardEnabled !== false
+          : ('aiReceptionistDashboardEnabled' in loadedProfile
+            ? loadedProfile.aiReceptionistDashboardEnabled !== false
+            : (profile as any).aiReceptionistDashboardEnabled !== false)),
       monitoredEmail: pickFilled(
         cached.monitoredEmail,
         serverProfile && (serverProfile as any).monitoredEmail,
@@ -4765,6 +4799,13 @@ export default function Home() {
               ? (serverProfile as any).emailLeadSummariesEnabled !== false
               : ('emailLeadSummariesEnabled' in l
                 ? (l as any).emailLeadSummariesEnabled !== false
+                : true)),
+          aiReceptionistDashboardEnabled: 'aiReceptionistDashboardEnabled' in cached
+            ? cached.aiReceptionistDashboardEnabled !== false
+            : (serverProfile && 'aiReceptionistDashboardEnabled' in serverProfile
+              ? (serverProfile as any).aiReceptionistDashboardEnabled !== false
+              : ('aiReceptionistDashboardEnabled' in l
+                ? (l as any).aiReceptionistDashboardEnabled !== false
                 : true)),
           monitoredEmail: pickFilled(
             cached.monitoredEmail,
@@ -8031,6 +8072,10 @@ export default function Home() {
         (mergedProfile as any).emailLeadSummariesEnabled !== undefined
           ? (mergedProfile as any).emailLeadSummariesEnabled !== false
           : (existing as any)?.emailLeadSummariesEnabled !== false,
+      aiReceptionistDashboardEnabled:
+        (mergedProfile as any).aiReceptionistDashboardEnabled !== undefined
+          ? (mergedProfile as any).aiReceptionistDashboardEnabled !== false
+          : (existing as any)?.aiReceptionistDashboardEnabled !== false,
       monitoredEmail: pickFilled(
         (mergedProfile as any).monitoredEmail,
         (existing as any)?.monitoredEmail,
@@ -8089,6 +8134,7 @@ export default function Home() {
       taxesEnabled: nextProfile.taxesEnabled !== false,
       aiJobRenderingEnabled: nextProfile.aiJobRenderingEnabled !== false,
       emailLeadSummariesEnabled: (nextProfile as any).emailLeadSummariesEnabled !== false,
+      aiReceptionistDashboardEnabled: (nextProfile as any).aiReceptionistDashboardEnabled !== false,
       monitoredEmail: String((nextProfile as any).monitoredEmail || '').trim(),
       aiReceptionistAddonActive: (nextProfile as any).aiReceptionistAddonActive === true,
       termsDisplayMode: nextProfile.termsDisplayMode === 'printed' ? 'printed' : 'link',
@@ -14851,6 +14897,59 @@ export default function Home() {
                           <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]"></div>
                         </label>
                       </div>
+
+                      <div className="flex items-center justify-between gap-4 border-t border-slate-200 pt-4">
+                        <div className="min-w-0">
+                          <p className="font-semibold">AI Receptionist on dashboard</p>
+                          <p className="text-sm text-gray-500">
+                            When on, dashboard Leads shows AI Receptionist call/SMS leads. Requires the paid
+                            add-on and AI answering <strong>On</strong>.
+                          </p>
+                          <button
+                            type="button"
+                            className="mt-2 text-sm font-semibold text-emerald-700 underline underline-offset-2 hover:text-emerald-900"
+                            onClick={() => openAiReceptionistSetup()}
+                          >
+                            Open AI Receptionist setup →
+                          </button>
+                          {!hasAiReceptionistAddon() && (
+                            <p className="text-xs text-amber-800 mt-1">
+                              Not subscribed yet — open setup to Confirm &amp; pay, then enable your line.
+                            </p>
+                          )}
+                          {hasAiReceptionistAddon() && !receptionistSettings.enabled && (
+                            <p className="text-xs text-amber-800 mt-1">
+                              Add-on is active, but AI answering is Off — turn it On in AI Receptionist.
+                            </p>
+                          )}
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                          <input
+                            type="checkbox"
+                            checked={getAiReceptionistDashboardEnabled()}
+                            onChange={async (e) => {
+                              const checked = e.target.checked;
+                              const nextProfile = {
+                                ...profile,
+                                aiReceptionistDashboardEnabled: checked,
+                              };
+                              setProfile(nextProfile);
+                              await saveProfileSettings(nextProfile);
+                              showMessage(
+                                checked
+                                  ? '✅ AI Receptionist leads will show on the dashboard when the add-on is active and AI is On.'
+                                  : '✅ AI Receptionist leads hidden from the dashboard.'
+                              );
+                              if (checked && !hasAiReceptionistAddon()) {
+                                window.setTimeout(() => openAiReceptionistSetup(), 400);
+                              }
+                            }}
+                            className="sr-only peer"
+                          />
+                          <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]"></div>
+                        </label>
+                      </div>
+
                       <div>
                         <label className="block text-sm font-semibold mb-2">
                           Email for the bot to monitor
