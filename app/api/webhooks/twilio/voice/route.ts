@@ -140,8 +140,10 @@ export async function POST(request: NextRequest) {
     const rawGreeting =
       (tenant.config.branding.greeting || '').trim() ||
       aiGreeting ||
-      `Thanks for calling {company}. This is the AI receptionist. How can I help you today?`;
-    const greeting = fillGreeting(rawGreeting, business).slice(0, 400);
+      `Thanks for calling {company}. This is the AI receptionist.`;
+    // Always start contact collection with the caller's name
+    const greetingBase = fillGreeting(rawGreeting, business).replace(/\s+/g, ' ').trim();
+    const greeting = `${greetingBase} Can I get your full name please?`.slice(0, 400);
 
     const transferForAi =
       [tenant.config.transferNumber || '', profilePhone]

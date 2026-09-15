@@ -20,12 +20,29 @@ export type ReceptionistCallSession = {
   transcript: CallTurn[];
   leadIds: string[];
   turn: number;
+  /** Contact fields the AI must collect before ending the call */
+  collectedName?: string;
+  collectedPhone?: string;
+  collectedAddress?: string;
+  collectedNotes?: string;
   /** Stashed SpeechResult while we ack Twilio quickly, then /think runs Grok */
   pendingCallerText?: string;
   emptyListenCount?: number;
   createdAt: string;
   updatedAt: string;
 };
+
+export function contactComplete(session: {
+  collectedName?: string;
+  collectedPhone?: string;
+  collectedAddress?: string;
+}): boolean {
+  return Boolean(
+    String(session.collectedName || '').trim() &&
+      String(session.collectedPhone || '').trim() &&
+      String(session.collectedAddress || '').trim()
+  );
+}
 
 function sessionRowId(callSid: string) {
   return `CALL-${String(callSid || '').slice(0, 64)}`;

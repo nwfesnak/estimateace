@@ -29,24 +29,40 @@ export async function POST(request: NextRequest) {
       return new NextResponse('', { status: 204 });
     }
 
-    // If we never created a lead mid-call, write a summary lead now
-    if (!(session.leadIds || []).length && session.transcript?.length) {
+    // Always write/update a final lead with name, phone, address when possible
+    if (session.transcript?.length) {
       const summary = await summarizeVoiceCall({
         businessName: session.businessName,
         transcript: session.transcript,
         callerPhone: session.from,
         urgentKeywords: session.urgentKeywords,
+        collectedName: session.collectedName,
+        collectedPhone: session.collectedPhone,
+        collectedAddress: session.collectedAddress,
       });
+      const name = summary.callerName || session.collectedName || 'Unknown';
+      const phone = summary.callerPhone || session.collectedPhone || session.from;
+      const address = summary.address || session.collectedAddress || '';
       await appendReceptionistLead({
         userId: session.userId,
-        callerName: summary.callerName,
-        callerPhone: session.from,
-        summary: summary.summary,
-        actionItems: summary.actionItems,
+        callerName: name,
+        callerPhone: phone,
+        address,
+        summary: [
+          `Name: ${name}`,
+          `Phone: ${phone}`,
+          address ? `Address: ${address}` : null,
+          summary.summary ? `Notes: ${summary.summary}` : null,
+        ]
+          .filter(Boolean)
+          .join('\n'),
+        actionItems: summary.actionItems?.length
+          ? summary.actionItems
+          : ['Follow up with caller'],
         transcript: transcriptToText(session.transcript),
         urgent: summary.urgent,
         language: summary.language,
-        source: 'forwarded',
+        source: 'voice',
       });
     }
 

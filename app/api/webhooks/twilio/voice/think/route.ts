@@ -1,11 +1,12 @@
 import { NextRequest } from 'next/server';
 import {
+  contactComplete,
   loadCallSession,
   saveCallSession,
   transcriptToText,
 } from '@/lib/receptionist-call-session';
 import { runReceptionistVoiceTurn } from '@/lib/receptionist-voice-agent';
-import { appendReceptionistLead } from '@/lib/receptionist-leads';
+import { appendReceptionistLead, formatLeadSummary } from '@/lib/receptionist-leads';
 import {
   sayGatherTwiml,
   sayHangupTwiml,
@@ -101,36 +102,83 @@ export async function POST(request: NextRequest) {
         transcript: session.transcript,
         callerMessage: callerText,
         transferAvailable: Boolean(transferE164),
+        collectedName: session.collectedName,
+        collectedPhone: session.collectedPhone,
+        collectedAddress: session.collectedAddress,
+        collectedNotes: session.collectedNotes,
       });
     } catch (e) {
       console.error('voice think grok:', e);
       result = {
-        say: 'Thanks. Could you tell me your name and what you need help with?',
+        say: !session.collectedName
+          ? 'Thanks for calling. Can I get your full name please?'
+          : !session.collectedPhone
+            ? 'Thanks. What is the best phone number to reach you?'
+            : !session.collectedAddress
+              ? 'And what is the job site address, including the city?'
+              : 'Thanks. How can I help you today?',
         action: 'continue' as const,
-        lead: null,
+        lead: {
+          name: session.collectedName || '',
+          phone: session.collectedPhone || '',
+          address: session.collectedAddress || '',
+          notes: session.collectedNotes || '',
+        },
       };
+    }
+
+    // Merge collected contact fields from this turn
+    if (result.lead) {
+      if (result.lead.name) session.collectedName = String(result.lead.name).trim();
+      if (result.lead.phone) session.collectedPhone = String(result.lead.phone).trim();
+      if (result.lead.address) session.collectedAddress = String(result.lead.address).trim();
+      if (result.lead.notes) session.collectedNotes = String(result.lead.notes).trim();
     }
 
     let speak = String(result.say || '').trim();
     if (!speak || speak.startsWith('{') || speak.includes('"action"')) {
-      speak = 'Thanks. How can I help with your project today?';
+      speak = !session.collectedName
+        ? 'Thanks for calling. Can I get your full name please?'
+        : !session.collectedPhone
+          ? 'Thanks. What is the best phone number to reach you?'
+          : !session.collectedAddress
+            ? 'And what is the job site address, including the city?'
+            : 'Thanks. How can I help you today?';
     }
     speak = speak.slice(0, 280);
 
     session.transcript.push({ role: 'agent', text: speak });
 
-    // Lead write must never crash the call
+    const complete = contactComplete(session);
+    // Never end the call until name + phone + address are collected
+    if (result.action === 'end' && !complete) {
+      result.action = 'continue';
+      if (!session.collectedName) speak = 'Before we wrap up, can I get your full name?';
+      else if (!session.collectedPhone)
+        speak = 'And what is the best phone number to call you back?';
+      else speak = 'Last thing — what is the job site address, including the city?';
+    }
+
+    // Save / update lead once we have at least a name, and again when complete
     try {
-      if (result.lead && (result.lead.notes || result.lead.name)) {
+      if (session.collectedName || session.collectedPhone || session.collectedAddress) {
+        const summary = formatLeadSummary({
+          name: session.collectedName,
+          phone: session.collectedPhone || session.from,
+          address: session.collectedAddress,
+          notes: session.collectedNotes,
+        });
         const lead = await appendReceptionistLead({
           userId: session.userId,
-          callerName: result.lead.name || '',
-          callerPhone: session.from,
-          summary:
-            [result.lead.notes, result.lead.address].filter(Boolean).join(' · ') || speak,
-          actionItems: ['Follow up from live AI call'],
+          callerName: session.collectedName || 'Unknown',
+          callerPhone: session.collectedPhone || session.from,
+          address: session.collectedAddress || '',
+          summary,
+          actionItems: complete
+            ? ['Follow up — name, phone, and address collected']
+            : ['Follow up — finish collecting missing contact fields'],
           transcript: transcriptToText(session.transcript),
-          urgent: Boolean(result.lead.urgent),
+          urgent: Boolean(result.lead?.urgent),
           source: 'voice',
         });
         if (lead?.id) session.leadIds = [...(session.leadIds || []), lead.id];
@@ -155,7 +203,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (result.action === 'end') {
+    if (result.action === 'end' && complete) {
       return twimlXmlResponse(sayHangupTwiml(speak || 'Thanks for calling. Goodbye.'));
     }
 

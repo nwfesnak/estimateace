@@ -10,10 +10,26 @@ function settingsId(userId: string) {
   return `SETTINGS-${userId}`;
 }
 
+export function formatLeadSummary(parts: {
+  name?: string;
+  phone?: string;
+  address?: string;
+  notes?: string;
+}): string {
+  const lines = [
+    parts.name ? `Name: ${parts.name}` : null,
+    parts.phone ? `Phone: ${parts.phone}` : null,
+    parts.address ? `Address: ${parts.address}` : null,
+    parts.notes ? `Notes: ${parts.notes}` : null,
+  ].filter(Boolean);
+  return lines.join('\n') || 'New lead';
+}
+
 export async function appendReceptionistLead(input: {
   userId: string;
   callerName?: string;
   callerPhone?: string;
+  address?: string;
   summary: string;
   actionItems?: string[];
   transcript?: string;
@@ -31,12 +47,26 @@ export async function appendReceptionistLead(input: {
     ? profile.aiReceptionistMessages
     : [];
 
+  const name = String(input.callerName || 'Unknown').slice(0, 120);
+  const phone = String(input.callerPhone || '').slice(0, 40);
+  const address = String(input.address || '').slice(0, 200);
+  const summaryBody = String(input.summary || '').trim();
+  const summary =
+    summaryBody.includes('Name:') || summaryBody.includes('Phone:')
+      ? summaryBody.slice(0, 2000)
+      : formatLeadSummary({
+          name,
+          phone,
+          address,
+          notes: summaryBody,
+        }).slice(0, 2000);
+
   const msg: ReceptionistMessage = {
     id: `lead-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     createdAt: new Date().toISOString(),
-    callerName: String(input.callerName || 'Unknown').slice(0, 120),
-    callerPhone: String(input.callerPhone || '').slice(0, 40),
-    summary: String(input.summary || 'New lead').slice(0, 2000),
+    callerName: name,
+    callerPhone: phone,
+    summary,
     actionItems: (input.actionItems || []).map(String).slice(0, 8),
     transcript: String(input.transcript || '').slice(0, 20000),
     urgent: Boolean(input.urgent),
