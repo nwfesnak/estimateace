@@ -20,6 +20,7 @@ export const VOICE_THINK_PATH = '/api/webhooks/twilio/voice/think';
 /**
  * Speak a prompt, then listen for speech.
  * Keep attributes conservative — invalid Gather attrs cause Twilio "application error".
+ * input MUST be exactly: dtmf | speech | "dtmf speech" (not "speech dtmf").
  */
 export function sayGatherTwiml(opts: {
   say: string;
@@ -37,7 +38,7 @@ export function sayGatherTwiml(opts: {
 
   return twimlResponse(
     [
-      `  <Gather input="speech dtmf" language="${lang}" timeout="8" speechTimeout="3" action="${action}" method="POST" actionOnEmptyResult="true" hints="${hints}">`,
+      `  <Gather input="dtmf speech" language="${lang}" timeout="8" speechTimeout="3" action="${action}" method="POST" actionOnEmptyResult="true" hints="${hints}">`,
       `    <Say voice="alice">${say}</Say>`,
       `  </Gather>`,
       `  <Say voice="alice">Sorry, I did not catch that.</Say>`,
