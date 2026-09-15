@@ -143,6 +143,8 @@ Update lead fields from what they said. Respond with JSON only.`;
         'Content-Type': 'application/json',
         Authorization: `Bearer ${apiKey}`,
       },
+      // Twilio webhooks time out ~15s — fail soft before that
+      signal: AbortSignal.timeout(8000),
       body: JSON.stringify({
         model,
         temperature: 0.35,
@@ -261,6 +263,7 @@ export async function summarizeVoiceCall(input: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${apiKey}`,
       },
+      signal: AbortSignal.timeout(8000),
       body: JSON.stringify({
         model: getXaiChatModel(),
         temperature: 0.2,
