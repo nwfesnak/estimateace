@@ -9,6 +9,7 @@ import {
   looksLikePersonName,
   runReceptionistVoiceTurn,
 } from '@/lib/receptionist-voice-agent';
+import { formatPhoneForSpeech } from '@/lib/receptionist-twiml';
 import { appendReceptionistLead, formatLeadSummary } from '@/lib/receptionist-leads';
 import {
   sayGatherTwiml,
@@ -171,11 +172,15 @@ export async function POST(request: NextRequest) {
         : !session.collectedName
           ? 'Happy to help — who am I speaking with?'
           : !session.collectedPhone
-            ? `${hi}is ${session.from || 'this number'} the best one to call you back on?`
+            ? `${hi}is ${session.from ? formatPhoneForSpeech(session.from) : 'this number'} the best one to call you back on?`
             : !session.collectedAddress
               ? `${hi}what's the job address, including the city?`
               : `${hi}anything else we should know before we follow up?`;
     }
+    // Rewrite any raw +1… / long digit runs so <Say> speaks digits
+    speak = speak.replace(/\+?1?\D*(\d{3})\D*(\d{3})\D*(\d{4})\b/g, (_m, a, b, c) =>
+      formatPhoneForSpeech(`${a}${b}${c}`)
+    );
     speak = speak.slice(0, 280);
 
     // If we just captured the name, don't re-ask "who am I speaking with?"
@@ -186,7 +191,7 @@ export async function POST(request: NextRequest) {
       const first = session.collectedName.split(/\s+/)[0];
       const hi = first ? `${first}, ` : '';
       if (!session.collectedPhone) {
-        speak = `${hi}is ${session.from || 'this number'} the best one to call you back on?`;
+        speak = `${hi}is ${session.from ? formatPhoneForSpeech(session.from) : 'this number'} the best one to call you back on?`;
       } else if (!session.collectedAddress) {
         speak = `${hi}what's the job address, including the city?`;
       } else {

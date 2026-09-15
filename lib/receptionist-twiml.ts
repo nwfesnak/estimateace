@@ -9,6 +9,26 @@ export function escapeXml(s: string) {
     .replace(/'/g, '&apos;');
 }
 
+
+/** Format a phone so Twilio <Say> reads digits, not "nine million…". */
+export function formatPhoneForSpeech(phone: string): string {
+  const digits = String(phone || '').replace(/\D/g, '');
+  if (!digits) return 'this number';
+  // US/CA: drop leading country 1 for speaking, keep last 10
+  let d = digits;
+  if (d.length === 11 && d.startsWith('1')) d = d.slice(1);
+  if (d.length > 10) d = d.slice(-10);
+  // Spaces force digit-by-digit TTS ("nine eight zero…")
+  const parts: string[] = [];
+  if (d.length === 10) {
+    parts.push(d.slice(0, 3).split('').join(' '));
+    parts.push(d.slice(3, 6).split('').join(' '));
+    parts.push(d.slice(6).split('').join(' '));
+    return parts.join(', ');
+  }
+  return d.split('').join(' ');
+}
+
 export function twimlResponse(inner: string) {
   return `<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n${inner}\n</Response>`;
 }

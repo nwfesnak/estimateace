@@ -4,6 +4,7 @@
  * name, phone, address, what they need, urgency, preferred callback.
  */
 import { getXaiApiKey, getXaiChatModel } from '@/lib/xai-config';
+import { formatPhoneForSpeech } from '@/lib/receptionist-twiml';
 import { transcriptToText, type CallTurn } from '@/lib/receptionist-call-session';
 
 export type VoiceAgentAction = 'continue' | 'transfer' | 'end';
@@ -219,7 +220,7 @@ function casualAskNext(
   }
   if (next === 'phone') {
     if (aniPhone) {
-      return `${hi}is ${aniPhone} the best number to call you back on?`;
+      return `${hi}is ${formatPhoneForSpeech(aniPhone)} the best number to call you back on?`;
     }
     return `${hi}what's the best number to reach you?`;
   }
@@ -313,7 +314,8 @@ Sound like a helpful person on the phone — warm, casual, brief (1–2 short se
 GOAL: Capture a solid lead through natural conversation, not an interrogation.
 Ideal lead fields:
 1) Full name
-2) Callback phone (caller ID is ${aniPhone || 'unknown'} — confirm it casually when phone is missing)
+2) Callback phone (caller ID is ${aniPhone || 'unknown'} — confirm it casually when phone is missing).
+CRITICAL for "say": when you speak any phone number, write EACH digit separated by spaces (example: "9 8 0, 5 5 5, 1 2 3 4") so text-to-speech does NOT say "nine million". Never read a phone as a whole integer.
 3) Job / service address (street + city)
 4) What they need (job type / problem) — put in notes + jobType
 5) Urgency and preferred time if they mention it
