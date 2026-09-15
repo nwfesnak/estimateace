@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
           : stage === 'phone'
             ? 'Is this the best number to call you back on?'
             : stage === 'anything_else'
-              ? 'Is there anything else you would like to add?'
+              ? "Anything else you'd like to add, or anything else we can help with today?"
               : stage === 'techs_sms'
                 ? 'Are you okay with us texting you as well?'
                 : 'What are you calling about today?';
@@ -112,6 +112,8 @@ export async function POST(request: NextRequest) {
       result = await runReceptionistVoiceTurn({
         businessName: session.businessName,
         knowledgeBase: session.knowledgeBase,
+        websiteUrl: session.websiteUrl,
+        websiteText: session.websiteText,
         greetingStyle: session.greeting,
         languages: session.languages,
         urgentKeywords: session.urgentKeywords,
@@ -138,7 +140,7 @@ export async function POST(request: NextRequest) {
               : stage === 'phone'
                 ? 'Got it — is this the best number to call you back on?'
                 : stage === 'anything_else'
-                  ? 'Is there anything else you would like to add about why you are calling today?'
+                  ? "Anything else you'd like to add, or anything else we can help with today?"
                   : stage === 'techs_sms'
                     ? 'Are you okay with us texting you as well?'
                     : `Thanks so much for calling ${session.businessName || 'us'}. We'll be in contact with you as soon as possible. Goodbye!`,
@@ -156,12 +158,15 @@ export async function POST(request: NextRequest) {
       };
     }
 
-    // Persist stage + SMS preference from agent
+    // Persist stage + SMS preference + website text from agent
     if (result.callStage) {
       session.callStage = result.callStage;
     }
     if (result.smsOk === true || result.smsOk === false) {
       session.smsOk = result.smsOk;
+    }
+    if (result.websiteText && !session.websiteText) {
+      session.websiteText = String(result.websiteText).slice(0, 8000);
     }
 
     // Merge collected contact fields from this turn
@@ -212,7 +217,7 @@ export async function POST(request: NextRequest) {
             : stage === 'phone'
               ? `${hi}is ${session.from ? formatPhoneForSpeech(session.from) : 'this number'} the best one to call you back on?`
               : stage === 'anything_else'
-                ? `Just to make sure I've got it — is there anything else you'd like to add about why you're calling today?`
+                ? `Anything else you'd like to add, or anything else we can help with today?`
                 : stage === 'techs_sms'
                   ? `All of our technicians are helping other customers right now, so we'll call you back as soon as we can. Are you okay with us texting you as well?`
                   : `Thanks so much for calling ${session.businessName || 'us'}. We'll be in contact with you as soon as possible. Goodbye!`;
@@ -222,7 +227,7 @@ export async function POST(request: NextRequest) {
     speak = speak.replace(/\+?1?\D*(\d{3})\D*(\d{3})\D*(\d{4})\b/g, (_m, a, b, c) =>
       formatPhoneForSpeech(`${a}${b}${c}`)
     );
-    speak = speak.slice(0, 280);
+    speak = speak.slice(0, 420);
 
     session.transcript.push({ role: 'agent', text: speak });
 

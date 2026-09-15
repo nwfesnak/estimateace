@@ -61,6 +61,7 @@ export async function POST(request: NextRequest) {
 
     const admin = getSupabaseAdmin();
     let knowledgeBase = '';
+    let websiteUrl = '';
     let urgentKeywords =
       'emergency, leak, no heat, no ac, flooding, urgent, asap, fire, smoke';
     let languages = ['en', 'es'];
@@ -78,6 +79,7 @@ export async function POST(request: NextRequest) {
       const profile = (data?.profile || {}) as any;
       const ai = profile.aiReceptionist || {};
       knowledgeBase = String(ai.knowledgeBase || '').slice(0, 10000);
+      websiteUrl = String(ai.websiteUrl || '').trim().slice(0, 500);
       if (ai.urgentKeywords) urgentKeywords = String(ai.urgentKeywords);
       if (Array.isArray(ai.languages) && ai.languages.length) languages = ai.languages.map(String);
       aiGreeting = String(ai.greeting || '');
@@ -160,6 +162,7 @@ export async function POST(request: NextRequest) {
           businessName: business,
           transferNumber: transferForAi || tenant.config.transferNumber || '',
           knowledgeBase,
+          websiteUrl,
           greeting: rawGreeting,
           urgentKeywords,
           languages,
