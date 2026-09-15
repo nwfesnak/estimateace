@@ -36,7 +36,7 @@ const NAME_STOP = new Set(
 function titleCaseName(s: string): string {
   return String(s || '')
     .trim()
-    .split(/\\s+/)
+    .split(/\s+/)
     .filter(Boolean)
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
     .join(' ')
@@ -45,16 +45,16 @@ function titleCaseName(s: string): string {
 
 /** True if utterance is plausibly just a person name (Twilio STT is often lowercase). */
 export function looksLikePersonName(text: string): boolean {
-  const raw = String(text || '').replace(/\\s+/g, ' ').trim();
+  const raw = String(text || '').replace(/\s+/g, ' ').trim();
   if (!raw || raw.length > 60) return false;
-  if (/\\d/.test(raw)) return false;
-  if (/[@#/\\\\]|https?:/i.test(raw)) return false;
-  const words = raw.replace(/[.,!?']/g, '').split(/\\s+/).filter(Boolean);
+  if (/\d/.test(raw)) return false;
+  if (/[@#/\\]|https?:/i.test(raw)) return false;
+  const words = raw.replace(/[.,!?']/g, '').split(/\s+/).filter(Boolean);
   if (words.length < 1 || words.length > 4) return false;
   if (words.every((w) => NAME_STOP.has(w.toLowerCase()))) return false;
   // reject clear job phrases
   if (
-    /\\b(pressure\\s*wash|roof|paint|plumb|hvac|estimate|quote|address|street|avenue|phone|number|call me)\\b/i.test(
+    /\b(pressure\s*wash|roof|paint|plumb|hvac|estimate|quote|address|street|avenue|phone|number|call me)\b/i.test(
       raw
     )
   ) {
@@ -69,7 +69,7 @@ export function extractLeadHintsFromSpeech(
   aniPhone = '',
   opts?: { expectName?: boolean; expectPhone?: boolean; expectAddress?: boolean }
 ): VoiceAgentLead {
-  const raw = String(text || '').replace(/\\s+/g, ' ').trim();
+  const raw = String(text || '').replace(/\s+/g, ' ').trim();
   if (!raw) return {};
 
   const lead: VoiceAgentLead = {};
@@ -77,13 +77,13 @@ export function extractLeadHintsFromSpeech(
 
   // Phone numbers in speech
   const phoneMatch = raw.match(
-    /(?:\\+?1[-.\\s]?)?(?:\\(?\\d{3}\\)?[-.\\s]?)\\d{3}[-.\\s]?\\d{4}\\b/
+    /(?:\+?1[-.\s]?)?(?:\(?\d{3}\)?[-.\s]?)\d{3}[-.\s]?\d{4}\b/
   );
   if (phoneMatch) {
-    lead.phone = phoneMatch[0].replace(/[^\\d+]/g, '');
+    lead.phone = phoneMatch[0].replace(/[^\d+]/g, '');
   } else if (
     aniPhone &&
-    /\\b(yes|yeah|yep|yup|correct|that's (me|right|fine)|that is|this (number|one)|calling from)\\b/i.test(
+    /\b(yes|yeah|yep|yup|correct|that's (me|right|fine)|that is|this (number|one)|calling from)\b/i.test(
       raw
     )
   ) {
@@ -92,8 +92,8 @@ export function extractLeadHintsFromSpeech(
 
   // "my name is X" / "this is X" / "I am X" — case-insensitive capture
   const namePatterns = [
-    /(?:my name is|my name's|name is|this is|i am|i'm|it's|it is)\\s+([A-Za-z][A-Za-z'-]*(?:\\s+[A-Za-z][A-Za-z'-]*){0,3})/i,
-    /(?:name'?s)\\s+([A-Za-z][A-Za-z'-]*(?:\\s+[A-Za-z][A-Za-z'-]*){0,3})/i,
+    /(?:my name is|my name's|name is|this is|i am|i'm|it's|it is)\s+([A-Za-z][A-Za-z'-]*(?:\s+[A-Za-z][A-Za-z'-]*){0,3})/i,
+    /(?:name'?s)\s+([A-Za-z][A-Za-z'-]*(?:\s+[A-Za-z][A-Za-z'-]*){0,3})/i,
   ];
   for (const re of namePatterns) {
     const m = raw.match(re);
@@ -111,7 +111,7 @@ export function extractLeadHintsFromSpeech(
     if (looksLikePersonName(raw) || expectName) {
       const cleaned = raw.replace(/[.,!?]/g, '').trim();
       // If expectName, accept almost any short alphabetic answer
-      const words = cleaned.split(/\\s+/).filter(Boolean);
+      const words = cleaned.split(/\s+/).filter(Boolean);
       const okExpect =
         expectName &&
         words.length >= 1 &&
@@ -126,10 +126,10 @@ export function extractLeadHintsFromSpeech(
 
   // Address-ish: number + street word, or "in City"
   const addr = raw.match(
-    /\\b(\\d{1,6}\\s+[A-Za-z0-9 .'-]{3,40}\\s+(?:st|street|ave|avenue|rd|road|blvd|boulevard|dr|drive|ln|lane|ct|court|way|circle|cir|hwy|highway)\\.?(?:\\s*,?\\s*[A-Za-z .']+)?)(?:\\b|$)/i
+    /\b(\d{1,6}\s+[A-Za-z0-9 .'-]{3,40}\s+(?:st|street|ave|avenue|rd|road|blvd|boulevard|dr|drive|ln|lane|ct|court|way|circle|cir|hwy|highway)\.?(?:\s*,?\s*[A-Za-z .']+)?)(?:\b|$)/i
   );
   if (addr) {
-    lead.address = addr[1].replace(/\\s+/g, ' ').trim();
+    lead.address = addr[1].replace(/\s+/g, ' ').trim();
   } else if (opts?.expectAddress) {
     // When we asked for address, take a reasonable whole utterance
     if (raw.length >= 5 && raw.length <= 120 && !looksLikePersonName(raw)) {
@@ -137,7 +137,7 @@ export function extractLeadHintsFromSpeech(
     }
   } else {
     const city = raw.match(
-      /\\b(?:in|at|near|around)\\s+([A-Za-z][A-Za-z]+(?:\\s+[A-Za-z][A-Za-z]+){0,2})\\b/i
+      /\b(?:in|at|near|around)\s+([A-Za-z][A-Za-z]+(?:\s+[A-Za-z][A-Za-z]+){0,2})\b/i
     );
     if (city && !lead.address) lead.address = titleCaseName(city[1]);
   }
@@ -145,7 +145,7 @@ export function extractLeadHintsFromSpeech(
   // Job / need keywords → notes
   const jobBits: string[] = [];
   const jobRe =
-    /\\b(pressure\\s*wash(?:ing)?|roof(?:ing)?|paint(?:ing)?|plumb(?:ing|er)?|hvac|ac|air\\s*condition(?:ing|er)?|electric(?:al|ian)?|landscap(?:e|ing)|lawn|mow(?:ing)?|fence|concrete|driveway|sidewalk|gutters?|windows?|clean(?:ing)?|repair|install|estimate|quote|remodel|leak|flood)\\b/gi;
+    /\b(pressure\s*wash(?:ing)?|roof(?:ing)?|paint(?:ing)?|plumb(?:ing|er)?|hvac|ac|air\s*condition(?:ing|er)?|electric(?:al|ian)?|landscap(?:e|ing)|lawn|mow(?:ing)?|fence|concrete|driveway|sidewalk|gutters?|windows?|clean(?:ing)?|repair|install|estimate|quote|remodel|leak|flood)\b/gi;
   let jm: RegExpExecArray | null;
   while ((jm = jobRe.exec(raw))) {
     jobBits.push(jm[1].toLowerCase());
@@ -160,12 +160,12 @@ export function extractLeadHintsFromSpeech(
     }
   }
 
-  if (/\\b(emergency|urgent|asap|right away|flooding|no heat|no ac|leak)\\b/i.test(raw)) {
+  if (/\b(emergency|urgent|asap|right away|flooding|no heat|no ac|leak)\b/i.test(raw)) {
     lead.urgent = true;
   }
 
   const when = raw.match(
-    /\\b((?:today|tomorrow|this (?:week|weekend|morning|afternoon|evening)|monday|tuesday|wednesday|thursday|friday|saturday|sunday|next week)(?:\\s+(?:morning|afternoon|evening|at\\s+\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)?))?)/i
+    /\b((?:today|tomorrow|this (?:week|weekend|morning|afternoon|evening)|monday|tuesday|wednesday|thursday|friday|saturday|sunday|next week)(?:\s+(?:morning|afternoon|evening|at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?))?)/i
   );
   if (when) lead.preferredTime = when[1];
 
