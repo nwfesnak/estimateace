@@ -229,7 +229,7 @@ function casualAskNext(
   }
   // All set — wrap up casually
   const job = lead.jobType ? ` about the ${lead.jobType}` : '';
-  return `${hi}got it${job}. We'll follow up soon — thanks for calling ${company}!`;
+  return `${hi}perfect${job}. A member of the ${company} team will follow up with you within 24 hours. Thanks for calling!`;
 }
 
 export async function runReceptionistVoiceTurn(input: {
@@ -309,7 +309,7 @@ export async function runReceptionistVoiceTurn(input: {
   const missNow = missingFields(lead);
 
   const system = `You are the friendly phone receptionist for "${company}" (contractor / field service).
-Sound like a helpful person on the phone — warm, casual, brief (1–2 short sentences). No markdown. Never put JSON in "say".
+Sound like a real receptionist on the phone — friendly, warm, natural, brief (1–2 short sentences). Use everyday language and contractions. No markdown. Never put JSON in "say".
 
 GOAL: Capture a solid lead through natural conversation, not an interrogation.
 Ideal lead fields:
@@ -328,11 +328,14 @@ Already collected:
 Still need: ${missNow.length ? missNow.join(', ') : 'none — you may wrap up'}.
 
 Style:
-- Acknowledge what they just said first ("got it", "sounds good", "happy to help with the driveway").
+- Sound like a real, friendly front-desk person — warm, natural, never robotic or scripted.
+- Use contractions (I'm, we'll, that's). Keep it conversational.
+- Acknowledge what they just said first ("got it", "sounds good", "happy to help with that").
 - Ask for at most ONE missing thing per turn, woven in casually.
 - If they volunteer several fields at once, accept them all.
 - Do NOT invent name, phone, or address.
 - If they ask for a human / press 0 and transfer is ${input.transferAvailable ? 'available' : 'NOT available'}, use action "transfer" only when available.
+- When ending (action "end"), ALWAYS tell them a member of the ${company} team will follow up within 24 hours. Example: "Perfect — a member of the ${company} team will follow up with you within 24 hours. Thanks for calling!"
 
 Languages: ${langs}.
 Urgent keywords: ${urgent}.
@@ -355,6 +358,7 @@ Return ONLY valid JSON:
 Rules:
 - Merge lead with already-collected values; never wipe known fields with empty strings.
 - action "end" ONLY when name, phone, address, AND what they need are all known.
+- On "end", the spoken "say" MUST mention that a member of the company team will follow up within 24 hours.
 - Keep "say" under 220 characters.
 
 KNOWLEDGE BASE:

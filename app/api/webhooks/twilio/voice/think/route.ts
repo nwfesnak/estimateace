@@ -82,7 +82,7 @@ export async function POST(request: NextRequest) {
     session.turn = (session.turn || 0) + 1;
 
     if (session.turn > MAX_TURNS) {
-      const bye = 'Thanks for calling. We will follow up soon. Goodbye.';
+      const bye = `Thanks for calling ${session.businessName || 'us'}. A member of the team will follow up with you within 24 hours. Goodbye.`;
       session.transcript.push({ role: 'agent', text: bye });
       try {
         await saveCallSession(session);
@@ -123,7 +123,7 @@ export async function POST(request: NextRequest) {
               ? 'Got it — is this the best number to call you back on?'
               : !session.collectedAddress
                 ? 'And what is the job address, including the city?'
-                : 'Thanks — we will follow up soon.',
+                : `Thanks — a member of the ${session.businessName || 'team'} team will follow up with you within 24 hours.`,
         action: 'continue' as const,
         lead: {
           name: session.collectedName || '',
@@ -195,7 +195,7 @@ export async function POST(request: NextRequest) {
       } else if (!session.collectedAddress) {
         speak = `${hi}what's the job address, including the city?`;
       } else {
-        speak = `${hi}got it — we'll follow up shortly.`;
+        speak = `${hi}perfect — a member of the ${session.businessName || 'team'} team will follow up with you within 24 hours. Thanks for calling!`;
       }
     }
 
@@ -263,7 +263,12 @@ export async function POST(request: NextRequest) {
     }
 
     if (result.action === 'end' && complete) {
-      return twimlXmlResponse(sayHangupTwiml(speak || 'Thanks for calling. Goodbye.'));
+      return twimlXmlResponse(
+        sayHangupTwiml(
+          speak ||
+            `Thanks for calling ${session.businessName || 'us'}. A member of the team will follow up with you within 24 hours.`
+        )
+      );
     }
 
     return twimlXmlResponse(
