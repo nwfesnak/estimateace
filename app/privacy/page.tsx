@@ -17,7 +17,7 @@ export default function PrivacyPage() {
           </Link>
         </p>
         <h1>Privacy Policy</h1>
-        <p className="text-sm text-slate-500">Last updated: September 7, 2026</p>
+        <p className="text-sm text-slate-500">Last updated: September 14, 2026</p>
 
         <p>
           This Privacy Policy explains how EstimateAce (&quot;we&quot;, &quot;us&quot;) collects and
@@ -32,7 +32,8 @@ export default function PrivacyPage() {
           </li>
           <li>
             <strong>Business content</strong> — estimates, invoices, job addresses, photos, videos,
-            receipts, mileage logs, calendar notes, receptionist test transcripts you create.
+            receipts, mileage logs, calendar notes, AI Receptionist call/SMS transcripts and leads
+            you create or receive.
           </li>
           <li>
             <strong>Usage &amp; technical data</strong> — IP address, device/browser type, logs needed
@@ -49,7 +50,10 @@ export default function PrivacyPage() {
           <li>Provide, maintain, and improve the Service</li>
           <li>Authenticate users and protect accounts</li>
           <li>Process subscriptions and send transactional email/SMS when configured</li>
-          <li>Run optional AI features you request (quotes, translation, receptionist test mode)</li>
+          <li>
+            Run optional AI features you request (quotes, translation, job renderings, AI
+            Receptionist calls/SMS)
+          </li>
           <li>Comply with law and enforce our Terms</li>
         </ul>
 
@@ -63,11 +67,30 @@ export default function PrivacyPage() {
           <li>Resend / Twilio — email/SMS when you enable notifications</li>
         </ul>
 
-        <h2>4. AI processing</h2>
+        <h2>4. AI processing (including xAI)</h2>
         <p>
-          When you use AI features, relevant text or images you submit may be sent to the AI provider
-          to generate a response. Do not submit data you are not allowed to process. Review provider
-          policies for their handling of API data.
+          When you use AI features, relevant text, images, or call/SMS content you submit (or that
+          callers provide to AI Receptionist) may be sent to our AI provider — currently{' '}
+          <strong>xAI</strong> — to generate a response. Do not submit data you are not authorized to
+          process.
+        </p>
+        <p>
+          <strong>Retention / training:</strong> We send prompts and necessary context to xAI over
+          their API solely to provide the feature you requested. We do not sell your Customer Content
+          for advertising. We configure and use the API for inference; we do not use your EstimateAce
+          customer data to train EstimateAce&apos;s own models. For how xAI retains or uses API data
+          (including any training or retention practices), see xAI&apos;s then-current privacy /
+          API terms at{' '}
+          <a href="https://x.ai" target="_blank" rel="noopener noreferrer">
+            x.ai
+          </a>
+          . You should review those terms before enabling AI features that process sensitive client
+          information.
+        </p>
+        <p>
+          Call audio for AI Receptionist is processed via our telephony provider (Twilio) for
+          speech-to-text and call handling; transcripts and lead summaries may be stored in your
+          EstimateAce account so you can follow up.
         </p>
 
         <h2>5. Sharing</h2>

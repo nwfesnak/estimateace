@@ -17,7 +17,7 @@ export default function TermsPage() {
           </Link>
         </p>
         <h1>Terms of Service</h1>
-        <p className="text-sm text-slate-500">Last updated: September 7, 2026</p>
+        <p className="text-sm text-slate-500">Last updated: September 14, 2026</p>
 
         <p>
           These Terms govern your use of EstimateAce (&quot;Service&quot;), a software platform for
@@ -50,16 +50,26 @@ export default function TermsPage() {
 
         <h2>4. AI features</h2>
         <p>
-          Optional AI features (pricing suggestions, translations, receptionist test mode, etc.) may
-          send prompts and relevant context to our AI providers (e.g. xAI). AI output can be wrong or
-          incomplete — you must review all quotes, legal language, and customer communications
+          Optional AI features (pricing suggestions, translations, job renderings, AI Receptionist,
+          and related tools) may send prompts, call audio transcripts, images, or other context you
+          submit to our AI providers (currently xAI) to generate a response. AI output can be wrong
+          or incomplete — you must review all quotes, legal language, and customer communications
           before use. AI is not professional advice.
         </p>
-
-        <h2>5. Beta / incomplete features</h2>
         <p>
-          Some features are labeled beta or demo (including AI Receptionist live phone answering and
-          advanced crew billing). Beta features are provided as-is and may change or be removed.
+          <strong>AI Receptionist</strong> is an optional paid add-on. When enabled, callers may
+          reach an AI line (typically via call forwarding from your existing business number). You
+          are responsible for carrier forwarding setup, disclosure to callers where required, and
+          reviewing leads the AI logs. Speech recognition and AI answers can fail; keep a transfer /
+          host number configured.
+        </p>
+
+        <h2>5. Evolving features</h2>
+        <p>
+          We may improve or change features over time. Crew seats are available as a paid per-seat
+          add-on. Some capabilities (for example deeper email-inbox automation or streaming voice
+          upgrades) may still roll out gradually — we will label unfinished items clearly in the
+          product when material.
         </p>
 
         <h2>6. Acceptable use</h2>

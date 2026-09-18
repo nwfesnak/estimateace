@@ -9,8 +9,8 @@ Goal: ship EstimateAce as a **real multi-customer product** for estimating/invoi
 - [x] Free trial clock (default 14 days) when billing status is seeded
 - [x] Terms (`/terms`) + Privacy (`/privacy`)
 - [x] Support email (`NEXT_PUBLIC_SUPPORT_EMAIL`)
-- [x] Crew fake $20 flow removed (beta free seats + Phase B note)
-- [x] AI Receptionist labeled **beta / test call only** (no live phone claim in UI)
+- [x] Crew fake $20 flow removed; crew seats live at $14.99/mo
+- [x] AI Receptionist live as **paid add-on** (forward business line → Twilio AI; collect name/phone/address)
 - [x] 2FA already disabled in code
 
 ## You must configure (ops)
@@ -54,12 +54,21 @@ Goal: ship EstimateAce as a **real multi-customer product** for estimating/invoi
    - Portal opens
    - With enforce=true, expired trial sees paywall
 
+## Crew seats ($14.99/mo) — ops checklist
+
+App UI + APIs are ready. Finish Stripe/Supabase:
+
+1. Stripe Live → Product **EstimateAce Crew Seat** → recurring **$14.99/month** → copy Price ID  
+2. Vercel Production: `STRIPE_PRICE_ID_CREW_SEAT=price_...` → redeploy  
+3. Supabase SQL: run `supabase/crew-seat-subscriptions.sql`  
+4. Full steps: `CREW_SEAT_STRIPE_SETUP.md`
+
 ## Still Phase B+
 
-- Real crew invites (Supabase Auth) + seat billing
 - Real MFA
-- AI Receptionist live Twilio voice + forward-to number (or third-party reseller)
+- Deeper email-inbox OAuth automation
 - Stripe Connect for client job payments (partially live via job Checkout)
+- CSP nonce migration (remove `unsafe-inline`)
 
 ## Security hardening (done in app code)
 - Deposit Stripe payments no longer force `paymentStatus=paid` unless fully paid

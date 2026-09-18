@@ -426,10 +426,10 @@ export default function Home() {
       receiptFolderCount: "{count} receipts",
       videosSection: "Videos",
       receiptsSection: "Receipts",
-      loginMain: "Log In (Main Account)",
+      loginMain: "Log In",
       signUp: "Sign Up",
-      logInAsCrew: "Log In as Crew / Sub-contractor",
-      crewLoginNote: "Use the email provided by the main account holder. No password needed.",
+      logInAsCrew: "Crew login",
+      crewLoginNote: "Crew use the email and password the account owner set under Billing → Manage → Crew.",
       twoStepVerification: "Two-Step Verification",
       verifyCode: "Verify Code",
       resendCode: "Resend Code",
@@ -573,10 +573,10 @@ export default function Home() {
       receiptFolderCount: "{count} recibos",
       videosSection: "Videos",
       receiptsSection: "Recibos",
-      loginMain: "Iniciar Sesión (Cuenta Principal)",
+      loginMain: "Iniciar sesión",
       signUp: "Registrarse",
-      logInAsCrew: "Iniciar Sesión como Equipo / Subcontratista",
-      crewLoginNote: "Usa el email proporcionado por la cuenta principal. No se necesita contraseña.",
+      logInAsCrew: "Acceso de equipo",
+      crewLoginNote: "El equipo usa el email y la contraseña que el dueño configuró en Facturación → Gestionar → Equipo.",
       twoStepVerification: "Verificación en Dos Pasos",
       verifyCode: "Verificar Código",
       resendCode: "Reenviar Código",
@@ -720,10 +720,10 @@ export default function Home() {
       receiptFolderCount: "{count} reçus",
       videosSection: "Vidéos",
       receiptsSection: "Reçus",
-      loginMain: "Connexion (Compte Principal)",
+      loginMain: "Connexion",
       signUp: "S'inscrire",
-      logInAsCrew: "Se connecter en tant qu'Équipe / Sous-traitant",
-      crewLoginNote: "Utilisez l'email fourni par le titulaire du compte principal. Pas de mot de passe requis.",
+      logInAsCrew: "Connexion équipe",
+      crewLoginNote: "L'équipe utilise l'email et le mot de passe définis par le propriétaire sous Facturation → Gérer → Équipe.",
       twoStepVerification: "Vérification en Deux Étapes",
       verifyCode: "Vérifier le Code",
       resendCode: "Renvoyer le Code",
@@ -11169,8 +11169,8 @@ export default function Home() {
           )}
 
           <p className="text-[10px] text-gray-500 mt-4 text-center leading-relaxed">
-            Crew members use this same login with the email and password set by the account owner
-            under Billing / Contact Us → Manage account → Crew.
+            Crew: log in here with the email and password your account owner created under Billing →
+            Manage → Crew.
           </p>
         </Card>
       </div>

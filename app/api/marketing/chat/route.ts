@@ -18,14 +18,15 @@ const RATE_LIMIT = 20;
 const WINDOW_MS = 60 * 60 * 1000;
 
 function corsHeaders(origin: string | null): HeadersInit {
-  const allow =
-    origin && ALLOWED_ORIGINS.has(origin) ? origin : 'https://estimateace.com';
-  return {
-    'Access-Control-Allow-Origin': allow,
+  // Reflect only allowlisted origins — never "*" and never a foreign Origin.
+  const allow = origin && ALLOWED_ORIGINS.has(origin) ? origin : null;
+  const headers: Record<string, string> = {
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     Vary: 'Origin',
   };
+  if (allow) headers['Access-Control-Allow-Origin'] = allow;
+  return headers;
 }
 
 function checkRateLimit(id: string) {
