@@ -10,9 +10,9 @@ Professional contractor estimating & invoicing tool with AI assistance.
 - Crew / sub-contractors (Supabase Auth) with optional Stripe seat billing
 - Reports, exports, archiving, recurring charges
 - Profile, client payments (Stripe Checkout / Connect where configured)
-- AI Receptionist **beta** (test call + knowledge base; live phone answering not shipped)
+- AI Receptionist **live paid add-on** — forward your business number to a Twilio AI line; collects name/phone/address; leads in dashboard
 
-**Phase A**: Product subscription via Stripe (`NEXT_PUBLIC_BILLING_ENFORCE=true` to hard-paywall). Client job deposits/balances via Stripe Checkout. AI Receptionist is test-call only until Phase C. See `GO_LIVE_PHASE_A.md`.
+**Billing**: Product subscription via Stripe (`NEXT_PUBLIC_BILLING_ENFORCE=true` to hard-paywall). Client job deposits/balances via Stripe Checkout. AI Receptionist is a separate `$49.99/mo` add-on. See `GO_LIVE_PHASE_A.md` and `RECEPTIONIST_ADDON_STRIPE_SETUP.md`.
 
 ## Setup
 

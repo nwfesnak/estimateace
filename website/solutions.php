@@ -47,8 +47,8 @@ $app_url = 'https://app.estimateace.com';
     </article>
     <article class="card icon-card" id="receptionist">
       <div class="icon">📞</div>
-      <h3>AI Receptionist (beta)</h3>
-      <p>Knowledge base, test call, and message inbox in the app today. Live missed-call answering and forwarding are coming in a later release.</p>
+      <h3>AI Receptionist</h3>
+      <p>Paid add-on: forward your existing business number to a live AI line. It answers, collects name, phone, and address, and logs leads in EstimateAce.</p>
       <p style="margin-top:0.75rem;"><a href="/receptionist.php">Learn more →</a></p>
     </article>
   </div>

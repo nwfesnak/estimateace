@@ -501,9 +501,10 @@ export function AIReceptionist({
             </span>
           </h2>
           <p className="text-sm text-gray-500 mt-1 max-w-xl">
-            Keep your existing business number. Forward it to your private Twilio AI line. When this
-            receptionist is <strong>On</strong>, AI answers; when <strong>Off</strong>, calls ring your
-            phone. Leads land in Inbox and dashboard.
+            <strong>Live phone receptionist.</strong> Keep your existing business number and forward it
+            to your private Twilio AI line. When <strong>On</strong>, AI answers and collects name,
+            phone, and address. When <strong>Off</strong>, calls ring your host number silently. Leads
+            land in Inbox and dashboard.
           </p>
           {linePhone && (
             <p className="mt-2 text-sm font-semibold text-emerald-800">
@@ -1179,9 +1180,9 @@ export function AIReceptionist({
       )}
 
       <p className="text-[10px] text-gray-400 mt-8 leading-snug">
-        AI Receptionist is designed for small businesses and contractors: 24/7 coverage, message
-        summaries, appointment help, urgent flags, multilingual replies, and natural conversation.
-        Live carrier forwarding uses your Twilio/SMS stack when provisioned. Not a replacement for 911.
+        Live phone AI for contractors: forward your business line, answer when you can’t, log leads
+        with name/phone/address, and transfer to your cell when needed. Speech can miss details —
+        always review leads. Not a replacement for 911.
       </p>
     </div>
   );

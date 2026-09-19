@@ -6,7 +6,7 @@
 |------|--------|
 | Marketing root shim (`index.html` → marketing-landing) | **Fixed** — `index.html` is full landing; `index.php` remains primary DirectoryIndex |
 | Resources `#` placeholders on marketing landing | **Fixed** — point to `resources.php`, app tutorials, support, receptionist |
-| AI Receptionist marketed as beta / coming later | **Fixed** — live paid add-on framing (marketing + Terms + receptionist.php) |
+| AI Receptionist marketed as live phone | **Fixed** — live paid add-on (forward + answer + leads); not beta |
 | Login “Main Account” / wrong crew password copy | **Fixed** — “Log In” + crew email/password from owner |
 | CORS `Access-Control-Allow-Origin: *` on marketing chat | **Hardened** — allowlist only; no `*` and no foreign Origin reflect |
 | Privacy light on xAI retention/training | **Expanded** — API inference, no EA training claim, link to x.ai + Twilio transcripts |
