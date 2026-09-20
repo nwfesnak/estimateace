@@ -1753,7 +1753,15 @@ export default function Home() {
     DEFAULT_RECEPTIONIST_SETTINGS
   );
   const [receptionistMessages, setReceptionistMessages] = useState<ReceptionistMessage[]>([]);
+  const [receptionistArchivedMessages, setReceptionistArchivedMessages] = useState<
+    ReceptionistMessage[]
+  >([]);
   const [receptionistSaving, setReceptionistSaving] = useState(false);
+  /** Dashboard lead detail viewer */
+  const [viewingReceptionistLead, setViewingReceptionistLead] = useState<ReceptionistMessage | null>(
+    null
+  );
+  const [reportsArchivedLeadsOpen, setReportsArchivedLeadsOpen] = useState(false);
   /** Email lead summaries (dashboard Leads — filled when email connect is live) */
   const [emailLeadSummaries, setEmailLeadSummaries] = useState<EmailLeadSummary[]>([]);
   /** SaaS product subscription (Phase A) */
@@ -7562,6 +7570,11 @@ export default function Home() {
     if (Array.isArray(serverProfile.aiReceptionistMessages)) {
       setReceptionistMessages(normalizeReceptionistMessages(serverProfile.aiReceptionistMessages));
     }
+    if (Array.isArray(serverProfile.aiReceptionistArchivedMessages)) {
+      setReceptionistArchivedMessages(
+        normalizeReceptionistMessages(serverProfile.aiReceptionistArchivedMessages)
+      );
+    }
     if (Array.isArray(serverProfile.emailLeadSummaries)) {
       setEmailLeadSummaries(normalizeEmailLeadSummaries(serverProfile.emailLeadSummaries));
     }
@@ -7587,7 +7600,52 @@ export default function Home() {
       m.id === id && m.status === 'new' ? { ...m, status: 'read' as const } : m
     );
     setReceptionistMessages(next);
-    await saveReceptionistData(receptionistSettings, next);
+    await saveReceptionistData(receptionistSettings, next, receptionistArchivedMessages);
+  };
+
+  /** Delete from dashboard inbox → move to Reports archived AI messages (does not touch real email) */
+  const archiveReceptionistLeadFromDashboard = async (id: string) => {
+    const msg = receptionistMessages.find((m) => m.id === id);
+    if (!msg) return;
+    if (
+      !confirm(
+        'Remove this message from Leads & inbox? It will be archived under Reports (your real email is not deleted).'
+      )
+    ) {
+      return;
+    }
+    const nextActive = receptionistMessages.filter((m) => m.id !== id);
+    const nextArchived = [
+      { ...msg, status: 'handled' as const },
+      ...receptionistArchivedMessages.filter((m) => m.id !== id),
+    ].slice(0, 500);
+    setReceptionistMessages(nextActive);
+    setReceptionistArchivedMessages(nextArchived);
+    if (viewingReceptionistLead?.id === id) setViewingReceptionistLead(null);
+    await saveReceptionistData(receptionistSettings, nextActive, nextArchived);
+    showMessage('✅ Message archived. Find it under Reports → Archived AI Receptionist messages.');
+  };
+
+  const restoreReceptionistLeadFromArchive = async (id: string) => {
+    const msg = receptionistArchivedMessages.find((m) => m.id === id);
+    if (!msg) return;
+    const nextArchived = receptionistArchivedMessages.filter((m) => m.id !== id);
+    const nextActive = [
+      { ...msg, status: 'read' as const },
+      ...receptionistMessages.filter((m) => m.id !== id),
+    ].slice(0, 200);
+    setReceptionistArchivedMessages(nextArchived);
+    setReceptionistMessages(nextActive);
+    await saveReceptionistData(receptionistSettings, nextActive, nextArchived);
+    showMessage('✅ Message restored to Leads & inbox.');
+  };
+
+  const permanentlyDeleteArchivedReceptionistLead = async (id: string) => {
+    if (!confirm('Permanently delete this archived message? This cannot be undone.')) return;
+    const nextArchived = receptionistArchivedMessages.filter((m) => m.id !== id);
+    setReceptionistArchivedMessages(nextArchived);
+    await saveReceptionistData(receptionistSettings, receptionistMessages, nextArchived);
+    showMessage('✅ Archived message deleted.');
   };
 
   const markEmailLeadRead = async (id: string) => {
@@ -8048,7 +8106,8 @@ export default function Home() {
 
   const saveReceptionistData = async (
     settings: ReceptionistSettings,
-    messages: ReceptionistMessage[]
+    messages: ReceptionistMessage[],
+    archived: ReceptionistMessage[] = receptionistArchivedMessages
   ) => {
     if (!workspaceUserId) {
       showMessage('Please log in to save AI Receptionist.');
@@ -8059,7 +8118,7 @@ export default function Home() {
       try {
         localStorage.setItem(
           `estimateace_receptionist_${workspaceUserId}`,
-          JSON.stringify({ settings, messages })
+          JSON.stringify({ settings, messages, archived })
         );
       } catch {
         /* ignore */
@@ -8075,10 +8134,12 @@ export default function Home() {
         jobName: '__settings__',
         documentType: 'settings',
         items: [],
+        invoiceNumber: `SETTINGS-${workspaceUserId}`,
         profile: {
           ...existing,
           aiReceptionist: settings,
           aiReceptionistMessages: messages.slice(0, 200),
+          aiReceptionistArchivedMessages: archived.slice(0, 500),
         },
         updated_at: new Date().toISOString(),
       });
@@ -8162,6 +8223,10 @@ export default function Home() {
         (mergedProfile as any).aiReceptionistMessages ??
         (existing as any)?.aiReceptionistMessages ??
         receptionistMessages,
+      aiReceptionistArchivedMessages:
+        (mergedProfile as any).aiReceptionistArchivedMessages ??
+        (existing as any)?.aiReceptionistArchivedMessages ??
+        receptionistArchivedMessages,
       // Never wipe signup welcome flag (prevents re-texting on every login/profile save)
       welcomeOnboardingSentAt:
         (existing as any)?.welcomeOnboardingSentAt ||
@@ -11412,7 +11477,7 @@ export default function Home() {
                           </span>
                         )}
                       </div>
-                      <div className="space-y-2 max-h-64 overflow-y-auto">
+                      <div className="space-y-2 max-h-[13.5rem] overflow-y-auto overscroll-contain pr-1">
                         {receptionistMessages.filter((m) => !m.spam).length === 0 ? (
                           <p className="text-sm text-gray-500 py-6 text-center">
                             No receptionist leads yet. When AI answering is On and a caller leaves a
@@ -11424,23 +11489,17 @@ export default function Home() {
                             .filter((m) => !m.spam)
                             .slice()
                             .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
-                            .slice(0, 8)
                             .map((m) => (
-                              <button
+                              <div
                                 key={m.id}
-                                type="button"
-                                className={`w-full text-left rounded-xl border p-3 transition hover:bg-white ${
+                                className={`rounded-xl border p-3 ${
                                   m.status === 'new'
                                     ? 'border-emerald-300 bg-emerald-50/80'
                                     : 'border-slate-200 bg-white'
                                 }`}
-                                onClick={() => {
-                                  void markReceptionistLeadRead(m.id);
-                                  setView('receptionistView');
-                                }}
                               >
                                 <div className="flex items-start justify-between gap-2">
-                                  <div className="min-w-0">
+                                  <div className="min-w-0 flex-1">
                                     <div className="font-semibold text-sm text-slate-900 truncate">
                                       {m.callerName || 'Unknown caller'}
                                       {m.urgent ? (
@@ -11448,6 +11507,11 @@ export default function Home() {
                                           Urgent
                                         </span>
                                       ) : null}
+                                      {m.status === 'new' && (
+                                        <span className="ml-2 text-[10px] font-bold text-emerald-700">
+                                          NEW
+                                        </span>
+                                      )}
                                     </div>
                                     <div className="text-xs text-gray-500 truncate">
                                       {m.callerPhone || 'No phone'} ·{' '}
@@ -11455,18 +11519,41 @@ export default function Home() {
                                         ? new Date(m.createdAt).toLocaleString()
                                         : ''}
                                     </div>
+                                    <p className="text-sm text-slate-700 mt-1 line-clamp-2 whitespace-pre-wrap">
+                                      {m.summary || 'No summary yet.'}
+                                    </p>
                                   </div>
-                                  {m.status === 'new' && (
-                                    <span className="shrink-0 text-[10px] font-bold text-emerald-700">NEW</span>
-                                  )}
                                 </div>
-                                <p className="text-sm text-slate-700 mt-1 line-clamp-2">
-                                  {m.summary || 'No summary yet.'}
-                                </p>
-                              </button>
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => {
+                                      void markReceptionistLeadRead(m.id);
+                                      setViewingReceptionistLead(m);
+                                    }}
+                                  >
+                                    View
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="destructive"
+                                    onClick={() => void archiveReceptionistLeadFromDashboard(m.id)}
+                                  >
+                                    Delete
+                                  </Button>
+                                </div>
+                              </div>
                             ))
                         )}
                       </div>
+                      {receptionistMessages.filter((m) => !m.spam).length > 3 && (
+                        <p className="text-[11px] text-gray-400 mt-2 text-center">
+                          Showing newest first · scroll for more · delete archives under Reports
+                        </p>
+                      )}
                     </div>
                     )}
 
@@ -16491,6 +16578,102 @@ export default function Home() {
                     <Button onClick={exportTaxReport} className="w-full bg-[#10b981]">
                       📤 Export Full Tax Report (CSV)
                     </Button>
+
+                    {/* Archived AI Receptionist messages (deleted from dashboard Leads) */}
+                    <Card className="mt-8 border-slate-200">
+                      <CardContent className="p-0">
+                        <button
+                          type="button"
+                          className="w-full flex items-center justify-between gap-3 p-5 text-left hover:bg-slate-50 rounded-xl"
+                          onClick={() => setReportsArchivedLeadsOpen((o) => !o)}
+                        >
+                          <div>
+                            <h4 className="font-semibold text-[#1e293b]">
+                              🗄️ Archived AI Receptionist messages
+                            </h4>
+                            <p className="text-sm text-gray-500 mt-1">
+                              Messages deleted from Dashboard → Leads &amp; inbox (in-app only — not your
+                              real email).
+                              {receptionistArchivedMessages.length
+                                ? ` · ${receptionistArchivedMessages.length} archived`
+                                : ''}
+                            </p>
+                          </div>
+                          <span className="text-xl text-gray-400 shrink-0">
+                            {reportsArchivedLeadsOpen ? '▾' : '▸'}
+                          </span>
+                        </button>
+                        {reportsArchivedLeadsOpen && (
+                          <div className="px-5 pb-5 border-t border-slate-100 pt-4 space-y-3 max-h-80 overflow-y-auto">
+                            {receptionistArchivedMessages.length === 0 ? (
+                              <p className="text-sm text-gray-500 text-center py-6">
+                                No archived receptionist messages yet. Delete a lead from the dashboard
+                                to archive it here.
+                              </p>
+                            ) : (
+                              receptionistArchivedMessages
+                                .slice()
+                                .sort((a, b) =>
+                                  String(b.createdAt).localeCompare(String(a.createdAt))
+                                )
+                                .map((m) => (
+                                  <div
+                                    key={m.id}
+                                    className="rounded-xl border border-slate-200 bg-white p-4"
+                                  >
+                                    <div className="font-semibold text-sm text-[#1e293b]">
+                                      {m.callerName || 'Unknown caller'}
+                                      {m.urgent ? (
+                                        <span className="ml-2 text-[10px] font-bold text-red-700 uppercase">
+                                          Urgent
+                                        </span>
+                                      ) : null}
+                                    </div>
+                                    <div className="text-xs text-gray-500 mt-0.5">
+                                      {m.callerPhone || 'No phone'} ·{' '}
+                                      {m.createdAt
+                                        ? new Date(m.createdAt).toLocaleString()
+                                        : ''}
+                                    </div>
+                                    <p className="text-sm text-slate-700 mt-2 whitespace-pre-wrap line-clamp-3">
+                                      {m.summary || 'No summary.'}
+                                    </p>
+                                    <div className="mt-3 flex flex-wrap gap-2">
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => setViewingReceptionistLead(m)}
+                                      >
+                                        View
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        className="border-emerald-600 text-emerald-800"
+                                        onClick={() => void restoreReceptionistLeadFromArchive(m.id)}
+                                      >
+                                        Restore to Leads
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="destructive"
+                                        onClick={() =>
+                                          void permanentlyDeleteArchivedReceptionistLead(m.id)
+                                        }
+                                      >
+                                        Delete forever
+                                      </Button>
+                                    </div>
+                                  </div>
+                                ))
+                            )}
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
                   </>
                   )}
                 </div>
@@ -17698,6 +17881,102 @@ export default function Home() {
       </Dialog>
 
       {/* Labor Modal — multi-entry: hours, hourly rate, memo; list all saved */}
+      <Dialog
+        open={!!viewingReceptionistLead}
+        onOpenChange={(open) => {
+          if (!open) setViewingReceptionistLead(null);
+        }}
+      >
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              {viewingReceptionistLead?.callerName || 'AI Receptionist message'}
+            </DialogTitle>
+            <DialogDescription>
+              In-app lead only — viewing or deleting here does not change your real email inbox.
+            </DialogDescription>
+          </DialogHeader>
+          {viewingReceptionistLead && (
+            <div className="space-y-3 text-sm">
+              <div className="text-gray-500">
+                {viewingReceptionistLead.callerPhone || 'No phone'} ·{' '}
+                {viewingReceptionistLead.createdAt
+                  ? new Date(viewingReceptionistLead.createdAt).toLocaleString()
+                  : ''}
+                {viewingReceptionistLead.source
+                  ? ` · ${viewingReceptionistLead.source}`
+                  : ''}
+                {viewingReceptionistLead.urgent ? ' · Urgent' : ''}
+              </div>
+              <div className="rounded-xl border bg-slate-50 p-4 whitespace-pre-wrap text-slate-800">
+                {viewingReceptionistLead.summary || 'No summary.'}
+              </div>
+              {viewingReceptionistLead.actionItems?.length > 0 && (
+                <div>
+                  <div className="font-semibold mb-1">Action items</div>
+                  <ul className="list-disc pl-5 text-slate-700">
+                    {viewingReceptionistLead.actionItems.map((a, i) => (
+                      <li key={i}>{a}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {viewingReceptionistLead.transcript && (
+                <div>
+                  <div className="font-semibold mb-1">Transcript</div>
+                  <div className="rounded-xl border bg-white p-3 max-h-48 overflow-y-auto whitespace-pre-wrap text-xs text-slate-600">
+                    {viewingReceptionistLead.transcript}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter className="gap-2 flex-wrap">
+            {viewingReceptionistLead &&
+              receptionistMessages.some((m) => m.id === viewingReceptionistLead.id) && (
+                <Button
+                  type="button"
+                  variant="destructive"
+                  onClick={() =>
+                    void archiveReceptionistLeadFromDashboard(viewingReceptionistLead.id)
+                  }
+                >
+                  Delete (archive)
+                </Button>
+              )}
+            {viewingReceptionistLead &&
+              receptionistArchivedMessages.some((m) => m.id === viewingReceptionistLead.id) && (
+                <>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="border-emerald-600 text-emerald-800"
+                    onClick={() => {
+                      void restoreReceptionistLeadFromArchive(viewingReceptionistLead.id);
+                      setViewingReceptionistLead(null);
+                    }}
+                  >
+                    Restore to Leads
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    onClick={() => {
+                      void permanentlyDeleteArchivedReceptionistLead(viewingReceptionistLead.id);
+                      setViewingReceptionistLead(null);
+                    }}
+                  >
+                    Delete forever
+                  </Button>
+                </>
+              )}
+            <Button type="button" variant="outline" onClick={() => setViewingReceptionistLead(null)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={isLaborModalOpen} onOpenChange={setIsLaborModalOpen}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
