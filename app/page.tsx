@@ -28,6 +28,7 @@ import {
   getTradeById,
   tradeQuickLinesToSaved,
 } from '@/lib/trade-quick-lines';
+import { getInboundAddressForUserClient } from '@/lib/email-inbound-address';
 import { AIReceptionist } from '@/components/AIReceptionist';
 import { SubscriptionGate } from '@/components/SubscriptionGate';
 import {
@@ -1789,6 +1790,7 @@ export default function Home() {
   const [emailLeadSummaries, setEmailLeadSummaries] = useState<EmailLeadSummary[]>([]);
   /** Last time email summaries were pulled from company SETTINGS (hourly refresh) */
   const [emailSummariesRefreshedAt, setEmailSummariesRefreshedAt] = useState<string | null>(null);
+  const [emailTestSummaryBusy, setEmailTestSummaryBusy] = useState(false);
   const monitoredEmailSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** SaaS product subscription (Phase A) */
   const [billing, setBilling] = useState<BillingSnapshot>(DEFAULT_BILLING_SNAPSHOT);
@@ -7756,10 +7758,47 @@ export default function Home() {
         return;
       }
       if (raw) {
+        const fwd = workspaceUserId ? getInboundAddressForUserClient(workspaceUserId) : '';
         showMessage(
-          `✅ Monitoring ${raw}. Dashboard Email summaries will show this address and refresh about once an hour.`
+          fwd
+            ? `✅ Saved ${raw}. Forward lead emails to ${fwd} so summaries appear on the dashboard.`
+            : `✅ Saved ${raw}. Forward lead emails to your EstimateAce address so summaries appear.`
         );
       }
+    }
+  };
+
+  /** Push a sample summary into the dashboard box (proves the pipeline without waiting for forward). */
+  const sendTestEmailSummary = async () => {
+    if (!supabase || !user || emailTestSummaryBusy) return;
+    setEmailTestSummaryBusy(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) {
+        showMessage('Please log in again to add a test summary.');
+        return;
+      }
+      const res = await fetch('/api/email-leads/ingest', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ test: true }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showMessage(json.error || 'Could not add test summary.');
+        return;
+      }
+      await refreshEmailLeadSummaries();
+      showMessage('✅ Test email summary added to the dashboard.');
+      setView('dashboard');
+    } catch (e: any) {
+      showMessage(e?.message || 'Could not add test summary.');
+    } finally {
+      setEmailTestSummaryBusy(false);
     }
   };
 
@@ -11915,15 +11954,33 @@ export default function Home() {
                             </p>
                           </div>
                         ) : emailLeadSummaries.length === 0 ? (
-                          <div className="text-sm text-gray-500 py-4 text-center space-y-2">
+                          <div className="text-sm text-gray-500 py-4 text-center space-y-3">
                             <p>
                               Watching{' '}
                               <strong className="text-slate-700">{getMonitoredEmail()}</strong>
                             </p>
-                            <p className="text-xs text-gray-400">
-                              No new email summaries yet. This box checks about once an hour.
-                              Full inbox connect (Google/Microsoft) can be added next.
+                            <p className="text-xs text-gray-500 leading-relaxed max-w-sm mx-auto">
+                              No summaries yet. Forward lead emails from any provider to your EstimateAce
+                              address (Profile → Company Info), or add a test summary to preview this box.
                             </p>
+                            {workspaceUserId && (
+                              <p className="text-[11px] text-slate-600 break-all px-2">
+                                Forward to:{' '}
+                                <code className="bg-white border rounded px-1 py-0.5">
+                                  {getInboundAddressForUserClient(workspaceUserId)}
+                                </code>
+                              </p>
+                            )}
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="border-sky-600 text-sky-800"
+                              disabled={emailTestSummaryBusy || !user}
+                              onClick={() => void sendTestEmailSummary()}
+                            >
+                              {emailTestSummaryBusy ? 'Adding…' : 'Add test summary'}
+                            </Button>
                           </div>
                         ) : (
                           <>
@@ -15631,42 +15688,93 @@ export default function Home() {
                         </label>
                       </div>
 
-                      <div>
-                        <label className="block text-sm font-semibold mb-2">
-                          Email for the bot to monitor
-                        </label>
-                        <Input
-                          type="email"
-                          placeholder="leads@yourcompany.com"
-                          value={(profile as any).monitoredEmail || ''}
-                          onChange={(e) => {
-                            const value = e.target.value;
-                            setProfile((prev) => ({ ...prev, monitoredEmail: value }));
-                            setProfileSettingsCache({
-                              ...getProfileSettingsCache(),
-                              monitoredEmail: String(value || '').trim(),
-                            });
-                            if (monitoredEmailSaveTimeoutRef.current) {
-                              clearTimeout(monitoredEmailSaveTimeoutRef.current);
-                            }
-                            monitoredEmailSaveTimeoutRef.current = setTimeout(() => {
-                              void saveMonitoredEmail(value, { quiet: true });
-                            }, 600);
-                          }}
-                          onBlur={(e) => {
-                            if (monitoredEmailSaveTimeoutRef.current) {
-                              clearTimeout(monitoredEmailSaveTimeoutRef.current);
-                              monitoredEmailSaveTimeoutRef.current = null;
-                            }
-                            void saveMonitoredEmail(e.target.value);
-                          }}
-                          className="bg-white max-w-md"
-                        />
-                        <p className="text-xs text-gray-500 mt-2 leading-relaxed">
-                          Enter the inbox you want EstimateAce to watch (business Gmail, Outlook, etc.).
-                          This address shows on <strong>Dashboard → Email summaries</strong> and that box
-                          refreshes about once an hour. Secure Google/Microsoft inbox connect can be added next.
-                        </p>
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-sm font-semibold mb-2">
+                            Your business inbox (any provider)
+                          </label>
+                          <Input
+                            type="email"
+                            placeholder="leads@yourcompany.com"
+                            value={(profile as any).monitoredEmail || ''}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              setProfile((prev) => ({ ...prev, monitoredEmail: value }));
+                              setProfileSettingsCache({
+                                ...getProfileSettingsCache(),
+                                monitoredEmail: String(value || '').trim(),
+                              });
+                              if (monitoredEmailSaveTimeoutRef.current) {
+                                clearTimeout(monitoredEmailSaveTimeoutRef.current);
+                              }
+                              monitoredEmailSaveTimeoutRef.current = setTimeout(() => {
+                                void saveMonitoredEmail(value, { quiet: true });
+                              }, 600);
+                            }}
+                            onBlur={(e) => {
+                              if (monitoredEmailSaveTimeoutRef.current) {
+                                clearTimeout(monitoredEmailSaveTimeoutRef.current);
+                                monitoredEmailSaveTimeoutRef.current = null;
+                              }
+                              void saveMonitoredEmail(e.target.value);
+                            }}
+                            className="bg-white max-w-md"
+                          />
+                          <p className="text-xs text-gray-500 mt-2 leading-relaxed">
+                            Works with <strong>any</strong> email — Gmail, Outlook, Yahoo, Apple, Zoho, custom
+                            domain, etc. Not limited to Google/Microsoft.
+                          </p>
+                        </div>
+
+                        <div className="rounded-xl border border-sky-200 bg-white p-3 space-y-2">
+                          <p className="text-sm font-semibold text-slate-800">
+                            Forward leads to this EstimateAce address
+                          </p>
+                          <p className="text-xs text-gray-500 leading-relaxed">
+                            In your email settings, set up <strong>auto-forward</strong> (or forward individual
+                            lead emails) to the address below. We summarize them onto{' '}
+                            <strong>Dashboard → Email summaries</strong> (checks about once an hour).
+                          </p>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <code className="text-xs sm:text-sm bg-slate-100 border rounded-lg px-2 py-1.5 break-all text-slate-800">
+                              {workspaceUserId
+                                ? getInboundAddressForUserClient(workspaceUserId)
+                                : 'Sign in to see your forward address'}
+                            </code>
+                            {workspaceUserId && (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={async () => {
+                                  const addr = getInboundAddressForUserClient(workspaceUserId);
+                                  try {
+                                    await navigator.clipboard.writeText(addr);
+                                    showMessage('✅ Forward address copied.');
+                                  } catch {
+                                    showMessage(addr);
+                                  }
+                                }}
+                              >
+                                Copy
+                              </Button>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2 leading-relaxed">
+                            Saving your inbox above only labels which mailbox you use. Summaries appear after
+                            mail is <strong>forwarded</strong> here (or use Add test summary below to preview
+                            the dashboard box).
+                          </p>
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="bg-sky-600 hover:bg-sky-700 text-white"
+                            disabled={emailTestSummaryBusy || !user}
+                            onClick={() => void sendTestEmailSummary()}
+                          >
+                            {emailTestSummaryBusy ? 'Adding…' : 'Add test summary'}
+                          </Button>
+                        </div>
                       </div>
                     </div>
 
