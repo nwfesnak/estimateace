@@ -23,6 +23,11 @@ import {
   sumLaborLogs,
   type LaborLog,
 } from '@/lib/labor-logs';
+import {
+  TRADE_QUICK_LINES,
+  getTradeById,
+  tradeQuickLinesToSaved,
+} from '@/lib/trade-quick-lines';
 import { AIReceptionist } from '@/components/AIReceptionist';
 import { SubscriptionGate } from '@/components/SubscriptionGate';
 import {
@@ -1546,6 +1551,7 @@ export default function Home() {
   const addressSuggestAbortRef = useRef<AbortController | null>(null);
 
   const [quickLines, setQuickLines] = useState<any[]>([]);
+  const [selectedTradeId, setSelectedTradeId] = useState('');
   const [savedTemplates, setSavedTemplates] = useState<any[]>([]);
 
   // Previous addresses from saved docs (fallback for auto-suggest)
@@ -8685,7 +8691,13 @@ export default function Home() {
   };
 
   const saveAsQuickLine = (item: any) => {
-    const newQuick = { id: Date.now(), description: item.description, qty: item.qty, unit: item.unit, price: item.price };
+    const newQuick = {
+      id: Date.now(),
+      description: item.description,
+      qty: item.qty,
+      unit: item.unit,
+      price: item.price,
+    };
     const updated = [...quickLines, newQuick];
     setQuickLines(updated);
     localStorage.setItem('quickLines', JSON.stringify(updated));
@@ -8693,15 +8705,85 @@ export default function Home() {
   };
 
   const applyQuickLine = (quick: any) => {
-    const newItem = { id: Date.now(), description: quick.description, qty: quick.qty, unit: quick.unit, price: quick.price, total: quick.qty * quick.price };
-    setItems(prev => [...prev, newItem]);
+    const qty = Number(quick.qty) || 1;
+    const price = Number(quick.price) || 0;
+    const newItem = {
+      id: Date.now(),
+      description: quick.description,
+      qty,
+      unit: quick.unit || '',
+      price,
+      total: qty * price,
+    };
+    setItems((prev) => [...prev, newItem]);
     setIsQuickLinesModalOpen(false);
   };
 
   const deleteQuickLine = (id: number) => {
-    const updated = quickLines.filter(q => q.id !== id);
+    const updated = quickLines.filter((q) => q.id !== id);
     setQuickLines(updated);
     localStorage.setItem('quickLines', JSON.stringify(updated));
+  };
+
+  const updateQuickLine = (
+    id: number,
+    patch: Partial<{ description: string; qty: number; unit: string; price: number }>
+  ) => {
+    const updated = quickLines.map((q) => (q.id === id ? { ...q, ...patch } : q));
+    setQuickLines(updated);
+    localStorage.setItem('quickLines', JSON.stringify(updated));
+  };
+
+  const applyTradeQuickLines = (tradeId: string, mode: 'replace' | 'merge' = 'replace') => {
+    const trade = getTradeById(tradeId);
+    if (!trade) return;
+    const generated = tradeQuickLinesToSaved(trade);
+    const updated =
+      mode === 'merge'
+        ? [
+            ...quickLines,
+            ...generated.map((g, i) => ({
+              ...g,
+              id: Date.now() + i + Math.floor(Math.random() * 1000),
+            })),
+          ]
+        : generated;
+    setQuickLines(updated);
+    setSelectedTradeId(tradeId);
+    localStorage.setItem('quickLines', JSON.stringify(updated));
+    localStorage.setItem('quickLinesTradeId', tradeId);
+    showMessage(
+      `✅ Loaded ${trade.lines.length} common ${trade.name} services into Quick Lines. Edit prices/descriptions anytime.`
+    );
+  };
+
+  const applyAllTradeQuickLinesToEstimate = () => {
+    if (!quickLines.length) {
+      showMessage('No quick lines to add. Pick a trade first.');
+      return;
+    }
+    const stamp = Date.now();
+    const newItems = quickLines.map((quick, i) => {
+      const qty = Number(quick.qty) || 1;
+      const price = Number(quick.price) || 0;
+      return {
+        id: stamp + i,
+        description: quick.description || '',
+        qty,
+        unit: quick.unit || '',
+        price,
+        total: qty * price,
+      };
+    });
+    setItems((prev) => {
+      const blankOnly =
+        prev.length === 1 &&
+        !(prev[0].description || '').trim() &&
+        !(Number(prev[0].price) > 0);
+      return blankOnly ? newItems : [...prev, ...newItems];
+    });
+    setIsQuickLinesModalOpen(false);
+    showMessage(`✅ Added ${newItems.length} line items from Quick Lines. Edit as needed.`);
   };
 
   const deleteSelectedEstimate = async (id: string) => {
@@ -8945,8 +9027,14 @@ export default function Home() {
   ]);
 
   useEffect(() => {
-    const saved = localStorage.getItem('quickLines');
-    if (saved) setQuickLines(JSON.parse(saved));
+    try {
+      const saved = localStorage.getItem('quickLines');
+      if (saved) setQuickLines(JSON.parse(saved));
+      const tradeId = localStorage.getItem('quickLinesTradeId') || '';
+      if (tradeId) setSelectedTradeId(tradeId);
+    } catch {
+      /* ignore */
+    }
     const savedT = localStorage.getItem('templates');
     if (savedT) setSavedTemplates(JSON.parse(savedT));
     const savedDiscountNames = localStorage.getItem('discountNames');
@@ -12307,6 +12395,37 @@ export default function Home() {
                 <div className="hidden sm:block w-px h-8 bg-gray-300 mx-1" aria-hidden />
                 <Button onClick={addRow} variant="outline">{t('addLineItem')}</Button>
                 <Button onClick={openQuickLinesModal} variant="outline">{t('quickLines')}</Button>
+                <select
+                  className="border rounded-xl px-3 py-2 text-sm bg-white max-w-[14rem]"
+                  value={selectedTradeId}
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    if (!id) {
+                      setSelectedTradeId('');
+                      return;
+                    }
+                    if (
+                      quickLines.length > 0 &&
+                      !confirm(
+                        'Replace your current Quick Lines with this trade’s common services? Click Cancel to keep your list and open Quick Lines to merge instead.'
+                      )
+                    ) {
+                      setSelectedTradeId(selectedTradeId);
+                      openQuickLinesModal();
+                      return;
+                    }
+                    applyTradeQuickLines(id, 'replace');
+                    openQuickLinesModal();
+                  }}
+                  title="Pick your trade to load common services into Quick Lines"
+                >
+                  <option value="">Trade templates…</option>
+                  {TRADE_QUICK_LINES.map((trade) => (
+                    <option key={trade.id} value={trade.id}>
+                      {trade.name}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <Card className="mb-8 overflow-hidden w-full max-w-full min-w-0">
@@ -18468,37 +18587,146 @@ export default function Home() {
 
       {/* Quick Lines Modal */}
       <Dialog open={isQuickLinesModalOpen} onOpenChange={setIsQuickLinesModalOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
           <DialogHeader>
-            <DialogTitle>📌 Saved Quick Lines</DialogTitle>
+            <DialogTitle>📌 Quick Lines</DialogTitle>
+            <DialogDescription>
+              Pick a trade to load common services and starter prices. Edit description and price anytime,
+              then Use one line or Add all to the estimate.
+            </DialogDescription>
           </DialogHeader>
-          <div className="max-h-96 overflow-auto py-2">
+          <div className="space-y-3 pb-2 border-b">
+            <label className="block text-sm font-semibold">Trade</label>
+            <div className="flex flex-wrap gap-2">
+              <select
+                className="border rounded-xl px-3 py-2 text-sm bg-white flex-1 min-w-[12rem]"
+                value={selectedTradeId}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  setSelectedTradeId(id);
+                  if (!id) return;
+                  if (quickLines.length > 0) {
+                    const replace = confirm(
+                      `Load ${getTradeById(id)?.name || 'this trade'} common services?\n\nOK = replace current Quick Lines\nCancel = add/merge onto your list`
+                    );
+                    applyTradeQuickLines(id, replace ? 'replace' : 'merge');
+                  } else {
+                    applyTradeQuickLines(id, 'replace');
+                  }
+                }}
+              >
+                <option value="">Select a trade…</option>
+                {TRADE_QUICK_LINES.map((trade) => (
+                  <option key={trade.id} value={trade.id}>
+                    {trade.name}
+                  </option>
+                ))}
+              </select>
+              {selectedTradeId && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => applyTradeQuickLines(selectedTradeId, 'replace')}
+                >
+                  Reload trade defaults
+                </Button>
+              )}
+            </div>
+          </div>
+          <div className="max-h-96 overflow-auto py-2 flex-1 min-h-0">
             {quickLines.length === 0 ? (
               <div className="text-center py-12 text-gray-500">
-                No quick lines saved yet.<br />
-                Click the 💾 icon next to any line item to save one.
+                No quick lines yet.
+                <br />
+                Pick a trade above, or click the 💾 icon next to any line item to save one.
               </div>
             ) : (
               <div className="space-y-3">
                 {quickLines.map((quick) => (
-                  <div key={quick.id} className="flex justify-between items-center border rounded-xl p-4 bg-white">
-                    <div className="flex-1">
-                      <div className="font-medium text-lg">{quick.description}</div>
-                      <div className="text-sm text-gray-500 mt-1">
-                        {quick.qty} × ${quick.price.toFixed(2)} = ${(quick.qty * quick.price).toFixed(2)}
-                        {quick.unit && ` • ${quick.unit}`}
+                  <div
+                    key={quick.id}
+                    className="border rounded-xl p-4 bg-white space-y-3"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      {quick.tradeName ? (
+                        <span className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">
+                          {quick.tradeName}
+                        </span>
+                      ) : (
+                        <span className="text-[11px] text-gray-400">Custom</span>
+                      )}
+                      <div className="text-sm font-semibold text-slate-800">
+                        $
+                        {(
+                          (Number(quick.qty) || 1) * (Number(quick.price) || 0)
+                        ).toFixed(2)}
                       </div>
                     </div>
-                    <div className="flex gap-3">
-                      <Button 
-                        size="sm" 
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">
+                        Description
+                      </label>
+                      <Input
+                        value={quick.description || ''}
+                        onChange={(e) =>
+                          updateQuickLine(quick.id, { description: e.target.value })
+                        }
+                        className="bg-white"
+                      />
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Qty</label>
+                        <Input
+                          type="number"
+                          min={0}
+                          step="any"
+                          value={quick.qty ?? 1}
+                          onChange={(e) =>
+                            updateQuickLine(quick.id, {
+                              qty: parseFloat(e.target.value) || 0,
+                            })
+                          }
+                          className="bg-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Unit</label>
+                        <Input
+                          value={quick.unit || ''}
+                          onChange={(e) =>
+                            updateQuickLine(quick.id, { unit: e.target.value })
+                          }
+                          className="bg-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold mb-1">Price</label>
+                        <Input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={quick.price ?? 0}
+                          onChange={(e) =>
+                            updateQuickLine(quick.id, {
+                              price: parseFloat(e.target.value) || 0,
+                            })
+                          }
+                          className="bg-white"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2 justify-end">
+                      <Button
+                        size="sm"
                         onClick={() => applyQuickLine(quick)}
                         className="bg-[#10b981]"
                       >
-                        Use
+                        Use on estimate
                       </Button>
-                      <Button 
-                        size="sm" 
+                      <Button
+                        size="sm"
                         variant="destructive"
                         onClick={() => deleteQuickLine(quick.id)}
                       >
@@ -18510,8 +18738,19 @@ export default function Home() {
               </div>
             )}
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsQuickLinesModalOpen(false)}>Close</Button>
+          <DialogFooter className="flex-wrap gap-2">
+            {quickLines.length > 0 && (
+              <Button
+                type="button"
+                className="bg-[#10b981] hover:bg-[#059669] text-white"
+                onClick={() => applyAllTradeQuickLinesToEstimate()}
+              >
+                Add all to estimate
+              </Button>
+            )}
+            <Button variant="outline" onClick={() => setIsQuickLinesModalOpen(false)}>
+              Close
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
