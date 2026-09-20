@@ -1082,6 +1082,10 @@ export default function Home() {
     twoFactorPhone: '',
     /** Learned material unit prices + labor rates from user AI breakdown edits */
     aiPriceMemory: { materials: [] } as AiPriceMemory,
+    /** Trade template id for Quick Lines (saved on company SETTINGS profile) */
+    tradeId: '',
+    /** Editable Quick Lines list (synced with company SETTINGS when trade is set) */
+    quickLines: [] as any[],
   });
   const [profile, setProfile] = useState(blankProfile);
 
@@ -1131,6 +1135,7 @@ export default function Home() {
   const freshDocumentRef = useRef(false);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const profileAutoSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const quickLinesProfileSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSavedCompanyFingerprintRef = useRef('');
   const profileRef = useRef(profile);
   profileRef.current = profile;
@@ -1429,6 +1434,8 @@ export default function Home() {
     twoFactorEnabled: false,
     twoFactorPhone: String(full.twoFactorPhone || '').trim(),
     aiPriceMemory: normalizeAiPriceMemory(full.aiPriceMemory),
+    tradeId: String(full.tradeId || '').trim(),
+    quickLines: Array.isArray(full.quickLines) ? full.quickLines : [],
     // deliberately omit: teammates, ccFee*, crewSubscriptionActive, etc.
   });
 
@@ -4940,6 +4947,17 @@ export default function Home() {
           aiPriceMemory: normalizeAiPriceMemory(
             (s as any).aiPriceMemory || (l as any).aiPriceMemory
           ),
+          tradeId: pickFilled(
+            (s as any).tradeId,
+            useCache ? (cachedCompany as any).tradeId : '',
+            (l as any).tradeId,
+            ''
+          ),
+          quickLines: Array.isArray((s as any).quickLines)
+            ? (s as any).quickLines
+            : Array.isArray((l as any).quickLines)
+              ? (l as any).quickLines
+              : [],
           language: preferredLang,
           teammates: ((s.teammates || l.teammates || []) as any[]).map((t: any) => ({
             ...t,
@@ -4948,6 +4966,37 @@ export default function Home() {
           })),
         };
       });
+      // Hydrate trade + quick lines UI state from company SETTINGS (preferred over local-only)
+      try {
+        const hydratedTradeId = String(
+          pickFilled(
+            (s as any).tradeId,
+            useCache ? (cachedCompany as any).tradeId : '',
+            (l as any).tradeId,
+            localStorage.getItem('quickLinesTradeId') || '',
+            ''
+          ) || ''
+        );
+        if (hydratedTradeId) setSelectedTradeId(hydratedTradeId);
+        const serverQl = Array.isArray((s as any).quickLines) ? (s as any).quickLines : null;
+        if (serverQl && serverQl.length > 0) {
+          setQuickLines(serverQl);
+          localStorage.setItem('quickLines', JSON.stringify(serverQl));
+          if (hydratedTradeId) localStorage.setItem('quickLinesTradeId', hydratedTradeId);
+        } else {
+          const localQl = localStorage.getItem('quickLines');
+          if (localQl) {
+            try {
+              const parsed = JSON.parse(localQl);
+              if (Array.isArray(parsed)) setQuickLines(parsed);
+            } catch {
+              /* ignore */
+            }
+          }
+        }
+      } catch {
+        /* ignore */
+      }
       // Sync fingerprint so auto-save does not re-write hydrate as a "change"
       lastSavedCompanyFingerprintRef.current = JSON.stringify({
         name: pickFilled(s.name, useCache ? cachedCompany.name : '', l.name, ''),
@@ -4966,6 +5015,12 @@ export default function Home() {
           s.certificateUrl,
           useCache ? cachedCompany.certificateUrl : '',
           l.certificateUrl,
+          ''
+        ),
+        tradeId: pickFilled(
+          (s as any).tradeId,
+          useCache ? (cachedCompany as any).tradeId : '',
+          (l as any).tradeId,
           ''
         ),
       });
@@ -8297,6 +8352,10 @@ export default function Home() {
         logoUrl: mergedProfile.logoUrl,
         logoSize: mergedProfile.logoSize,
         certificateUrl: mergedProfile.certificateUrl,
+        tradeId: (mergedProfile as any).tradeId || '',
+        quickLines: Array.isArray((mergedProfile as any).quickLines)
+          ? (mergedProfile as any).quickLines
+          : [],
       },
     });
   };
@@ -8384,6 +8443,7 @@ export default function Home() {
         logoUrl: profile.logoUrl || '',
         logoSize: profile.logoSize || 'medium',
         certificateUrl: profile.certificateUrl || '',
+        tradeId: profile.tradeId || '',
       }),
     [
       profile.name,
@@ -8399,6 +8459,7 @@ export default function Home() {
       profile.logoUrl,
       profile.logoSize,
       profile.certificateUrl,
+      profile.tradeId,
     ]
   );
 
@@ -8690,6 +8751,43 @@ export default function Home() {
     setCalendarView('appointments');
   };
 
+  /** Persist Quick Lines (+ trade) to localStorage and company SETTINGS profile */
+  const persistQuickLinesToProfile = async (
+    nextLines: any[],
+    tradeId: string,
+    options?: { quiet?: boolean; debounceMs?: number }
+  ) => {
+    setQuickLines(nextLines);
+    setSelectedTradeId(tradeId);
+    try {
+      localStorage.setItem('quickLines', JSON.stringify(nextLines));
+      if (tradeId) localStorage.setItem('quickLinesTradeId', tradeId);
+      else localStorage.removeItem('quickLinesTradeId');
+    } catch {
+      /* ignore */
+    }
+    const nextProfile = {
+      ...profileRef.current,
+      tradeId: tradeId || '',
+      quickLines: nextLines,
+    };
+    setProfile(nextProfile);
+    const runSave = async () => {
+      await saveProfileSettings(nextProfile, { quiet: options?.quiet !== false });
+    };
+    const delay = options?.debounceMs ?? 0;
+    if (delay > 0) {
+      if (quickLinesProfileSaveTimeoutRef.current) {
+        clearTimeout(quickLinesProfileSaveTimeoutRef.current);
+      }
+      quickLinesProfileSaveTimeoutRef.current = setTimeout(() => {
+        void runSave();
+      }, delay);
+      return;
+    }
+    await runSave();
+  };
+
   const saveAsQuickLine = (item: any) => {
     const newQuick = {
       id: Date.now(),
@@ -8699,8 +8797,9 @@ export default function Home() {
       price: item.price,
     };
     const updated = [...quickLines, newQuick];
-    setQuickLines(updated);
-    localStorage.setItem('quickLines', JSON.stringify(updated));
+    void persistQuickLinesToProfile(updated, selectedTradeId || profile.tradeId || '', {
+      quiet: true,
+    });
     showMessage('Quick line saved!');
   };
 
@@ -8721,8 +8820,9 @@ export default function Home() {
 
   const deleteQuickLine = (id: number) => {
     const updated = quickLines.filter((q) => q.id !== id);
-    setQuickLines(updated);
-    localStorage.setItem('quickLines', JSON.stringify(updated));
+    void persistQuickLinesToProfile(updated, selectedTradeId || profile.tradeId || '', {
+      quiet: true,
+    });
   };
 
   const updateQuickLine = (
@@ -8730,11 +8830,18 @@ export default function Home() {
     patch: Partial<{ description: string; qty: number; unit: string; price: number }>
   ) => {
     const updated = quickLines.map((q) => (q.id === id ? { ...q, ...patch } : q));
-    setQuickLines(updated);
-    localStorage.setItem('quickLines', JSON.stringify(updated));
+    // Debounce cloud save while typing; localStorage updates immediately
+    void persistQuickLinesToProfile(updated, selectedTradeId || profile.tradeId || '', {
+      quiet: true,
+      debounceMs: 800,
+    });
   };
 
-  const applyTradeQuickLines = (tradeId: string, mode: 'replace' | 'merge' = 'replace') => {
+  const applyTradeQuickLines = async (
+    tradeId: string,
+    mode: 'replace' | 'merge' = 'replace',
+    options?: { quiet?: boolean }
+  ) => {
     const trade = getTradeById(tradeId);
     if (!trade) return;
     const generated = tradeQuickLinesToSaved(trade);
@@ -8748,13 +8855,12 @@ export default function Home() {
             })),
           ]
         : generated;
-    setQuickLines(updated);
-    setSelectedTradeId(tradeId);
-    localStorage.setItem('quickLines', JSON.stringify(updated));
-    localStorage.setItem('quickLinesTradeId', tradeId);
-    showMessage(
-      `✅ Loaded ${trade.lines.length} common ${trade.name} services into Quick Lines. Edit prices/descriptions anytime.`
-    );
+    await persistQuickLinesToProfile(updated, tradeId, { quiet: true });
+    if (!options?.quiet) {
+      showMessage(
+        `✅ Loaded ${trade.lines.length} common ${trade.name} services into Quick Lines. Saved to company profile.`
+      );
+    }
   };
 
   const applyAllTradeQuickLinesToEstimate = () => {
@@ -9027,11 +9133,17 @@ export default function Home() {
   ]);
 
   useEffect(() => {
+    // Local fallback only — company SETTINGS (loadLatestProfile) wins when available
     try {
-      const saved = localStorage.getItem('quickLines');
-      if (saved) setQuickLines(JSON.parse(saved));
       const tradeId = localStorage.getItem('quickLinesTradeId') || '';
-      if (tradeId) setSelectedTradeId(tradeId);
+      if (tradeId) setSelectedTradeId((prev) => prev || tradeId);
+      const saved = localStorage.getItem('quickLines');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setQuickLines((prev) => (prev.length > 0 ? prev : parsed));
+        }
+      }
     } catch {
       /* ignore */
     }
@@ -12395,37 +12507,6 @@ export default function Home() {
                 <div className="hidden sm:block w-px h-8 bg-gray-300 mx-1" aria-hidden />
                 <Button onClick={addRow} variant="outline">{t('addLineItem')}</Button>
                 <Button onClick={openQuickLinesModal} variant="outline">{t('quickLines')}</Button>
-                <select
-                  className="border rounded-xl px-3 py-2 text-sm bg-white max-w-[14rem]"
-                  value={selectedTradeId}
-                  onChange={(e) => {
-                    const id = e.target.value;
-                    if (!id) {
-                      setSelectedTradeId('');
-                      return;
-                    }
-                    if (
-                      quickLines.length > 0 &&
-                      !confirm(
-                        'Replace your current Quick Lines with this trade’s common services? Click Cancel to keep your list and open Quick Lines to merge instead.'
-                      )
-                    ) {
-                      setSelectedTradeId(selectedTradeId);
-                      openQuickLinesModal();
-                      return;
-                    }
-                    applyTradeQuickLines(id, 'replace');
-                    openQuickLinesModal();
-                  }}
-                  title="Pick your trade to load common services into Quick Lines"
-                >
-                  <option value="">Trade templates…</option>
-                  {TRADE_QUICK_LINES.map((trade) => (
-                    <option key={trade.id} value={trade.id}>
-                      {trade.name}
-                    </option>
-                  ))}
-                </select>
               </div>
 
               <Card className="mb-8 overflow-hidden w-full max-w-full min-w-0">
@@ -14760,6 +14841,72 @@ export default function Home() {
                       )}
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div className="md:col-span-2">
+                        <label className="block text-sm font-semibold mb-2">
+                          Trade / service templates
+                        </label>
+                        <select
+                          className="border rounded-xl px-3 py-2 text-sm bg-white w-full max-w-md"
+                          value={selectedTradeId || profile.tradeId || ''}
+                          onChange={(e) => {
+                            const id = e.target.value;
+                            if (!id) {
+                              setSelectedTradeId('');
+                              const nextProfile = {
+                                ...profileRef.current,
+                                tradeId: '',
+                                quickLines,
+                              };
+                              setProfile(nextProfile);
+                              void saveProfileSettings(nextProfile, { quiet: true });
+                              try {
+                                localStorage.removeItem('quickLinesTradeId');
+                              } catch {
+                                /* ignore */
+                              }
+                              return;
+                            }
+                            if (
+                              quickLines.length > 0 &&
+                              !confirm(
+                                `Load ${getTradeById(id)?.name || 'this trade'} common services into Quick Lines?\n\nOK = replace current Quick Lines\nCancel = keep your list and only save the trade`
+                              )
+                            ) {
+                              // Save trade only — keep existing quick lines
+                              setSelectedTradeId(id);
+                              const nextProfile = {
+                                ...profileRef.current,
+                                tradeId: id,
+                                quickLines,
+                              };
+                              setProfile(nextProfile);
+                              try {
+                                localStorage.setItem('quickLinesTradeId', id);
+                              } catch {
+                                /* ignore */
+                              }
+                              void saveProfileSettings(nextProfile, { quiet: true });
+                              showMessage(
+                                `✅ Trade saved to company profile: ${getTradeById(id)?.name || id}`
+                              );
+                              return;
+                            }
+                            void applyTradeQuickLines(id, 'replace');
+                          }}
+                          title="Pick your trade — saved to company profile and loads Quick Lines"
+                        >
+                          <option value="">Select your trade…</option>
+                          {TRADE_QUICK_LINES.map((trade) => (
+                            <option key={trade.id} value={trade.id}>
+                              {trade.name}
+                            </option>
+                          ))}
+                        </select>
+                        <p className="text-xs text-gray-500 mt-1">
+                          Saved on your company profile. Loads common Quick Lines with starter prices
+                          (editable anytime from the estimate editor).
+                        </p>
+                      </div>
                       <div>
                         <label className="block text-sm font-semibold mb-2">{t('companyName')}</label>
                         <Input value={profile.company} onChange={e => setProfile(prev => ({...prev, company: e.target.value}))} />
@@ -18591,47 +18738,43 @@ export default function Home() {
           <DialogHeader>
             <DialogTitle>📌 Quick Lines</DialogTitle>
             <DialogDescription>
-              Pick a trade to load common services and starter prices. Edit description and price anytime,
-              then Use one line or Add all to the estimate.
+              Edit description and price anytime, then Use one line or Add all to the estimate.
+              Set your trade under Profile → Company Info (above Company Name).
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3 pb-2 border-b">
-            <label className="block text-sm font-semibold">Trade</label>
-            <div className="flex flex-wrap gap-2">
-              <select
-                className="border rounded-xl px-3 py-2 text-sm bg-white flex-1 min-w-[12rem]"
-                value={selectedTradeId}
-                onChange={(e) => {
-                  const id = e.target.value;
-                  setSelectedTradeId(id);
-                  if (!id) return;
-                  if (quickLines.length > 0) {
-                    const replace = confirm(
-                      `Load ${getTradeById(id)?.name || 'this trade'} common services?\n\nOK = replace current Quick Lines\nCancel = add/merge onto your list`
-                    );
-                    applyTradeQuickLines(id, replace ? 'replace' : 'merge');
-                  } else {
-                    applyTradeQuickLines(id, 'replace');
-                  }
-                }}
-              >
-                <option value="">Select a trade…</option>
-                {TRADE_QUICK_LINES.map((trade) => (
-                  <option key={trade.id} value={trade.id}>
-                    {trade.name}
-                  </option>
-                ))}
-              </select>
-              {selectedTradeId && (
+          <div className="space-y-2 pb-2 border-b">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm text-gray-600">
+                Trade:{' '}
+                <strong className="text-[#1e293b]">
+                  {getTradeById(selectedTradeId || profile.tradeId || '')?.name ||
+                    'Not set — choose on Profile'}
+                </strong>
+              </span>
+              {(selectedTradeId || profile.tradeId) && (
                 <Button
                   type="button"
                   size="sm"
                   variant="outline"
-                  onClick={() => applyTradeQuickLines(selectedTradeId, 'replace')}
+                  onClick={() =>
+                    void applyTradeQuickLines(selectedTradeId || profile.tradeId, 'replace')
+                  }
                 >
                   Reload trade defaults
                 </Button>
               )}
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setIsQuickLinesModalOpen(false);
+                  setView('profileView');
+                  setProfileTab('info');
+                }}
+              >
+                Change trade on Profile
+              </Button>
             </div>
           </div>
           <div className="max-h-96 overflow-auto py-2 flex-1 min-h-0">
@@ -18639,7 +18782,8 @@ export default function Home() {
               <div className="text-center py-12 text-gray-500">
                 No quick lines yet.
                 <br />
-                Pick a trade above, or click the 💾 icon next to any line item to save one.
+                Set your trade on Profile (above Company Name), or click the 💾 icon next to any line
+                item to save one.
               </div>
             ) : (
               <div className="space-y-3">
