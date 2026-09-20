@@ -76,18 +76,23 @@ export async function appendReceptionistLead(input: {
     source: input.source || 'forwarded',
   };
 
-  await admin.from('estimates').upsert({
+  const { error } = await admin.from('estimates').upsert({
     id: sid,
     user_id: input.userId,
     jobName: '__settings__',
     documentType: 'settings',
     items: [],
+    invoiceNumber: sid,
     profile: {
       ...profile,
       aiReceptionistMessages: [msg, ...messages].slice(0, 200),
     },
     updated_at: new Date().toISOString(),
   });
+  if (error) {
+    console.error('appendReceptionistLead upsert failed:', error.message);
+    return null;
+  }
 
   // Best-effort owner notify
   try {

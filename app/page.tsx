@@ -1233,11 +1233,16 @@ export default function Home() {
     return (profile as any).aiReceptionistAddonActive === true;
   };
 
-  /** Show receptionist leads when dashboard toggle On + paid add-on + receptionist answering On */
-  const showReceptionistLeadsOnDashboard = (): boolean =>
-    getAiReceptionistDashboardEnabled() &&
-    hasAiReceptionistAddon() &&
-    receptionistSettings.enabled === true;
+  /** Show receptionist leads when Company Info dashboard toggle is On */
+  const showReceptionistLeadsOnDashboard = (): boolean => {
+    if (!getAiReceptionistDashboardEnabled()) return false;
+    // Prefer On + subscribed, but never hide the column if leads already exist
+    return (
+      receptionistSettings.enabled === true ||
+      hasAiReceptionistAddon() ||
+      receptionistMessages.some((m) => !m.spam)
+    );
+  };
 
   const showEmailLeadsOnDashboard = (): boolean => getEmailLeadSummariesEnabled();
 
@@ -2899,6 +2904,21 @@ export default function Home() {
       setBillingLoaded(false);
     }
   }, [workspaceUserId, crewResolved, currentCrew, user?.id]);
+
+  // Keep dashboard Leads fresh when new AI Receptionist calls/SMS arrive
+  useEffect(() => {
+    if (view !== 'dashboard' || !workspaceUserId || !supabase || !crewResolved) return;
+    void loadReceptionistFromSettings({ skipBillingSync: true });
+    const id = window.setInterval(() => {
+      void loadReceptionistFromSettings({ skipBillingSync: true });
+    }, 15000);
+    const onFocus = () => void loadReceptionistFromSettings({ skipBillingSync: true });
+    window.addEventListener('focus', onFocus);
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [view, workspaceUserId, supabase, crewResolved]);
 
   useEffect(() => {
     if (!workspaceUserId) {
@@ -7515,14 +7535,19 @@ export default function Home() {
     }
   };
 
-  const loadReceptionistFromSettings = async () => {
+  const loadReceptionistFromSettings = async (opts?: { skipBillingSync?: boolean }) => {
     if (!workspaceUserId) return;
     try {
       const raw = localStorage.getItem(`estimateace_receptionist_${workspaceUserId}`);
       if (raw) {
         const parsed = JSON.parse(raw);
-        setReceptionistSettings(normalizeReceptionistSettings(parsed?.settings));
-        setReceptionistMessages(normalizeReceptionistMessages(parsed?.messages));
+        // Prefer server messages below; local cache is only a fallback while loading
+        if (!opts?.skipBillingSync) {
+          setReceptionistSettings(normalizeReceptionistSettings(parsed?.settings));
+        }
+        if (Array.isArray(parsed?.messages) && parsed.messages.length) {
+          setReceptionistMessages(normalizeReceptionistMessages(parsed.messages));
+        }
       }
     } catch {
       /* ignore */
@@ -7533,10 +7558,11 @@ export default function Home() {
     if (serverProfile.aiReceptionist) {
       setReceptionistSettings(normalizeReceptionistSettings(serverProfile.aiReceptionist));
     }
-    if (serverProfile.aiReceptionistMessages) {
+    // Always apply server messages (including empty) so dashboard stays accurate after new calls
+    if (Array.isArray(serverProfile.aiReceptionistMessages)) {
       setReceptionistMessages(normalizeReceptionistMessages(serverProfile.aiReceptionistMessages));
     }
-    if (serverProfile.emailLeadSummaries) {
+    if (Array.isArray(serverProfile.emailLeadSummaries)) {
       setEmailLeadSummaries(normalizeEmailLeadSummaries(serverProfile.emailLeadSummaries));
     }
     // Keep Billing / Profile subscription badge in sync with SETTINGS
@@ -7550,8 +7576,10 @@ export default function Home() {
             : prev.receptionistBilling,
       }));
     }
-    // Also pull from Stripe in case webhook lagged
-    await syncReceptionistBillingToProfile({ quiet: true });
+    // Also pull from Stripe in case webhook lagged (skip on frequent dashboard poll)
+    if (!opts?.skipBillingSync) {
+      await syncReceptionistBillingToProfile({ quiet: true });
+    }
   };
 
   const markReceptionistLeadRead = async (id: string) => {
@@ -11343,17 +11371,27 @@ export default function Home() {
                         land here.
                       </p>
                     </div>
-                    {showReceptionistLeadsOnDashboard() && (
+                    <div className="flex flex-wrap gap-2">
+                      {showReceptionistLeadsOnDashboard() && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="border-emerald-600 text-emerald-800"
+                          onClick={() => setView('receptionistView')}
+                        >
+                          Open AI Receptionist
+                        </Button>
+                      )}
                       <Button
                         type="button"
                         size="sm"
                         variant="outline"
-                        className="border-emerald-600 text-emerald-800"
-                        onClick={() => setView('receptionistView')}
+                        onClick={() => void loadReceptionistFromSettings({ skipBillingSync: true })}
                       >
-                        Open AI Receptionist
+                        Refresh leads
                       </Button>
-                    )}
+                    </div>
                   </div>
 
                   <div
@@ -11377,8 +11415,9 @@ export default function Home() {
                       <div className="space-y-2 max-h-64 overflow-y-auto">
                         {receptionistMessages.filter((m) => !m.spam).length === 0 ? (
                           <p className="text-sm text-gray-500 py-6 text-center">
-                            No receptionist leads yet. Run a test call or connect live phone answering later —
-                            summaries will show here.
+                            No receptionist leads yet. When AI answering is On and a caller leaves a
+                            message, it appears here — tap <strong>Refresh leads</strong> if you just
+                            got a call.
                           </p>
                         ) : (
                           receptionistMessages
