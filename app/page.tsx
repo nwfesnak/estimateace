@@ -1216,6 +1216,16 @@ export default function Home() {
     return (profile as any).emailLeadSummariesEnabled !== false;
   };
 
+  /** Inbox address the email bot monitors (Profile → Company Info) */
+  const getMonitoredEmail = (): string => {
+    const fromProfile = String((profile as any).monitoredEmail || '').trim();
+    if (fromProfile) return fromProfile;
+    const cached = getProfileSettingsCache();
+    const fromCache = String(cached.monitoredEmail || '').trim();
+    if (fromCache) return fromCache;
+    return '';
+  };
+
   /** Company Profile toggle — show AI Receptionist column on dashboard Leads */
   const getAiReceptionistDashboardEnabled = (): boolean => {
     const cached = getProfileSettingsCache();
@@ -1777,6 +1787,9 @@ export default function Home() {
   const [reportsArchivedLeadsOpen, setReportsArchivedLeadsOpen] = useState(false);
   /** Email lead summaries (dashboard Leads — filled when email connect is live) */
   const [emailLeadSummaries, setEmailLeadSummaries] = useState<EmailLeadSummary[]>([]);
+  /** Last time email summaries were pulled from company SETTINGS (hourly refresh) */
+  const [emailSummariesRefreshedAt, setEmailSummariesRefreshedAt] = useState<string | null>(null);
+  const monitoredEmailSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** SaaS product subscription (Phase A) */
   const [billing, setBilling] = useState<BillingSnapshot>(DEFAULT_BILLING_SNAPSHOT);
   const [billingEnforced, setBillingEnforced] = useState(false);
@@ -2940,6 +2953,17 @@ export default function Home() {
       window.removeEventListener('focus', onFocus);
     };
   }, [view, workspaceUserId, supabase, crewResolved]);
+
+  // Email summary box: refresh from company SETTINGS once per hour
+  useEffect(() => {
+    if (view !== 'dashboard' || !workspaceUserId || !crewResolved) return;
+    if (!showEmailLeadsOnDashboard()) return;
+    void refreshEmailLeadSummaries();
+    const id = window.setInterval(() => {
+      void refreshEmailLeadSummaries();
+    }, 60 * 60 * 1000);
+    return () => window.clearInterval(id);
+  }, [view, workspaceUserId, crewResolved, (profile as any).emailLeadSummariesEnabled]);
 
   useEffect(() => {
     if (!workspaceUserId) {
@@ -7638,21 +7662,104 @@ export default function Home() {
     }
     if (Array.isArray(serverProfile.emailLeadSummaries)) {
       setEmailLeadSummaries(normalizeEmailLeadSummaries(serverProfile.emailLeadSummaries));
+      setEmailSummariesRefreshedAt(new Date().toISOString());
     }
-    // Keep Billing / Profile subscription badge in sync with SETTINGS
-    if (serverProfile.receptionistBilling || serverProfile.aiReceptionistAddonActive) {
+    // Keep monitored inbox + Billing badge in sync with SETTINGS
+    const serverMonitored = String((serverProfile as any).monitoredEmail || '').trim();
+    if (
+      serverMonitored ||
+      serverProfile.receptionistBilling ||
+      serverProfile.aiReceptionistAddonActive
+    ) {
       setProfile((prev) => ({
         ...prev,
-        aiReceptionistAddonActive: serverProfile.aiReceptionistAddonActive === true,
-        receptionistBilling:
-          serverProfile.receptionistBilling && typeof serverProfile.receptionistBilling === 'object'
-            ? serverProfile.receptionistBilling
-            : prev.receptionistBilling,
+        ...(serverMonitored ? { monitoredEmail: serverMonitored } : {}),
+        ...(serverProfile.receptionistBilling || serverProfile.aiReceptionistAddonActive
+          ? {
+              aiReceptionistAddonActive: serverProfile.aiReceptionistAddonActive === true,
+              receptionistBilling:
+                serverProfile.receptionistBilling &&
+                typeof serverProfile.receptionistBilling === 'object'
+                  ? serverProfile.receptionistBilling
+                  : prev.receptionistBilling,
+            }
+          : {}),
       }));
+      if (serverMonitored) {
+        setProfileSettingsCache({
+          ...getProfileSettingsCache(),
+          monitoredEmail: serverMonitored,
+        });
+      }
     }
     // Also pull from Stripe in case webhook lagged (skip on frequent dashboard poll)
     if (!opts?.skipBillingSync) {
       await syncReceptionistBillingToProfile({ quiet: true });
+    }
+  };
+
+  /** Pull email summaries + monitored address from company SETTINGS (hourly on dashboard) */
+  const refreshEmailLeadSummaries = async () => {
+    if (!workspaceUserId) return;
+    try {
+      const cached = getProfileSettingsCache();
+      const cachedEmail = String(cached.monitoredEmail || '').trim();
+      if (cachedEmail && !String((profileRef.current as any).monitoredEmail || '').trim()) {
+        setProfile((prev) => ({ ...prev, monitoredEmail: cachedEmail }));
+      }
+      if (Array.isArray(cached.emailLeadSummaries) && cached.emailLeadSummaries.length) {
+        setEmailLeadSummaries(normalizeEmailLeadSummaries(cached.emailLeadSummaries));
+      }
+    } catch {
+      /* ignore */
+    }
+    if (!supabase) {
+      setEmailSummariesRefreshedAt(new Date().toISOString());
+      return;
+    }
+    const serverProfile = await fetchServerProfileSettings();
+    if (!serverProfile) {
+      setEmailSummariesRefreshedAt(new Date().toISOString());
+      return;
+    }
+    const serverMonitored = String((serverProfile as any).monitoredEmail || '').trim();
+    if (serverMonitored) {
+      setProfile((prev) => ({ ...prev, monitoredEmail: serverMonitored }));
+      setProfileSettingsCache({
+        ...getProfileSettingsCache(),
+        monitoredEmail: serverMonitored,
+      });
+    }
+    if (Array.isArray(serverProfile.emailLeadSummaries)) {
+      const next = normalizeEmailLeadSummaries(serverProfile.emailLeadSummaries);
+      setEmailLeadSummaries(next);
+      setProfileSettingsCache({
+        ...getProfileSettingsCache(),
+        emailLeadSummaries: next,
+      });
+    }
+    setEmailSummariesRefreshedAt(new Date().toISOString());
+  };
+
+  const saveMonitoredEmail = async (rawInput: string, options?: { quiet?: boolean }) => {
+    const raw = String(rawInput || '').trim();
+    const nextProfile = { ...profileRef.current, monitoredEmail: raw };
+    setProfile(nextProfile);
+    setProfileSettingsCache({
+      ...getProfileSettingsCache(),
+      monitoredEmail: raw,
+    });
+    await saveProfileSettings(nextProfile, { quiet: true });
+    if (!options?.quiet) {
+      if (raw && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw)) {
+        showMessage('Enter a valid email address for the bot to monitor.');
+        return;
+      }
+      if (raw) {
+        showMessage(
+          `✅ Monitoring ${raw}. Dashboard Email summaries will show this address and refresh about once an hour.`
+        );
+      }
     }
   };
 
@@ -11652,7 +11759,10 @@ export default function Home() {
                         type="button"
                         size="sm"
                         variant="outline"
-                        onClick={() => void loadReceptionistFromSettings({ skipBillingSync: true })}
+                        onClick={() => {
+                          void loadReceptionistFromSettings({ skipBillingSync: true });
+                          if (showEmailLeadsOnDashboard()) void refreshEmailLeadSummaries();
+                        }}
                       >
                         Refresh leads
                       </Button>
@@ -11757,81 +11867,113 @@ export default function Home() {
                     </div>
                     )}
 
-                    {/* Email summaries — included feature, company toggle */}
+                    {/* Email summaries — monitored inbox + hourly summary list */}
                     {showEmailLeadsOnDashboard() && (
                     <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 min-h-[180px]">
-                      <div className="flex items-center justify-between gap-2 mb-3">
-                        <h4 className="font-semibold text-sm text-slate-800">✉️ Email summaries</h4>
+                      <div className="flex items-start justify-between gap-2 mb-2">
+                        <div className="min-w-0">
+                          <h4 className="font-semibold text-sm text-slate-800">✉️ Email summaries</h4>
+                          {getMonitoredEmail() ? (
+                            <p className="text-xs text-slate-600 mt-0.5 truncate">
+                              Monitoring{' '}
+                              <strong className="text-slate-800">{getMonitoredEmail()}</strong>
+                            </p>
+                          ) : (
+                            <p className="text-xs text-amber-700 mt-0.5">
+                              No monitor email set — add one in Profile → Company Info
+                            </p>
+                          )}
+                        </div>
                         {emailLeadSummaries.filter((m) => m.status === 'new').length > 0 && (
-                          <span className="text-[11px] font-bold uppercase tracking-wide bg-sky-600 text-white px-2 py-0.5 rounded-full">
+                          <span className="shrink-0 text-[11px] font-bold uppercase tracking-wide bg-sky-600 text-white px-2 py-0.5 rounded-full">
                             {emailLeadSummaries.filter((m) => m.status === 'new').length} new
                           </span>
                         )}
                       </div>
+                      <p className="text-[11px] text-gray-400 mb-3">
+                        {emailSummariesRefreshedAt
+                          ? `Updated ${new Date(emailSummariesRefreshedAt).toLocaleString()} · refreshes about once an hour`
+                          : 'Refreshes about once an hour'}
+                        {' · '}
+                        <button
+                          type="button"
+                          className="underline text-sky-700 hover:text-sky-900"
+                          onClick={() => void refreshEmailLeadSummaries()}
+                        >
+                          Refresh now
+                        </button>
+                      </p>
                       <div className="space-y-2 max-h-64 overflow-y-auto">
-                        {emailLeadSummaries.length === 0 ? (
+                        {!getMonitoredEmail() ? (
                           <div className="text-sm text-gray-500 py-4 text-center space-y-2">
-                            {(profile as any).monitoredEmail ? (
-                              <>
-                                <p>
-                                  Watching{' '}
-                                  <strong className="text-slate-700">
-                                    {String((profile as any).monitoredEmail)}
-                                  </strong>
-                                </p>
-                                <p className="text-xs text-gray-400">
-                                  Summaries will show here as new emails arrive (inbox bot connection coming next).
-                                </p>
-                              </>
-                            ) : (
-                              <>
-                                <p>
-                                  Add the email you want monitored under{' '}
-                                  <strong>Profile → Company Info → Email for the bot to monitor</strong>.
-                                </p>
-                                <p className="text-xs text-gray-400">
-                                  Included with your plan — turn off under Company Profile if you do not want this box.
-                                </p>
-                              </>
-                            )}
+                            <p>
+                              Add the email you want monitored under{' '}
+                              <strong>Profile → Company Info → Email for the bot to monitor</strong>.
+                            </p>
+                            <p className="text-xs text-gray-400">
+                              Included with your plan — turn off under Company Profile if you do not want this box.
+                            </p>
+                          </div>
+                        ) : emailLeadSummaries.length === 0 ? (
+                          <div className="text-sm text-gray-500 py-4 text-center space-y-2">
+                            <p>
+                              Watching{' '}
+                              <strong className="text-slate-700">{getMonitoredEmail()}</strong>
+                            </p>
+                            <p className="text-xs text-gray-400">
+                              No new email summaries yet. This box checks about once an hour.
+                              Full inbox connect (Google/Microsoft) can be added next.
+                            </p>
                           </div>
                         ) : (
-                          emailLeadSummaries
-                            .slice()
-                            .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
-                            .slice(0, 8)
-                            .map((m) => (
-                              <button
-                                key={m.id}
-                                type="button"
-                                className={`w-full text-left rounded-xl border p-3 transition hover:bg-white ${
-                                  m.status === 'new'
-                                    ? 'border-sky-300 bg-sky-50/80'
-                                    : 'border-slate-200 bg-white'
-                                }`}
-                                onClick={() => void markEmailLeadRead(m.id)}
-                              >
-                                <div className="flex items-start justify-between gap-2">
-                                  <div className="min-w-0">
-                                    <div className="font-semibold text-sm text-slate-900 truncate">
-                                      {m.fromName || m.fromEmail || 'Unknown sender'}
+                          <>
+                            <div className="rounded-xl border border-sky-200 bg-sky-50/70 px-3 py-2 text-xs text-slate-700">
+                              <strong>{emailLeadSummaries.length}</strong> summarized
+                              {emailLeadSummaries.filter((m) => m.status === 'new').length > 0
+                                ? ` · ${emailLeadSummaries.filter((m) => m.status === 'new').length} new`
+                                : ''}
+                              {' · '}
+                              newest first
+                            </div>
+                            {emailLeadSummaries
+                              .slice()
+                              .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
+                              .slice(0, 8)
+                              .map((m) => (
+                                <button
+                                  key={m.id}
+                                  type="button"
+                                  className={`w-full text-left rounded-xl border p-3 transition hover:bg-white ${
+                                    m.status === 'new'
+                                      ? 'border-sky-300 bg-sky-50/80'
+                                      : 'border-slate-200 bg-white'
+                                  }`}
+                                  onClick={() => void markEmailLeadRead(m.id)}
+                                >
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div className="min-w-0">
+                                      <div className="font-semibold text-sm text-slate-900 truncate">
+                                        {m.fromName || m.fromEmail || 'Unknown sender'}
+                                      </div>
+                                      <div className="text-xs text-gray-500 truncate">
+                                        {m.subject} ·{' '}
+                                        {m.createdAt
+                                          ? new Date(m.createdAt).toLocaleString()
+                                          : ''}
+                                      </div>
                                     </div>
-                                    <div className="text-xs text-gray-500 truncate">
-                                      {m.subject} ·{' '}
-                                      {m.createdAt
-                                        ? new Date(m.createdAt).toLocaleString()
-                                        : ''}
-                                    </div>
+                                    {m.status === 'new' && (
+                                      <span className="shrink-0 text-[10px] font-bold text-sky-700">
+                                        NEW
+                                      </span>
+                                    )}
                                   </div>
-                                  {m.status === 'new' && (
-                                    <span className="shrink-0 text-[10px] font-bold text-sky-700">NEW</span>
-                                  )}
-                                </div>
-                                <p className="text-sm text-slate-700 mt-1 line-clamp-2">
-                                  {m.summary || 'No summary yet.'}
-                                </p>
-                              </button>
-                            ))
+                                  <p className="text-sm text-slate-700 mt-1 line-clamp-2">
+                                    {m.summary || 'No summary yet.'}
+                                  </p>
+                                </button>
+                              ))}
+                          </>
                         )}
                       </div>
                     </div>
@@ -15497,31 +15639,33 @@ export default function Home() {
                           type="email"
                           placeholder="leads@yourcompany.com"
                           value={(profile as any).monitoredEmail || ''}
-                          onChange={(e) =>
-                            setProfile((prev) => ({ ...prev, monitoredEmail: e.target.value }))
-                          }
-                          onBlur={async () => {
-                            const raw = String((profile as any).monitoredEmail || '').trim();
-                            const nextProfile = { ...profile, monitoredEmail: raw };
-                            setProfile(nextProfile);
-                            await saveProfileSettings(nextProfile, { quiet: true });
-                            if (raw && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw)) {
-                              showMessage('Enter a valid email address for the bot to monitor.');
-                              return;
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            setProfile((prev) => ({ ...prev, monitoredEmail: value }));
+                            setProfileSettingsCache({
+                              ...getProfileSettingsCache(),
+                              monitoredEmail: String(value || '').trim(),
+                            });
+                            if (monitoredEmailSaveTimeoutRef.current) {
+                              clearTimeout(monitoredEmailSaveTimeoutRef.current);
                             }
-                            if (raw) {
-                              showMessage(
-                                `✅ Monitoring email saved: ${raw}. Summaries will appear on the dashboard when the inbox bot is connected.`
-                              );
+                            monitoredEmailSaveTimeoutRef.current = setTimeout(() => {
+                              void saveMonitoredEmail(value, { quiet: true });
+                            }, 600);
+                          }}
+                          onBlur={(e) => {
+                            if (monitoredEmailSaveTimeoutRef.current) {
+                              clearTimeout(monitoredEmailSaveTimeoutRef.current);
+                              monitoredEmailSaveTimeoutRef.current = null;
                             }
+                            void saveMonitoredEmail(e.target.value);
                           }}
                           className="bg-white max-w-md"
                         />
                         <p className="text-xs text-gray-500 mt-2 leading-relaxed">
                           Enter the inbox you want EstimateAce to watch (business Gmail, Outlook, etc.).
-                          New messages will be summarized on <strong>Dashboard → Leads &amp; inbox</strong>.
-                          Secure Google/Microsoft login connect can be added next; for now this registers
-                          which address you want monitored.
+                          This address shows on <strong>Dashboard → Email summaries</strong> and that box
+                          refreshes about once an hour. Secure Google/Microsoft inbox connect can be added next.
                         </p>
                       </div>
                     </div>
