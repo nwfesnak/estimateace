@@ -2430,7 +2430,10 @@ export default function Home() {
 
   // Simple toast renderer - placed in the main return below
   const ToastContainer = () => (
-    <div className="fixed bottom-20 right-4 z-[100] space-y-2">
+    <div
+      className="fixed right-4 z-[100] space-y-2"
+      style={{ bottom: 'max(5.5rem, calc(4.5rem + env(safe-area-inset-bottom, 0px)))' }}
+    >
       {toasts.map(toast => (
         <div key={toast.id} className="bg-[#1e293b] text-white px-4 py-2 rounded-lg shadow-lg text-sm max-w-xs">
           {toast.message}
@@ -9340,6 +9343,44 @@ export default function Home() {
     }
   }, [view, invoiceNumber, documentType, terms]);
 
+  /**
+   * iOS Safari: Radix dialog / camera lock can leave body overflow:hidden after close
+   * (especially in-app browsers). Unlock when no overlay/camera is active.
+   */
+  useEffect(() => {
+    let unlockTimer: ReturnType<typeof setTimeout> | null = null;
+    const unlockBodyScrollIfIdle = () => {
+      if (typeof document === 'undefined') return;
+      const dialogOpen = !!document.querySelector(
+        '[data-slot="dialog-overlay"][data-state="open"], [data-slot="dialog-content"][data-state="open"]'
+      );
+      const cameraLock = document.documentElement.classList.contains('device-camera-lock');
+      if (dialogOpen || cameraLock) return;
+      document.body.style.removeProperty('overflow');
+      document.body.style.removeProperty('padding-right');
+      document.body.style.removeProperty('pointer-events');
+      document.documentElement.style.removeProperty('overflow');
+    };
+    const scheduleUnlock = () => {
+      if (unlockTimer) clearTimeout(unlockTimer);
+      unlockTimer = setTimeout(unlockBodyScrollIfIdle, 80);
+    };
+    unlockBodyScrollIfIdle();
+    const onVis = () => {
+      if (document.visibilityState === 'visible') scheduleUnlock();
+    };
+    window.addEventListener('pageshow', scheduleUnlock);
+    document.addEventListener('visibilitychange', onVis);
+    const mo = new MutationObserver(scheduleUnlock);
+    mo.observe(document.body, { childList: true, subtree: true });
+    return () => {
+      if (unlockTimer) clearTimeout(unlockTimer);
+      window.removeEventListener('pageshow', scheduleUnlock);
+      document.removeEventListener('visibilitychange', onVis);
+      mo.disconnect();
+    };
+  }, []);
+
   // Ensure the chosen language from localStorage (user choice) is always applied
   useEffect(() => {
     const preferred = getPreferredLanguage();
@@ -11722,20 +11763,20 @@ export default function Home() {
       `}</style>
 
       <ErrorBoundary>
-        <div className="flex flex-col h-screen bg-[#f4f4f4]">
+        <div className="app-shell bg-[#f4f4f4]">
         {currentCrew && (
-          <div className="bg-blue-100 text-blue-800 text-xs p-2 text-center">
+          <div className="shrink-0 bg-blue-100 text-blue-800 text-xs p-2 text-center">
             Logged in as crew: {currentCrew.email}
             {currentCrew.role === 'limited' ? ' (limited access)' : ''}
           </div>
         )}
-        <div className="bg-white border-b px-4 py-2 flex justify-between items-center no-print sticky top-0 z-20 shadow-sm">
+        <div className="shrink-0 bg-white border-b px-4 py-2 flex justify-between items-center no-print sticky top-0 z-20 shadow-sm">
           <span className="text-sm font-semibold text-[#1e293b] truncate">
             {profile.company || 'EstimateAce'}
           </span>
           <Button onClick={logout} variant="outline" size="sm">{t('logOut')}</Button>
         </div>
-        <div ref={mainScrollRef} className="flex-1 overflow-auto p-4 md:p-8">
+        <div ref={mainScrollRef} className="app-shell-main px-4 pt-4 md:px-8 md:pt-8">
           {view === 'dashboard' && (
             <div>
               <div className="flex items-center gap-4 mb-8">
@@ -11815,7 +11856,10 @@ export default function Home() {
                           </span>
                         )}
                       </div>
-                      <div className="space-y-2 max-h-[13.5rem] overflow-y-auto overscroll-contain pr-1">
+                      <div
+                        className="space-y-2 max-h-[13.5rem] overflow-y-auto overscroll-contain pr-1"
+                        data-nested-scroll
+                      >
                         {receptionistMessages.filter((m) => !m.spam).length === 0 ? (
                           <p className="text-sm text-gray-500 py-6 text-center">
                             No receptionist leads yet. When AI answering is On and a caller leaves a
@@ -11931,7 +11975,10 @@ export default function Home() {
                           Refresh now
                         </button>
                       </p>
-                      <div className="space-y-2 max-h-64 overflow-y-auto">
+                      <div
+                        className="space-y-2 max-h-64 overflow-y-auto overscroll-contain"
+                        data-nested-scroll
+                      >
                         {!getMonitoredEmail() ? (
                           <div className="text-sm text-gray-500 py-4 text-center space-y-2">
                             <p>
@@ -17932,25 +17979,29 @@ export default function Home() {
           )}
         </div>
 
-        {/* Bottom Navigation */}
-        <div className="bg-white border-t shadow-inner flex items-center justify-around py-2 px-1 text-xs">
-          <button onClick={goToDashboard} className={`flex flex-col items-center flex-1 py-1 ${view === 'dashboard' ? 'text-[#10b981]' : 'text-gray-500'}`}>
+        {/* Bottom Navigation — outside scroll column; safe-area via .app-shell-bottom-nav */}
+        <nav
+          className="app-shell-bottom-nav border-t shadow-inner flex items-center justify-around pt-2 px-1 text-xs no-print"
+          aria-label="Main"
+        >
+          <button type="button" onClick={goToDashboard} className={`flex flex-col items-center flex-1 py-1 ${view === 'dashboard' ? 'text-[#10b981]' : 'text-gray-500'}`}>
             <span className="text-3xl mb-0.5">📊</span>
             <span>{t('dashboard')}</span>
           </button>
-          <button onClick={() => setView('estimatesList')} className="flex flex-col items-center flex-1 py-1 text-gray-500">
+          <button type="button" onClick={() => setView('estimatesList')} className="flex flex-col items-center flex-1 py-1 text-gray-500">
             <span className="text-3xl mb-0.5">📋</span>
             <span>{t('estimates')}</span>
           </button>
-          <button onClick={() => setView('invoicesList')} className="flex flex-col items-center flex-1 py-1 text-gray-500">
+          <button type="button" onClick={() => setView('invoicesList')} className="flex flex-col items-center flex-1 py-1 text-gray-500">
             <span className="text-3xl mb-0.5">💰</span>
             <span>{t('invoices')}</span>
           </button>
-          <button onClick={() => openNewDocument('estimate')} className="flex flex-col items-center flex-1 py-1 text-gray-500">
+          <button type="button" onClick={() => openNewDocument('estimate')} className="flex flex-col items-center flex-1 py-1 text-gray-500">
             <span className="text-3xl mb-0.5">📄</span>
             <span>{t('newEstimate')}</span>
           </button>
           <button
+            type="button"
             onClick={() => {
               setView('reportsView');
               void refreshArchivesList();
@@ -17960,23 +18011,25 @@ export default function Home() {
             <span className="text-3xl mb-0.5">📊</span>
             <span>{t('reports')}</span>
           </button>
-          <button onClick={openCalendarModal} className="flex flex-col items-center flex-1 py-1 text-gray-500">
+          <button type="button" onClick={openCalendarModal} className="flex flex-col items-center flex-1 py-1 text-gray-500">
             <span className="text-3xl mb-0.5">📅</span>
             <span>{t('calendar')}</span>
           </button>
-          <button 
+          <button
+            type="button"
             onClick={() => {
               if (currentCrew) {
                 showMessage('Profile editing is restricted for crew accounts.');
                 return;
               }
               setView('profileView');
-            }} 
-            className="flex flex-col items-center flex-1 py-1 text-gray-500">
+            }}
+            className="flex flex-col items-center flex-1 py-1 text-gray-500"
+          >
             <span className="text-3xl mb-0.5">👤</span>
             <span>{t('profile')}</span>
           </button>
-        </div>
+        </nav>
       </div>
 
       <ToastContainer />

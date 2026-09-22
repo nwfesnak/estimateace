@@ -129,6 +129,51 @@
   }
 }
 
+/*
+ * App shell (logged-in): one primary scroll column + sticky chrome.
+ * iOS Safari: prefer dvh so the bottom tab bar is not pushed below the
+ * visible viewport (classic 100vh / nested overflow trap).
+ */
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh; /* fallback */
+  max-height: 100vh;
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+.app-shell-main {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  /* Keep last content clear of home indicator when scrolling to end */
+  padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px));
+}
+
+.app-shell-bottom-nav {
+  flex-shrink: 0;
+  position: relative;
+  z-index: 30;
+  /* Home indicator / in-app browser bottom chrome */
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+  background-color: #fff;
+}
+
+/* Nested lead lists etc. — don't steal parent scroll at edges */
+.app-shell-main .overscroll-contain,
+.app-shell-main [data-nested-scroll] {
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
 /* ========== Device-style camera (stationary chrome; zoom only the preview) ========== */
 
 html.device-camera-lock,
