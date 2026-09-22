@@ -1790,7 +1790,6 @@ export default function Home() {
   const [emailLeadSummaries, setEmailLeadSummaries] = useState<EmailLeadSummary[]>([]);
   /** Last time email summaries were pulled from company SETTINGS (hourly refresh) */
   const [emailSummariesRefreshedAt, setEmailSummariesRefreshedAt] = useState<string | null>(null);
-  const [emailTestSummaryBusy, setEmailTestSummaryBusy] = useState(false);
   const monitoredEmailSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** SaaS product subscription (Phase A) */
   const [billing, setBilling] = useState<BillingSnapshot>(DEFAULT_BILLING_SNAPSHOT);
@@ -7768,40 +7767,6 @@ export default function Home() {
     }
   };
 
-  /** Push a sample summary into the dashboard box (proves the pipeline without waiting for forward). */
-  const sendTestEmailSummary = async () => {
-    if (!supabase || !user || emailTestSummaryBusy) return;
-    setEmailTestSummaryBusy(true);
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token;
-      if (!token) {
-        showMessage('Please log in again to add a test summary.');
-        return;
-      }
-      const res = await fetch('/api/email-leads/ingest', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ test: true }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        showMessage(json.error || 'Could not add test summary.');
-        return;
-      }
-      await refreshEmailLeadSummaries();
-      showMessage('✅ Test email summary added to the dashboard.');
-      setView('dashboard');
-    } catch (e: any) {
-      showMessage(e?.message || 'Could not add test summary.');
-    } finally {
-      setEmailTestSummaryBusy(false);
-    }
-  };
-
   const markReceptionistLeadRead = async (id: string) => {
     const next = receptionistMessages.map((m) =>
       m.id === id && m.status === 'new' ? { ...m, status: 'read' as const } : m
@@ -11985,7 +11950,7 @@ export default function Home() {
                             </p>
                             <p className="text-xs text-gray-500 leading-relaxed max-w-sm mx-auto">
                               No summaries yet. Forward lead emails from any provider to your EstimateAce
-                              address (Profile → Company Info), or add a test summary to preview this box.
+                              address (Profile → Company Info).
                             </p>
                             {workspaceUserId && (
                               <p className="text-[11px] text-slate-600 break-all px-2">
@@ -11995,16 +11960,6 @@ export default function Home() {
                                 </code>
                               </p>
                             )}
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              className="border-sky-600 text-sky-800"
-                              disabled={emailTestSummaryBusy || !user}
-                              onClick={() => void sendTestEmailSummary()}
-                            >
-                              {emailTestSummaryBusy ? 'Adding…' : 'Add test summary'}
-                            </Button>
                           </div>
                         ) : (
                           <>
@@ -15809,18 +15764,8 @@ export default function Home() {
                           </div>
                           <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2 leading-relaxed">
                             Saving your inbox above only labels which mailbox you use. Summaries appear after
-                            mail is <strong>forwarded</strong> here (or use Add test summary below to preview
-                            the dashboard box).
+                            mail is <strong>forwarded</strong> to this address.
                           </p>
-                          <Button
-                            type="button"
-                            size="sm"
-                            className="bg-sky-600 hover:bg-sky-700 text-white"
-                            disabled={emailTestSummaryBusy || !user}
-                            onClick={() => void sendTestEmailSummary()}
-                          >
-                            {emailTestSummaryBusy ? 'Adding…' : 'Add test summary'}
-                          </Button>
                         </div>
                       </div>
                     </div>
