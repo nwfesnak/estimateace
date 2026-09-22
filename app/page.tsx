@@ -7855,12 +7855,13 @@ export default function Home() {
     showMessage('✅ Archived message deleted.');
   };
 
-  const markEmailLeadRead = async (id: string) => {
-    if (!workspaceUserId || !supabase) return;
-    const next = emailLeadSummaries.map((m) =>
-      m.id === id && m.status === 'new' ? { ...m, status: 'read' as const } : m
-    );
+  const persistEmailLeadSummaries = async (next: EmailLeadSummary[]) => {
     setEmailLeadSummaries(next);
+    setProfileSettingsCache({
+      ...getProfileSettingsCache(),
+      emailLeadSummaries: next.slice(0, 200),
+    });
+    if (!workspaceUserId || !supabase) return;
     try {
       const existing = (await fetchServerProfileSettings()) || {};
       await supabase.from('estimates').upsert({
@@ -7876,8 +7877,31 @@ export default function Home() {
         updated_at: new Date().toISOString(),
       });
     } catch (e) {
-      console.warn('markEmailLeadRead:', e);
+      console.warn('persistEmailLeadSummaries:', e);
     }
+  };
+
+  const markEmailLeadRead = async (id: string) => {
+    const next = emailLeadSummaries.map((m) =>
+      m.id === id && m.status === 'new' ? { ...m, status: 'read' as const } : m
+    );
+    await persistEmailLeadSummaries(next);
+  };
+
+  /** Remove a forwarded email summary from the dashboard (does not delete the original inbox email). */
+  const deleteEmailLeadFromDashboard = async (id: string) => {
+    const msg = emailLeadSummaries.find((m) => m.id === id);
+    if (!msg) return;
+    if (
+      !confirm(
+        'Remove this email summary from the dashboard? Your original inbox email is not deleted — only this EstimateAce summary.'
+      )
+    ) {
+      return;
+    }
+    const next = emailLeadSummaries.filter((m) => m.id !== id);
+    await persistEmailLeadSummaries(next);
+    showMessage('✅ Email summary removed from the dashboard.');
   };
 
   const refreshBillingStatus = async () => {
@@ -11997,20 +12021,23 @@ export default function Home() {
                               .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
                               .slice(0, 8)
                               .map((m) => (
-                                <button
+                                <div
                                   key={m.id}
-                                  type="button"
-                                  className={`w-full text-left rounded-xl border p-3 transition hover:bg-white ${
+                                  className={`rounded-xl border p-3 ${
                                     m.status === 'new'
                                       ? 'border-sky-300 bg-sky-50/80'
                                       : 'border-slate-200 bg-white'
                                   }`}
-                                  onClick={() => void markEmailLeadRead(m.id)}
                                 >
                                   <div className="flex items-start justify-between gap-2">
-                                    <div className="min-w-0">
+                                    <div className="min-w-0 flex-1">
                                       <div className="font-semibold text-sm text-slate-900 truncate">
                                         {m.fromName || m.fromEmail || 'Unknown sender'}
+                                        {m.status === 'new' && (
+                                          <span className="ml-2 text-[10px] font-bold text-sky-700">
+                                            NEW
+                                          </span>
+                                        )}
                                       </div>
                                       <div className="text-xs text-gray-500 truncate">
                                         {m.subject} ·{' '}
@@ -12018,21 +12045,41 @@ export default function Home() {
                                           ? new Date(m.createdAt).toLocaleString()
                                           : ''}
                                       </div>
+                                      <p className="text-sm text-slate-700 mt-1 line-clamp-2 whitespace-pre-wrap">
+                                        {m.summary || 'No summary yet.'}
+                                      </p>
                                     </div>
-                                    {m.status === 'new' && (
-                                      <span className="shrink-0 text-[10px] font-bold text-sky-700">
-                                        NEW
-                                      </span>
-                                    )}
                                   </div>
-                                  <p className="text-sm text-slate-700 mt-1 line-clamp-2">
-                                    {m.summary || 'No summary yet.'}
-                                  </p>
-                                </button>
+                                  <div className="mt-2 flex flex-wrap gap-2">
+                                    {m.status === 'new' && (
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => void markEmailLeadRead(m.id)}
+                                      >
+                                        Mark read
+                                      </Button>
+                                    )}
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="destructive"
+                                      onClick={() => void deleteEmailLeadFromDashboard(m.id)}
+                                    >
+                                      Delete
+                                    </Button>
+                                  </div>
+                                </div>
                               ))}
                           </>
                         )}
                       </div>
+                      {emailLeadSummaries.length > 0 && (
+                        <p className="text-[11px] text-gray-400 mt-2 text-center">
+                          Delete removes the summary here only — not your real inbox email
+                        </p>
+                      )}
                     </div>
                     )}
                   </div>
