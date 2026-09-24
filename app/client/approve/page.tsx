@@ -9,6 +9,7 @@ import {
   STRIPE_CARD_FIXED_USD,
   STRIPE_CARD_PERCENT,
 } from '@/lib/stripe-fees';
+import { quoteTotalsForItems } from '@/lib/optional-line-items';
 
 type PayOption = {
   method: string;
@@ -47,6 +48,9 @@ type DocPayload = {
   discountType?: string;
   discountValue?: number;
   taxAmount?: number;
+  taxRate?: number;
+  isTaxExempt?: boolean;
+  taxesEnabled?: boolean;
   depositPercent?: number;
   depositDue?: number;
   showDeposit?: boolean;
@@ -61,7 +65,14 @@ type DocPayload = {
   estimateApproved?: boolean;
   approvedAt?: string | null;
   approvedBy?: string | null;
-  items?: Array<{ description: string; qty: number; total: number }>;
+  items?: Array<{
+    id?: string;
+    description: string;
+    qty: number;
+    total: number;
+    optional?: boolean;
+    clientSelected?: boolean;
+  }>;
   paymentOptions?: PayOption[];
   message?: string;
   error?: string;
@@ -168,6 +179,8 @@ function ApprovePayInner() {
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [selectedMethod, setSelectedMethod] = useState<string | null>(null);
   const [infoBanner, setInfoBanner] = useState('');
+  /** Optional line ids the client wants to add */
+  const [selectedOptionIds, setSelectedOptionIds] = useState<string[]>([]);
 
   useEffect(() => {
     if (!token) {
@@ -187,6 +200,10 @@ function ApprovePayInner() {
           return;
         }
         setDoc(json);
+        const chosen = (Array.isArray(json.items) ? json.items : [])
+          .filter((it: any) => it?.optional && it?.clientSelected && it?.id)
+          .map((it: any) => String(it.id));
+        setSelectedOptionIds(chosen);
         if (paidFlag === '1' || json.estimateApproved) setApproved(true);
       } catch {
         if (!cancelled) setError('Network error loading document.');
@@ -207,7 +224,7 @@ function ApprovePayInner() {
       const res = await fetch('/api/client/approve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token }),
+        body: JSON.stringify({ token, selectedOptionIds }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -222,9 +239,21 @@ function ApprovePayInner() {
               estimateApproved: true,
               approvedAt: json.approvedAt || prev.approvedAt,
               approvedBy: 'client',
+              items: (prev.items || []).map((it) =>
+                it.optional
+                  ? { ...it, clientSelected: selectedOptionIds.includes(String(it.id || '')) }
+                  : it
+              ),
             }
           : prev
       );
+      try {
+        const reload = await fetch(`/api/client/document?token=${encodeURIComponent(token)}`);
+        const fresh = await reload.json().catch(() => ({}));
+        if (reload.ok) setDoc(fresh);
+      } catch {
+        /* approval already saved */
+      }
       setInfoBanner('Estimate approved — your contractor can schedule the job. It is not an invoice yet.');
       return true;
     } catch {
@@ -236,6 +265,31 @@ function ApprovePayInner() {
   };
 
   const isEstimate = (doc?.documentType || 'estimate') !== 'invoice';
+  const docItems = Array.isArray(doc?.items) ? doc.items : [];
+  const optionalItems = docItems.filter((it) => it.optional);
+  const requiredItems = docItems.filter((it) => !it.optional);
+  const hasOptionalLines = optionalItems.length > 0;
+  const allLinesOptional = hasOptionalLines && requiredItems.length === 0;
+  const choicePreview = useMemo(
+    () =>
+      quoteTotalsForItems({
+        items: docItems.map((it, index) => ({
+          ...it,
+          id: it.id || `idx-${index}`,
+        })),
+        selectedIds: selectedOptionIds,
+        discount: {
+          description: doc?.discountDescription,
+          value: Number(doc?.discountValue) || 0,
+          type: doc?.discountType,
+          amount: Number(doc?.discountAmount) || 0,
+        },
+        taxRate: Number(doc?.taxRate) || 0,
+        taxesEnabled: doc?.taxesEnabled !== false,
+        isTaxExempt: !!doc?.isTaxExempt,
+      }),
+    [docItems, selectedOptionIds, doc?.discountDescription, doc?.discountValue, doc?.discountType, doc?.discountAmount, doc?.taxRate, doc?.taxesEnabled, doc?.isTaxExempt]
+  );
   const depositDue = Number(doc?.depositDue) || 0;
   const balanceDue = Number(doc?.balanceDue) || 0;
   const amountPaid = Number(doc?.amountPaid) || 0;
@@ -414,7 +468,7 @@ function ApprovePayInner() {
             {doc?.address ? <p className="text-sm text-slate-600 mt-1">{doc.address}</p> : null}
           </div>
 
-          {Array.isArray(doc?.items) && doc!.items!.length > 0 && (
+          {requiredItems.length > 0 && (
             <div className="border rounded-xl overflow-hidden">
               <table className="w-full text-sm">
                 <thead className="bg-slate-50 text-slate-600">
@@ -424,8 +478,8 @@ function ApprovePayInner() {
                   </tr>
                 </thead>
                 <tbody>
-                  {doc!.items!.map((it, i) => (
-                    <tr key={i} className="border-t">
+                  {requiredItems.map((it, i) => (
+                    <tr key={it.id || i} className="border-t">
                       <td className="p-2 text-slate-800">{it.description}</td>
                       <td className="p-2 text-right whitespace-nowrap">{money(it.total)}</td>
                     </tr>
@@ -435,16 +489,82 @@ function ApprovePayInner() {
             </div>
           )}
 
+          {hasOptionalLines && isEstimate && (
+            <div className="rounded-xl border border-amber-300 bg-amber-50/70 p-3 space-y-2">
+              <p className="text-sm font-semibold text-amber-950">
+                {allLinesOptional ? 'Choose the options you want' : 'Optional add-ons'}
+              </p>
+              <p className="text-xs text-amber-900">
+                {allLinesOptional
+                  ? 'Every line on this estimate is optional. Check the ones you want included.'
+                  : 'Included work is listed above. Check any extra options you want to add.'}
+              </p>
+              {optionalItems.map((it) => {
+                const id = String(it.id || '');
+                const checked = selectedOptionIds.includes(id);
+                return (
+                  <label
+                    key={id || it.description}
+                    className={`flex items-start gap-3 rounded-lg border bg-white p-3 ${
+                      approved ? 'cursor-default' : 'cursor-pointer'
+                    } ${checked ? 'border-amber-400' : 'border-amber-200'}`}
+                  >
+                    <input
+                      type="checkbox"
+                      className="mt-1 h-5 w-5 shrink-0 accent-amber-600"
+                      checked={checked}
+                      disabled={approved || busy}
+                      onChange={(e) => {
+                        setSelectedOptionIds((prev) =>
+                          e.target.checked ? [...prev, id] : prev.filter((x) => x !== id)
+                        );
+                        setError('');
+                      }}
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm text-slate-900">{it.description}</span>
+                      <span className="block text-sm font-semibold text-amber-900 mt-0.5">
+                        {money(it.total)}
+                      </span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+
+          {hasOptionalLines && !isEstimate && (
+            <div className="border rounded-xl overflow-hidden">
+              <table className="w-full text-sm">
+                <tbody>
+                  {optionalItems.map((it, i) => (
+                    <tr key={it.id || i} className="border-t">
+                      <td className="p-2 text-slate-800">
+                        {it.description}
+                        <span className="block text-[11px] text-amber-800">
+                          {it.clientSelected ? 'Added' : 'Optional — not included'}
+                        </span>
+                      </td>
+                      <td className="p-2 text-right whitespace-nowrap">{money(it.total)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
           <div className="rounded-xl bg-slate-50 p-4 space-y-1">
-            {(Number(doc?.discountAmount) || 0) > 0.005 && (
+            {((hasOptionalLines && isEstimate ? choicePreview.discountAmount : Number(doc?.discountAmount)) || 0) > 0.005 && (
               <>
                 <div className="flex justify-between text-sm text-slate-600">
                   <span>Subtotal</span>
                   <span>
                     {money(
-                      Number(doc?.subtotalBeforeDiscount) ||
-                        Number(doc?.grandTotal) + Number(doc?.discountAmount) ||
-                        0
+                      hasOptionalLines && isEstimate
+                        ? choicePreview.includedSubtotal
+                        : Number(doc?.subtotalBeforeDiscount) ||
+                          Number(doc?.grandTotal) + Number(doc?.discountAmount) ||
+                          0
                     )}
                   </span>
                 </div>
@@ -456,20 +576,31 @@ function ApprovePayInner() {
                       ? ` (${doc.discountValue}%)`
                       : ''}
                   </span>
-                  <span>−{money(Number(doc?.discountAmount) || 0)}</span>
+                  <span>
+                    −{money(hasOptionalLines && isEstimate ? choicePreview.discountAmount : Number(doc?.discountAmount) || 0)}
+                  </span>
                 </div>
-                {(Number(doc?.taxAmount) || 0) > 0 && (
+                {((hasOptionalLines && isEstimate ? choicePreview.taxAmount : Number(doc?.taxAmount)) || 0) > 0 && (
                   <div className="flex justify-between text-sm text-slate-600">
                     <span>Tax</span>
-                    <span>{money(Number(doc?.taxAmount) || 0)}</span>
+                    <span>
+                      {money(hasOptionalLines && isEstimate ? choicePreview.taxAmount : Number(doc?.taxAmount) || 0)}
+                    </span>
                   </div>
                 )}
               </>
             )}
             <div className="flex justify-between text-lg font-bold">
               <span>Grand total</span>
-              <span className="text-emerald-700">{money(Number(doc?.grandTotal) || 0)}</span>
+              <span className="text-emerald-700">
+                {money(hasOptionalLines && isEstimate ? choicePreview.grandTotal : Number(doc?.grandTotal) || 0)}
+              </span>
             </div>
+            {hasOptionalLines && isEstimate && choicePreview.optionalOpenTotal > 0.009 && (
+              <p className="text-xs text-amber-800 pt-1">
+                Unchecked options ({money(choicePreview.optionalOpenTotal)}) are not in this total.
+              </p>
+            )}
             {(Number(doc?.amountPaid) || 0) > 0 && (
               <div className="flex justify-between text-sm text-slate-600">
                 <span>Amount paid</span>
@@ -480,7 +611,7 @@ function ApprovePayInner() {
               <span>{payLabel}</span>
               <span className="font-semibold">{money(basePay)}</span>
             </div>
-            {payKind === 'deposit' && depositDue >= 0.5 && (
+            {payKind === 'deposit' && depositDue >= 0.5 && (!hasOptionalLines || !isEstimate || approved) && (
               <div className="flex justify-between text-sm text-emerald-800 pt-2 border-t mt-2">
                 <span>Deposit ({doc?.depositPercent || 0}%)</span>
                 <span className="font-semibold">{money(depositDue)}</span>
@@ -488,8 +619,8 @@ function ApprovePayInner() {
             )}
           </div>
 
-          {/* Amount due summary */}
-          {canPay && (
+          {/* Amount due summary — after optional choices are approved so the amount matches */}
+          {canPay && (!hasOptionalLines || !isEstimate || approved) && (
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm space-y-1">
               <div className="flex justify-between font-semibold text-slate-900">
                 <span>{payLabel}</span>
@@ -598,6 +729,10 @@ function ApprovePayInner() {
               disabled={busy || !termsGateOk}
               onClick={() => {
                 if (!requireTermsOrError()) return;
+                if (allLinesOptional && selectedOptionIds.length === 0) {
+                  setError('Choose at least one option before approving this estimate.');
+                  return;
+                }
                 void persistClientApproval();
               }}
             >
@@ -616,7 +751,7 @@ function ApprovePayInner() {
           )}
 
           {/* All contractor-enabled methods — totals include processing fee */}
-          {canPay && (!isEstimate || approved || payKind === 'deposit') && (
+          {canPay && (!hasOptionalLines || !isEstimate || approved) && (!isEstimate || approved || payKind === 'deposit') && (
             <div className={`space-y-3 pt-1 ${!termsGateOk ? 'opacity-60' : ''}`}>
               <p className="text-sm font-semibold text-slate-800">
                 {payLabel} — choose a payment method

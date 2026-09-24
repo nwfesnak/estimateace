@@ -3,18 +3,14 @@
  * and /api/client/document (items − discount + tax; laborAmount is reference-only).
  */
 
+import { includedItemsSubtotal } from '@/lib/optional-line-items';
+
 function roundMoney(n: number): number {
   return Math.round((Number(n) || 0) * 100) / 100;
 }
 
 function itemsSubtotal(items: any[]): number {
-  return roundMoney(
-    (items || []).reduce((sum, it) => {
-      const t = Number(it?.total);
-      if (Number.isFinite(t) && t > 0) return sum + t;
-      return sum + (Number(it?.qty) || 0) * (Number(it?.price) || 0);
-    }, 0)
-  );
+  return includedItemsSubtotal(items);
 }
 
 function discountFromDoc(row: any, itemsTotal: number): number {

@@ -55,6 +55,12 @@ import {
   type EstimateApprovedBy,
 } from '@/lib/estimate-approval';
 import { invoiceSentLabel, readInvoiceSentAt } from '@/lib/invoice-sent';
+import {
+  isOptionalLine,
+  lineCountsTowardTotal,
+  openOptionalSubtotal,
+  optionalLineNote,
+} from '@/lib/optional-line-items';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { getSupabaseClient, getSupabaseConfigHelpMessage } from '@/lib/supabase/client';
@@ -274,8 +280,12 @@ const computeEstimateTotals = (input: {
 }) => {
   const labor = roundMoney(Number(input.laborAmount) || 0);
   const itemsTotal = roundMoney(
-    (input.items || []).reduce((sum, item) => sum + getLineItemTotal(item), 0)
+    (input.items || []).reduce((sum, item) => {
+      if (!lineCountsTowardTotal(item)) return sum;
+      return sum + getLineItemTotal(item);
+    }, 0)
   );
+  const optionalAddOnTotal = openOptionalSubtotal(input.items || []);
   const subtotalBeforeDiscount = itemsTotal;
 
   let discountAmount = 0;
@@ -309,6 +319,7 @@ const computeEstimateTotals = (input: {
     taxableTotal,
     taxAmount,
     grandTotal,
+    optionalAddOnTotal,
   };
 };
 
@@ -1294,6 +1305,7 @@ export default function Home() {
     discountAmount,
     taxAmount,
     grandTotal,
+    optionalAddOnTotal,
   } = estimateTotals;
 
   // Credit card processing fee derived values (must be after profile state)
@@ -2246,6 +2258,11 @@ export default function Home() {
             <div className={`text-right font-bold ${totalClass}`}>
               Total: ${grandTotal.toFixed(2)}
             </div>
+            {optionalAddOnTotal > 0.009 && (
+              <div className="text-right text-sm font-semibold text-amber-700">
+                Optional add-ons (client can add): ${optionalAddOnTotal.toFixed(2)}
+              </div>
+            )}
             {amountPaid > 0.009 && (
               <>
                 <div className={`text-right font-semibold text-emerald-700 ${textClass}`}>
@@ -12797,7 +12814,14 @@ export default function Home() {
                       className="line-item-card rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden"
                     >
                       <div className="flex items-center justify-between gap-2 bg-[#1e293b] text-white px-3 py-2.5">
-                        <span className="text-sm font-semibold">Line {idx + 1}</span>
+                        <span className="text-sm font-semibold flex items-center gap-2 min-w-0">
+                          Line {idx + 1}
+                          {item.optional ? (
+                            <span className="text-[10px] font-bold uppercase tracking-wide bg-amber-400 text-slate-900 px-1.5 py-0.5 rounded">
+                              Optional
+                            </span>
+                          ) : null}
+                        </span>
                         <div className="flex gap-1 shrink-0">
                           <Button
                             size="sm"
@@ -12807,6 +12831,33 @@ export default function Home() {
                             title="Save as quick line"
                           >
                             💾
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className={
+                              item.optional
+                                ? 'bg-amber-400 text-slate-900 border-amber-200 hover:bg-amber-300 h-8 px-2'
+                                : 'bg-white/10 text-white border-white/30 hover:bg-white/20 h-8 px-2'
+                            }
+                            onClick={() => {
+                              const next = !isOptionalLine(item);
+                              updateItem(item.id, 'optional', next);
+                              if (!next) updateItem(item.id, 'clientSelected', false);
+                            }}
+                            title={
+                              item.optional
+                                ? 'Optional for the client. Click to make this line required.'
+                                : 'Make this line optional. The client can choose to add it on the estimate.'
+                            }
+                            aria-pressed={!!item.optional}
+                            aria-label={
+                              item.optional
+                                ? 'This line is optional for the client'
+                                : 'Make this line an optional client choice'
+                            }
+                          >
+                            {item.optional ? '☑' : '☐'}
                           </Button>
                           <Button
                             size="sm"
@@ -12834,6 +12885,11 @@ export default function Home() {
                               className="min-h-[72px] text-sm leading-relaxed border-0 shadow-none focus-visible:ring-0 px-1 py-1"
                             />
                           </div>
+                          {item.optional ? (
+                            <p className="text-xs text-amber-800">
+                              Optional for the client. It stays out of the total until they choose to add it on the estimate.
+                            </p>
+                          ) : null}
 
                           <Button
                             size="sm"
@@ -13189,6 +13245,12 @@ export default function Home() {
                       <div className="flex justify-end text-4xl font-bold">
                         Grand Total: <span className="text-[#10b981] ml-4">${grandTotal.toFixed(2)}</span>
                       </div>
+                      {optionalAddOnTotal > 0.009 && (
+                        <div className="flex justify-end text-base font-semibold mt-2 text-amber-700">
+                          Optional add-ons (not in total — client can add):{' '}
+                          <span className="ml-4">${optionalAddOnTotal.toFixed(2)}</span>
+                        </div>
+                      )}
 
                       {amountPaid > 0.009 && (
                         <div className="mt-4 rounded-xl border-2 border-amber-300 bg-amber-50 p-4 text-right space-y-2">
@@ -14197,6 +14259,7 @@ export default function Home() {
                       <tr key={i} className="border-b">
                         <td className="py-3">
                           <span className="text-xs text-gray-500">Line {i + 1}: </span>{item.description}
+                          {optionalLineNote(item)}
                           {renderClientItemBreakdown(item, 'mt-1 text-xs text-gray-600 leading-snug pl-2')}
                         </td>
                         <td className="py-3 text-right">{item.qty}</td>
@@ -17780,6 +17843,7 @@ export default function Home() {
                       <tr key={i} className="border-b">
                         <td className="py-3">
                           <span className="text-xs text-gray-500">Line {i + 1}: </span>{item.description}
+                          {optionalLineNote(item)}
                           {renderClientItemBreakdown(item, 'mt-1 text-xs text-gray-600 leading-snug pl-2')}
                         </td>
                         <td className="py-3 text-right border-l border-gray-400 px-3">{item.qty}</td>
@@ -18327,7 +18391,10 @@ export default function Home() {
 
                   // Slim payload only — avoid non-serializable / huge fields that break send
                   const emailItems = (items || []).slice(0, 40).map((it: any) => ({
+                    id: it?.id,
                     description: String(it?.description || '').slice(0, 500),
+                    optional: isOptionalLine(it),
+                    clientSelected: it?.clientSelected === true,
                     qty: Number(it?.qty) || 0,
                     unit: String(it?.unit || '').slice(0, 40),
                     price: Number(it?.price) || 0,

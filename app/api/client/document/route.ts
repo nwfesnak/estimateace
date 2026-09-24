@@ -3,6 +3,12 @@ import { verifyClientActionToken } from '@/lib/client-action-token';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { extractMediaStoragePath, isMediaPdfRef } from '@/lib/media-url';
 import { readEstimateApproval } from '@/lib/estimate-approval';
+import {
+  includedItemsSubtotal,
+  isClientSelectedOption,
+  isOptionalLine,
+  lineOptionId,
+} from '@/lib/optional-line-items';
 
 /**
  * Public (token-gated) document summary for client approve / pay page.
@@ -136,11 +142,7 @@ export async function GET(request: NextRequest) {
     }
     const storedDiscount = profile._discount || {};
     const items = Array.isArray(row.items) ? row.items : [];
-    const itemsTotal = items.reduce((sum: number, it: any) => {
-      const t = Number(it.total);
-      if (t > 0) return sum + t;
-      return sum + (Number(it.qty) || 0) * (Number(it.price) || 0);
-    }, 0);
+    const itemsTotal = includedItemsSubtotal(items);
 
     const discountDescription = String(
       row.discountDescription || storedDiscount.discountDescription || ''
@@ -271,10 +273,16 @@ export async function GET(request: NextRequest) {
       hasCertificate,
       certificateUrl,
       certificateIsPdf,
-      items: items.slice(0, 40).map((it: any) => ({
+      taxRate: Number(row.taxRate ?? row.taxrate) || 0,
+      isTaxExempt: !!(row.isTaxExempt ?? row.istaxexempt),
+      taxesEnabled: profile.taxesEnabled !== false,
+      items: items.slice(0, 40).map((it: any, index: number) => ({
+        id: lineOptionId(it, index),
         description: String(it.description || 'Line item').slice(0, 200),
         qty: Number(it.qty) || 0,
         total: Number(it.total) || Number(it.qty || 0) * Number(it.price || 0),
+        optional: isOptionalLine(it),
+        clientSelected: isClientSelectedOption(it),
       })),
     });
   } catch (e: any) {

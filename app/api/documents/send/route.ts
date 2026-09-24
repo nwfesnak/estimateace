@@ -4,6 +4,7 @@ import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { sendEmailNotification, sendSmsNotification } from '@/lib/notifications';
 import { createClientActionToken } from '@/lib/client-action-token';
 import { getAppUrl } from '@/lib/stripe-server';
+import { isClientSelectedOption, isOptionalLine } from '@/lib/optional-line-items';
 
 type LineItem = {
   description?: string;
@@ -191,13 +192,24 @@ export async function POST(request: NextRequest) {
       documentType === 'estimate' && depositDue >= 0.5 ? depositDue : amountDueNow;
 
     const location = [address, city, state, zipCode].filter(Boolean).join(', ');
-    const lineLines = items
+    const includedItems = items.filter(
+      (it) => !isOptionalLine(it) || isClientSelectedOption(it)
+    );
+    const openOptionalItems = items.filter(
+      (it) => isOptionalLine(it) && !isClientSelectedOption(it)
+    );
+    const formatLine = (it: LineItem, i: number) => {
+      const desc = String(it.description || 'Line item').slice(0, 120);
+      const total = money(Number(it.total) || Number(it.qty || 0) * Number(it.price || 0));
+      return `${i + 1}. ${desc} — ${total}`;
+    };
+    const lineLines = includedItems
       .slice(0, 20)
-      .map((it, i) => {
-        const desc = String(it.description || 'Line item').slice(0, 120);
-        const total = money(Number(it.total) || Number(it.qty || 0) * Number(it.price || 0));
-        return `${i + 1}. ${desc} — ${total}`;
-      })
+      .map((it, i) => formatLine(it, i))
+      .join('\n');
+    const optionalLines = openOptionalItems
+      .slice(0, 20)
+      .map((it, i) => formatLine(it, i))
       .join('\n');
 
     const subject = `${docLabel} ${invoiceNumber} from ${company}`;
@@ -224,6 +236,9 @@ export async function POST(request: NextRequest) {
       `Grand total: ${money(grandTotal)}`,
       amountPaid > 0 ? `Already paid: ${money(amountPaid)}` : '',
       lineLines ? `\nItems:\n${lineLines}` : '',
+      optionalLines
+        ? `\nOptional — client can add these on the estimate link:\n${optionalLines}`
+        : '',
       '',
       companyPhone ? `Phone: ${companyPhone}` : '',
       companyEmail ? `Email: ${companyEmail}` : '',
@@ -233,17 +248,20 @@ export async function POST(request: NextRequest) {
       .join('\n');
 
     // Compact line list (no long breakdowns in email — keeps Total due + buttons above Gmail clip)
-    const rowsHtml = items
-      .slice(0, 15)
-      .map((it) => {
-        const desc = escapeHtml(String(it.description || 'Line item').slice(0, 100));
-        const total = money(Number(it.total) || Number(it.qty || 0) * Number(it.price || 0));
-        return `<tr>
+    const rowHtmlFor = (list: LineItem[]) =>
+      list
+        .slice(0, 15)
+        .map((it) => {
+          const desc = escapeHtml(String(it.description || 'Line item').slice(0, 100));
+          const total = money(Number(it.total) || Number(it.qty || 0) * Number(it.price || 0));
+          return `<tr>
           <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-size:13px;">${desc}</td>
           <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;text-align:right;font-size:13px;white-space:nowrap;">${total}</td>
         </tr>`;
-      })
-      .join('');
+        })
+        .join('');
+    const rowsHtml = rowHtmlFor(includedItems);
+    const optionalRowsHtml = rowHtmlFor(openOptionalItems);
 
     // Optional media (kept short — below main CTA so primary actions stay visible)
     const sitePhotoUrls: string[] = Array.isArray(body.sitePhotoUrls)
@@ -449,6 +467,23 @@ export async function POST(request: NextRequest) {
                   <th style="text-align:right;padding:8px;font-size:12px;color:#64748b;">Total</th>
                 </tr>
                 ${rowsHtml}
+              </table>
+            </td>
+          </tr>`
+              : ''
+          }
+          ${
+            optionalRowsHtml
+              ? `<tr>
+            <td style="padding:0 20px 16px;">
+              <p style="margin:0 0 6px;font-size:12px;font-weight:600;color:#b45309;text-transform:uppercase;letter-spacing:0.04em;">Optional — add on the estimate</p>
+              <p style="margin:0 0 8px;font-size:12px;color:#92400e;">These are not in the total yet. Open the estimate link to choose which ones to add.</p>
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #fcd34d;border-radius:8px;">
+                <tr style="background:#fffbeb;">
+                  <th style="text-align:left;padding:8px;font-size:12px;color:#92400e;">Option</th>
+                  <th style="text-align:right;padding:8px;font-size:12px;color:#92400e;">Add</th>
+                </tr>
+                ${optionalRowsHtml}
               </table>
             </td>
           </tr>`
