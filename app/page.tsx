@@ -2221,12 +2221,6 @@ export default function Home() {
                 Subtotal: ${taxableSubtotal.toFixed(2)}
               </div>
             )}
-            {laborAmount > 0 && (
-              <div className={`text-right font-semibold text-[#14b8a6] ${textClass}`}>
-                Labor: ${laborAmount.toFixed(2)}
-                <span className="block text-sm font-normal text-gray-500">Reference only — not included in total</span>
-              </div>
-            )}
             {hasActiveDiscount() && (
               <div className={`text-right font-semibold text-gray-700 ${textClass}`}>
                 Subtotal before discount: ${subtotalBeforeDiscount.toFixed(2)}
@@ -13134,14 +13128,6 @@ export default function Home() {
                       <div className="flex justify-end text-xl font-semibold mb-2 text-gray-700">
                         Subtotal (line items): <span className="ml-4">${taxableSubtotal.toFixed(2)}</span>
                       </div>
-                      {laborAmount > 0 && (
-                        <div className="flex justify-end text-xl font-semibold mb-2 text-[#14b8a6]">
-                          <span>
-                            Labor: <span className="ml-4">${laborAmount.toFixed(2)}</span>
-                            <span className="block text-sm font-normal text-gray-500 text-right">Reference only — not included in total</span>
-                          </span>
-                        </div>
-                      )}
                       {hasActiveDiscount() && (
                         <div className="flex justify-end text-xl font-semibold mb-2 text-gray-700">
                           Subtotal before discount: <span className="ml-4">${subtotalBeforeDiscount.toFixed(2)}</span>
