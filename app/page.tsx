@@ -54,6 +54,7 @@ import {
   withEstimateApproval,
   type EstimateApprovedBy,
 } from '@/lib/estimate-approval';
+import { invoiceSentLabel, readInvoiceSentAt } from '@/lib/invoice-sent';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { getSupabaseClient, getSupabaseConfigHelpMessage } from '@/lib/supabase/client';
@@ -806,6 +807,8 @@ export default function Home() {
   /** Won job — can schedule on calendar without converting to invoice */
   const [estimateApprovedAt, setEstimateApprovedAt] = useState<string | null>(null);
   const [estimateApprovedBy, setEstimateApprovedBy] = useState<EstimateApprovedBy | null>(null);
+  /** Set after this invoice is emailed or texted to the client */
+  const [invoiceSentAt, setInvoiceSentAt] = useState<string | null>(null);
   const [jobName, setJobName] = useState('');
   const [address, setAddress] = useState('');
   const [city, setCity] = useState('');
@@ -1134,6 +1137,8 @@ export default function Home() {
   const skipAutosaveUntilRef = useRef(0);
   /** True until the user has real content on a brand-new document (avoids blank EST clutter + deposit bleed). */
   const freshDocumentRef = useRef(false);
+  /** Latest invoice send time, so a save that starts before React re-renders still keeps the mark. */
+  const invoiceSentAtRef = useRef<string | null>(null);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const profileAutoSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const quickLinesProfileSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1514,6 +1519,7 @@ export default function Home() {
           _estimateApprovedBy: estimateApprovedBy || 'owner',
         }
       : {}),
+    ...(invoiceSentAt ? { _invoiceSentAt: invoiceSentAt } : {}),
   });
 
   // Payment modal states
@@ -3295,6 +3301,8 @@ export default function Home() {
     paymentStatus?: 'pending' | 'paid';
     paymentMethod?: string;
     documentType?: 'estimate' | 'invoice';
+    /** Stamp when this invoice was emailed or texted (avoids stale state right after send) */
+    invoiceSentAt?: string | null;
     /** Suppress error toasts (auto-save) — still shows on hard failure */
     quiet?: boolean;
   }): Promise<{ ok: boolean; error?: string; id?: string }> => {
@@ -3326,6 +3334,13 @@ export default function Home() {
     const milesToSave = options?.mileageLogs ?? jobMileageLogs;
     const laborToSave = options?.laborLogs ?? jobLaborLogs;
     const renderingsToSave = options?.jobRenderings ?? jobRenderings;
+    if (options && 'invoiceSentAt' in options) {
+      invoiceSentAtRef.current = options.invoiceSentAt || null;
+    }
+    const sentAtToSave =
+      options && 'invoiceSentAt' in options
+        ? options.invoiceSentAt
+        : invoiceSentAtRef.current || invoiceSentAt;
     const laborAmountToSave = sumLaborLogs(laborToSave);
     const laborHoursToSave = sumLaborHours(laborToSave);
     const laborRateToSave =
@@ -3347,6 +3362,7 @@ export default function Home() {
       profile: {
         ...getDocumentProfileSnapshot(profileToSave, breakdownToSave, milesToSave, laborToSave),
         _jobRenderings: renderingsToSave,
+        ...(sentAtToSave ? { _invoiceSentAt: sentAtToSave } : {}),
       },
       documentType: options?.documentType || documentType || 'estimate',
       dueDate: dueDate || '',
@@ -4729,6 +4745,11 @@ export default function Home() {
       setEstimateApprovedAt(a.approvedAt);
       setEstimateApprovedBy(a.approvedBy);
     }
+    {
+      const sentAt = readInvoiceSentAt(est);
+      invoiceSentAtRef.current = sentAt;
+      setInvoiceSentAt(sentAt);
+    }
     setDueDate(est.dueDate || '');
     setPaymentStatus(est.paymentStatus || 'pending');
     setAmountPaid(est.amountPaid || 0);
@@ -5069,6 +5090,8 @@ export default function Home() {
     setDocumentType(nextType);
     setEstimateApprovedAt(null);
     setEstimateApprovedBy(null);
+    invoiceSentAtRef.current = null;
+    setInvoiceSentAt(null);
     setJobName(''); setAddress(''); setCity(''); setState(''); setZipCode('');
     setPhones(['']); setEmails(['']); setTerms('');
     setPhotoUrls([]); setVideoUrls([]); setReceiptUrls([]); setReceiptDetails([]); setJobMileageLogs([]);
@@ -12192,16 +12215,30 @@ export default function Home() {
                               onClick={() => void openDocumentFromList(inv)}
                             >
                               <TableCell className="font-medium">
-                                <button
-                                  type="button"
-                                  className="text-[#0f766e] font-semibold underline underline-offset-2 hover:text-emerald-800 text-left"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    void openDocumentFromList(inv);
-                                  }}
-                                >
-                                  {inv.invoiceNumber || inv.id || 'Invoice'}
-                                </button>
+                                <div className="flex items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    className="text-[#0f766e] font-semibold underline underline-offset-2 hover:text-emerald-800 text-left"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      void openDocumentFromList(inv);
+                                    }}
+                                  >
+                                    {inv.invoiceNumber || inv.id || 'Invoice'}
+                                  </button>
+                                  {readInvoiceSentAt(inv) ? (
+                                    <span
+                                      className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-sky-100 text-sky-700 shrink-0"
+                                      title={invoiceSentLabel(readInvoiceSentAt(inv)!)}
+                                      aria-label={invoiceSentLabel(readInvoiceSentAt(inv)!)}
+                                    >
+                                      <svg viewBox="0 0 20 20" className="w-3.5 h-3.5" fill="none" aria-hidden>
+                                        <rect x="3" y="5" width="14" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.6" />
+                                        <path d="M3.5 6.5 10 11l6.5-4.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                                      </svg>
+                                    </span>
+                                  ) : null}
+                                </div>
                               </TableCell>
                               <TableCell>
                                 <button
@@ -18413,6 +18450,12 @@ export default function Home() {
                   showMessage(
                     `✅ ${documentType === 'invoice' ? 'Invoice' : 'Estimate'} sent!\n${parts.join('\n')}`
                   );
+                  if (documentType === 'invoice') {
+                    const sentStamp = new Date().toISOString();
+                    invoiceSentAtRef.current = sentStamp;
+                    setInvoiceSentAt(sentStamp);
+                    void saveToDB({ quiet: true, invoiceSentAt: sentStamp });
+                  }
                   setIsSendModalOpen(false);
                 } catch (err: any) {
                   showMessage(
