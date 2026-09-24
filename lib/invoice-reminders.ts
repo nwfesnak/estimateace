@@ -3,6 +3,7 @@
  */
 
 import { readInvoiceSentAt } from '@/lib/invoice-sent';
+import { computeDocumentGrandTotal } from '@/lib/document-totals';
 
 export const INVOICE_REMINDER_INTERVAL_MS = 2 * 24 * 60 * 60 * 1000;
 
@@ -32,9 +33,43 @@ export function isInvoiceMarkedPaid(row: any): boolean {
   return status === 'paid';
 }
 
+/** Card checkout writes the payment itself. Cash, Venmo, Zelle, and check do not. */
+const AUTO_LOGGED_METHODS = new Set(['stripe', 'card', 'credit card', 'creditcard']);
+
+export function isAutoLoggedPayment(row: any): boolean {
+  const method = String(row?.paymentMethod ?? row?.paymentmethod ?? '')
+    .trim()
+    .toLowerCase();
+  return AUTO_LOGGED_METHODS.has(method);
+}
+
+/**
+ * Stop reminders when the invoice is marked paid, or when a card payment
+ * was logged and covers the balance. Other methods wait for Mark paid.
+ */
+export function isInvoiceSettledForReminders(row: any): boolean {
+  if (isInvoiceMarkedPaid(row)) return true;
+  if (!isAutoLoggedPayment(row)) return false;
+  let items = row?.items;
+  if (typeof items === 'string') {
+    try {
+      items = JSON.parse(items);
+    } catch {
+      items = [];
+    }
+  }
+  const total = computeDocumentGrandTotal({
+    ...row,
+    items: Array.isArray(items) ? items : [],
+  });
+  const paid = Number(row?.amountPaid ?? row?.amountpaid) || 0;
+  if (total > 0.009) return paid >= total - 0.009;
+  return paid > 0.009;
+}
+
 /** True when a reminder email and text should go out now. */
 export function invoiceReminderDue(row: any, now = Date.now()): boolean {
-  if (!isInvoiceDocument(row) || isInvoiceMarkedPaid(row)) return false;
+  if (!isInvoiceDocument(row) || isInvoiceSettledForReminders(row)) return false;
   const sentMs = Date.parse(readInvoiceSentAt(row) || '');
   if (!Number.isFinite(sentMs)) return false;
   const lastRaw = readInvoiceLastReminderAt(row);
@@ -45,18 +80,20 @@ export function invoiceReminderDue(row: any, now = Date.now()): boolean {
 
 export function invoiceReminderHint(row: any, now = Date.now()): string {
   const sent = readInvoiceSentAt(row);
-  if (!sent || isInvoiceMarkedPaid(row)) return '';
+  if (!sent || isInvoiceSettledForReminders(row)) return '';
   const last = readInvoiceLastReminderAt(row);
+  const stopNote =
+    'Card payments stop these automatically. For cash, Venmo, Zelle, or check, mark the invoice paid when the money arrives.';
   if (last && !Number.isNaN(Date.parse(last))) {
-    return `Reminder emailed and texted ${new Date(last).toLocaleString()}. Another goes out every 2 days until this invoice is marked paid.`;
+    return `Reminder emailed and texted ${new Date(last).toLocaleString()}. Another goes out every 2 days. ${stopNote}`;
   }
   const sentMs = Date.parse(sent);
   if (!Number.isFinite(sentMs)) return '';
   const firstAt = sentMs + INVOICE_REMINDER_INTERVAL_MS;
   if (now >= firstAt) {
-    return 'A reminder email and text is due. Another goes out every 2 days until this invoice is marked paid.';
+    return `A reminder email and text is due, then every 2 days. ${stopNote}`;
   }
-  return `Reminder email and text ${new Date(firstAt).toLocaleString()}, then every 2 days until this invoice is marked paid.`;
+  return `Reminder email and text ${new Date(firstAt).toLocaleString()}, then every 2 days. ${stopNote}`;
 }
 
 export function profileOf(row: any): Record<string, any> {

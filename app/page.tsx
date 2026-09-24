@@ -12210,7 +12210,7 @@ export default function Home() {
                     💰 {t('invoices')}
                   </h3>
                   <p className="text-sm text-gray-500 mb-4">
-                    After an invoice is sent, the client gets a reminder email and text every 2 days until you mark it paid.
+                    After an invoice is sent, the client gets a reminder email and text every 2 days. A card payment that logs itself stops the reminders. For cash, Venmo, Zelle, or check, mark the invoice paid when you receive the money.
                   </p>
                   <div className="overflow-x-auto">
                     <Table>
@@ -12264,11 +12264,11 @@ export default function Home() {
                                       className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-100 text-amber-800 shrink-0"
                                       title={
                                         invoiceReminderHint(inv) ||
-                                        'Reminder email and text every 2 days until this invoice is marked paid.'
+                                        'Reminder email and text every 2 days until this invoice is paid. Card payments stop them automatically.'
                                       }
                                       aria-label={
                                         invoiceReminderHint(inv) ||
-                                        'Reminder email and text every 2 days until this invoice is marked paid.'
+                                        'Reminder email and text every 2 days until this invoice is paid. Card payments stop them automatically.'
                                       }
                                     >
                                       <svg viewBox="0 0 20 20" className="w-3.5 h-3.5" fill="none" aria-hidden>
