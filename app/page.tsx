@@ -55,6 +55,7 @@ import {
   type EstimateApprovedBy,
 } from '@/lib/estimate-approval';
 import { invoiceSentLabel, readInvoiceSentAt } from '@/lib/invoice-sent';
+import { invoiceReminderHint } from '@/lib/invoice-reminders';
 import {
   isOptionalLine,
   lineCountsTowardTotal,
@@ -12205,9 +12206,12 @@ export default function Home() {
 
               <Card className="mb-8">
                 <CardContent className="p-6">
-                  <h3 className="font-semibold mb-4 flex items-center gap-2">
+                  <h3 className="font-semibold mb-1 flex items-center gap-2">
                     💰 {t('invoices')}
                   </h3>
+                  <p className="text-sm text-gray-500 mb-4">
+                    After an invoice is sent, the client gets a reminder email and text every 2 days until you mark it paid.
+                  </p>
                   <div className="overflow-x-auto">
                     <Table>
                       <TableHeader>
@@ -12252,6 +12256,24 @@ export default function Home() {
                                       <svg viewBox="0 0 20 20" className="w-3.5 h-3.5" fill="none" aria-hidden>
                                         <rect x="3" y="5" width="14" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.6" />
                                         <path d="M3.5 6.5 10 11l6.5-4.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                                      </svg>
+                                    </span>
+                                  ) : null}
+                                  {readInvoiceSentAt(inv) ? (
+                                    <span
+                                      className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-100 text-amber-800 shrink-0"
+                                      title={
+                                        invoiceReminderHint(inv) ||
+                                        'Reminder email and text every 2 days until this invoice is marked paid.'
+                                      }
+                                      aria-label={
+                                        invoiceReminderHint(inv) ||
+                                        'Reminder email and text every 2 days until this invoice is marked paid.'
+                                      }
+                                    >
+                                      <svg viewBox="0 0 20 20" className="w-3.5 h-3.5" fill="none" aria-hidden>
+                                        <path d="M10 3.5a4.5 4.5 0 0 1 4.5 4.5c0 2.2.6 3.2 1.1 3.8.3.3.1.9-.4.9H4.8c-.5 0-.7-.6-.4-.9.5-.6 1.1-1.6 1.1-3.8A4.5 4.5 0 0 1 10 3.5Z" stroke="currentColor" strokeWidth="1.6" />
+                                        <path d="M8.5 14.2a1.5 1.5 0 0 0 3 0" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
                                       </svg>
                                     </span>
                                   ) : null}
