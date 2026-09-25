@@ -159,6 +159,11 @@ export async function POST(request: NextRequest) {
           if (!result.ok) console.error('webhook crew seat invoice:', result.error);
           break;
         }
+        if (isReceptionistAddonSubscription(sub)) {
+          const result = await upsertReceptionistAddonFromStripe(sub);
+          if (!result.ok) console.error('webhook receptionist addon invoice:', result.error);
+          break;
+        }
         const result = await upsertSubscriptionFromStripe(sub);
         if (!result.ok) console.error('webhook invoice upsert:', result.error);
         break;
