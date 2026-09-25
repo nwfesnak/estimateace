@@ -159,6 +159,14 @@ export async function POST(request: NextRequest) {
           if (!result.ok) console.error('webhook crew seat invoice:', result.error);
           break;
         }
+        // AI Receptionist add-on ($49.99/mo) — same branch as customer.subscription.*
+        // Without this, invoice.paid renewals call upsertSubscriptionFromStripe and
+        // overwrite/treat the add-on like a normal SaaS plan.
+        if (isReceptionistAddonSubscription(sub)) {
+          const result = await upsertReceptionistAddonFromStripe(sub);
+          if (!result.ok) console.error('webhook receptionist addon invoice:', result.error);
+          break;
+        }
         const result = await upsertSubscriptionFromStripe(sub);
         if (!result.ok) console.error('webhook invoice upsert:', result.error);
         break;
