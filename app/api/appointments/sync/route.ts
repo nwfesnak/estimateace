@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { settingsDocId, type StoredAppointment } from '@/lib/appointment-reminders';
+import { mergeFilledPaymentSettings } from '@/lib/client-payment-options';
 
 async function verifyUser(request: NextRequest) {
   const authHeader = request.headers.get('authorization');
@@ -38,15 +39,28 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const appointments = Array.isArray(body.appointments) ? body.appointments as StoredAppointment[] : [];
     const profile = body.profile && typeof body.profile === 'object' ? body.profile : {};
+    const settingsId = settingsDocId(user.id);
+    const { data: existingRow } = await supabase
+      .from('estimates')
+      .select('profile')
+      .eq('id', settingsId)
+      .maybeSingle();
+    const existing =
+      existingRow?.profile && typeof existingRow.profile === 'object' ? existingRow.profile : {};
 
     const { error } = await supabase.from('estimates').upsert({
-      id: settingsDocId(user.id),
+      id: settingsId,
       user_id: user.id,
       jobName: '__settings__',
       documentType: 'settings',
       items: [],
       profile: {
+        ...existing,
         ...profile,
+        paymentSettings: mergeFilledPaymentSettings(
+          (existing as any).paymentSettings,
+          (profile as any).paymentSettings
+        ),
         _appointments: appointments,
       },
       updated_at: new Date().toISOString(),

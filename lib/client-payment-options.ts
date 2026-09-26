@@ -55,6 +55,46 @@ function mergeSettings(
   return out;
 }
 
+/**
+ * Combine payment methods without letting a blank handle wipe a saved one.
+ * Later sources win when they actually have a handle, QR, or enabled flag.
+ */
+export function mergeFilledPaymentSettings(
+  ...sources: Array<Record<string, PaymentMethodSettings> | null | undefined>
+): Record<string, PaymentMethodSettings> {
+  const keys = new Set<string>(Object.keys(DEFAULTS));
+  for (const source of sources) {
+    if (!source) continue;
+    for (const key of Object.keys(source)) keys.add(key);
+  }
+  const out: Record<string, PaymentMethodSettings> = {};
+  for (const key of keys) {
+    const base = DEFAULTS[key] || { enabled: false, connected: false };
+    let enabled = base.enabled ?? false;
+    let connected = base.connected ?? false;
+    let handle = '';
+    let qrUrl = '';
+    for (const source of sources) {
+      const row = source?.[key];
+      if (!row) continue;
+      if (typeof row.enabled === 'boolean') enabled = row.enabled;
+      if (typeof row.connected === 'boolean') connected = row.connected;
+      const nextHandle = String(row.handle || '').trim();
+      if (nextHandle) handle = nextHandle;
+      const nextQr = String(row.qrUrl || '').trim();
+      if (nextQr) qrUrl = nextQr;
+    }
+    out[key] = {
+      ...base,
+      enabled,
+      connected: connected || !!handle || !!qrUrl,
+      ...(handle ? { handle } : {}),
+      ...(qrUrl ? { qrUrl } : {}),
+    };
+  }
+  return out;
+}
+
 const META: Record<
   string,
   { icon: string; label: string; description: string; howItWorks: string; clickToPay: boolean }

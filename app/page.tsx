@@ -67,6 +67,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { getSupabaseClient, getSupabaseConfigHelpMessage } from '@/lib/supabase/client';
 import { extractMediaStoragePath, isMediaPdfRef, resolveMediaDisplayUrl } from '@/lib/media-url';
 import { buildAccountExportZip } from '@/lib/account-export';
+import { mergeFilledPaymentSettings } from '@/lib/client-payment-options';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { getLineItemUnitOptions, LINE_ITEM_UNITS } from '@/lib/quote-units';
 import {
@@ -1158,6 +1159,8 @@ export default function Home() {
   const lastSavedCompanyFingerprintRef = useRef('');
   const profileRef = useRef(profile);
   profileRef.current = profile;
+  /** Keep profile saves in order so a blank payment write cannot finish after a real one. */
+  const settingsSaveChainRef = useRef(Promise.resolve());
   const [profileAutoSaveLabel, setProfileAutoSaveLabel] = useState('');
 
   // Must be defined before profile cache helpers (used during render totals)
@@ -4724,17 +4727,10 @@ export default function Home() {
               ? Math.max(0, Number(loadedProfile.escrowMinimumAmount) || 0)
               : Math.max(0, Number(profile.escrowMinimumAmount) || 0))),
       depositPercentage: loadedProfile.depositPercentage ?? cached.depositPercentage ?? profile.depositPercentage ?? 10,
-      paymentSettings: mergePaymentSettings({
-        ...loadedProfile.paymentSettings,
-        ...(serverProfile?.paymentSettings || {}),
-        venmo: {
-          ...mergePaymentSettings(loadedProfile.paymentSettings).venmo,
-          ...mergePaymentSettings(serverProfile?.paymentSettings).venmo,
-          handle:
-            mergePaymentSettings(serverProfile?.paymentSettings).venmo?.handle ||
-            mergePaymentSettings(loadedProfile.paymentSettings).venmo?.handle,
-        },
-      }),
+      paymentSettings: mergeFilledPaymentSettings(
+        loadedProfile.paymentSettings,
+        serverProfile?.paymentSettings
+      ),
       logoUrl: loadedProfile.logoUrl ?? '',
       logoSize: loadedProfile.logoSize ?? 'medium',
       language: preferredLang,
@@ -4987,19 +4983,11 @@ export default function Home() {
                   ? Math.max(0, Number(l.escrowMinimumAmount) || 0)
                   : 10000)),
           depositPercentage: s.depositPercentage ?? l.depositPercentage ?? cached.depositPercentage ?? 10,
-          paymentSettings: mergePaymentSettings({
-            ...(l.paymentSettings || {}),
-            ...(serverProfile?.paymentSettings || {}),
-            venmo: {
-              ...mergePaymentSettings(l.paymentSettings).venmo,
-              ...mergePaymentSettings(serverProfile?.paymentSettings).venmo,
-              handle: pickFilled(
-                mergePaymentSettings(serverProfile?.paymentSettings).venmo?.handle,
-                mergePaymentSettings(l.paymentSettings).venmo?.handle,
-                ''
-              ),
-            },
-          }),
+          paymentSettings: mergeFilledPaymentSettings(
+            l.paymentSettings,
+            cached.paymentSettings,
+            serverProfile?.paymentSettings
+          ),
           // SMS 2FA forced off until phone line is active
           twoFactorEnabled: false,
           twoFactorPhone: pickFilled(
@@ -8501,8 +8489,13 @@ export default function Home() {
         (existing as any)?.termsDisplayMode === 'printed'
           ? 'printed'
           : 'link',
+      paymentSettings: mergeFilledPaymentSettings(
+        (existing as any)?.paymentSettings,
+        snapshot.paymentSettings,
+        nextProfile.paymentSettings
+      ),
     };
-    await supabase.from('estimates').upsert({
+    const { error: settingsError } = await supabase.from('estimates').upsert({
       id: `SETTINGS-${workspaceUserId}`,
       user_id: workspaceUserId,
       jobName: '__settings__',
@@ -8511,6 +8504,10 @@ export default function Home() {
       profile: profileWithMileage,
       updated_at: new Date().toISOString(),
     });
+    if (settingsError) {
+      console.error('upsertUserSettingsProfile:', settingsError);
+      throw new Error(settingsError.message);
+    }
     // Durable local backup of company identity (survives reloads)
     setProfileSettingsCache({
       companyProfile: {
@@ -8531,11 +8528,13 @@ export default function Home() {
         quickLines: Array.isArray((mergedProfile as any).quickLines)
           ? (mergedProfile as any).quickLines
           : [],
+        paymentSettings: (profileWithMileage as any).paymentSettings,
       },
     });
   };
 
   const saveProfileSettings = async (nextProfile: typeof profile, options?: { quiet?: boolean }) => {
+    const run = async () => {
     setProfileSettingsCache({
       depositPercentage: nextProfile.depositPercentage,
       showDepositOnApproval: nextProfile.showDepositOnApproval,
@@ -8554,6 +8553,7 @@ export default function Home() {
       monitoredEmail: String((nextProfile as any).monitoredEmail || '').trim(),
       aiReceptionistAddonActive: (nextProfile as any).aiReceptionistAddonActive === true,
       termsDisplayMode: nextProfile.termsDisplayMode === 'printed' ? 'printed' : 'link',
+      paymentSettings: nextProfile.paymentSettings,
     });
     await upsertUserSettingsProfile(nextProfile);
     // Keep open estimate's embedded profile in sync, but SETTINGS row is source of truth
@@ -8562,6 +8562,13 @@ export default function Home() {
     if (!options?.quiet) {
       // callers that want toast still pass nothing; auto-save uses quiet
     }
+    };
+    const queued = settingsSaveChainRef.current.then(run, run);
+    settingsSaveChainRef.current = queued.then(
+      () => undefined,
+      () => undefined
+    );
+    return queued;
   };
 
   const saveEstimateBreakdownSettings = async (
@@ -9612,18 +9619,20 @@ export default function Home() {
 
   const updatePayPalHandle = (value: string) => {
     const handle = cleanPayPalHandle(value);
+    const current = profileRef.current;
     const nextProfile = {
-      ...profile,
+      ...current,
       paymentSettings: {
-        ...mergePaymentSettings(profile.paymentSettings),
+        ...mergePaymentSettings(current.paymentSettings),
         paypal: {
-          ...mergePaymentSettings(profile.paymentSettings).paypal,
-          enabled: mergePaymentSettings(profile.paymentSettings).paypal?.enabled ?? true,
+          ...mergePaymentSettings(current.paymentSettings).paypal,
+          enabled: mergePaymentSettings(current.paymentSettings).paypal?.enabled ?? true,
           handle,
           connected: hasPayPalHandle(handle),
         },
       },
     };
+    profileRef.current = nextProfile;
     setProfile(nextProfile);
     void saveProfileSettings(nextProfile);
     if (handle) {
@@ -9990,18 +9999,20 @@ export default function Home() {
 
   const updateVenmoUsername = (value: string) => {
     const handle = cleanVenmoHandle(value);
+    const current = profileRef.current;
     const nextProfile = {
-      ...profile,
+      ...current,
       paymentSettings: {
-        ...mergePaymentSettings(profile.paymentSettings),
+        ...mergePaymentSettings(current.paymentSettings),
         venmo: {
-          ...mergePaymentSettings(profile.paymentSettings).venmo,
-          enabled: mergePaymentSettings(profile.paymentSettings).venmo?.enabled ?? true,
+          ...mergePaymentSettings(current.paymentSettings).venmo,
+          enabled: mergePaymentSettings(current.paymentSettings).venmo?.enabled ?? true,
           handle,
           connected: hasVenmoHandle(handle),
         },
       },
     };
+    profileRef.current = nextProfile;
     setProfile(nextProfile);
     void saveProfileSettings(nextProfile);
     if (handle) {
@@ -10031,6 +10042,7 @@ export default function Home() {
           },
         },
       };
+      profileRef.current = nextProfile;
       setProfile(nextProfile);
       setMailCheckSaveLabel('Saving…');
       void saveProfileSettings(nextProfile, { quiet: true })
@@ -10060,11 +10072,12 @@ export default function Home() {
   };
 
   const updateZelleSettings = (patch: { handle?: string; qrUrl?: string; enabled?: boolean }) => {
-    const current = mergePaymentSettings(profile.paymentSettings).zelle;
+    const base = profileRef.current;
+    const current = mergePaymentSettings(base.paymentSettings).zelle;
     const nextProfile = {
-      ...profile,
+      ...base,
       paymentSettings: {
-        ...mergePaymentSettings(profile.paymentSettings),
+        ...mergePaymentSettings(base.paymentSettings),
         zelle: {
           ...current,
           enabled: patch.enabled ?? current?.enabled ?? true,
@@ -10077,6 +10090,7 @@ export default function Home() {
         },
       },
     };
+    profileRef.current = nextProfile;
     setProfile(nextProfile);
     void saveProfileSettings(nextProfile);
   };
@@ -10786,13 +10800,15 @@ export default function Home() {
   };
 
   const togglePaymentMethod = (method: string, enabled: boolean) => {
+    const current = profileRef.current;
     const nextProfile = {
-      ...profile,
+      ...current,
       paymentSettings: {
-        ...mergePaymentSettings(profile.paymentSettings),
-        [method]: { ...mergePaymentSettings(profile.paymentSettings)[method], enabled },
+        ...mergePaymentSettings(current.paymentSettings),
+        [method]: { ...mergePaymentSettings(current.paymentSettings)[method], enabled },
       },
     };
+    profileRef.current = nextProfile;
     setProfile(nextProfile);
     void saveProfileSettings(nextProfile);
   };
