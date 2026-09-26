@@ -66,6 +66,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { getSupabaseClient, getSupabaseConfigHelpMessage } from '@/lib/supabase/client';
 import { extractMediaStoragePath, isMediaPdfRef, resolveMediaDisplayUrl } from '@/lib/media-url';
+import { buildAccountExportZip } from '@/lib/account-export';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { getLineItemUnitOptions, LINE_ITEM_UNITS } from '@/lib/quote-units';
 import {
@@ -489,7 +490,7 @@ export default function Home() {
       venmoUsernameHelp: "Clients will be sent to this Venmo username when they pay by Venmo.",
       venmoUsernamePlaceholder: "YourBusiness",
       chargeCCFee: "Charge customers a credit card processing fee",
-      exportData: "Export Selected Data (CSV)",
+      exportData: "Export all my data",
       viewAppointments: "View Appointments",
       backToSchedule: "Back to Schedule",
       scheduleAppointment: "Schedule Appointment",
@@ -1774,6 +1775,7 @@ export default function Home() {
     photos: true,
     videos: true
   });
+  const [exportBusy, setExportBusy] = useState(false);
 
   const [selectedReportJob, setSelectedReportJob] = useState<any>(null);
   const [reportsSubTab, setReportsSubTab] = useState<
@@ -9201,37 +9203,43 @@ export default function Home() {
   };
 
   const exportData = async () => {
-    if (!user || !supabase) return;
+    if (!user || !supabase || !workspaceUserId || exportBusy) return;
+    setExportBusy(true);
+    showMessage('Preparing your export. Photos and videos can take a minute.');
+    try {
+      const [{ data: docs, error: docsError }, { data: archives, error: archivesError }] = await Promise.all([
+        supabase.from('estimates').select('*').eq('user_id', workspaceUserId),
+        supabase.from('archive-est').select('*').eq('user_id', workspaceUserId),
+      ]);
+      if (docsError) throw new Error(docsError.message);
+      if (archivesError) throw new Error(archivesError.message);
 
-    let csv = 'Type,InvoiceNumber,Client,Date,Address,City,ZipCode,GrandTotal,PhotoUrls,VideoUrls\n';
-
-    if (exportOptions.estimates || exportOptions.invoices) {
-      const { data: docs } = await supabase.from('estimates').select('*').eq('user_id', workspaceUserId);
-      (docs || []).forEach(doc => {
-        if ((exportOptions.estimates && (doc.documentType === 'estimate' || doc.invoiceNumber?.startsWith('EST'))) ||
-            (exportOptions.invoices && (doc.documentType === 'invoice' || doc.invoiceNumber?.startsWith('INV')))) {
-          const total = doc.items ? doc.items.reduce((sum: number, item: any) => sum + (item.total || 0), 0) : 0;
-          csv += `"${doc.documentType || 'estimate'}","${doc.invoiceNumber || ''}","${doc.jobName || ''}","${doc.date || ''}","${doc.address || ''}","${doc.city || ''}","${doc.zipCode || ''}",${total},"${(doc.photoUrls || []).join('; ')}","${(doc.videoUrls || []).join('; ')}"\n`;
-        }
+      const { blob, mediaFiles, missing } = await buildAccountExportZip({
+        documents: docs || [],
+        archives: archives || [],
+        options: exportOptions,
+        fetchMedia: async (storagePath) => {
+          const url = await getMediaUrl(storagePath);
+          if (!url) return null;
+          const res = await fetch(url);
+          if (!res.ok) return null;
+          return new Uint8Array(await res.arrayBuffer());
+        },
       });
-    }
 
-    if (exportOptions.archives) {
-      const { data: archives } = await supabase.from('archive-est').select('*').eq('user_id', workspaceUserId);
-      (archives || []).forEach(arch => {
-        const total = arch.items ? arch.items.reduce((sum: number, item: any) => sum + (item.total || 0), 0) : 0;
-        csv += `"archive","${arch.invoiceNumber || ''}","${arch.jobName || ''}","${arch.date || ''}","${arch.address || ''}","${arch.city || ''}","${arch.zipCode || ''}",${total},"${(arch.photoUrls || []).join('; ')}","${(arch.videoUrls || []).join('; ')}"\n`;
-      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `EstimateAce_Export_${new Date().toISOString().slice(0, 10)}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+      const missNote = missing.length ? ` ${missing.length} file(s) could not be downloaded and are listed in the zip.` : '';
+      showMessage(`✅ Export downloaded. ${mediaFiles} photo, receipt, and video file(s) included.${missNote}`);
+    } catch (err: any) {
+      showMessage(`Could not export: ${err?.message || 'Try again.'}`);
+    } finally {
+      setExportBusy(false);
     }
-
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `EstimateAce_Export_${new Date().toISOString().slice(0,10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-    showMessage('✅ Selected data exported as CSV');
   };
 
   /** Gallery pickers (no capture) — camera uses DeviceCamera component instead. */
@@ -16141,7 +16149,10 @@ export default function Home() {
                     </div>
 
                     <div className="border-t pt-8">
-                      <h3 className="font-semibold mb-4">Export Data</h3>
+                      <h3 className="font-semibold mb-2">Export all my data</h3>
+                      <p className="text-sm text-gray-500 mb-4">
+                        Downloads a zip of your active estimates and invoices, archives, company info, and the photo, receipt, and video files.
+                      </p>
                       <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
                         <label className="flex items-center gap-2">
                           <input type="checkbox" checked={exportOptions.estimates} onChange={e => setExportOptions(prev => ({...prev, estimates: e.target.checked}))} />
@@ -16164,7 +16175,9 @@ export default function Home() {
                           {t('videos')}
                         </label>
                       </div>
-                      <Button onClick={exportData} className="w-full bg-[#10b981]">{t('exportData')}</Button>
+                      <Button onClick={exportData} disabled={exportBusy} className="w-full bg-[#10b981]">
+                        {exportBusy ? 'Preparing export…' : t('exportData')}
+                      </Button>
                     </div>
 
                     <Button onClick={saveProfile} className="w-full bg-[#10b981]">{t('saveProfile')}</Button>
