@@ -2289,9 +2289,9 @@ export default function Home() {
         )}
         {profile.chargeCCFee && ccFeePercent > 0 && (
           <div className="text-right mt-1 text-sm text-gray-600">
-            Credit card processing fee ({ccFeePercent}%): ${ccFeeAmount.toFixed(2)}
+            Stripe credit card fee ({ccFeePercent}%): ${ccFeeAmount.toFixed(2)}
             <br />
-            <span className="font-semibold">If paid by card: ${totalWithCCFee.toFixed(2)}</span>
+            <span className="font-semibold">If paid by Stripe credit card: ${totalWithCCFee.toFixed(2)}</span>
           </div>
         )}
       </>
@@ -13334,8 +13334,8 @@ export default function Home() {
 
                       {profile.chargeCCFee && (
                         <div className="flex justify-end text-sm mt-2 text-gray-600">
-                          + Credit card processing fee ({ccFeePercent}%): <span className="font-medium ml-1">${ccFeeAmount.toFixed(2)}</span>
-                          <span className="ml-3 text-[#f59e0b] font-semibold">Card total: ${totalWithCCFee.toFixed(2)}</span>
+                          + Stripe credit card fee ({ccFeePercent}%): <span className="font-medium ml-1">${ccFeeAmount.toFixed(2)}</span>
+                          <span className="ml-3 text-[#f59e0b] font-semibold">Stripe card total: ${totalWithCCFee.toFixed(2)}</span>
                         </div>
                       )}
                     </>
@@ -16239,10 +16239,10 @@ export default function Home() {
                         <div>
                           <div className="font-medium">{t('chargeCCFee')}</div>
                           <div className="text-sm text-gray-500">
-                            When <strong>on</strong>, clients pay job amount + card processing fee on Stripe and
-                            PayPal (use the rate below, typically matching card processor cost). When{' '}
-                            <strong>off</strong>, no processing fee is added — you absorb card fees. Venmo, Zelle,
-                            and mail check never include a fee.
+                            When <strong>on</strong>, Stripe credit card checkout adds this processing fee
+                            (use the rate below, typically matching the card processor cost). When{' '}
+                            <strong>off</strong>, the card charge is the invoice amount and you absorb the fee.
+                            Venmo, PayPal, Zelle, and mail check never include a fee.
                           </div>
                         </div>
                       </label>

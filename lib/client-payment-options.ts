@@ -268,8 +268,9 @@ export function buildClientPaymentOptions(input: {
 
   if (settings.paypal?.enabled && hasPayPalSetup(settings.paypal)) {
     const handle = cleanPayPalHandle(settings.paypal.handle || '');
-    const m = metaFor('paypal', chargeFees);
-    const fee = withFee('paypal', baseAmount, { chargeFees, feePercentOverride: feePct });
+    const m = metaFor('paypal', false);
+    // Processing fee is Stripe credit cards only.
+    const fee = withFee('paypal', baseAmount, { chargeFees: false });
     const note = buildPaymentTrackingNote(
       input.invoiceNumber || '',
       fee.feeAmount > 0 ? `${input.label || 'Payment'} + fee` : input.label || 'Payment',

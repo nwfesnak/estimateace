@@ -615,7 +615,7 @@ function ApprovePayInner() {
               <>
                 <div className="flex justify-between text-sm text-slate-600">
                   <span>
-                    Card processing fee ({feePercent}% + ${STRIPE_CARD_FIXED_USD.toFixed(2)})
+                    Stripe credit card fee ({feePercent}% + ${STRIPE_CARD_FIXED_USD.toFixed(2)})
                   </span>
                   <span>
                     {money(
@@ -628,7 +628,7 @@ function ApprovePayInner() {
                   </span>
                 </div>
                 <div className="flex justify-between text-sm font-semibold">
-                  <span>Pay by card</span>
+                  <span>Pay by Stripe credit card</span>
                   <span>
                     {money(
                       computeStripeCardFee(basePay, {
@@ -669,7 +669,7 @@ function ApprovePayInner() {
               )}
               {chargeFees ? (
                 <p className="text-[11px] text-amber-800 pt-1">
-                  Card and PayPal may include a processing fee. Venmo, Zelle, and mail check have no
+                  The processing fee is added only when paying by Stripe credit card. Venmo, PayPal, Zelle, and mail check have no
                   processing fee.
                 </p>
               ) : (

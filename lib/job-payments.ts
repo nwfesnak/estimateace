@@ -192,9 +192,15 @@ export async function createJobCheckoutSession(
     input.passProcessingFee !== undefined
       ? input.passProcessingFee
       : shouldPassProcessingFeeToPayee();
+  // Fee is only for Stripe credit/debit card checkout, not ACH or other methods.
   const feeBreakdown = passFee
     ? computeStripeCardFee(baseAmount, {
-        percentRate: input.feePercentRate,
+        method: 'stripe',
+        chargeFees: true,
+        percentRate:
+          input.feePercentRate != null && input.feePercentRate > 0
+            ? input.feePercentRate
+            : undefined,
         fixedFee: input.feeFixedUsd,
       })
     : null;
@@ -267,9 +273,9 @@ export async function createJobCheckoutSession(
   }
 
   /**
-   * Prefer automatic payment methods so Stripe can show:
-   * card, Apple Pay / Google Pay (wallets), Link, US bank ACH when enabled.
-   * Explicit payment_method_types alone often hides wallets / ACH incorrectly.
+   * When the card fee is included, Checkout is card-only so a bank transfer
+   * is not charged the credit-card fee. Apple Pay / Google Pay still appear
+   * as card wallets. Without the fee, Stripe can also offer bank transfer.
    */
   const sessionParams: Record<string, unknown> = {
     mode: 'payment',
@@ -280,10 +286,14 @@ export async function createJobCheckoutSession(
     payment_intent_data: {
       metadata,
     },
-    automatic_payment_methods: {
-      enabled: true,
-      allow_redirects: 'always',
-    },
+    ...(passFee && feeBreakdown && feeBreakdown.feeAmount > 0
+      ? { payment_method_types: ['card'] }
+      : {
+          automatic_payment_methods: {
+            enabled: true,
+            allow_redirects: 'always',
+          },
+        }),
   };
 
   if (input.clientEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.clientEmail)) {

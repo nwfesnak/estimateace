@@ -223,7 +223,7 @@ export async function POST(request: NextRequest) {
       '',
       `${totalDueLabel}: ${money(totalDueAmount)}`,
       amountDueNow >= 0.5 && chargeCCFee && exampleFee.feeAmount > 0
-        ? `Card processing fee: ${money(exampleFee.feeAmount)}\nPay by card: ${money(exampleFee.totalAmount)}\nVenmo, Zelle, and mail check stay ${money(totalDueAmount)} with no processing fee.`
+        ? `Stripe credit card fee: ${money(exampleFee.feeAmount)}\nPay by Stripe credit card: ${money(exampleFee.totalAmount)}\nVenmo, PayPal, Zelle, and mail check stay ${money(totalDueAmount)} with no processing fee.`
         : '',
       '',
       `Pay / approve: ${actionUrl}`,
@@ -339,7 +339,7 @@ export async function POST(request: NextRequest) {
         </p>
         ${
           amountDueNow >= 0.5 && chargeCCFee && exampleFee.feeAmount > 0
-            ? `<p style="margin:0 0 16px;font-size:12px;color:#64748b;">Card / PayPal may include a processing fee at checkout. Venmo, Zelle, and mail check have no processing fee.</p>`
+            ? `<p style="margin:0 0 16px;font-size:12px;color:#64748b;">The processing fee is added only on Stripe credit card checkout. Venmo, PayPal, Zelle, and mail check have no processing fee.</p>`
             : ''
         }
         <!--[if mso]>
@@ -455,8 +455,8 @@ export async function POST(request: NextRequest) {
                 <tr><td style="padding:8px 0 0;font-size:16px;font-weight:800;color:#065f46;">${escapeHtml(totalDueLabel)}</td><td style="padding:8px 0 0;font-size:16px;font-weight:800;color:#065f46;text-align:right;">${money(totalDueAmount)}</td></tr>
                 ${
                   amountDueNow >= 0.5 && chargeCCFee && exampleFee.feeAmount > 0
-                    ? `<tr><td style="padding:4px 0;font-size:13px;color:#64748b;">Card processing fee</td><td style="padding:4px 0;font-size:13px;text-align:right;">${money(exampleFee.feeAmount)}</td></tr>
-                <tr><td style="padding:4px 0;font-size:15px;font-weight:700;">Pay by card</td><td style="padding:4px 0;font-size:15px;font-weight:700;text-align:right;">${money(exampleFee.totalAmount)}</td></tr>`
+                    ? `<tr><td style="padding:4px 0;font-size:13px;color:#64748b;">Stripe credit card fee</td><td style="padding:4px 0;font-size:13px;text-align:right;">${money(exampleFee.feeAmount)}</td></tr>
+                <tr><td style="padding:4px 0;font-size:15px;font-weight:700;">Pay by Stripe credit card</td><td style="padding:4px 0;font-size:15px;font-weight:700;text-align:right;">${money(exampleFee.totalAmount)}</td></tr>`
                     : ''
                 }
               </table>
