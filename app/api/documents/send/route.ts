@@ -223,7 +223,7 @@ export async function POST(request: NextRequest) {
       '',
       `${totalDueLabel}: ${money(totalDueAmount)}`,
       amountDueNow >= 0.5 && chargeCCFee && exampleFee.feeAmount > 0
-        ? `(Card payments may include a processing fee. Example card total: ${money(exampleFee.totalAmount)}. Zelle and mail check have no processing fee.)`
+        ? `Card processing fee: ${money(exampleFee.feeAmount)}\nPay by card: ${money(exampleFee.totalAmount)}\nVenmo, Zelle, and mail check stay ${money(totalDueAmount)} with no processing fee.`
         : '',
       '',
       `Pay / approve: ${actionUrl}`,
@@ -453,6 +453,12 @@ export async function POST(request: NextRequest) {
                 <tr><td style="padding:6px 0;font-size:15px;font-weight:700;">Grand total</td><td style="padding:6px 0;font-size:15px;font-weight:700;text-align:right;">${money(grandTotal)}</td></tr>
                 ${amountPaid > 0 ? `<tr><td style="padding:4px 0;font-size:13px;color:#64748b;">Already paid</td><td style="padding:4px 0;font-size:13px;text-align:right;">${money(amountPaid)}</td></tr>` : ''}
                 <tr><td style="padding:8px 0 0;font-size:16px;font-weight:800;color:#065f46;">${escapeHtml(totalDueLabel)}</td><td style="padding:8px 0 0;font-size:16px;font-weight:800;color:#065f46;text-align:right;">${money(totalDueAmount)}</td></tr>
+                ${
+                  amountDueNow >= 0.5 && chargeCCFee && exampleFee.feeAmount > 0
+                    ? `<tr><td style="padding:4px 0;font-size:13px;color:#64748b;">Card processing fee</td><td style="padding:4px 0;font-size:13px;text-align:right;">${money(exampleFee.feeAmount)}</td></tr>
+                <tr><td style="padding:4px 0;font-size:15px;font-weight:700;">Pay by card</td><td style="padding:4px 0;font-size:15px;font-weight:700;text-align:right;">${money(exampleFee.totalAmount)}</td></tr>`
+                    : ''
+                }
               </table>
             </td>
           </tr>

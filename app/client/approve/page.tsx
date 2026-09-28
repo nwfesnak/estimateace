@@ -611,6 +611,36 @@ function ApprovePayInner() {
               <span>{payLabel}</span>
               <span className="font-semibold">{money(basePay)}</span>
             </div>
+            {chargeFees && feePercent > 0 && basePay >= 0.5 && (
+              <>
+                <div className="flex justify-between text-sm text-slate-600">
+                  <span>
+                    Card processing fee ({feePercent}% + ${STRIPE_CARD_FIXED_USD.toFixed(2)})
+                  </span>
+                  <span>
+                    {money(
+                      computeStripeCardFee(basePay, {
+                        percentRate: feePercent,
+                        chargeFees: true,
+                        method: 'stripe',
+                      }).feeAmount
+                    )}
+                  </span>
+                </div>
+                <div className="flex justify-between text-sm font-semibold">
+                  <span>Pay by card</span>
+                  <span>
+                    {money(
+                      computeStripeCardFee(basePay, {
+                        percentRate: feePercent,
+                        chargeFees: true,
+                        method: 'stripe',
+                      }).totalAmount
+                    )}
+                  </span>
+                </div>
+              </>
+            )}
             {payKind === 'deposit' && depositDue >= 0.5 && (!hasOptionalLines || !isEstimate || approved) && (
               <div className="flex justify-between text-sm text-emerald-800 pt-2 border-t mt-2">
                 <span>Deposit ({doc?.depositPercent || 0}%)</span>

@@ -1463,13 +1463,17 @@ export default function Home() {
         ? full.receptionistBilling
         : null,
     paymentSettings: mergePaymentSettings(full.paymentSettings),
+    chargeCCFee: full.chargeCCFee === true,
+    ccFeePercentage: Number.isFinite(Number(full.ccFeePercentage))
+      ? Math.max(0, Number(full.ccFeePercentage))
+      : 3,
     // SMS 2FA forced off until phone line is active
     twoFactorEnabled: false,
     twoFactorPhone: String(full.twoFactorPhone || '').trim(),
     aiPriceMemory: normalizeAiPriceMemory(full.aiPriceMemory),
     tradeId: String(full.tradeId || '').trim(),
     quickLines: Array.isArray(full.quickLines) ? full.quickLines : [],
-    // deliberately omit: teammates, ccFee*, crewSubscriptionActive, etc.
+    // deliberately omit: teammates, crewSubscriptionActive, etc.
   });
 
   /** Prefer non-empty values so a blank estimate snapshot never wipes company info. */
@@ -16224,7 +16228,12 @@ export default function Home() {
                         <input
                           type="checkbox"
                           checked={!!profile.chargeCCFee}
-                          onChange={(e) => setProfile(prev => ({ ...prev, chargeCCFee: e.target.checked }))}
+                          onChange={(e) => {
+                            const nextProfile = { ...profileRef.current, chargeCCFee: e.target.checked };
+                            profileRef.current = nextProfile;
+                            setProfile(nextProfile);
+                            void saveProfileSettings(nextProfile, { quiet: true });
+                          }}
                           className="mt-1 w-5 h-5 accent-[#10b981]"
                         />
                         <div>
@@ -16247,10 +16256,17 @@ export default function Home() {
                             min="0"
                             max="10"
                             value={profile.ccFeePercentage ?? 3}
-                            onChange={(e) => setProfile(prev => ({ 
-                              ...prev, 
-                              ccFeePercentage: parseFloat(e.target.value) || 0 
-                            }))}
+                            onChange={(e) => {
+                              const nextProfile = {
+                                ...profileRef.current,
+                                ccFeePercentage: parseFloat(e.target.value) || 0,
+                              };
+                              profileRef.current = nextProfile;
+                              setProfile(nextProfile);
+                            }}
+                            onBlur={() => {
+                              void saveProfileSettings(profileRef.current, { quiet: true });
+                            }}
                             className="w-20 text-right"
                           />
                           <span className="text-sm">%</span>
