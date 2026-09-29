@@ -8464,6 +8464,10 @@ export default function Home() {
         (existing as any)?.welcomeOnboardingChannels ||
         (mergedProfile as any).welcomeOnboardingChannels ||
         undefined,
+      ownerSignupAlertSentAt:
+        (existing as any)?.ownerSignupAlertSentAt ||
+        (mergedProfile as any).ownerSignupAlertSentAt ||
+        undefined,
       emailLeadSummaries:
         (mergedProfile as any).emailLeadSummaries ??
         (existing as any)?.emailLeadSummaries ??

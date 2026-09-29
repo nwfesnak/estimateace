@@ -103,7 +103,30 @@ export async function GET(request: NextRequest) {
         }
 
         // Welcome email/SMS is ONLY sent from /api/billing/start-trial (landing-page signup).
-        // Do not send on every login / billing status poll.
+        // Owner alert: start-trial covers instant signup. Email-confirm accounts have no
+        // session yet, so the first billing poll (new subscription row, recent user) alerts once.
+        if (!data && (user.app_metadata as { is_crew?: boolean } | null)?.is_crew !== true) {
+          const createdMs = user.created_at ? new Date(user.created_at).getTime() : NaN;
+          const recent =
+            Number.isFinite(createdMs) && Date.now() - createdMs < 7 * 24 * 60 * 60 * 1000;
+          if (recent) {
+            try {
+              const { maybeSendOwnerSignupAlert } = await import('@/lib/owner-signup-alert');
+              const meta = (user.user_metadata || {}) as Record<string, unknown>;
+              await maybeSendOwnerSignupAlert({
+                admin,
+                userId: user.id,
+                email: user.email || '',
+                phone: String(meta.phone || ''),
+                name: String(meta.full_name || meta.name || ''),
+                company: String(meta.company || ''),
+                plan: String(meta.preferred_plan || ''),
+              });
+            } catch (alertErr) {
+              console.warn('billing/status owner signup alert:', alertErr);
+            }
+          }
+        }
       }
     } else {
       snapshot = ensureTrialEndsAt(snapshot);

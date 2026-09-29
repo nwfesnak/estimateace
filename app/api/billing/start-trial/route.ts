@@ -135,6 +135,23 @@ export async function POST(request: NextRequest) {
       console.warn('start-trial welcome onboarding error:', welcomeErr);
     }
 
+    // Email + text the platform owner once. Separate from the contractor welcome.
+    let ownerSignupAlert: unknown = null;
+    try {
+      const { maybeSendOwnerSignupAlert } = await import('@/lib/owner-signup-alert');
+      ownerSignupAlert = await maybeSendOwnerSignupAlert({
+        admin,
+        userId: user.id,
+        email: user.email || '',
+        phone,
+        name,
+        company,
+        plan,
+      });
+    } catch (alertErr) {
+      console.warn('start-trial owner signup alert error:', alertErr);
+    }
+
     return NextResponse.json({
       ok: true,
       plan,
@@ -143,6 +160,7 @@ export async function POST(request: NextRequest) {
       trialEndsAt: snapshot.trialEndsAt,
       status: snapshot.status === 'active' ? 'active' : 'trialing',
       welcomeOnboarding,
+      ownerSignupAlert,
     });
   } catch (e: any) {
     console.error('start-trial:', e);
