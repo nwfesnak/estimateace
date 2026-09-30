@@ -55,7 +55,7 @@ import {
   type EstimateApprovedBy,
 } from '@/lib/estimate-approval';
 import { invoiceSentLabel, readInvoiceSentAt } from '@/lib/invoice-sent';
-import { invoiceReminderHint } from '@/lib/invoice-reminders';
+import { firstInvoiceReminderDays, invoiceReminderHint } from '@/lib/invoice-reminders';
 import {
   isOptionalLine,
   lineCountsTowardTotal,
@@ -1056,6 +1056,8 @@ export default function Home() {
     showLaborBreakdownOnEstimate: false,
     showCostBreakdownOnEstimate: false,
     appointmentReminderEnabled: false,
+    /** 0 = invoice email only when Send is clicked. 2, 4, or 6 = follow up that often until paid. */
+    invoiceReminderDays: 2 as 0 | 2 | 4 | 6,
     /** Contractor opted in to receive EstimateAce SMS (reminders, notices) */
     smsOptIn: false,
     smsOptInAt: '' as string,
@@ -1449,6 +1451,7 @@ export default function Home() {
     escrowMinimumAmount: Math.max(0, Number(full.escrowMinimumAmount) || 0),
     autoSaveEnabled: full.autoSaveEnabled !== false,
     appointmentReminderEnabled: !!full.appointmentReminderEnabled,
+    invoiceReminderDays: firstInvoiceReminderDays(full.invoiceReminderDays),
     smsOptIn: !!full.smsOptIn,
     smsOptInAt: String(full.smsOptInAt || ''),
     showDiscountOnEstimate: full.showDiscountOnEstimate === true,
@@ -4708,6 +4711,12 @@ export default function Home() {
       appointmentReminderEnabled: 'appointmentReminderEnabled' in loadedProfile
         ? !!loadedProfile.appointmentReminderEnabled
         : (cached.appointmentReminderEnabled ?? profile.appointmentReminderEnabled ?? false),
+      invoiceReminderDays: firstInvoiceReminderDays(
+        serverProfile && (serverProfile as any).invoiceReminderDays,
+        cached.invoiceReminderDays,
+        loadedProfile.invoiceReminderDays,
+        profile.invoiceReminderDays
+      ),
       showDepositOnApproval: 'showDepositOnApproval' in loadedProfile
         ? loadedProfile.showDepositOnApproval !== false
         : (cached.showDepositOnApproval ?? profile.showDepositOnApproval ?? true),
@@ -4960,6 +4969,11 @@ export default function Home() {
             : ('appointmentReminderEnabled' in l
               ? !!l.appointmentReminderEnabled
               : (cached.appointmentReminderEnabled ?? false)),
+          invoiceReminderDays: firstInvoiceReminderDays(
+            (s as any).invoiceReminderDays,
+            cached.invoiceReminderDays,
+            (l as any).invoiceReminderDays
+          ),
           showDepositOnApproval: 'showDepositOnApproval' in (s as any)
             ? (s as any).showDepositOnApproval !== false
             : ('showDepositOnApproval' in l
@@ -8551,6 +8565,7 @@ export default function Home() {
       escrowMinimumAmount: Math.max(0, Number(nextProfile.escrowMinimumAmount) || 0),
       autoSaveEnabled: nextProfile.autoSaveEnabled,
       appointmentReminderEnabled: nextProfile.appointmentReminderEnabled,
+      invoiceReminderDays: firstInvoiceReminderDays(nextProfile.invoiceReminderDays),
       smsOptIn: !!nextProfile.smsOptIn,
       smsOptInAt: String(nextProfile.smsOptInAt || ''),
       showDiscountOnEstimate: nextProfile.showDiscountOnEstimate === true,
@@ -12295,12 +12310,12 @@ export default function Home() {
                                     <span
                                       className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-100 text-amber-800 shrink-0"
                                       title={
-                                        invoiceReminderHint(inv) ||
-                                        'Reminder email and text every 2 days until this invoice is paid. Card payments stop them automatically.'
+                                        invoiceReminderHint(inv, Date.now(), profile.invoiceReminderDays) ||
+                                        'Reminder email and text until this invoice is paid. Card payments stop them automatically.'
                                       }
                                       aria-label={
-                                        invoiceReminderHint(inv) ||
-                                        'Reminder email and text every 2 days until this invoice is paid. Card payments stop them automatically.'
+                                        invoiceReminderHint(inv, Date.now(), profile.invoiceReminderDays) ||
+                                        'Reminder email and text until this invoice is paid. Card payments stop them automatically.'
                                       }
                                     >
                                       <svg viewBox="0 0 20 20" className="w-3.5 h-3.5" fill="none" aria-hidden>
@@ -16012,6 +16027,32 @@ export default function Home() {
                           />
                           <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]"></div>
                         </label>
+                      </div>
+
+                      <div className="border-t border-gray-200 pt-4 space-y-2">
+                        <p className="font-semibold">Automatic invoice reminders</p>
+                        <p className="text-sm text-gray-500">
+                          The invoice email and text go out when you click Send. This sets the follow-ups until the invoice is marked paid.
+                        </p>
+                        <select
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
+                          value={String(firstInvoiceReminderDays(profile.invoiceReminderDays))}
+                          onChange={async (e) => {
+                            const invoiceReminderDays = firstInvoiceReminderDays(e.target.value);
+                            const nextProfile = { ...profileRef.current, invoiceReminderDays };
+                            profileRef.current = nextProfile;
+                            setProfile(nextProfile);
+                            await saveProfileSettings(nextProfile, { quiet: true });
+                          }}
+                        >
+                          <option value="0">Only when I click Send</option>
+                          <option value="2">Every 2 days after it is sent, until marked paid</option>
+                          <option value="4">Every 4 days until marked paid</option>
+                          <option value="6">Every 6 days until marked paid</option>
+                        </select>
+                        <p className="text-xs text-gray-500">
+                          Card payments stop the follow-ups when the balance is covered. Cash, Venmo, Zelle, and a mailed check continue until you mark the invoice paid.
+                        </p>
                       </div>
 
                       <div className="flex items-start justify-between gap-3 border-t border-gray-200 pt-4">

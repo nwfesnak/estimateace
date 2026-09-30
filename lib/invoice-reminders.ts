@@ -1,11 +1,35 @@
 /**
- * Unpaid sent invoices: first reminder 2 days after send, then every 2 days until paid.
+ * Unpaid sent invoices: follow-up email and text on the contractor's cadence
+ * until paid. 0 = only the manual Send. 2, 4, or 6 = repeat that many days.
  */
 
 import { readInvoiceSentAt } from '@/lib/invoice-sent';
 import { computeDocumentGrandTotal } from '@/lib/document-totals';
 
 export const INVOICE_REMINDER_INTERVAL_MS = 2 * 24 * 60 * 60 * 1000;
+
+export type InvoiceReminderDays = 0 | 2 | 4 | 6;
+
+/** Missing or unknown values stay on the original every-2-days cadence. */
+export function normalizeInvoiceReminderDays(value: unknown): InvoiceReminderDays {
+  const n = typeof value === 'string' ? Number(value.trim()) : Number(value);
+  if (n === 0 || n === 2 || n === 4 || n === 6) return n;
+  return 2;
+}
+
+export function firstInvoiceReminderDays(...values: unknown[]): InvoiceReminderDays {
+  for (const value of values) {
+    if (value === undefined || value === null || value === '') continue;
+    const n = typeof value === 'string' ? Number(value.trim()) : Number(value);
+    if (n === 0 || n === 2 || n === 4 || n === 6) return n;
+  }
+  return 2;
+}
+
+export function invoiceReminderIntervalMs(days: InvoiceReminderDays): number {
+  if (days === 0) return 0;
+  return days * 24 * 60 * 60 * 1000;
+}
 
 export function readInvoiceLastReminderAt(row: any): string | null {
   if (!row) return null;
@@ -68,32 +92,51 @@ export function isInvoiceSettledForReminders(row: any): boolean {
 }
 
 /** True when a reminder email and text should go out now. */
-export function invoiceReminderDue(row: any, now = Date.now()): boolean {
+export function invoiceReminderDue(
+  row: any,
+  now = Date.now(),
+  intervalDays?: unknown
+): boolean {
+  const days = normalizeInvoiceReminderDays(
+    intervalDays !== undefined ? intervalDays : profileOf(row).invoiceReminderDays
+  );
+  if (days === 0) return false;
   if (!isInvoiceDocument(row) || isInvoiceSettledForReminders(row)) return false;
   const sentMs = Date.parse(readInvoiceSentAt(row) || '');
   if (!Number.isFinite(sentMs)) return false;
   const lastRaw = readInvoiceLastReminderAt(row);
   const anchor = lastRaw ? Date.parse(lastRaw) : sentMs;
   if (!Number.isFinite(anchor)) return false;
-  return now - anchor >= INVOICE_REMINDER_INTERVAL_MS;
+  return now - anchor >= invoiceReminderIntervalMs(days);
 }
 
-export function invoiceReminderHint(row: any, now = Date.now()): string {
+export function invoiceReminderHint(
+  row: any,
+  now = Date.now(),
+  intervalDays?: unknown
+): string {
   const sent = readInvoiceSentAt(row);
   if (!sent || isInvoiceSettledForReminders(row)) return '';
-  const last = readInvoiceLastReminderAt(row);
+  const days = normalizeInvoiceReminderDays(
+    intervalDays !== undefined ? intervalDays : profileOf(row).invoiceReminderDays
+  );
   const stopNote =
     'Card payments stop these automatically. For cash, Venmo, Zelle, or check, mark the invoice paid when the money arrives.';
+  if (days === 0) {
+    return `Sent ${new Date(sent).toLocaleString()}. Automatic follow-ups are off, so another email goes out only when you click Send. ${stopNote}`;
+  }
+  const every = `every ${days} days`;
+  const last = readInvoiceLastReminderAt(row);
   if (last && !Number.isNaN(Date.parse(last))) {
-    return `Reminder emailed and texted ${new Date(last).toLocaleString()}. Another goes out every 2 days. ${stopNote}`;
+    return `Reminder emailed and texted ${new Date(last).toLocaleString()}. Another goes out ${every}. ${stopNote}`;
   }
   const sentMs = Date.parse(sent);
   if (!Number.isFinite(sentMs)) return '';
-  const firstAt = sentMs + INVOICE_REMINDER_INTERVAL_MS;
+  const firstAt = sentMs + invoiceReminderIntervalMs(days);
   if (now >= firstAt) {
-    return `A reminder email and text is due, then every 2 days. ${stopNote}`;
+    return `A reminder email and text is due, then ${every}. ${stopNote}`;
   }
-  return `Reminder email and text ${new Date(firstAt).toLocaleString()}, then every 2 days. ${stopNote}`;
+  return `Reminder email and text ${new Date(firstAt).toLocaleString()}, then ${every}. ${stopNote}`;
 }
 
 export function profileOf(row: any): Record<string, any> {

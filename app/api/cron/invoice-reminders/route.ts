@@ -8,10 +8,12 @@ import {
   invoiceReminderDue,
   isInvoiceDocument,
   isInvoiceSettledForReminders,
+  normalizeInvoiceReminderDays,
   profileOf,
   readInvoiceReminderCount,
   recipientEmails,
   recipientPhones,
+  type InvoiceReminderDays,
 } from '@/lib/invoice-reminders';
 
 export const maxDuration = 60;
@@ -29,8 +31,9 @@ function escapeHtml(s: string) {
 }
 
 /**
- * Daily job: unpaid sent invoices get a client email and text
- * 2 days after send, then every 2 days until marked paid.
+ * Daily job: unpaid sent invoices get a client email and text on the
+ * contractor's cadence (every 2, 4, or 6 days) until marked paid.
+ * Cadence 0 sends nothing here — only the Send button emails the client.
  */
 export async function GET(request: NextRequest) {
   const cronSecret = (process.env.CRON_SECRET || '').trim();
@@ -63,6 +66,15 @@ export async function GET(request: NextRequest) {
 
   const appUrl = getAppUrl(request.url);
   const nowIso = new Date().toISOString();
+  const intervalByUser = new Map<string, InvoiceReminderDays>();
+  for (const row of data || []) {
+    const id = String(row.id || '');
+    const docType = String(row.documentType ?? row.documenttype ?? '').toLowerCase();
+    if (!id.startsWith('SETTINGS-') && docType !== 'settings') continue;
+    const uid = String(row.user_id || id.replace(/^SETTINGS-/, '')).trim();
+    if (!uid) continue;
+    intervalByUser.set(uid, normalizeInvoiceReminderDays(profileOf(row).invoiceReminderDays));
+  }
   const summary = {
     checked: 0,
     due: 0,
@@ -74,7 +86,10 @@ export async function GET(request: NextRequest) {
   for (const row of data || []) {
     if (!isInvoiceDocument(row) || isInvoiceSettledForReminders(row)) continue;
     summary.checked += 1;
-    if (!invoiceReminderDue(row)) {
+    const reminderDays =
+      intervalByUser.get(String(row.user_id || '').trim()) ??
+      normalizeInvoiceReminderDays(profileOf(row).invoiceReminderDays);
+    if (!invoiceReminderDue(row, Date.now(), reminderDays)) {
       summary.skipped += 1;
       continue;
     }
@@ -85,7 +100,11 @@ export async function GET(request: NextRequest) {
       .eq('id', row.id)
       .maybeSingle();
     const current = fresh || row;
-    if (freshError || !invoiceReminderDue(current) || isInvoiceSettledForReminders(current)) {
+    if (
+      freshError ||
+      !invoiceReminderDue(current, Date.now(), reminderDays) ||
+      isInvoiceSettledForReminders(current)
+    ) {
       summary.skipped += 1;
       continue;
     }
@@ -142,7 +161,7 @@ export async function GET(request: NextRequest) {
       `Balance due: ${money(balance)}.`,
       `View and pay: ${actionUrl}`,
       companyPhone ? `Call ${companyPhone}.` : '',
-      'Reminders repeat every 2 days until the invoice is paid. Card payments stop them automatically.',
+      `Reminders repeat every ${reminderDays} days until the invoice is paid. Card payments stop them automatically.`,
     ]
       .filter(Boolean)
       .join('\n');
@@ -151,7 +170,7 @@ export async function GET(request: NextRequest) {
       <p style="margin:0 0 8px;">${escapeHtml(company)} sent a reminder for invoice <strong>${escapeHtml(invoiceNumber)}</strong>${jobName ? ` (${escapeHtml(jobName)})` : ''}.</p>
       <p style="margin:0 0 12px;font-size:18px;"><strong>Balance due: ${money(balance)}</strong></p>
       <p style="margin:0 0 16px;"><a href="${escapeHtml(actionUrl)}" style="display:inline-block;background:#0f766e;color:#fff;text-decoration:none;padding:10px 16px;border-radius:8px;font-weight:700;">View and pay invoice</a></p>
-      <p style="margin:0;font-size:13px;color:#475569;">This reminder repeats every 2 days until the invoice is paid. A card payment stops them automatically.${companyPhone ? ` Call ${escapeHtml(companyPhone)}.` : ''}</p>
+      <p style="margin:0;font-size:13px;color:#475569;">This reminder repeats every ${reminderDays} days until the invoice is paid. A card payment stops them automatically.${companyPhone ? ` Call ${escapeHtml(companyPhone)}.` : ''}</p>
     </div>`;
 
     const smsBody = `${company}: Reminder — invoice ${invoiceNumber} for ${jobName} is unpaid. Balance ${money(balance)}. Pay: ${actionUrl}${companyPhone ? ` Call ${companyPhone}.` : ''} Reply STOP to opt out.`;
