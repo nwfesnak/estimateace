@@ -15243,6 +15243,31 @@ export default function Home() {
                         </span>
                       )}
                     </div>
+                    <div className="border rounded-xl p-4 space-y-2 bg-gray-50">
+                      <p className="font-semibold">Automatic invoice reminders</p>
+                      <p className="text-sm text-gray-500">
+                        The invoice email and text go out when you click Send. This sets the follow-ups until the invoice is marked paid.
+                      </p>
+                      <select
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
+                        value={String(firstInvoiceReminderDays(profile.invoiceReminderDays))}
+                        onChange={async (e) => {
+                          const invoiceReminderDays = firstInvoiceReminderDays(e.target.value);
+                          const nextProfile = { ...profileRef.current, invoiceReminderDays };
+                          profileRef.current = nextProfile;
+                          setProfile(nextProfile);
+                          await saveProfileSettings(nextProfile, { quiet: true });
+                        }}
+                      >
+                        <option value="0">Only when I click Send</option>
+                        <option value="2">Every 2 days after it is sent, until marked paid</option>
+                        <option value="4">Every 4 days until marked paid</option>
+                        <option value="6">Every 6 days until marked paid</option>
+                      </select>
+                      <p className="text-xs text-gray-500">
+                        Card payments stop the follow-ups when the balance is covered. Cash, Venmo, Zelle, and a mailed check continue until you mark the invoice paid.
+                      </p>
+                    </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div className="md:col-span-2">
                         <label className="block text-sm font-semibold mb-2">
@@ -16027,32 +16052,6 @@ export default function Home() {
                           />
                           <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]"></div>
                         </label>
-                      </div>
-
-                      <div className="border-t border-gray-200 pt-4 space-y-2">
-                        <p className="font-semibold">Automatic invoice reminders</p>
-                        <p className="text-sm text-gray-500">
-                          The invoice email and text go out when you click Send. This sets the follow-ups until the invoice is marked paid.
-                        </p>
-                        <select
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
-                          value={String(firstInvoiceReminderDays(profile.invoiceReminderDays))}
-                          onChange={async (e) => {
-                            const invoiceReminderDays = firstInvoiceReminderDays(e.target.value);
-                            const nextProfile = { ...profileRef.current, invoiceReminderDays };
-                            profileRef.current = nextProfile;
-                            setProfile(nextProfile);
-                            await saveProfileSettings(nextProfile, { quiet: true });
-                          }}
-                        >
-                          <option value="0">Only when I click Send</option>
-                          <option value="2">Every 2 days after it is sent, until marked paid</option>
-                          <option value="4">Every 4 days until marked paid</option>
-                          <option value="6">Every 6 days until marked paid</option>
-                        </select>
-                        <p className="text-xs text-gray-500">
-                          Card payments stop the follow-ups when the balance is covered. Cash, Venmo, Zelle, and a mailed check continue until you mark the invoice paid.
-                        </p>
                       </div>
 
                       <div className="flex items-start justify-between gap-3 border-t border-gray-200 pt-4">
