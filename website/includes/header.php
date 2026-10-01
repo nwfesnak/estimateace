@@ -13,6 +13,7 @@ $app_url = 'https://app.estimateace.com';
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/css/style.css" />
+  <?php include __DIR__ . '/meta-pixel.html'; ?>
 </head>
 <body>
 <div class="announce">Now live — Run your business at <a href="<?= $app_url ?>">app.estimateace.com</a></div>

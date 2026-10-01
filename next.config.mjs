@@ -31,11 +31,11 @@ const nextConfig = {
     // marketing APIs set CORS per-route for estimateace.com only (never *).
     const cspHeader = `
       default-src 'self';
-      script-src 'self' 'unsafe-inline' https://*.supabase.co https://js.stripe.com;
+      script-src 'self' 'unsafe-inline' https://*.supabase.co https://js.stripe.com https://connect.facebook.net;
       style-src 'self' 'unsafe-inline';
-      img-src 'self' blob: data: https://*.supabase.co https://*.supabase.in https://*.stripe.com;
+      img-src 'self' blob: data: https://*.supabase.co https://*.supabase.in https://*.stripe.com https://www.facebook.com;
       font-src 'self';
-      connect-src 'self' https://*.supabase.co https://*.supabase.in https://libretranslate.com https://api.x.ai https://api.stripe.com https://*.stripe.com wss://*.supabase.co;
+      connect-src 'self' https://*.supabase.co https://*.supabase.in https://libretranslate.com https://api.x.ai https://api.stripe.com https://*.stripe.com wss://*.supabase.co https://www.facebook.com https://connect.facebook.net;
       media-src 'self' blob: https://*.supabase.co https://*.supabase.in;
       object-src 'none';
       frame-src https://js.stripe.com https://hooks.stripe.com https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com https://www.loom.com;
