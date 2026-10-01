@@ -113,7 +113,8 @@ export const openVenmoPaymentPage = (
   }
 
   if (options?.newTab !== false && typeof window !== 'undefined') {
-    window.open(webUrl, '_blank', 'noopener,noreferrer');
+    const popup = window.open(webUrl, '_blank', 'noopener,noreferrer');
+    if (!popup) window.location.href = webUrl;
     return true;
   }
 
@@ -194,7 +195,8 @@ export const openPayPalPaymentPage = (
   if (!url || typeof window === 'undefined') return false;
 
   if (options?.newTab !== false) {
-    window.open(url, '_blank', 'noopener,noreferrer');
+    const popup = window.open(url, '_blank', 'noopener,noreferrer');
+    if (!popup) window.location.href = url;
     return true;
   }
   window.location.href = url;

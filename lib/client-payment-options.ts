@@ -107,6 +107,14 @@ const META: Record<
       'Opens Stripe Checkout. Card is always available. Apple Pay / Google Pay appear when your device supports them. US bank eCheck/ACH appears when enabled on the contractor’s Stripe account.',
     clickToPay: true,
   },
+  ach: {
+    icon: '🏦',
+    label: 'Bank account',
+    description: 'US bank transfer — no card processing fee',
+    howItWorks:
+      'Opens Stripe Checkout for a bank transfer at the invoice amount. No credit card fee.',
+    clickToPay: true,
+  },
   venmo: {
     icon: '📱',
     label: 'Venmo',
@@ -232,14 +240,32 @@ export function buildClientPaymentOptions(input: {
     const fee = withFee('stripe', baseAmount, { chargeFees, feePercentOverride: feePct });
     options.push({
       method: 'stripe',
-      label: m.label,
+      label: chargeFees ? 'Credit or debit card' : m.label,
       icon: m.icon,
-      description: m.description,
-      howItWorks: m.howItWorks,
+      description: chargeFees
+        ? 'Stripe Checkout. A card processing fee is added.'
+        : m.description,
+      howItWorks: chargeFees
+        ? 'Opens Stripe Checkout for a credit or debit card. Apple Pay and Google Pay appear when this phone supports them. A processing fee is added so the contractor receives the full job amount.'
+        : m.howItWorks,
       ready: true,
       clickToPay: true,
       ...fee,
     });
+    if (chargeFees && baseAmount >= 0.5) {
+      const bank = META.ach;
+      const bankFee = withFee('ach', baseAmount, { chargeFees: false });
+      options.push({
+        method: 'ach',
+        label: bank.label,
+        icon: bank.icon,
+        description: bank.description,
+        howItWorks: bank.howItWorks,
+        ready: true,
+        clickToPay: true,
+        ...bankFee,
+      });
+    }
   }
 
   if (settings.venmo?.enabled && hasVenmoSetup(settings.venmo)) {

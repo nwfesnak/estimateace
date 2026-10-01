@@ -160,6 +160,12 @@ export type JobCheckoutInput = {
   feePercentRate?: number;
   /** Fixed fee dollars (default $0.30) */
   feeFixedUsd?: number;
+  /**
+   * card — credit/debit only (card fee may be added).
+   * bank — US bank transfer, invoice amount only.
+   * auto — Stripe chooses (card, wallets, bank) with no extra fee line.
+   */
+  checkoutMethod?: 'card' | 'bank' | 'auto';
 };
 
 /**
@@ -273,27 +279,38 @@ export async function createJobCheckoutSession(
   }
 
   /**
-   * When the card fee is included, Checkout is card-only so a bank transfer
-   * is not charged the credit-card fee. Apple Pay / Google Pay still appear
-   * as card wallets. Without the fee, Stripe can also offer bank transfer.
+   * Card fee stays on credit/debit checkout only.
+   * Bank transfer is a separate session at the invoice amount.
+   * With the fee off, Stripe can offer card, wallets, and bank together.
    */
+  const checkoutMethod: 'card' | 'bank' | 'auto' =
+    input.checkoutMethod ||
+    (passFee && feeBreakdown && feeBreakdown.feeAmount > 0 ? 'card' : 'auto');
+  const bankOnly = checkoutMethod === 'bank';
+  const cardOnly = checkoutMethod === 'card';
   const sessionParams: Record<string, unknown> = {
     mode: 'payment',
-    line_items,
+    line_items: bankOnly ? line_items.filter((_, i) => i === 0) : line_items,
     success_url: input.successUrl || defaultSuccess,
     cancel_url: input.cancelUrl || defaultCancel,
-    metadata,
+    metadata: bankOnly
+      ? { ...metadata, fee_amount: '0', total_charged: baseAmount.toFixed(2), payment_kind: kind }
+      : metadata,
     payment_intent_data: {
-      metadata,
+      metadata: bankOnly
+        ? { ...metadata, fee_amount: '0', total_charged: baseAmount.toFixed(2) }
+        : metadata,
     },
-    ...(passFee && feeBreakdown && feeBreakdown.feeAmount > 0
+    ...(cardOnly
       ? { payment_method_types: ['card'] }
-      : {
-          automatic_payment_methods: {
-            enabled: true,
-            allow_redirects: 'always',
-          },
-        }),
+      : bankOnly
+        ? { payment_method_types: ['us_bank_account'] }
+        : {
+            automatic_payment_methods: {
+              enabled: true,
+              allow_redirects: 'always',
+            },
+          }),
   };
 
   if (input.clientEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.clientEmail)) {
@@ -308,6 +325,23 @@ export async function createJobCheckoutSession(
       );
     } catch (e: any) {
       const msg = String(e?.message || '');
+      // A card-only list can be rejected. Retry normal Checkout so the client can still pay.
+      if (cardOnly && /payment_method|payment method/i.test(msg)) {
+        const autoCard = {
+          ...params,
+          payment_method_types: undefined,
+          automatic_payment_methods: {
+            enabled: true,
+            allow_redirects: 'always',
+          },
+        };
+        return await stripe.checkout.sessions.create(
+          autoCard as Stripe.Checkout.SessionCreateParams,
+          opts
+        );
+      }
+      // Bank-only failure should stay bank-only. The caller shows a clear message.
+      if (bankOnly) throw e;
       // Fallback chain: card + ACH → card only
       if (/automatic_payment_methods|payment_method/i.test(msg)) {
         try {
@@ -389,6 +423,13 @@ export async function createJobCheckoutSession(
     };
   } catch (e: any) {
     console.error('createJobCheckoutSession:', e);
+    if (bankOnly) {
+      return {
+        ok: false,
+        error:
+          'Bank transfer is not available on this payment. Use a credit or debit card, Venmo, PayPal, Zelle, or mail a check.',
+      };
+    }
     return {
       ok: false,
       error:

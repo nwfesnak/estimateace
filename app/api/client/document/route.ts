@@ -122,12 +122,13 @@ export async function GET(request: NextRequest) {
         .maybeSingle();
       const sp = (settingsRow?.profile || {}) as any;
       if (sp && typeof sp === 'object') {
+        const { mergeFilledPaymentSettings } = await import('@/lib/client-payment-options');
         profile = {
           ...profile,
-          paymentSettings: {
-            ...(profile.paymentSettings || {}),
-            ...(sp.paymentSettings || {}),
-          },
+          paymentSettings: mergeFilledPaymentSettings(
+            profile.paymentSettings,
+            sp.paymentSettings
+          ),
           chargeCCFee: sp.chargeCCFee !== undefined ? sp.chargeCCFee : profile.chargeCCFee,
           ccFeePercentage: sp.ccFeePercentage ?? profile.ccFeePercentage,
           company: profile.company || sp.company,

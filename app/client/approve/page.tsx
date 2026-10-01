@@ -10,6 +10,7 @@ import {
   STRIPE_CARD_PERCENT,
 } from '@/lib/stripe-fees';
 import { quoteTotalsForItems } from '@/lib/optional-line-items';
+import { openPayPalPaymentPage, openVenmoPaymentPage } from '@/lib/payment-links';
 
 type PayOption = {
   method: string;
@@ -336,7 +337,10 @@ function ApprovePayInner() {
     return false;
   };
 
-  const startStripeCheckout = async (kind: 'deposit' | 'balance' = payKind) => {
+  const startStripeCheckout = async (
+    kind: 'deposit' | 'balance' = payKind,
+    method: 'card' | 'bank' = 'card'
+  ) => {
     if (!token) return;
     if (!requireTermsOrError()) return;
     setBusy(true);
@@ -349,6 +353,7 @@ function ApprovePayInner() {
         body: JSON.stringify({
           token,
           kind,
+          method,
           amount: kind === 'deposit' ? depositDue : balanceDue,
           grandTotal: doc?.grandTotal,
           depositPercent: doc?.depositPercent,
@@ -379,16 +384,28 @@ function ApprovePayInner() {
     const opt = paymentOptions.find((o) => o.method === method);
     if (!opt) return;
 
-    if (method === 'stripe') {
-      await startStripeCheckout(payKind);
+    if (method === 'stripe' || method === 'ach') {
+      await startStripeCheckout(payKind, method === 'ach' ? 'bank' : 'card');
       return;
     }
 
     const totalWithFee = Number(opt.totalAmount) > 0 ? Number(opt.totalAmount) : basePay;
     const feeAmt = Number(opt.feeAmount) || 0;
+    const payNote = [doc?.company, doc?.invoiceNumber, payLabel].filter(Boolean).join(' · ');
 
-    if (opt.payUrl && (method === 'venmo' || method === 'paypal')) {
-      window.open(opt.payUrl, '_blank', 'noopener,noreferrer');
+    if (method === 'venmo' || method === 'paypal') {
+      const opened =
+        method === 'venmo'
+          ? openVenmoPaymentPage(opt.handle || '', totalWithFee, payNote)
+          : openPayPalPaymentPage(opt.handle || '', totalWithFee, payNote);
+      if (!opened) {
+        setError(
+          method === 'venmo'
+            ? 'Could not open Venmo. Send the amount to the @username shown.'
+            : 'Could not open PayPal. Use the PayPal name shown on this page.'
+        );
+        return;
+      }
       setInfoBanner(
         `Opened ${opt.label}. Pay ${money(totalWithFee)}` +
           (feeAmt > 0
@@ -756,7 +773,7 @@ function ApprovePayInner() {
           {isEstimate && !approved && (
             <Button
               className="w-full py-6 text-lg bg-slate-800 hover:bg-slate-900 text-white rounded-xl disabled:opacity-50"
-              disabled={busy || !termsGateOk}
+              disabled={busy}
               onClick={() => {
                 if (!requireTermsOrError()) return;
                 if (allLinesOptional && selectedOptionIds.length === 0) {
@@ -796,7 +813,7 @@ function ApprovePayInner() {
                   <button
                     key={opt.method}
                     type="button"
-                    disabled={busy || !termsGateOk}
+                    disabled={busy}
                     onClick={() => void handlePayOption(opt.method)}
                     className={`w-full text-left p-4 border-2 rounded-2xl transition ${
                       selectedMethod === opt.method
@@ -860,8 +877,8 @@ function ApprovePayInner() {
               {paymentOptions.length === 0 && (
                 <Button
                   className="w-full py-6 bg-emerald-600 text-white disabled:opacity-50"
-                  disabled={busy || !termsGateOk}
-                  onClick={() => void startStripeCheckout(payKind)}
+                  disabled={busy}
+                  onClick={() => void startStripeCheckout(payKind, 'card')}
                 >
                   {busy
                     ? 'Starting…'

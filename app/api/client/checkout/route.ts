@@ -12,6 +12,11 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}));
     const token = String(body.token || '').trim();
     const kind = String(body.kind || 'deposit').toLowerCase() === 'balance' ? 'balance' : 'deposit';
+    const requestedMethod = String(body.method || 'card').toLowerCase();
+    const wantBank =
+      requestedMethod === 'bank' ||
+      requestedMethod === 'ach' ||
+      requestedMethod === 'us_bank_account';
     const clientEmail = String(body.clientEmail || '').trim();
 
     const verified = verifyClientActionToken(token);
@@ -42,7 +47,26 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Document not found for this payment link.' }, { status: 404 });
     }
 
-    const profile = (row?.profile || {}) as any;
+    let profile = (row?.profile || {}) as any;
+    try {
+      const { data: settingsRow } = admin
+        ? await admin
+            .from('estimates')
+            .select('profile')
+            .eq('id', `SETTINGS-${uid}`)
+            .maybeSingle()
+        : { data: null };
+      const sp = (settingsRow?.profile || {}) as any;
+      if (sp && typeof sp === 'object' && sp.chargeCCFee !== undefined) {
+        profile = {
+          ...profile,
+          chargeCCFee: sp.chargeCCFee,
+          ccFeePercentage: sp.ccFeePercentage ?? profile.ccFeePercentage,
+        };
+      }
+    } catch {
+      /* pay the document amount even if settings cannot be read */
+    }
     // Same total as approve page /api/client/document (discount applied; labor not double-counted)
     const { computeDocumentGrandTotal } = await import('@/lib/document-totals');
     const grandTotal = computeDocumentGrandTotal(row);
@@ -107,8 +131,9 @@ export async function POST(request: NextRequest) {
       paymentKind: due.payKind,
       successUrl: `${returnBase}&paid=1`,
       cancelUrl: `${returnBase}&paid=0`,
-      passProcessingFee: chargeFees,
-      feePercentRate,
+      passProcessingFee: wantBank ? false : chargeFees,
+      feePercentRate: wantBank ? 0 : feePercentRate,
+      checkoutMethod: wantBank ? 'bank' : chargeFees ? 'card' : 'auto',
     });
 
     if (!result.ok || !result.url) {
