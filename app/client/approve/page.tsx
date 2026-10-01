@@ -179,6 +179,7 @@ function ApprovePayInner() {
   /** Required when contractor attached Terms & Conditions */
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [selectedMethod, setSelectedMethod] = useState<string | null>(null);
+  const [showOtherPays, setShowOtherPays] = useState(false);
   const [infoBanner, setInfoBanner] = useState('');
   /** Optional line ids the client wants to add */
   const [selectedOptionIds, setSelectedOptionIds] = useState<string[]>([]);
@@ -324,6 +325,10 @@ function ApprovePayInner() {
     () => sanitizePayOptions(doc?.paymentOptions, basePay, feePercent, chargeFees),
     [doc?.paymentOptions, basePay, feePercent, chargeFees]
   );
+  const primaryPay = paymentOptions.find((o) => o.method === 'stripe') || paymentOptions[0];
+  const otherPays = primaryPay
+    ? paymentOptions.filter((o) => o.method !== primaryPay.method)
+    : [];
   const canPay = basePay >= 0.5;
   const hasTerms = Boolean(String(doc?.terms || '').trim());
   /** Block approve/pay until client confirms they read terms (only when terms exist) */
@@ -666,37 +671,6 @@ function ApprovePayInner() {
             )}
           </div>
 
-          {/* Amount due summary — after optional choices are approved so the amount matches */}
-          {canPay && (!hasOptionalLines || !isEstimate || approved) && (
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm space-y-1">
-              <div className="flex justify-between font-semibold text-slate-900">
-                <span>{payLabel}</span>
-                <span>{money(basePay)}</span>
-              </div>
-              {isEstimate && payKind === 'deposit' && (
-                <p className="text-xs text-slate-600">
-                  Deposit only. Remaining balance after deposit: {money(Math.max(0, grandTotal - basePay))}
-                  {amountPaid > 0 ? ` (already paid ${money(amountPaid)})` : ''}.
-                </p>
-              )}
-              {!isEstimate && amountPaid > 0 && (
-                <p className="text-xs text-slate-600">
-                  Job total {money(grandTotal)} − deposit/payments {money(amountPaid)} = balance due.
-                </p>
-              )}
-              {chargeFees ? (
-                <p className="text-[11px] text-amber-800 pt-1">
-                  The processing fee is added only when paying by Stripe credit card. Venmo, PayPal, Zelle, and mail check have no
-                  processing fee.
-                </p>
-              ) : (
-                <p className="text-[11px] text-emerald-800 pt-1">
-                  No processing fee on payment methods for this contractor.
-                </p>
-              )}
-            </div>
-          )}
-
           {error && (
             <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2 whitespace-pre-wrap">
               {error}
@@ -708,66 +682,30 @@ function ApprovePayInner() {
             </p>
           )}
 
-          {/* Terms must be accepted before approve/pay when contractor set them up */}
           {hasTerms && (
-            <div className="rounded-xl border-2 border-teal-300 bg-teal-50/80 p-4 space-y-3">
-              {doc?.termsDisplayMode === 'printed' ? (
-                <div className="rounded-lg border border-teal-200 bg-white p-3 max-h-64 overflow-y-auto">
-                  <p className="text-sm font-bold text-teal-950 mb-2">Terms &amp; Conditions</p>
-                  <p className="text-xs text-slate-800 whitespace-pre-wrap leading-relaxed">
-                    {String(doc?.terms || '').trim()}
-                  </p>
-                </div>
-              ) : (
-                <div className="text-center space-y-2">
-                  <p className="text-sm font-semibold text-teal-950">Step 1 — Read the Terms</p>
-                  <a
-                    href={`/client/terms?token=${encodeURIComponent(token)}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center w-full sm:w-auto px-4 py-3 rounded-xl bg-teal-800 text-white text-sm font-bold hover:bg-teal-900"
-                  >
-                    Open Terms &amp; Conditions
-                  </a>
-                  <p className="text-[11px] text-teal-800/80">
-                    Opens in a new tab. After reading, check the box below.
-                  </p>
-                </div>
-              )}
-              <label className="flex items-start gap-3 cursor-pointer select-none rounded-lg border-2 border-teal-400 bg-white p-3 shadow-sm">
-                <input
-                  type="checkbox"
-                  className="mt-1 h-5 w-5 shrink-0 accent-teal-700"
-                  checked={termsAccepted}
-                  onChange={(e) => {
-                    setTermsAccepted(e.target.checked);
-                    if (e.target.checked) setError('');
-                  }}
-                />
-                <span className="text-sm text-slate-800 leading-snug">
-                  <strong>
-                    {doc?.termsDisplayMode === 'printed' ? 'Step 2 — ' : 'Step 2 — '}I have read and
-                    agree
-                  </strong>{' '}
-                  to the Terms &amp; Conditions for this {isEstimate ? 'estimate' : 'invoice'}.
-                  {doc?.termsDisplayMode !== 'printed' ? (
-                    <span className="block text-xs text-teal-900 mt-1 font-medium">
-                      Required after opening the Terms link above. Approve / pay stay locked until
-                      you check this box.
-                    </span>
-                  ) : (
-                    <span className="block text-xs text-teal-900 mt-1 font-medium">
-                      Required. Approve / pay stay locked until you check this box.
-                    </span>
-                  )}
-                </span>
-              </label>
-              {!termsAccepted && (
-                <p className="text-xs text-amber-900 text-center font-medium">
-                  Check the box above to enable approve and payment options.
-                </p>
-              )}
-            </div>
+            <label className="flex items-start gap-3 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-5 w-5 shrink-0 accent-emerald-600"
+                checked={termsAccepted}
+                onChange={(e) => {
+                  setTermsAccepted(e.target.checked);
+                  if (e.target.checked) setError('');
+                }}
+              />
+              <span className="text-sm text-slate-700 leading-snug">
+                I agree to the{' '}
+                <a
+                  href={`/client/terms?token=${encodeURIComponent(token)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline font-medium text-slate-900"
+                >
+                  terms
+                </a>
+                .
+              </span>
+            </label>
           )}
 
           {isEstimate && !approved && (
@@ -797,99 +735,79 @@ function ApprovePayInner() {
             </div>
           )}
 
-          {/* All contractor-enabled methods — totals include processing fee */}
           {canPay && (!hasOptionalLines || !isEstimate || approved) && (!isEstimate || approved || payKind === 'deposit') && (
-            <div className={`space-y-3 pt-1 ${!termsGateOk ? 'opacity-60' : ''}`}>
-              <p className="text-sm font-semibold text-slate-800">
-                {payLabel} — choose a payment method
-              </p>
-              <p className="text-xs text-slate-500">
-                Options enabled by {doc?.company || 'your contractor'}:
-              </p>
-              {paymentOptions.map((opt) => {
-                const total = Number(opt.totalAmount) > 0 ? Number(opt.totalAmount) : basePay;
-                const feeAmt = Number(opt.feeAmount) || 0;
-                return (
-                  <button
-                    key={opt.method}
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void handlePayOption(opt.method)}
-                    className={`w-full text-left p-4 border-2 rounded-2xl transition ${
-                      selectedMethod === opt.method
-                        ? 'border-emerald-500 bg-emerald-50'
-                        : 'border-slate-200 bg-white hover:bg-slate-50'
-                    } disabled:cursor-not-allowed disabled:opacity-70`}
-                  >
-                    <div className="flex items-start gap-3">
-                      <span className="text-3xl shrink-0">{opt.icon}</span>
-                      <div className="min-w-0 flex-1">
-                        <div className="font-semibold text-slate-900">{opt.label}</div>
-                        <div className="text-xs text-slate-600 mt-0.5">{opt.description}</div>
-                        {opt.handle && opt.method !== 'stripe' && (
-                          <div className="text-xs font-medium text-slate-800 mt-1">
-                            {opt.method === 'venmo'
-                              ? opt.handle
-                              : opt.method === 'zelle'
-                                ? `Send to: ${opt.handle}`
-                                : opt.method === 'mailcheck'
-                                  ? `Mail to: ${opt.handle}`
-                                  : opt.handle}
-                          </div>
-                        )}
-                        {opt.method === 'zelle' && opt.qrUrl && (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={opt.qrUrl}
-                            alt="Zelle QR"
-                            className="mt-2 w-28 h-28 object-contain border rounded bg-white"
-                          />
-                        )}
-                        <div className="mt-2 text-[11px] text-slate-600 space-y-0.5">
-                          <div className="flex justify-between gap-2">
-                            <span>{payLabel}</span>
-                            <span>{money(Number(opt.baseAmount) || basePay)}</span>
-                          </div>
-                          {feeAmt > 0 ? (
-                            <div className="flex justify-between gap-2 text-amber-800">
-                              <span>{opt.feeLabel || 'Processing fee'}</span>
-                              <span>{money(feeAmt)}</span>
-                            </div>
-                          ) : (
-                            <div className="flex justify-between gap-2 text-emerald-700 font-medium">
-                              <span>Processing fee</span>
-                              <span>None</span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      <div className="shrink-0 text-right">
-                        <div className="text-sm font-bold text-emerald-700">{money(total)}</div>
-                        <div className="text-[10px] text-slate-500">you pay</div>
-                        <div className="text-xs font-semibold text-emerald-600 mt-1">
-                          {busy && selectedMethod === opt.method ? '…' : 'Pay →'}
-                        </div>
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
-              {paymentOptions.length === 0 && (
+            <div className="space-y-3 pt-1">
+              {primaryPay ? (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void handlePayOption(primaryPay.method)}
+                  className="w-full rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white py-5 px-4 disabled:opacity-60"
+                >
+                  <span className="block text-lg font-bold">
+                    {busy && selectedMethod === primaryPay.method
+                      ? 'Starting…'
+                      : `Pay ${money(
+                          Number(primaryPay.totalAmount) > 0 ? Number(primaryPay.totalAmount) : basePay
+                        )}`}
+                  </span>
+                  <span className="block text-sm text-emerald-50 mt-1">
+                    {primaryPay.method === 'stripe'
+                      ? Number(primaryPay.feeAmount) > 0
+                        ? `Card · includes ${money(Number(primaryPay.feeAmount))} processing fee`
+                        : 'Credit or debit card'
+                      : primaryPay.label}
+                  </span>
+                </button>
+              ) : (
                 <Button
-                  className="w-full py-6 bg-emerald-600 text-white disabled:opacity-50"
+                  className="w-full py-6 bg-emerald-600 text-white"
                   disabled={busy}
                   onClick={() => void startStripeCheckout(payKind, 'card')}
                 >
-                  {busy
-                    ? 'Starting…'
-                    : `Pay with Stripe (${money(
-                        computeStripeCardFee(basePay, {
-                          chargeFees,
-                          percentRate: chargeFees ? feePercent : 0,
-                          fixedFee: chargeFees ? STRIPE_CARD_FIXED_USD : 0,
-                        }).totalAmount
-                      )})`}
+                  {busy ? 'Starting…' : `Pay ${money(basePay)}`}
                 </Button>
+              )}
+
+              {otherPays.length > 0 && (
+                <button
+                  type="button"
+                  className="w-full text-sm font-medium text-slate-600 underline py-1"
+                  onClick={() => setShowOtherPays((open) => !open)}
+                >
+                  {showOtherPays ? 'Hide other ways to pay' : 'Other ways to pay'}
+                </button>
+              )}
+
+              {showOtherPays &&
+                otherPays.map((opt) => {
+                  const total = Number(opt.totalAmount) > 0 ? Number(opt.totalAmount) : basePay;
+                  return (
+                    <button
+                      key={opt.method}
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void handlePayOption(opt.method)}
+                      className="w-full flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-left disabled:opacity-60"
+                    >
+                      <span className="min-w-0">
+                        <span className="block font-medium text-slate-900">{opt.label}</span>
+                        {opt.handle ? (
+                          <span className="block text-xs text-slate-500 truncate">{opt.handle}</span>
+                        ) : null}
+                      </span>
+                      <span className="shrink-0 font-semibold text-slate-800">{money(total)}</span>
+                    </button>
+                  );
+                })}
+
+              {showOtherPays && selectedMethod === 'zelle' && paymentOptions.find((o) => o.method === 'zelle')?.qrUrl && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={paymentOptions.find((o) => o.method === 'zelle')?.qrUrl}
+                  alt="Zelle QR"
+                  className="mx-auto w-28 h-28 object-contain border rounded bg-white"
+                />
               )}
             </div>
           )}
