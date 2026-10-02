@@ -240,6 +240,9 @@ export async function GET(request: NextRequest) {
       company,
       companyPhone: profile.phone || '',
       companyEmail: profile.email || '',
+      clientEmail: (Array.isArray(row.emails) ? row.emails : [])
+        .map((e: unknown) => String(e || '').trim())
+        .find((e: string) => e.includes('@') && e.toLowerCase() !== String(profile.email || '').trim().toLowerCase()) || '',
       address: [row.address, row.city, row.state, row.zipCode || row.zipcode]
         .filter(Boolean)
         .join(', '),

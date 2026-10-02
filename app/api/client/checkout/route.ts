@@ -48,6 +48,7 @@ export async function POST(request: NextRequest) {
     }
 
     let profile = (row?.profile || {}) as any;
+    let ownerEmails: string[] = [];
     try {
       const { data: settingsRow } = admin
         ? await admin
@@ -57,16 +58,34 @@ export async function POST(request: NextRequest) {
             .maybeSingle()
         : { data: null };
       const sp = (settingsRow?.profile || {}) as any;
-      if (sp && typeof sp === 'object' && sp.chargeCCFee !== undefined) {
-        profile = {
-          ...profile,
-          chargeCCFee: sp.chargeCCFee,
-          ccFeePercentage: sp.ccFeePercentage ?? profile.ccFeePercentage,
-        };
+      if (sp && typeof sp === 'object') {
+        if (sp.email) ownerEmails.push(String(sp.email));
+        if (sp.chargeCCFee !== undefined) {
+          profile = {
+            ...profile,
+            chargeCCFee: sp.chargeCCFee,
+            ccFeePercentage: sp.ccFeePercentage ?? profile.ccFeePercentage,
+          };
+        }
+      }
+      if (admin) {
+        const { data: authUser } = await admin.auth.admin.getUserById(uid);
+        if (authUser?.user?.email) ownerEmails.push(String(authUser.user.email));
       }
     } catch {
       /* pay the document amount even if settings cannot be read */
     }
+    const ownerEmailSet = new Set(
+      ownerEmails.map((e) => e.trim().toLowerCase()).filter((e) => e.includes('@'))
+    );
+    const jobClientEmail = (Array.isArray(row.emails) ? row.emails : [])
+      .map((e: unknown) => String(e || '').trim())
+      .find((e: string) => e.includes('@') && !ownerEmailSet.has(e.toLowerCase()));
+    const requestedPayer = String(clientEmail || '').trim();
+    const payerEmail =
+      requestedPayer && !ownerEmailSet.has(requestedPayer.toLowerCase())
+        ? requestedPayer
+        : jobClientEmail || '';
     // Same total as approve page /api/client/document (discount applied; labor not double-counted)
     const { computeDocumentGrandTotal } = await import('@/lib/document-totals');
     const grandTotal = computeDocumentGrandTotal(row);
@@ -126,7 +145,7 @@ export async function POST(request: NextRequest) {
       invoiceNumber,
       documentType: due.documentType,
       jobName,
-      clientEmail: clientEmail || undefined,
+      clientEmail: payerEmail || undefined,
       requestUrl: request.url,
       paymentKind: due.payKind,
       successUrl: `${returnBase}&paid=1`,

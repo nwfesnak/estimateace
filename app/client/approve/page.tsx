@@ -38,6 +38,7 @@ type DocPayload = {
   company?: string;
   companyPhone?: string;
   companyEmail?: string;
+  clientEmail?: string;
   address?: string;
   date?: string;
   grandTotal?: number;
@@ -363,7 +364,7 @@ function ApprovePayInner() {
           grandTotal: doc?.grandTotal,
           depositPercent: doc?.depositPercent,
           jobName: doc?.jobName,
-          clientEmail: doc?.companyEmail,
+          clientEmail: doc?.clientEmail || '',
         }),
       });
       const json = await res.json().catch(() => ({}));
