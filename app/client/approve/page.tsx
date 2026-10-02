@@ -465,7 +465,9 @@ function ApprovePayInner() {
     <div className="min-h-screen bg-slate-50 p-4 md:p-8">
       <div className="max-w-lg mx-auto bg-white rounded-2xl border shadow-sm overflow-hidden">
         <div className="bg-emerald-600 text-white px-6 py-5">
-          <p className="text-sm text-emerald-100">EstimateAce</p>
+          <p className="text-sm text-emerald-100">
+            {isEstimate ? 'Review this estimate' : 'Pay this invoice'}
+          </p>
           <h1 className="text-2xl font-bold mt-1">{doc?.company || 'Your contractor'}</h1>
           <p className="text-emerald-50 mt-1">
             {isEstimate ? 'Estimate' : 'Invoice'} {doc?.invoiceNumber || ''}
@@ -485,7 +487,7 @@ function ApprovePayInner() {
           )}
 
           <div>
-            <p className="text-sm text-slate-500">Client / job</p>
+            <p className="text-sm text-slate-500">For</p>
             <p className="font-semibold text-slate-900">{doc?.jobName}</p>
             {doc?.address ? <p className="text-sm text-slate-600 mt-1">{doc.address}</p> : null}
           </div>
@@ -772,10 +774,10 @@ function ApprovePayInner() {
               {otherPays.length > 0 && (
                 <button
                   type="button"
-                  className="w-full text-sm font-medium text-slate-600 underline py-1"
+                  className="w-full rounded-2xl border-2 border-slate-300 bg-white text-slate-800 font-semibold py-3 px-4"
                   onClick={() => setShowOtherPays((open) => !open)}
                 >
-                  {showOtherPays ? 'Hide other ways to pay' : 'Other ways to pay'}
+                  {showOtherPays ? 'Hide other ways to pay' : 'More ways to pay'}
                 </button>
               )}
 

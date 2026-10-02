@@ -159,7 +159,7 @@ export async function GET(request: NextRequest) {
     const text = [
       `${company}: this is a reminder that invoice ${invoiceNumber} for ${jobName} is still unpaid.`,
       `Balance due: ${money(balance)}.`,
-      `View and pay: ${actionUrl}`,
+      `Pay now: ${actionUrl}`,
       companyPhone ? `Call ${companyPhone}.` : '',
       `Reminders repeat every ${reminderDays} days until the invoice is paid. Card payments stop them automatically.`,
     ]
@@ -169,11 +169,11 @@ export async function GET(request: NextRequest) {
     const html = `<div style="font-family:Arial,sans-serif;color:#0f172a;line-height:1.45">
       <p style="margin:0 0 8px;">${escapeHtml(company)} sent a reminder for invoice <strong>${escapeHtml(invoiceNumber)}</strong>${jobName ? ` (${escapeHtml(jobName)})` : ''}.</p>
       <p style="margin:0 0 12px;font-size:18px;"><strong>Balance due: ${money(balance)}</strong></p>
-      <p style="margin:0 0 16px;"><a href="${escapeHtml(actionUrl)}" style="display:inline-block;background:#0f766e;color:#fff;text-decoration:none;padding:10px 16px;border-radius:8px;font-weight:700;">View and pay invoice</a></p>
+      <p style="margin:0 0 16px;"><a href="${escapeHtml(actionUrl)}" style="display:inline-block;background:#0f766e;color:#fff;text-decoration:none;padding:10px 16px;border-radius:8px;font-weight:700;">Pay ${money(balance)}</a></p>
       <p style="margin:0;font-size:13px;color:#475569;">This reminder repeats every ${reminderDays} days until the invoice is paid. A card payment stops them automatically.${companyPhone ? ` Call ${escapeHtml(companyPhone)}.` : ''}</p>
     </div>`;
 
-    const smsBody = `${company}: Reminder — invoice ${invoiceNumber} for ${jobName} is unpaid. Balance ${money(balance)}. Pay: ${actionUrl}${companyPhone ? ` Call ${companyPhone}.` : ''} Reply STOP to opt out.`;
+    const smsBody = `${company}: Invoice ${invoiceNumber} is unpaid. Pay ${money(balance)} here: ${actionUrl}${companyPhone ? ` Call ${companyPhone}.` : ''} Reply STOP to opt out.`;
 
     let notified = false;
     for (const email of emails) {

@@ -163,24 +163,6 @@ export async function POST(request: NextRequest) {
     const termsUrl = `${appUrl}/client/terms?token=${encodeURIComponent(actionToken)}`;
     const certificateUrl = `${appUrl}/client/certificate?token=${encodeURIComponent(actionToken)}`;
 
-    // Short button labels — full amount shown as "Total due" line above buttons
-    const payButtonLabelHtml =
-      documentType === 'estimate'
-        ? amountDueNow >= 0.5
-          ? 'Approve &amp; make payment'
-          : 'Approve estimate'
-        : amountDueNow >= 0.5
-          ? 'Make payment'
-          : 'View invoice';
-    const payButtonLabelPlain =
-      documentType === 'estimate'
-        ? amountDueNow >= 0.5
-          ? 'Approve & make payment'
-          : 'Approve estimate'
-        : amountDueNow >= 0.5
-          ? 'Make payment'
-          : 'View invoice';
-
     const totalDueLabel =
       documentType === 'estimate' && depositDue >= 0.5
         ? 'Deposit due'
@@ -190,6 +172,16 @@ export async function POST(request: NextRequest) {
 
     const totalDueAmount =
       documentType === 'estimate' && depositDue >= 0.5 ? depositDue : amountDueNow;
+
+    const payButtonLabelPlain =
+      documentType === 'estimate'
+        ? amountDueNow >= 0.5
+          ? `Approve and pay ${money(totalDueAmount)}`
+          : 'Approve estimate'
+        : amountDueNow >= 0.5
+          ? `Pay ${money(totalDueAmount)}`
+          : 'View invoice';
+    const payButtonLabelHtml = escapeHtml(payButtonLabelPlain);
 
     const location = [address, city, state, zipCode].filter(Boolean).join(', ');
     const includedItems = items.filter(
@@ -226,7 +218,7 @@ export async function POST(request: NextRequest) {
         ? `Stripe credit card fee: ${money(exampleFee.feeAmount)}\nPay by Stripe credit card: ${money(exampleFee.totalAmount)}\nVenmo, PayPal, Zelle, and mail check stay ${money(totalDueAmount)} with no processing fee.`
         : '',
       '',
-      `Pay / approve: ${actionUrl}`,
+      `Pay now: ${actionUrl}`,
       terms && termsDisplayMode === 'link' ? `Terms & Conditions: ${termsUrl}` : '',
       terms && termsDisplayMode === 'printed'
         ? `Terms & Conditions (printed on document):\n${terms.slice(0, 2500)}${terms.length > 2500 ? '\n…' : ''}`
@@ -337,11 +329,6 @@ export async function POST(request: NextRequest) {
         <p style="margin:0 0 16px;font-size:32px;font-weight:800;color:#064e3b;line-height:1.1;">
           ${money(totalDueAmount)}
         </p>
-        ${
-          amountDueNow >= 0.5 && chargeCCFee && exampleFee.feeAmount > 0
-            ? `<p style="margin:0 0 16px;font-size:12px;color:#64748b;">The processing fee is added only on Stripe credit card checkout. Venmo, PayPal, Zelle, and mail check have no processing fee.</p>`
-            : ''
-        }
         <!--[if mso]>
         <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="${escapeHtml(actionUrl)}" style="height:48px;v-text-anchor:middle;width:260px;" arcsize="12%" fillcolor="#10b981" stroke="f">
           <w:anchorlock/>
@@ -356,21 +343,7 @@ export async function POST(request: NextRequest) {
         <!--<![endif]-->
         ${
           terms && termsDisplayMode === 'link'
-            ? `
-        <div style="height:12px;line-height:12px;font-size:12px;">&nbsp;</div>
-        <!--[if mso]>
-        <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="${escapeHtml(termsUrl)}" style="height:44px;v-text-anchor:middle;width:260px;" arcsize="12%" fillcolor="#0f766e" stroke="f">
-          <w:anchorlock/>
-          <center style="color:#ffffff;font-family:sans-serif;font-size:15px;font-weight:bold;">View Terms &amp; Conditions</center>
-        </v:roundrect>
-        <![endif]-->
-        <!--[if !mso]><!-- -->
-        <a href="${escapeHtml(termsUrl)}"
-           style="display:inline-block;background:#0f766e;color:#ffffff !important;text-decoration:none;font-weight:700;font-size:15px;padding:12px 24px;border-radius:12px;mso-hide:all;">
-          View Terms &amp; Conditions
-        </a>
-        <!--<![endif]-->
-        `
+            ? `<p style="margin:14px 0 0;font-size:13px;"><a href="${escapeHtml(termsUrl)}" style="color:#0f766e;">Read terms</a></p>`
             : ''
         }
         ${
@@ -385,21 +358,7 @@ export async function POST(request: NextRequest) {
         }
         ${
           hasCertificate
-            ? `
-        <div style="height:12px;line-height:12px;font-size:12px;">&nbsp;</div>
-        <!--[if mso]>
-        <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="${escapeHtml(certificateUrl)}" style="height:44px;v-text-anchor:middle;width:260px;" arcsize="12%" fillcolor="#1e40af" stroke="f">
-          <w:anchorlock/>
-          <center style="color:#ffffff;font-family:sans-serif;font-size:15px;font-weight:bold;">View Certificate of Insurance</center>
-        </v:roundrect>
-        <![endif]-->
-        <!--[if !mso]><!-- -->
-        <a href="${escapeHtml(certificateUrl)}"
-           style="display:inline-block;background:#1e40af;color:#ffffff !important;text-decoration:none;font-weight:700;font-size:15px;padding:12px 24px;border-radius:12px;mso-hide:all;">
-          View Certificate of Insurance
-        </a>
-        <!--<![endif]-->
-        `
+            ? `<p style="margin:8px 0 0;font-size:13px;"><a href="${escapeHtml(certificateUrl)}" style="color:#1e40af;">Insurance certificate</a></p>`
             : ''
         }
       </td>
@@ -455,8 +414,7 @@ export async function POST(request: NextRequest) {
                 <tr><td style="padding:8px 0 0;font-size:16px;font-weight:800;color:#065f46;">${escapeHtml(totalDueLabel)}</td><td style="padding:8px 0 0;font-size:16px;font-weight:800;color:#065f46;text-align:right;">${money(totalDueAmount)}</td></tr>
                 ${
                   amountDueNow >= 0.5 && chargeCCFee && exampleFee.feeAmount > 0
-                    ? `<tr><td style="padding:4px 0;font-size:13px;color:#64748b;">Stripe credit card fee</td><td style="padding:4px 0;font-size:13px;text-align:right;">${money(exampleFee.feeAmount)}</td></tr>
-                <tr><td style="padding:4px 0;font-size:15px;font-weight:700;">Pay by Stripe credit card</td><td style="padding:4px 0;font-size:15px;font-weight:700;text-align:right;">${money(exampleFee.totalAmount)}</td></tr>`
+                    ? `<tr><td colspan="2" style="padding:8px 0 0;font-size:12px;color:#64748b;">Paying by card adds ${money(exampleFee.feeAmount)}. Venmo, PayPal, Zelle, and a check stay ${money(totalDueAmount)}.</td></tr>`
                     : ''
                 }
               </table>
