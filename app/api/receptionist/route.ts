@@ -47,24 +47,42 @@ export async function GET(request: NextRequest) {
     }
     const admin = getSupabaseAdmin();
     let businessName = '';
+    let profilePaid = false;
     if (admin) {
       const { data } = await admin
         .from('estimates')
         .select('profile')
         .eq('id', `SETTINGS-${user.id}`)
         .maybeSingle();
-      businessName = String((data?.profile as any)?.company || '');
+      const profile = (data?.profile || {}) as any;
+      businessName = String(profile.company || '');
+      profilePaid = profile.aiReceptionistAddonActive === true;
     }
     const config = await loadReceptionistConfig(user.id, businessName);
     let billing = await loadReceptionistBilling(user.id);
-    let addonActive = receptionistAddonHasAccess(billing);
+    const billingStatus = String(billing.status || '').toLowerCase();
+    const billingEnded =
+      (billingStatus === 'canceled' ||
+        billingStatus === 'unpaid' ||
+        billingStatus === 'incomplete_expired') &&
+      !(billing.currentPeriodEnd && new Date(billing.currentPeriodEnd).getTime() > Date.now());
+    const hasPhone = Boolean(config.twilio?.phoneNumber);
+    let addonActive =
+      receptionistAddonHasAccess(billing) ||
+      (profilePaid && !billingEnded) ||
+      (hasPhone && !billingEnded);
 
-    // After Stripe pay, webhook can lag — sync from Stripe so UI shows Subscribed
+    // After Stripe pay, webhook can lag — sync from Stripe so UI shows Subscribed.
+    // A saved paid flag or an existing phone line stays paid unless Stripe says the subscription ended.
     if (!addonActive) {
       try {
         const synced = await syncReceptionistAddonForUser(user.id);
         billing = synced.billing || billing;
-        addonActive = synced.active;
+        const status = String(billing.status || '').toLowerCase();
+        const ended =
+          (status === 'canceled' || status === 'unpaid' || status === 'incomplete_expired') &&
+          !(billing.currentPeriodEnd && new Date(billing.currentPeriodEnd).getTime() > Date.now());
+        addonActive = synced.active || ((profilePaid || hasPhone) && !ended);
       } catch (e) {
         console.warn('receptionist GET sync:', e);
       }

@@ -33,6 +33,8 @@ type AIReceptionistProps = {
   onBack: () => void;
   /** Keep Billing / Profile subscription badge in sync when Stripe status changes */
   onAddonStatusChange?: (active: boolean, billing?: Record<string, unknown> | null) => void;
+  /** Profile already knows this account paid. Avoid flashing a pay button. */
+  subscriptionActive?: boolean;
 };
 
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -60,6 +62,7 @@ export function AIReceptionist({
   saving = false,
   onBack,
   onAddonStatusChange,
+  subscriptionActive = false,
 }: AIReceptionistProps) {
   const [tab, setTab] = React.useState<'inbox' | 'phone' | 'setup' | 'knowledge' | 'test'>('inbox');
   const [chat, setChat] = React.useState<ChatLine[]>([]);
@@ -73,7 +76,7 @@ export function AIReceptionist({
   const [lineError, setLineError] = React.useState<string | null>(null);
   const [areaCode, setAreaCode] = React.useState('');
   const [transferNumber, setTransferNumber] = React.useState(companyPhone || '');
-  const [addonActive, setAddonActive] = React.useState(false);
+  const [addonActive, setAddonActive] = React.useState(subscriptionActive);
   const [addonAmountDisplay, setAddonAmountDisplay] = React.useState('$49.99');
   const [publicBusinessNumber, setPublicBusinessNumber] = React.useState(companyPhone || '');
   const [copiedForward, setCopiedForward] = React.useState(false);
@@ -94,9 +97,10 @@ export function AIReceptionist({
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) return;
-      setLinePhone(json.phoneNumber || json.config?.phoneNumber || null);
+      const phone = json.phoneNumber || json.config?.phoneNumber || null;
+      setLinePhone(phone);
       setLineStatus(String(json.status || json.config?.status || 'none'));
-      const active = Boolean(json.addonActive || json.subscribed);
+      const active = Boolean(json.addonActive || json.subscribed || phone);
       setAddonActive(active);
       if (json.addonAmountDisplay) setAddonAmountDisplay(String(json.addonAmountDisplay));
       if (json.config?.transferNumber) setTransferNumber(String(json.config.transferNumber));
@@ -153,13 +157,13 @@ export function AIReceptionist({
         return;
       }
       const active = Boolean(json.addonActive || json.subscribed);
-      setAddonActive(active);
-      onAddonStatusChange?.(active, json.billing || null);
+      setAddonActive((prev) => active || prev);
+      onAddonStatusChange?.(active || addonActive, json.billing || null);
       await refreshLine();
-      if (!active) {
+      if (!active && !addonActive && !linePhone) {
         setLineError(
           json.message ||
-            'Stripe has not marked this subscription active yet. Wait a few seconds and tap Refresh again.'
+            'Payment is not showing yet. Wait a few seconds and choose I already paid.'
         );
       } else {
         setLineError(null);
@@ -501,10 +505,8 @@ export function AIReceptionist({
             </span>
           </h2>
           <p className="text-sm text-gray-500 mt-1 max-w-xl">
-            <strong>Live phone receptionist.</strong> Keep your existing business number and forward it
-            to your private Twilio AI line. When <strong>On</strong>, AI answers and collects name,
-            phone, and address. When <strong>Off</strong>, calls ring your host number silently. Leads
-            land in Inbox and dashboard.
+            Calls to your business number can be answered here. Turn answering <strong>On</strong> when
+            you want the AI to pick up. Messages show up in Inbox.
           </p>
           {linePhone && (
             <p className="mt-2 text-sm font-semibold text-emerald-800">
@@ -558,9 +560,9 @@ export function AIReceptionist({
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
         <Card>
           <CardContent className="p-4 text-center">
-            <div className="text-[10px] uppercase text-gray-500">Status</div>
+            <div className="text-[10px] uppercase text-gray-500">Answering</div>
             <div className={`text-lg font-bold ${settings.enabled ? 'text-emerald-600' : 'text-gray-400'}`}>
-              {settings.enabled ? 'Active' : 'Paused'}
+              {settings.enabled ? 'On' : 'Off'}
             </div>
           </CardContent>
         </Card>
@@ -715,63 +717,40 @@ export function AIReceptionist({
         <div className="space-y-6">
           <Card className="border-emerald-200">
             <CardContent className="p-6 space-y-4">
-              <h3 className="font-semibold text-lg">Your AI phone line</h3>
+              <h3 className="font-semibold text-lg">Phone line</h3>
               <p className="text-sm text-gray-600">
-                EstimateAce provisions a Twilio number for your business. Callers dial this line and
-                talk with the AI (speech). SMS also lands in your Inbox. Fill Knowledge base before
-                going live.
+                Customers keep calling your business number. That number forwards to the private AI line below.
               </p>
 
-              <div className="rounded-xl border border-violet-200 bg-violet-50/80 p-4 text-sm text-violet-950">
-                <strong>Paid add-on:</strong> {addonAmountDisplay}/month.
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm">
                 {addonActive ? (
-                  <span className="mt-2 inline-flex items-center rounded-full bg-emerald-600 text-white text-xs font-bold uppercase tracking-wide px-3 py-1">
-                    Subscribed
-                  </span>
+                  <p className="font-semibold text-emerald-800">
+                    Subscription paid · {addonAmountDisplay}/month
+                  </p>
                 ) : (
-                  <span className="block mt-1 text-amber-900">Not subscribed yet — confirm payment below.</span>
+                  <div className="space-y-3">
+                    <p className="text-slate-800">
+                      Subscribe for {addonAmountDisplay}/month to turn on the AI phone line.
+                    </p>
+                    <Button
+                      type="button"
+                      className="w-full bg-violet-700 hover:bg-violet-800 text-white font-bold py-6 text-base"
+                      disabled={lineBusy}
+                      onClick={() => void startAddonCheckout()}
+                    >
+                      {lineBusy ? 'Opening Stripe…' : `Subscribe · ${addonAmountDisplay}/mo`}
+                    </Button>
+                    <button
+                      type="button"
+                      className="text-xs text-slate-500 underline"
+                      disabled={lineBusy}
+                      onClick={() => void refreshSubscriptionStatus()}
+                    >
+                      {lineBusy ? 'Checking…' : 'I already paid — check again'}
+                    </button>
+                  </div>
                 )}
-                <div className="mt-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="text-xs"
-                    disabled={lineBusy}
-                    onClick={() => void refreshSubscriptionStatus()}
-                  >
-                    {lineBusy ? 'Checking…' : 'Refresh subscription'}
-                  </Button>
-                </div>
               </div>
-
-              {addonActive ? (
-                <div className="rounded-2xl border-2 border-emerald-400 bg-emerald-50 p-5 text-center">
-                  <p className="text-lg font-bold text-emerald-900">✓ Subscribed — {addonAmountDisplay}/mo</p>
-                  <p className="text-sm text-emerald-800 mt-1">
-                    {linePhone
-                      ? 'Your AI phone line is ready below. Forward your business number to it.'
-                      : 'Payment confirmed. Next: enable your AI phone line (only needed once).'}
-                  </p>
-                </div>
-              ) : (
-                <div className="rounded-2xl border-2 border-violet-300 bg-white p-5 space-y-3">
-                  <p className="text-sm text-slate-800">
-                    Step 1 — Confirm payment for AI Receptionist ({addonAmountDisplay}/mo).
-                  </p>
-                  <Button
-                    type="button"
-                    className="w-full bg-violet-700 hover:bg-violet-800 text-white font-bold py-6 text-base"
-                    disabled={lineBusy}
-                    onClick={() => void startAddonCheckout()}
-                  >
-                    {lineBusy ? 'Opening Stripe…' : `Confirm & pay ${addonAmountDisplay}/mo`}
-                  </Button>
-                  <p className="text-xs text-gray-500 text-center">
-                    Already paid? Tap <strong>Refresh subscription</strong> above.
-                  </p>
-                </div>
-              )}
 
               {linePhone ? (
                 <div className="rounded-2xl border-2 border-emerald-300 bg-emerald-50 p-5 text-center">
@@ -916,9 +895,7 @@ export function AIReceptionist({
             <CardContent className="p-6 space-y-3">
               <h3 className="font-semibold text-lg">Getting started</h3>
               <ol className="text-sm text-gray-700 list-decimal pl-5 space-y-1">
-                <li>
-                  <strong>Phone line</strong> → pay add-on → <strong>Enable AI receptionist line</strong>.
-                </li>
+                <li>Phone line — subscribe if needed, then turn on the AI number once.</li>
                 <li>
                   Forward your <strong>existing business number</strong> to the private AI line (instructions
                   on Phone line).

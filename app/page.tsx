@@ -14649,14 +14649,11 @@ export default function Home() {
                         <p className="text-sm text-gray-600 mt-1 max-w-lg">
                           {hasAiReceptionistAddon() ? (
                             <>
-                              Add-on is active ($49.99/mo). Open Phone line to enable your Twilio AI number, then
-                              turn the receptionist <strong>On</strong> so leads show on the dashboard.
+                              Paid, $49.99/mo. Open the receptionist to manage the phone line and incoming calls.
                             </>
                           ) : (
                             <>
-                              AI Receptionist is <strong>$49.99/mo</strong>. Open setup → Phone line →{' '}
-                              <strong>Confirm &amp; pay</strong> on Stripe, then enable your AI phone line.
-                              Email summaries stay included with your plan.
+                              $49.99/mo. Open the receptionist and tap Subscribe. Email summaries stay on your plan.
                             </>
                           )}
                         </p>
@@ -17487,6 +17484,7 @@ export default function Home() {
               onChangeMessages={setReceptionistMessages}
               onSave={saveReceptionistData}
               saving={receptionistSaving}
+              subscriptionActive={hasAiReceptionistAddon()}
               onAddonStatusChange={(active, billingInfo) => {
                 setProfile((prev) => ({
                   ...prev,
