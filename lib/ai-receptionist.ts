@@ -92,6 +92,19 @@ export function normalizeReceptionistSettings(raw: unknown): ReceptionistSetting
   };
 }
 
+const WEBSITE_FACTS_HEADING = '— From your website —';
+
+/** Keep notes the contractor typed, and replace an earlier website import. */
+export function mergeWebsiteFactsIntoKnowledge(existing: string, facts: string): string {
+  const incoming = String(facts || '').trim();
+  if (!incoming) return String(existing || '');
+  const current = String(existing || '').trim();
+  const markerAt = current.indexOf(WEBSITE_FACTS_HEADING);
+  const kept = (markerAt >= 0 ? current.slice(0, markerAt) : current).trim();
+  if (!kept) return incoming;
+  return `${kept}\n\n${WEBSITE_FACTS_HEADING}\n${incoming}`;
+}
+
 export function normalizeReceptionistMessages(raw: unknown): ReceptionistMessage[] {
   if (!Array.isArray(raw)) return [];
   return raw

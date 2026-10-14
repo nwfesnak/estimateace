@@ -10,6 +10,7 @@ import {
   type ReceptionistMessage,
   fillGreeting,
   isWithinBusinessHours,
+  mergeWebsiteFactsIntoKnowledge,
   DEFAULT_RECEPTIONIST_SETTINGS,
 } from '@/lib/ai-receptionist';
 
@@ -80,6 +81,11 @@ export function AIReceptionist({
   const [addonAmountDisplay, setAddonAmountDisplay] = React.useState('$49.99');
   const [publicBusinessNumber, setPublicBusinessNumber] = React.useState(companyPhone || '');
   const [copiedForward, setCopiedForward] = React.useState(false);
+  const [factsBusy, setFactsBusy] = React.useState(false);
+  const [factsNote, setFactsNote] = React.useState<string | null>(null);
+  const factsLock = React.useRef(false);
+  const settingsRef = React.useRef(settings);
+  settingsRef.current = settings;
 
   const inHours = isWithinBusinessHours(settings);
   const activeGreeting = fillGreeting(
@@ -324,6 +330,55 @@ export function AIReceptionist({
   };
 
   const save = () => void onSave(settings, messages);
+
+  const fillFactsFromWebsite = async () => {
+    if (factsBusy || factsLock.current) return;
+    const websiteUrl = settings.websiteUrl.trim();
+    if (!websiteUrl) {
+      setFactsNote('Enter your company website first.');
+      return;
+    }
+    factsLock.current = true;
+    setFactsBusy(true);
+    setFactsNote(null);
+    try {
+      const token = await getAccessToken();
+      if (!token) {
+        setFactsNote('Sign in again, then fill facts from your website.');
+        return;
+      }
+      const res = await fetch('/api/receptionist/website-facts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ websiteUrl }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setFactsNote(String(data.error || 'Could not read that website.'));
+        return;
+      }
+      const facts = String(data.facts || '').trim();
+      if (!facts) {
+        setFactsNote('That website did not include enough business details. Type the facts below.');
+        return;
+      }
+      const current = settingsRef.current;
+      onChangeSettings({
+        ...current,
+        websiteUrl: current.websiteUrl.trim() || String(data.websiteUrl || websiteUrl),
+        knowledgeBase: mergeWebsiteFactsIntoKnowledge(current.knowledgeBase, facts),
+      });
+      setFactsNote('Facts added from your website. Review them, then save the knowledge base.');
+    } catch {
+      setFactsNote('Could not reach the website. Check the address and try again.');
+    } finally {
+      factsLock.current = false;
+      setFactsBusy(false);
+    }
+  };
 
   const startTestCall = () => {
     setChat([{ role: 'agent', text: activeGreeting }]);
@@ -1051,16 +1106,29 @@ export function AIReceptionist({
               <h3 className="font-semibold text-lg">Knowledge base</h3>
               <p className="text-sm text-gray-600">
                 What the receptionist knows about your business — services, pricing ranges, service
-                area, brands you install, warranty, parking, deposit policy, etc. You can also paste
-                text from your website.
+                area, brands you install, warranty, parking, deposit policy, and hours. Enter your
+                company website and fill those facts in, or type them yourself.
               </p>
               <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Website (optional reference)</label>
-                <Input
-                  value={settings.websiteUrl}
-                  onChange={(e) => patch({ websiteUrl: e.target.value })}
-                  placeholder="https://yoursite.com"
-                />
+                <label className="block text-xs font-medium text-gray-500 mb-1">Company website</label>
+                <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+                  <Input
+                    value={settings.websiteUrl}
+                    onChange={(e) => patch({ websiteUrl: e.target.value })}
+                    placeholder="https://yoursite.com"
+                    className="flex-1"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void fillFactsFromWebsite()}
+                    disabled={factsBusy || saving || !settings.websiteUrl.trim()}
+                    className="shrink-0"
+                  >
+                    {factsBusy ? 'Reading website…' : 'Fill facts from website'}
+                  </Button>
+                </div>
+                {factsNote ? <p className="text-xs text-gray-600 mt-2">{factsNote}</p> : null}
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">Business facts & FAQs</label>
