@@ -4652,8 +4652,17 @@ export default function Home() {
       ...profile,
       ...loadedProfileWithoutBreakdown,
       crewSubscriptionActive: loadedProfile.crewSubscriptionActive ?? false,
-      chargeCCFee: loadedProfile.chargeCCFee ?? false,
-      ccFeePercentage: loadedProfile.ccFeePercentage ?? 3,
+      // Company fee toggle lives on SETTINGS. An older job snapshot must not uncheck it.
+      chargeCCFee:
+        serverProfile && 'chargeCCFee' in serverProfile
+          ? (serverProfile as any).chargeCCFee === true
+          : profile.chargeCCFee === true,
+      ccFeePercentage:
+        serverProfile && Number((serverProfile as any).ccFeePercentage) > 0
+          ? Math.max(0, Number((serverProfile as any).ccFeePercentage))
+          : Number(profile.ccFeePercentage) > 0
+            ? Math.max(0, Number(profile.ccFeePercentage))
+            : 3,
       autoSaveEnabled: 'autoSaveEnabled' in loadedProfile
         ? loadedProfile.autoSaveEnabled !== false
         : (cached.autoSaveEnabled ?? profile.autoSaveEnabled ?? true),
@@ -4907,8 +4916,18 @@ export default function Home() {
             'medium'
           ),
           crewSubscriptionActive: s.crewSubscriptionActive ?? l.crewSubscriptionActive ?? false,
-          chargeCCFee: s.chargeCCFee ?? l.chargeCCFee ?? false,
-          ccFeePercentage: s.ccFeePercentage ?? l.ccFeePercentage ?? 3,
+          chargeCCFee:
+            'chargeCCFee' in (s as any)
+              ? (s as any).chargeCCFee === true
+              : cached.chargeCCFee === true || (l as any).chargeCCFee === true,
+          ccFeePercentage:
+            Number((s as any).ccFeePercentage) > 0
+              ? Math.max(0, Number((s as any).ccFeePercentage))
+              : Number(cached.ccFeePercentage) > 0
+                ? Math.max(0, Number(cached.ccFeePercentage))
+                : Number((l as any).ccFeePercentage) > 0
+                  ? Math.max(0, Number((l as any).ccFeePercentage))
+                  : 3,
           autoSaveEnabled: 'autoSaveEnabled' in (s as any)
             ? (s as any).autoSaveEnabled !== false
             : ('autoSaveEnabled' in l
@@ -8577,6 +8596,10 @@ export default function Home() {
       aiReceptionistAddonActive: (nextProfile as any).aiReceptionistAddonActive === true,
       termsDisplayMode: nextProfile.termsDisplayMode === 'printed' ? 'printed' : 'link',
       paymentSettings: nextProfile.paymentSettings,
+      chargeCCFee: nextProfile.chargeCCFee === true,
+      ccFeePercentage: Number.isFinite(Number(nextProfile.ccFeePercentage))
+        ? Math.max(0, Number(nextProfile.ccFeePercentage))
+        : 3,
     });
     await upsertUserSettingsProfile(nextProfile);
     // Keep open estimate's embedded profile in sync, but SETTINGS row is source of truth
