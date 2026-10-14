@@ -4645,6 +4645,9 @@ export default function Home() {
       showCostBreakdownOnEstimate: _sc,
       showPriceBreakdownByLine: _sp,
       showDiscountOnEstimate: _sd,
+      chargeCCFee: _jobFee,
+      ccFeePercentage: _jobFeePct,
+      paymentSettings: _jobPay,
       ...loadedProfileWithoutBreakdown
     } = loadedProfile;
     setEstimateBreakdownSettings(getBreakdownSettingsFromDoc(loadedProfile));
@@ -4654,13 +4657,15 @@ export default function Home() {
       ...profile,
       ...loadedProfileWithoutBreakdown,
       crewSubscriptionActive: loadedProfile.crewSubscriptionActive ?? false,
-      // Company fee toggle lives on SETTINGS. An older job snapshot must not uncheck it.
-      chargeCCFee:
-        serverProfile && 'chargeCCFee' in serverProfile
+      // Company fee toggle lives on SETTINGS. An older job snapshot must not change it.
+      chargeCCFee: paymentSettingsTouchedRef.current
+        ? profileRef.current.chargeCCFee === true
+        : serverProfile && 'chargeCCFee' in serverProfile
           ? (serverProfile as any).chargeCCFee === true
           : profile.chargeCCFee === true,
-      ccFeePercentage:
-        serverProfile && Number((serverProfile as any).ccFeePercentage) > 0
+      ccFeePercentage: paymentSettingsTouchedRef.current
+        ? Math.max(0, Number(profileRef.current.ccFeePercentage) || 0) || 3
+        : serverProfile && Number((serverProfile as any).ccFeePercentage) > 0
           ? Math.max(0, Number((serverProfile as any).ccFeePercentage))
           : Number(profile.ccFeePercentage) > 0
             ? Math.max(0, Number(profile.ccFeePercentage))
@@ -4888,6 +4893,9 @@ export default function Home() {
           showCostBreakdownOnEstimate: _sc,
           showPriceBreakdownByLine: _sp,
           showDiscountOnEstimate: _sd,
+          chargeCCFee: _jobFee,
+          ccFeePercentage: _jobFeePct,
+          paymentSettings: _jobPay,
           ...loadedWithoutBreakdown
         } = l as any;
 
@@ -4920,18 +4928,18 @@ export default function Home() {
             'medium'
           ),
           crewSubscriptionActive: s.crewSubscriptionActive ?? l.crewSubscriptionActive ?? false,
-          chargeCCFee:
-            'chargeCCFee' in (s as any)
+          chargeCCFee: paymentSettingsTouchedRef.current
+            ? profileRef.current.chargeCCFee === true
+            : 'chargeCCFee' in (s as any)
               ? (s as any).chargeCCFee === true
-              : cached.chargeCCFee === true || (l as any).chargeCCFee === true,
-          ccFeePercentage:
-            Number((s as any).ccFeePercentage) > 0
+              : cached.chargeCCFee === true,
+          ccFeePercentage: paymentSettingsTouchedRef.current
+            ? Math.max(0, Number(profileRef.current.ccFeePercentage) || 0) || 3
+            : Number((s as any).ccFeePercentage) > 0
               ? Math.max(0, Number((s as any).ccFeePercentage))
               : Number(cached.ccFeePercentage) > 0
                 ? Math.max(0, Number(cached.ccFeePercentage))
-                : Number((l as any).ccFeePercentage) > 0
-                  ? Math.max(0, Number((l as any).ccFeePercentage))
-                  : 3,
+                : 3,
           autoSaveEnabled: 'autoSaveEnabled' in (s as any)
             ? (s as any).autoSaveEnabled !== false
             : ('autoSaveEnabled' in l
@@ -10909,17 +10917,18 @@ export default function Home() {
           isTest: !!json.isTest,
         });
         if (json.connectReady || json.connected) {
+          const currentPay = mergePaymentSettings(profileRef.current.paymentSettings);
           const nextProfile = {
             ...profileRef.current,
             paymentSettings: {
-              ...mergePaymentSettings(profileRef.current.paymentSettings),
+              ...currentPay,
               stripe: {
-                ...mergePaymentSettings(profileRef.current.paymentSettings).stripe,
-                enabled: true,
+                ...currentPay.stripe,
                 connected: !!json.connectReady || !!json.connected,
               },
             },
           };
+          profileRef.current = nextProfile;
           setProfile(nextProfile);
         }
       }
@@ -16321,10 +16330,24 @@ export default function Home() {
                           type="checkbox"
                           checked={!!profile.chargeCCFee}
                           onChange={(e) => {
-                            const nextProfile = { ...profileRef.current, chargeCCFee: e.target.checked };
+                            const chargeCCFee = e.target.checked;
+                            paymentSettingsTouchedRef.current = true;
+                            const nextProfile = { ...profileRef.current, chargeCCFee };
                             profileRef.current = nextProfile;
                             setProfile(nextProfile);
-                            void saveProfileSettings(nextProfile, { quiet: true });
+                            void saveProfileSettings(nextProfile, { quiet: true })
+                              .then(() => {
+                                showMessage(
+                                  chargeCCFee
+                                    ? 'Credit card processing fee is on.'
+                                    : 'Credit card processing fee is off.'
+                                );
+                              })
+                              .catch(() => {
+                                showMessage(
+                                  'Could not save the credit card processing fee. Check your connection and try again.'
+                                );
+                              });
                           }}
                           className="mt-1 w-5 h-5 accent-[#10b981]"
                         />
@@ -16357,6 +16380,7 @@ export default function Home() {
                               setProfile(nextProfile);
                             }}
                             onBlur={() => {
+                              paymentSettingsTouchedRef.current = true;
                               void saveProfileSettings(profileRef.current, { quiet: true });
                             }}
                             className="w-20 text-right"
