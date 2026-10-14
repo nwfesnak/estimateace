@@ -311,6 +311,10 @@ export async function createJobCheckoutSession(
               allow_redirects: 'always',
             },
           }),
+    // Guest checkout. Hide Stripe Link so the client is not asked to create an account.
+    wallet_options: {
+      link: { display: 'never' },
+    },
   };
 
   if (input.clientEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.clientEmail)) {
@@ -325,6 +329,13 @@ export async function createJobCheckoutSession(
       );
     } catch (e: any) {
       const msg = String(e?.message || '');
+      if (/wallet_options/i.test(msg)) {
+        const { wallet_options: _ignored, ...withoutLink } = params;
+        return await stripe.checkout.sessions.create(
+          withoutLink as Stripe.Checkout.SessionCreateParams,
+          opts
+        );
+      }
       // A card-only list can be rejected. Retry normal Checkout so the client can still pay.
       if (cardOnly && /payment_method|payment method/i.test(msg)) {
         const autoCard = {
