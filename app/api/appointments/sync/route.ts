@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { settingsDocId, type StoredAppointment } from '@/lib/appointment-reminders';
-import { mergeFilledPaymentSettings } from '@/lib/client-payment-options';
 
 async function verifyUser(request: NextRequest) {
   const authHeader = request.headers.get('authorization');
@@ -47,6 +46,8 @@ export async function POST(request: NextRequest) {
       .maybeSingle();
     const existing =
       existingRow?.profile && typeof existingRow.profile === 'object' ? existingRow.profile : {};
+    const prevPayments = (existing as { paymentSettings?: unknown }).paymentSettings;
+    const prevFee = (existing as { chargeCCFee?: unknown }).chargeCCFee;
 
     const { error } = await supabase.from('estimates').upsert({
       id: settingsId,
@@ -57,10 +58,16 @@ export async function POST(request: NextRequest) {
       profile: {
         ...existing,
         ...profile,
-        paymentSettings: mergeFilledPaymentSettings(
-          (existing as any).paymentSettings,
-          (profile as any).paymentSettings
-        ),
+        // Calendar sync must not turn PayPal, Venmo, or the card-fee switch back on.
+        paymentSettings:
+          prevPayments && typeof prevPayments === 'object'
+            ? prevPayments
+            : (profile as { paymentSettings?: unknown }).paymentSettings,
+        chargeCCFee: typeof prevFee === 'boolean' ? prevFee : (profile as { chargeCCFee?: unknown }).chargeCCFee,
+        ccFeePercentage:
+          existing && typeof existing === 'object' && 'ccFeePercentage' in existing
+            ? (existing as { ccFeePercentage?: unknown }).ccFeePercentage
+            : (profile as { ccFeePercentage?: unknown }).ccFeePercentage,
         _appointments: appointments,
       },
       updated_at: new Date().toISOString(),

@@ -1161,6 +1161,8 @@ export default function Home() {
   const lastSavedCompanyFingerprintRef = useRef('');
   const profileRef = useRef(profile);
   profileRef.current = profile;
+  /** After the contractor edits Client Payments, background profile reloads must not flip those switches. */
+  const paymentSettingsTouchedRef = useRef(false);
   /** Keep profile saves in order so a blank payment write cannot finish after a real one. */
   const settingsSaveChainRef = useRef(Promise.resolve());
   const [profileAutoSaveLabel, setProfileAutoSaveLabel] = useState('');
@@ -4749,10 +4751,12 @@ export default function Home() {
               ? Math.max(0, Number(loadedProfile.escrowMinimumAmount) || 0)
               : Math.max(0, Number(profile.escrowMinimumAmount) || 0))),
       depositPercentage: loadedProfile.depositPercentage ?? cached.depositPercentage ?? profile.depositPercentage ?? 10,
-      paymentSettings: mergeFilledPaymentSettings(
-        loadedProfile.paymentSettings,
-        serverProfile?.paymentSettings
-      ),
+      paymentSettings: paymentSettingsTouchedRef.current
+        ? mergePaymentSettings(profileRef.current.paymentSettings)
+        : mergeFilledPaymentSettings(
+            loadedProfile.paymentSettings,
+            serverProfile?.paymentSettings
+          ),
       logoUrl: loadedProfile.logoUrl ?? '',
       logoSize: loadedProfile.logoSize ?? 'medium',
       language: preferredLang,
@@ -5020,11 +5024,13 @@ export default function Home() {
                   ? Math.max(0, Number(l.escrowMinimumAmount) || 0)
                   : 10000)),
           depositPercentage: s.depositPercentage ?? l.depositPercentage ?? cached.depositPercentage ?? 10,
-          paymentSettings: mergeFilledPaymentSettings(
-            l.paymentSettings,
-            cached.paymentSettings,
-            serverProfile?.paymentSettings
-          ),
+          paymentSettings: paymentSettingsTouchedRef.current
+            ? mergePaymentSettings(profileRef.current.paymentSettings)
+            : mergeFilledPaymentSettings(
+                l.paymentSettings,
+                cached.paymentSettings,
+                serverProfile?.paymentSettings
+              ),
           // SMS 2FA forced off until phone line is active
           twoFactorEnabled: false,
           twoFactorPhone: pickFilled(
@@ -8432,13 +8438,19 @@ export default function Home() {
         },
         body: JSON.stringify({
           appointments: nextAppointments,
-          profile: {
-            ...getSafeProfileSnapshot(nextProfile),
-            email: nextProfile.email || '',
-            phone: nextProfile.phone || '',
-            name: nextProfile.name || '',
-            appointmentReminderEnabled: !!nextProfile.appointmentReminderEnabled,
-          },
+          profile: (() => {
+            const snap = getSafeProfileSnapshot(nextProfile) as Record<string, unknown>;
+            delete snap.paymentSettings;
+            delete snap.chargeCCFee;
+            delete snap.ccFeePercentage;
+            return {
+              ...snap,
+              email: nextProfile.email || '',
+              phone: nextProfile.phone || '',
+              name: nextProfile.name || '',
+              appointmentReminderEnabled: !!nextProfile.appointmentReminderEnabled,
+            };
+          })(),
         }),
       });
     } catch (err) {
@@ -9665,6 +9677,7 @@ export default function Home() {
 
   const updatePayPalHandle = (value: string) => {
     const handle = cleanPayPalHandle(value);
+    paymentSettingsTouchedRef.current = true;
     const current = profileRef.current;
     const nextProfile = {
       ...current,
@@ -10044,6 +10057,7 @@ export default function Home() {
   };
 
   const updateVenmoUsername = (value: string) => {
+    paymentSettingsTouchedRef.current = true;
     const handle = cleanVenmoHandle(value);
     const current = profileRef.current;
     const nextProfile = {
@@ -10075,6 +10089,7 @@ export default function Home() {
   const [mailCheckSaveLabel, setMailCheckSaveLabel] = useState('');
 
   const updateMailCheckAddress = (address: string, options?: { immediate?: boolean }) => {
+    paymentSettingsTouchedRef.current = true;
     const runSave = () => {
       const nextProfile = {
         ...profileRef.current,
@@ -10118,6 +10133,7 @@ export default function Home() {
   };
 
   const updateZelleSettings = (patch: { handle?: string; qrUrl?: string; enabled?: boolean }) => {
+    paymentSettingsTouchedRef.current = true;
     const base = profileRef.current;
     const current = mergePaymentSettings(base.paymentSettings).zelle;
     const nextProfile = {
@@ -10846,6 +10862,7 @@ export default function Home() {
   };
 
   const togglePaymentMethod = (method: string, enabled: boolean) => {
+    paymentSettingsTouchedRef.current = true;
     const current = profileRef.current;
     const nextProfile = {
       ...current,
@@ -10856,7 +10873,18 @@ export default function Home() {
     };
     profileRef.current = nextProfile;
     setProfile(nextProfile);
-    void saveProfileSettings(nextProfile);
+    const label = getPaymentMethodMeta(method).label;
+    void saveProfileSettings(nextProfile)
+      .then(() => {
+        showMessage(
+          enabled
+            ? `${label} is on for client payments.`
+            : `${label} is off for client payments.`
+        );
+      })
+      .catch(() => {
+        showMessage('Could not save that payment option. Check your connection and try again.');
+      });
   };
 
   const refreshStripeConnectStatus = async (sync = false) => {
