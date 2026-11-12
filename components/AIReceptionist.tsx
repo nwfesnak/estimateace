@@ -199,13 +199,6 @@ export function AIReceptionist({
         setLineError('Please log in again.');
         return;
       }
-      if (
-        !confirm(
-          `AI Receptionist add-on is ${addonAmountDisplay}/month.\n\nYou’ll confirm payment on the next Stripe screen. After payment, come back here to enable your AI phone line.`
-        )
-      ) {
-        return;
-      }
       const res = await fetch('/api/receptionist/checkout', {
         method: 'POST',
         headers: {
@@ -226,10 +219,10 @@ export function AIReceptionist({
         return;
       }
       if (json.url) {
-        window.location.href = json.url;
+        window.location.assign(json.url);
         return;
       }
-      setLineError('No checkout URL returned.');
+      setLineError(json.error || json.message || 'No checkout URL returned.');
     } catch {
       setLineError('Network error starting checkout.');
     } finally {
@@ -691,7 +684,7 @@ export function AIReceptionist({
           >
             {lineBusy ? 'Checking…' : 'I already paid — check again'}
           </button>
-          {lineError && tab !== 'phone' && (
+          {lineError && (
             <p className="text-sm text-red-700">{lineError}</p>
           )}
         </div>
