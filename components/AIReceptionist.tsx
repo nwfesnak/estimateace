@@ -34,6 +34,8 @@ type AIReceptionistProps = {
   onBack: () => void;
   /** Keep Billing / Profile subscription badge in sync when Stripe status changes */
   onAddonStatusChange?: (active: boolean, billing?: Record<string, unknown> | null) => void;
+  /** Company Profile phone. Editing the public business number updates this. */
+  onCompanyPhoneChange?: (phone: string) => void;
   /** Profile already knows this account paid. Avoid flashing a pay button. */
   subscriptionActive?: boolean;
 };
@@ -63,6 +65,7 @@ export function AIReceptionist({
   saving = false,
   onBack,
   onAddonStatusChange,
+  onCompanyPhoneChange,
   subscriptionActive = false,
 }: AIReceptionistProps) {
   const [tab, setTab] = React.useState<'inbox' | 'phone' | 'setup' | 'knowledge' | 'test'>('inbox');
@@ -82,7 +85,6 @@ export function AIReceptionist({
   const [transferNumber, setTransferNumber] = React.useState(companyPhone || '');
   const [addonActive, setAddonActive] = React.useState(subscriptionActive);
   const [addonAmountDisplay, setAddonAmountDisplay] = React.useState('$49.99');
-  const [publicBusinessNumber, setPublicBusinessNumber] = React.useState(companyPhone || '');
   const [copiedForward, setCopiedForward] = React.useState(false);
   const [factsBusy, setFactsBusy] = React.useState(false);
   const [factsNote, setFactsNote] = React.useState<string | null>(null);
@@ -100,9 +102,6 @@ export function AIReceptionist({
   getAccessTokenRef.current = getAccessToken;
   const onAddonStatusChangeRef = React.useRef(onAddonStatusChange);
   onAddonStatusChangeRef.current = onAddonStatusChange;
-  const companyPhoneRef = React.useRef(companyPhone);
-  companyPhoneRef.current = companyPhone;
-
   const refreshLine = React.useCallback(async () => {
     try {
       const token = await getAccessTokenRef.current();
@@ -123,11 +122,6 @@ export function AIReceptionist({
       setAddonActive(active);
       if (json.addonAmountDisplay) setAddonAmountDisplay(String(json.addonAmountDisplay));
       if (json.config?.transferNumber) setTransferNumber(String(json.config.transferNumber));
-      if (json.config?.publicBusinessNumber) {
-        setPublicBusinessNumber(String(json.config.publicBusinessNumber));
-      } else if (companyPhoneRef.current) {
-        setPublicBusinessNumber(companyPhoneRef.current);
-      }
       onAddonStatusChangeRef.current?.(active, json.billing || null);
     } catch {
       /* ignore */
@@ -302,7 +296,7 @@ export function AIReceptionist({
         },
         body: JSON.stringify({
           transferNumber,
-          publicBusinessNumber,
+          publicBusinessNumber: companyPhone,
           ...(lineReady ? { phoneNumber: String(linePhone || '').trim() } : {}),
           branding: { businessName: companyName, greeting: settings.greeting },
         }),
@@ -952,10 +946,14 @@ export function AIReceptionist({
                       Your public business number (what customers dial)
                     </label>
                     <Input
-                      value={publicBusinessNumber}
-                      onChange={(e) => setPublicBusinessNumber(e.target.value)}
-                      placeholder={companyPhone || '(555) 123-4567'}
+                      value={companyPhone}
+                      onChange={(e) => onCompanyPhoneChange?.(e.target.value)}
+                      placeholder="(555) 123-4567"
+                      inputMode="tel"
                     />
+                    <p className="text-xs text-sky-800 mt-1">
+                      This is the phone number on Company Profile. Changing it here updates that number.
+                    </p>
                   </div>
                   <div className="rounded-xl bg-white border border-sky-200 p-3 text-sm space-y-2">
                     <div className="space-y-2">
@@ -991,7 +989,7 @@ export function AIReceptionist({
                         busy / no-answer only — your choice).
                       </li>
                       <li>
-                        Keep showing <strong>{publicBusinessNumber || 'your business number'}</strong> on
+                        Keep showing <strong>{companyPhone || 'your business number'}</strong> on
                         your website, trucks, and Google Business — do not advertise the Twilio number.
                       </li>
                       <li>
@@ -1055,7 +1053,7 @@ export function AIReceptionist({
               <div className="rounded-xl bg-slate-50 border p-3 text-sm">
                 <div className="font-medium text-gray-700">Public business number</div>
                 <div className="text-gray-600">
-                  {publicBusinessNumber || companyPhone || 'Add in Phone line / Profile'}
+                  {companyPhone || 'Add it on Company Profile'}
                 </div>
                 <div className="font-medium text-gray-700 mt-2">Private AI forward-to number</div>
                 <div className="text-gray-600">{linePhone || 'Not provisioned yet'}</div>

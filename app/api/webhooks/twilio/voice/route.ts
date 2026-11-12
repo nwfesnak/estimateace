@@ -104,8 +104,8 @@ export async function POST(request: NextRequest) {
 
     const hostCandidates = [
       tenant.config.transferNumber || '',
-      tenant.config.publicBusinessNumber || '',
       profilePhone || '',
+      tenant.config.publicBusinessNumber || '',
     ];
     const hostRing =
       hostCandidates

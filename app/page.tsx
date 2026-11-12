@@ -8504,6 +8504,15 @@ export default function Home() {
       slogan: pickFilled(snapshot.slogan, existing?.slogan),
       address: pickFilled(snapshot.address, existing?.address),
       phone: pickFilled(snapshot.phone, existing?.phone),
+      receptionistConfig:
+        existing?.receptionistConfig && typeof existing.receptionistConfig === 'object'
+          ? {
+              ...existing.receptionistConfig,
+              publicBusinessNumber: String(
+                pickFilled(snapshot.phone, existing?.phone) || ''
+              ),
+            }
+          : existing?.receptionistConfig,
       email: pickFilled(snapshot.email, existing?.email),
       city: pickFilled(snapshot.city, existing?.city),
       state: pickFilled(snapshot.state, existing?.state),
@@ -17614,6 +17623,9 @@ export default function Home() {
             <AIReceptionist
               companyName={profile.company || 'Your Company'}
               companyPhone={profile.phone || ''}
+              onCompanyPhoneChange={(phone) => {
+                setProfile((prev) => ({ ...prev, phone }));
+              }}
               companyEmail={profile.email || ''}
               settings={receptionistSettings}
               messages={receptionistMessages}
