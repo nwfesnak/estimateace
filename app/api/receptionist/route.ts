@@ -145,10 +145,33 @@ export async function PATCH(request: NextRequest) {
             ? String(body.publicBusinessNumber)
             : current.publicBusinessNumber,
         afterHours: body.afterHours || current.afterHours,
+        twilio:
+          body.phoneNumber !== undefined && current.twilio
+            ? {
+                ...current.twilio,
+                phoneNumber: String(body.phoneNumber || '').trim(),
+              }
+            : current.twilio,
       },
       user.id,
       current.branding.businessName
     );
+
+    if (body.phoneNumber !== undefined) {
+      const editedLine = String(body.phoneNumber || '').trim();
+      if (!editedLine) {
+        return NextResponse.json(
+          { error: 'Enter the private AI line number calls should forward to.' },
+          { status: 400 }
+        );
+      }
+      if (!current.twilio) {
+        return NextResponse.json(
+          { error: 'No AI phone line yet. Enable the receptionist line first.' },
+          { status: 400 }
+        );
+      }
+    }
 
     // Can't enable without a provisioned number
     if (next.enabled && !next.twilio?.phoneNumber) {

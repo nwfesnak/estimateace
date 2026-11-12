@@ -73,6 +73,8 @@ export function AIReceptionist({
   const [filter, setFilter] = React.useState<'all' | 'new' | 'urgent'>('all');
   const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
   const [linePhone, setLinePhone] = React.useState<string | null>(null);
+  const [lineReady, setLineReady] = React.useState(false);
+  const linePhoneDirtyRef = React.useRef(false);
   const [lineStatus, setLineStatus] = React.useState<string>('none');
   const [lineBusy, setLineBusy] = React.useState(false);
   const [lineError, setLineError] = React.useState<string | null>(null);
@@ -104,8 +106,11 @@ export function AIReceptionist({
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) return;
-      const phone = json.phoneNumber || json.config?.phoneNumber || null;
-      setLinePhone(phone);
+      const phone = String(json.phoneNumber || json.config?.phoneNumber || '').trim();
+      if (phone) {
+        setLineReady(true);
+        if (!linePhoneDirtyRef.current) setLinePhone(phone);
+      }
       setLineStatus(String(json.status || json.config?.status || 'none'));
       const active = Boolean(json.addonActive || json.subscribed || phone);
       setAddonActive(active);
@@ -259,7 +264,8 @@ export function AIReceptionist({
         setLineError(json.error || 'Could not provision AI phone number.');
         return;
       }
-      setLinePhone(json.phoneNumber || null);
+      setLinePhone(json.phoneNumber || '');
+      setLineReady(Boolean(json.phoneNumber));
       setLineStatus(String(json.status || 'active'));
       setAddonActive(true);
       if (json.alreadyProvisioned) {
@@ -290,6 +296,7 @@ export function AIReceptionist({
         body: JSON.stringify({
           transferNumber,
           publicBusinessNumber,
+          ...(lineReady ? { phoneNumber: String(linePhone || '').trim() } : {}),
           branding: { businessName: companyName, greeting: settings.greeting },
         }),
       });
@@ -298,6 +305,7 @@ export function AIReceptionist({
         setLineError(json.error || 'Could not save line settings.');
         return;
       }
+      linePhoneDirtyRef.current = false;
       await refreshLine();
     } catch {
       setLineError('Network error saving line settings.');
@@ -871,7 +879,7 @@ export function AIReceptionist({
                 )}
               </div>
 
-              {linePhone ? (
+              {lineReady ? (
                 <div className="rounded-2xl border-2 border-emerald-300 bg-emerald-50 p-5 text-center">
                   <div className="text-xs uppercase tracking-wide text-emerald-800 font-semibold">
                     AI line ready · {lineStatus}
@@ -921,7 +929,7 @@ export function AIReceptionist({
                 </p>
               )}
 
-              {linePhone && (
+              {lineReady && (
                 <div className="rounded-2xl border-2 border-sky-300 bg-sky-50 p-5 space-y-3">
                   <h4 className="font-semibold text-sky-950 text-base">
                     Keep advertising one number — forward to AI
@@ -943,16 +951,30 @@ export function AIReceptionist({
                     />
                   </div>
                   <div className="rounded-xl bg-white border border-sky-200 p-3 text-sm space-y-2">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div>
-                        <div className="text-xs uppercase text-gray-500 font-semibold">
-                          Forward calls to (private AI line)
-                        </div>
-                        <div className="font-bold text-lg text-slate-900 tracking-tight">{linePhone}</div>
+                    <div className="space-y-2">
+                      <label className="block text-xs uppercase text-gray-500 font-semibold" htmlFor="ai-forward-number">
+                        Forward calls to (private AI line)
+                      </label>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Input
+                          id="ai-forward-number"
+                          value={linePhone || ''}
+                          onChange={(e) => {
+                            linePhoneDirtyRef.current = true;
+                            setLinePhone(e.target.value);
+                          }}
+                          placeholder="Private AI number"
+                          inputMode="tel"
+                          className="font-semibold text-base max-w-xs bg-white"
+                        />
+                        <Button type="button" variant="outline" size="sm" onClick={() => void copyAiNumber()}>
+                          {copiedForward ? 'Copied!' : 'Copy AI number'}
+                        </Button>
                       </div>
-                      <Button type="button" variant="outline" size="sm" onClick={() => void copyAiNumber()}>
-                        {copiedForward ? 'Copied!' : 'Copy AI number'}
-                      </Button>
+                      <p className="text-xs text-slate-600">
+                        Correct this number if it is wrong, then tap Save phone settings. Your business
+                        line should forward to this number.
+                      </p>
                     </div>
                     <ol className="list-decimal pl-5 text-xs text-slate-700 space-y-1.5 pt-1">
                       <li>Copy the AI number above.</li>

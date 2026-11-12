@@ -126,6 +126,34 @@ export async function saveReceptionistConfig(
   });
   if (error) throw new Error(error.message);
 
+  if (nextConfig.twilio?.phoneNumber) {
+    const secretsId = receptionistSecretsRowId(userId);
+    const { data: secretsExisting } = await admin
+      .from('estimates')
+      .select('profile')
+      .eq('id', secretsId)
+      .maybeSingle();
+    const prevSecrets = secretsExisting?.profile;
+    if (prevSecrets && typeof prevSecrets === 'object') {
+      const prevPhone = String((prevSecrets as { phoneNumber?: string }).phoneNumber || '').trim();
+      if (prevPhone !== nextConfig.twilio.phoneNumber) {
+        await admin.from('estimates').upsert({
+          id: secretsId,
+          user_id: userId,
+          jobName: '__receptionist_secrets__',
+          documentType: 'settings',
+          items: [],
+          profile: {
+            ...(prevSecrets as Record<string, unknown>),
+            phoneNumber: nextConfig.twilio.phoneNumber,
+            updatedAt: new Date().toISOString(),
+          },
+          updated_at: new Date().toISOString(),
+        });
+      }
+    }
+  }
+
   if (secrets?.subaccountAuthToken) {
     const secretsId = receptionistSecretsRowId(userId);
     await admin.from('estimates').upsert({
