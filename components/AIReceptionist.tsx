@@ -96,9 +96,16 @@ export function AIReceptionist({
     companyName
   );
 
+  const getAccessTokenRef = React.useRef(getAccessToken);
+  getAccessTokenRef.current = getAccessToken;
+  const onAddonStatusChangeRef = React.useRef(onAddonStatusChange);
+  onAddonStatusChangeRef.current = onAddonStatusChange;
+  const companyPhoneRef = React.useRef(companyPhone);
+  companyPhoneRef.current = companyPhone;
+
   const refreshLine = React.useCallback(async () => {
     try {
-      const token = await getAccessToken();
+      const token = await getAccessTokenRef.current();
       if (!token) return;
       const res = await fetch('/api/receptionist', {
         headers: { Authorization: `Bearer ${token}` },
@@ -118,14 +125,14 @@ export function AIReceptionist({
       if (json.config?.transferNumber) setTransferNumber(String(json.config.transferNumber));
       if (json.config?.publicBusinessNumber) {
         setPublicBusinessNumber(String(json.config.publicBusinessNumber));
-      } else if (companyPhone) {
-        setPublicBusinessNumber(companyPhone);
+      } else if (companyPhoneRef.current) {
+        setPublicBusinessNumber(companyPhoneRef.current);
       }
-      onAddonStatusChange?.(active, json.billing || null);
+      onAddonStatusChangeRef.current?.(active, json.billing || null);
     } catch {
       /* ignore */
     }
-  }, [getAccessToken, companyPhone, onAddonStatusChange]);
+  }, []);
 
   React.useEffect(() => {
     void refreshLine();
