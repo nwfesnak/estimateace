@@ -15497,6 +15497,10 @@ export default function Home() {
                       <div>
                         <label className="block text-sm font-semibold mb-2">{t('phone')}</label>
                         <Input value={profile.phone} onChange={e => setProfile(prev => ({...prev, phone: e.target.value}))} />
+                        <p className="text-xs text-gray-500 mt-1">
+                          This is the number to show on your website, trucks, and Google Business.
+                          The AI Receptionist uses this same number and does not advertise the private AI line.
+                        </p>
                       </div>
                       <div>
                         <label className="block text-sm font-semibold mb-2">{t('email')}</label>

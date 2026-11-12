@@ -952,7 +952,7 @@ export function AIReceptionist({
                       inputMode="tel"
                     />
                     <p className="text-xs text-sky-800 mt-1">
-                      This is the phone number on Company Profile. Changing it here updates that number.
+                      Same number as Company Profile → Phone. Changing it here updates your company profile.
                     </p>
                   </div>
                   <div className="rounded-xl bg-white border border-sky-200 p-3 text-sm space-y-2">
@@ -989,8 +989,9 @@ export function AIReceptionist({
                         busy / no-answer only — your choice).
                       </li>
                       <li>
-                        Keep showing <strong>{companyPhone || 'your business number'}</strong> on
+                        Keep showing <strong>{companyPhone || 'your Company Profile phone'}</strong> on
                         your website, trucks, and Google Business — do not advertise the Twilio number.
+                        That is the Phone saved on your Company Profile.
                       </li>
                       <li>
                         Turn AI Receptionist <strong>On</strong> (top of this page) and Save when you want
