@@ -98,18 +98,30 @@ export function getTrialDays(): number {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_TRIAL_DAYS;
 }
 
-/** Promo codes from marketing landers (e.g. ?promo=2mo → 60 days). */
+/** Promo codes from marketing landers (e.g. ?promo=2mo → 60 days). A named promo wins over a client-sent day count. */
 export function resolveTrialDaysFromPromo(promo?: string | null, explicitDays?: number | null): number {
-  if (explicitDays != null && Number.isFinite(explicitDays) && explicitDays > 0) {
-    return Math.min(365, Math.floor(Number(explicitDays)));
-  }
   const p = String(promo || '')
     .trim()
     .toLowerCase();
+  if (p === '3mo' || p === '3months' || p === '90' || p === 'three-months') return 90;
   if (p === '2mo' || p === '2months' || p === '60' || p === 'two-months') return 60;
   if (p === '6mo' || p === '6months' || p === '180' || p === 'six-months') return 180;
+  if (explicitDays != null && Number.isFinite(explicitDays) && explicitDays > 0) {
+    return Math.min(365, Math.floor(Number(explicitDays)));
+  }
   return getTrialDays();
 }
+
+/** 3-month lander (?promo=3mo). Card is not collected at signup. */
+export function isThreeMonthPromo(promo?: string | null): boolean {
+  const p = String(promo || '')
+    .trim()
+    .toLowerCase();
+  return p === '3mo' || p === '3months' || p === '90' || p === 'three-months';
+}
+
+export const THREE_MONTH_PROMO_DAYS = 90;
+export const THREE_MONTH_PROMO_LIMIT = 20;
 
 export function normalizeBillingSnapshot(raw: unknown): BillingSnapshot {
   const r = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};

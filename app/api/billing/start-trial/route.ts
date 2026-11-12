@@ -3,9 +3,13 @@ import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import {
   ensureTrialEndsAt,
+  isThreeMonthPromo,
   normalizeBillingSnapshot,
   resolveTrialDaysFromPromo,
+  THREE_MONTH_PROMO_DAYS,
+  THREE_MONTH_PROMO_LIMIT,
 } from '@/lib/billing';
+import { claimThreeMonthPromoSpot } from '@/lib/promo-3mo';
 
 /**
  * Seed free trial + preferred plan (monthly|yearly) after signup from /trial page.
@@ -57,7 +61,28 @@ export async function POST(request: NextRequest) {
 
     // Only seed trial if not already active paid
     if (snapshot.status !== 'active') {
-      if (!snapshot.trialEndsAt) {
+      if (isThreeMonthPromo(promo)) {
+        const claim = await claimThreeMonthPromoSpot(admin, user.id);
+        if (!claim.ok) {
+          return NextResponse.json(
+            {
+              error: `This 3-month offer is full. All ${THREE_MONTH_PROMO_LIMIT} spots are taken.`,
+              full: true,
+              limit: THREE_MONTH_PROMO_LIMIT,
+            },
+            { status: 409 }
+          );
+        }
+        if (!claim.already || !snapshot.trialEndsAt) {
+          snapshot = ensureTrialEndsAt(
+            { ...snapshot, status: 'none', trialEndsAt: null },
+            new Date(),
+            THREE_MONTH_PROMO_DAYS
+          );
+        } else if (snapshot.status === 'none') {
+          snapshot = { ...snapshot, status: 'trialing' };
+        }
+      } else if (!snapshot.trialEndsAt) {
         snapshot = ensureTrialEndsAt(
           { ...snapshot, status: 'none', trialEndsAt: null },
           new Date(),
@@ -107,6 +132,7 @@ export async function POST(request: NextRequest) {
       phone: phone || (prev as any).phone || '',
       email: user.email || (prev as any).email || '',
       preferredBillingPlan: plan,
+      ...(isThreeMonthPromo(promo) ? { signupPromo: '3mo' } : {}),
     };
 
     await admin.from('estimates').upsert({

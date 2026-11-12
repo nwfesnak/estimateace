@@ -14,9 +14,17 @@ function trialDaysForPromo(promo: string | null): number {
   const p = String(promo || '')
     .trim()
     .toLowerCase();
+  if (p === '3mo' || p === '3months' || p === '90' || p === 'three-months') return 90;
   if (p === '2mo' || p === '2months' || p === '60' || p === 'two-months') return 60;
   if (p === '6mo' || p === '6months' || p === '180' || p === 'six-months') return 180;
   return DEFAULT_TRIAL_DAYS;
+}
+
+function isThreeMonthOffer(promo: string | null): boolean {
+  const p = String(promo || '')
+    .trim()
+    .toLowerCase();
+  return p === '3mo' || p === '3months' || p === '90' || p === 'three-months';
 }
 
 function TrialForm() {
@@ -25,14 +33,17 @@ function TrialForm() {
     searchParams.get('plan') === 'yearly' ? 'yearly' : 'monthly';
   const promo = searchParams.get('promo');
   const trialDays = trialDaysForPromo(promo);
+  const threeMonthOffer = isThreeMonthOffer(promo);
   const trialLabel =
     trialDays >= 180
       ? '6-month'
-      : trialDays >= 60
-        ? '2-month'
-        : trialDays === 14
-          ? '14-day'
-          : `${trialDays}-day`;
+      : trialDays >= 90
+        ? '3-month'
+        : trialDays >= 60
+          ? '2-month'
+          : trialDays === 14
+            ? '14-day'
+            : `${trialDays}-day`;
 
   const [plan, setPlan] = useState<Plan>(initialPlan);
   const [company, setCompany] = useState('');
@@ -84,6 +95,19 @@ function TrialForm() {
       return;
     }
 
+    if (threeMonthOffer) {
+      try {
+        const spotsRes = await fetch('/api/billing/promo-3mo', { cache: 'no-store' });
+        const spots = await spotsRes.json().catch(() => ({}));
+        if (spotsRes.ok && spots.open === false) {
+          setError('This 3-month offer is full. All 20 spots are taken.');
+          return;
+        }
+      } catch {
+        /* server still enforces the 20-signup cap */
+      }
+    }
+
     const supabase = getSupabaseClient();
     if (!supabase) {
       setError(getSupabaseConfigHelpMessage());
@@ -101,6 +125,7 @@ function TrialForm() {
             full_name: trimmedName,
             phone: phone.trim(),
             preferred_plan: plan,
+            promo: promo || '',
           },
         },
       });
@@ -115,7 +140,7 @@ function TrialForm() {
         const token = data.session.access_token;
         // Seed trial + preferred plan
         try {
-          await fetch('/api/billing/start-trial', {
+          const trialRes = await fetch('/api/billing/start-trial', {
             method: 'POST',
             headers: {
               Authorization: `Bearer ${token}`,
@@ -130,7 +155,18 @@ function TrialForm() {
               trialDays,
             }),
           });
+          if (threeMonthOffer && !trialRes.ok) {
+            const trialJson = await trialRes.json().catch(() => ({}));
+            setError(
+              trialJson.error || 'This 3-month offer is full. All 20 spots are taken.'
+            );
+            return;
+          }
         } catch {
+          if (threeMonthOffer) {
+            setError('Could not start the 3-month offer. Please try again.');
+            return;
+          }
           /* trial still seeds on first status poll */
         }
 
@@ -143,9 +179,10 @@ function TrialForm() {
 
       if (data.user && !data.session) {
         setInfo(
-          'Account created! Check your email to confirm, then log in. Your 14-day trial starts on first login. You chose: ' +
+          `Account created! Check your email to confirm, then log in. Your ${trialLabel} free trial (${trialDays} days) starts on first login. You chose: ` +
             planLabel +
-            ` (${planPrice} after trial).`
+            ` (${planPrice} after trial).` +
+            (threeMonthOffer ? ' No credit card is required until the 3 months end.' : '')
         );
         return;
       }
@@ -182,7 +219,8 @@ function TrialForm() {
               {promo === '2mo' ||
               promo === '2months' ||
               promo === '6mo' ||
-              promo === '6months'
+              promo === '6months' ||
+              threeMonthOffer
                 ? ' · Limited offer'
                 : ''}
             </p>
@@ -191,9 +229,12 @@ function TrialForm() {
             </h1>
             <p className="text-sm text-slate-600 mt-2">
               This is the only place to create a new EstimateAce account (from the website or Sign
-              Up). Enter your details for a {trialLabel} free trial ({trialDays} days). After the
-              trial you will be billed for the plan you choose below unless you cancel. Then use the
-              same email and password to log in at app.estimateace.com.
+              Up). Enter your details for a {trialLabel} free trial ({trialDays} days).
+              {threeMonthOffer
+                ? ' No credit card is required to start. After 90 days you will need to pay for the plan you choose below to keep the account. '
+                : ' After the trial you will be billed for the plan you choose below unless you cancel. '}
+              Then use the same email and password to log in at app.estimateace.com.
+              {threeMonthOffer ? ' This offer is limited to the first 20 signups.' : ''}
             </p>
           </div>
 

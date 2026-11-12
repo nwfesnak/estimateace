@@ -2752,9 +2752,11 @@ export default function Home() {
       const trialLabel =
         promo === '6mo' || promo === '6months' || promo === '180'
           ? '6-month (180-day)'
-          : promo === '2mo' || promo === '2months' || promo === '60'
-            ? '2-month (60-day)'
-            : '14-day';
+          : promo === '3mo' || promo === '3months' || promo === '90'
+            ? '3-month (90-day)'
+            : promo === '2mo' || promo === '2months' || promo === '60'
+              ? '2-month (60-day)'
+              : '14-day';
       showMessage(
         `✅ ${trialLabel} free trial started! After the trial you will be billed ${planLabel} unless you cancel in Billing / Contact Us.`
       );

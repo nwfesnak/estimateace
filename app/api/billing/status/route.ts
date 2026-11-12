@@ -7,9 +7,12 @@ import {
   isAccountClosed,
   isBillingEnforced,
   isStripeConfigured,
+  isThreeMonthPromo,
   normalizeBillingSnapshot,
+  THREE_MONTH_PROMO_DAYS,
   type BillingSnapshot,
 } from '@/lib/billing';
+import { claimThreeMonthPromoSpot } from '@/lib/promo-3mo';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { purgeIfAccountClosed } from '@/lib/account-purge';
@@ -82,7 +85,19 @@ export async function GET(request: NextRequest) {
 
       // Don't re-seed trial if closing
       if (!snapshot.accountClosesAt) {
-        const withTrial = ensureTrialEndsAt(snapshot);
+        const meta = (user.user_metadata || {}) as Record<string, unknown>;
+        let seed = snapshot;
+        let promoDays: number | undefined;
+        if (isThreeMonthPromo(String(meta.promo || ''))) {
+          const claim = await claimThreeMonthPromoSpot(admin, user.id);
+          if (claim.ok && !claim.already) {
+            seed = { ...snapshot, status: 'none', trialEndsAt: null };
+            promoDays = THREE_MONTH_PROMO_DAYS;
+          } else if (claim.ok && !snapshot.trialEndsAt) {
+            promoDays = THREE_MONTH_PROMO_DAYS;
+          }
+        }
+        const withTrial = ensureTrialEndsAt(seed, new Date(), promoDays);
         if (
           !data ||
           (!data.trial_ends_at && withTrial.trialEndsAt) ||
