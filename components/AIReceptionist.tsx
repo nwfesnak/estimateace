@@ -68,7 +68,9 @@ export function AIReceptionist({
   onCompanyPhoneChange,
   subscriptionActive = false,
 }: AIReceptionistProps) {
-  const [tab, setTab] = React.useState<'inbox' | 'phone' | 'setup' | 'knowledge' | 'test'>('inbox');
+  const [tab, setTab] = React.useState<'inbox' | 'phone' | 'setup' | 'knowledge' | 'test'>(
+    subscriptionActive ? 'inbox' : 'phone'
+  );
   const [chat, setChat] = React.useState<ChatLine[]>([]);
   const [callerInput, setCallerInput] = React.useState('');
   const [testBusy, setTestBusy] = React.useState(false);
@@ -118,7 +120,7 @@ export function AIReceptionist({
         if (!linePhoneDirtyRef.current) setLinePhone(phone);
       }
       setLineStatus(String(json.status || json.config?.status || 'none'));
-      const active = Boolean(json.addonActive || json.subscribed || phone);
+      const active = Boolean(json.addonActive || json.subscribed);
       setAddonActive(active);
       if (json.addonAmountDisplay) setAddonAmountDisplay(String(json.addonAmountDisplay));
       if (json.config?.transferNumber) setTransferNumber(String(json.config.transferNumber));
@@ -170,13 +172,13 @@ export function AIReceptionist({
         return;
       }
       const active = Boolean(json.addonActive || json.subscribed);
-      setAddonActive((prev) => active || prev);
-      onAddonStatusChange?.(active || addonActive, json.billing || null);
+      setAddonActive(active);
+      onAddonStatusChange?.(active, json.billing || null);
       await refreshLine();
-      if (!active && !addonActive && !linePhone) {
+      if (!active) {
         setLineError(
           json.message ||
-            'Payment is not showing yet. Wait a few seconds and choose I already paid.'
+            'Payment is not showing yet. Wait a few seconds and choose I already paid — or tap Subscribe.'
         );
       } else {
         setLineError(null);
@@ -663,6 +665,37 @@ export function AIReceptionist({
           </CardContent>
         </Card>
       </div>
+
+      {!addonActive && (
+        <div className="mb-6 rounded-2xl border-2 border-violet-300 bg-violet-50 p-5 space-y-3">
+          <p className="font-semibold text-violet-950">
+            AI Receptionist is not subscribed yet.
+          </p>
+          <p className="text-sm text-violet-900">
+            Subscribe for {addonAmountDisplay}/month. Stripe opens next. After payment, come back
+            here to turn on the AI phone line.
+          </p>
+          <Button
+            type="button"
+            className="w-full bg-violet-700 hover:bg-violet-800 text-white font-bold py-6 text-base"
+            disabled={lineBusy}
+            onClick={() => void startAddonCheckout()}
+          >
+            {lineBusy ? 'Opening Stripe…' : `Subscribe · ${addonAmountDisplay}/mo`}
+          </Button>
+          <button
+            type="button"
+            className="text-xs text-violet-800 underline"
+            disabled={lineBusy}
+            onClick={() => void refreshSubscriptionStatus()}
+          >
+            {lineBusy ? 'Checking…' : 'I already paid — check again'}
+          </button>
+          {lineError && tab !== 'phone' && (
+            <p className="text-sm text-red-700">{lineError}</p>
+          )}
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex flex-wrap border-b mb-6 gap-1">

@@ -66,14 +66,10 @@ export async function GET(request: NextRequest) {
         billingStatus === 'unpaid' ||
         billingStatus === 'incomplete_expired') &&
       !(billing.currentPeriodEnd && new Date(billing.currentPeriodEnd).getTime() > Date.now());
-    const hasPhone = Boolean(config.twilio?.phoneNumber);
-    let addonActive =
-      receptionistAddonHasAccess(billing) ||
-      (profilePaid && !billingEnded) ||
-      (hasPhone && !billingEnded);
+    let addonActive = receptionistAddonHasAccess(billing) || (profilePaid && !billingEnded);
 
     // After Stripe pay, webhook can lag — sync from Stripe so UI shows Subscribed.
-    // A saved paid flag or an existing phone line stays paid unless Stripe says the subscription ended.
+    // An existing phone number is not a subscription. Unpaid accounts must still be able to pay.
     if (!addonActive) {
       try {
         const synced = await syncReceptionistAddonForUser(user.id);
@@ -82,7 +78,7 @@ export async function GET(request: NextRequest) {
         const ended =
           (status === 'canceled' || status === 'unpaid' || status === 'incomplete_expired') &&
           !(billing.currentPeriodEnd && new Date(billing.currentPeriodEnd).getTime() > Date.now());
-        addonActive = synced.active || ((profilePaid || hasPhone) && !ended);
+        addonActive = synced.active || (profilePaid && !ended);
       } catch (e) {
         console.warn('receptionist GET sync:', e);
       }

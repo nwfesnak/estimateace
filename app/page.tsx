@@ -16038,7 +16038,7 @@ export default function Home() {
                           </button>
                           {!hasAiReceptionistAddon() && (
                             <p className="text-xs text-amber-800 mt-1">
-                              Not subscribed yet — open setup to Confirm &amp; pay, then enable your line.
+                              Not subscribed yet — open setup and tap Subscribe · $49.99/mo.
                             </p>
                           )}
                           {hasAiReceptionistAddon() && !receptionistSettings.enabled && (
