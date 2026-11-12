@@ -71,6 +71,7 @@ export function AIReceptionist({
   const [testBusy, setTestBusy] = React.useState(false);
   const [testError, setTestError] = React.useState<string | null>(null);
   const [filter, setFilter] = React.useState<'all' | 'new' | 'urgent'>('all');
+  const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
   const [linePhone, setLinePhone] = React.useState<string | null>(null);
   const [lineStatus, setLineStatus] = React.useState<string>('none');
   const [lineBusy, setLineBusy] = React.useState(false);
@@ -520,11 +521,24 @@ export function AIReceptionist({
     void onSave(settings, next);
   };
 
-  const deleteMsg = (id: string) => {
-    if (!window.confirm('Delete this message?')) return;
-    const next = messages.filter((m) => m.id !== id);
+  const deleteMessages = (ids: string[]) => {
+    const idSet = new Set(ids);
+    const count = messages.filter((m) => idSet.has(m.id)).length;
+    if (count === 0) return;
+    const prompt =
+      count === 1 ? 'Delete this message?' : `Delete ${count} messages?`;
+    if (!window.confirm(prompt)) return;
+    const next = messages.filter((m) => !idSet.has(m.id));
+    setSelectedIds((prev) => prev.filter((id) => !idSet.has(id)));
     onChangeMessages(next);
     void onSave(settings, next);
+  };
+
+  const deleteMsg = (id: string) => deleteMessages([id]);
+
+  const deleteSelected = () => {
+    const ids = filtered.filter((m) => selectedIds.includes(m.id)).map((m) => m.id);
+    deleteMessages(ids);
   };
 
   const toggleDay = (d: number) => {
@@ -689,6 +703,41 @@ export function AIReceptionist({
             </Button>
           </div>
 
+          {filtered.length > 0 && (
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="w-4 h-4 accent-[#10b981]"
+                  checked={filtered.every((m) => selectedIds.includes(m.id))}
+                  onChange={() => {
+                    const visible = filtered.map((m) => m.id);
+                    const allOn = visible.every((id) => selectedIds.includes(id));
+                    setSelectedIds((prev) =>
+                      allOn
+                        ? prev.filter((id) => !visible.includes(id))
+                        : Array.from(new Set([...prev, ...visible]))
+                    );
+                  }}
+                />
+                Select all
+              </label>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="text-red-600"
+                disabled={!filtered.some((m) => selectedIds.includes(m.id))}
+                onClick={deleteSelected}
+              >
+                Delete selected
+                {filtered.some((m) => selectedIds.includes(m.id))
+                  ? ` (${filtered.filter((m) => selectedIds.includes(m.id)).length})`
+                  : ''}
+              </Button>
+            </div>
+          )}
+
           {filtered.length === 0 ? (
             <div className="rounded-2xl border border-dashed bg-gray-50 p-10 text-center text-gray-500">
               No messages yet. Run a <strong>Test call</strong> to see how summaries land in your inbox,
@@ -704,7 +753,21 @@ export function AIReceptionist({
                   } ${m.spam ? 'opacity-60' : ''}`}
                 >
                   <div className="flex flex-wrap justify-between gap-2 mb-2">
-                    <div>
+                    <div className="flex items-start gap-2 min-w-0">
+                      <input
+                        type="checkbox"
+                        className="mt-1 w-4 h-4 accent-[#10b981] shrink-0"
+                        checked={selectedIds.includes(m.id)}
+                        aria-label={`Select message from ${m.callerName || 'unknown caller'}`}
+                        onChange={() =>
+                          setSelectedIds((prev) =>
+                            prev.includes(m.id)
+                              ? prev.filter((id) => id !== m.id)
+                              : [...prev, m.id]
+                          )
+                        }
+                      />
+                      <div className="min-w-0">
                       <div className="font-semibold text-[#1e293b]">
                         {m.callerName}
                         {m.callerPhone ? (
@@ -714,6 +777,7 @@ export function AIReceptionist({
                       <div className="text-xs text-gray-400">
                         {new Date(m.createdAt).toLocaleString()} · {m.source}
                         {m.language ? ` · ${m.language}` : ''}
+                      </div>
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-1">

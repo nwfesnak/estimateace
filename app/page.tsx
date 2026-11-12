@@ -1819,6 +1819,7 @@ export default function Home() {
     null
   );
   const [reportsArchivedLeadsOpen, setReportsArchivedLeadsOpen] = useState(false);
+  const [selectedReceptionistLeadIds, setSelectedReceptionistLeadIds] = useState<string[]>([]);
   /** Email lead summaries (dashboard Leads — filled when email connect is live) */
   const [emailLeadSummaries, setEmailLeadSummaries] = useState<EmailLeadSummary[]>([]);
   /** Last time email summaries were pulled from company SETTINGS (hourly refresh) */
@@ -7855,26 +7856,50 @@ export default function Home() {
   };
 
   /** Delete from dashboard inbox → move to Reports archived AI messages (does not touch real email) */
-  const archiveReceptionistLeadFromDashboard = async (id: string) => {
-    const msg = receptionistMessages.find((m) => m.id === id);
-    if (!msg) return;
-    if (
-      !confirm(
-        'Remove this message from Leads & inbox? It will be archived under Reports (your real email is not deleted).'
-      )
-    ) {
-      return;
-    }
-    const nextActive = receptionistMessages.filter((m) => m.id !== id);
+  const archiveReceptionistLeads = async (ids: string[], confirmText: string) => {
+    const idSet = new Set(ids);
+    const moving = receptionistMessages.filter((m) => idSet.has(m.id));
+    if (moving.length === 0) return;
+    if (!confirm(confirmText)) return;
+    const nextActive = receptionistMessages.filter((m) => !idSet.has(m.id));
     const nextArchived = [
-      { ...msg, status: 'handled' as const },
-      ...receptionistArchivedMessages.filter((m) => m.id !== id),
+      ...moving.map((m) => ({ ...m, status: 'handled' as const })),
+      ...receptionistArchivedMessages.filter((m) => !idSet.has(m.id)),
     ].slice(0, 500);
     setReceptionistMessages(nextActive);
     setReceptionistArchivedMessages(nextArchived);
-    if (viewingReceptionistLead?.id === id) setViewingReceptionistLead(null);
+    setSelectedReceptionistLeadIds((prev) => prev.filter((id) => !idSet.has(id)));
+    if (viewingReceptionistLead && idSet.has(viewingReceptionistLead.id)) {
+      setViewingReceptionistLead(null);
+    }
     await saveReceptionistData(receptionistSettings, nextActive, nextArchived);
-    showMessage('✅ Message archived. Find it under Reports → Archived AI Receptionist messages.');
+    showMessage(
+      moving.length === 1
+        ? '✅ Message archived. Find it under Reports → Archived AI Receptionist messages.'
+        : `✅ ${moving.length} messages archived. Find them under Reports → Archived AI Receptionist messages.`
+    );
+  };
+
+  const archiveReceptionistLeadFromDashboard = (id: string) =>
+    archiveReceptionistLeads(
+      [id],
+      'Remove this message from Leads & inbox? It will be archived under Reports (your real email is not deleted).'
+    );
+
+  const archiveSelectedReceptionistLeads = () => {
+    const ids = selectedReceptionistLeadIds.filter((id) =>
+      receptionistMessages.some((m) => m.id === id && !m.spam)
+    );
+    if (ids.length === 0) return;
+    const countLabel = ids.length === 1 ? 'this message' : `${ids.length} messages`;
+    const archivedLine =
+      ids.length === 1
+        ? 'It will be archived under Reports (your real email is not deleted).'
+        : 'They will be archived under Reports (your real email is not deleted).';
+    return archiveReceptionistLeads(
+      ids,
+      `Remove ${countLabel} from Leads & inbox? ${archivedLine}`
+    );
   };
 
   const restoreReceptionistLeadFromArchive = async (id: string) => {
@@ -11998,6 +12023,51 @@ export default function Home() {
                           </span>
                         )}
                       </div>
+                      {receptionistMessages.some((m) => !m.spam) && (
+                        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                          <label className="flex items-center gap-2 text-xs text-slate-600 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              className="w-4 h-4 accent-[#10b981]"
+                              checked={receptionistMessages
+                                .filter((m) => !m.spam)
+                                .every((m) => selectedReceptionistLeadIds.includes(m.id))}
+                              onChange={() => {
+                                const visible = receptionistMessages
+                                  .filter((m) => !m.spam)
+                                  .map((m) => m.id);
+                                const allOn = visible.every((id) =>
+                                  selectedReceptionistLeadIds.includes(id)
+                                );
+                                setSelectedReceptionistLeadIds((prev) =>
+                                  allOn
+                                    ? prev.filter((id) => !visible.includes(id))
+                                    : Array.from(new Set([...prev, ...visible]))
+                                );
+                              }}
+                            />
+                            Select all
+                          </label>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="destructive"
+                            disabled={
+                              !receptionistMessages.some(
+                                (m) => !m.spam && selectedReceptionistLeadIds.includes(m.id)
+                              )
+                            }
+                            onClick={() => void archiveSelectedReceptionistLeads()}
+                          >
+                            Delete selected
+                            {receptionistMessages.some(
+                              (m) => !m.spam && selectedReceptionistLeadIds.includes(m.id)
+                            )
+                              ? ` (${receptionistMessages.filter((m) => !m.spam && selectedReceptionistLeadIds.includes(m.id)).length})`
+                              : ''}
+                          </Button>
+                        </div>
+                      )}
                       <div
                         className="space-y-2 max-h-[13.5rem] overflow-y-auto overscroll-contain pr-1"
                         data-nested-scroll
@@ -12023,6 +12093,21 @@ export default function Home() {
                                 }`}
                               >
                                 <div className="flex items-start justify-between gap-2">
+                                  <label className="mt-0.5 shrink-0 cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      className="w-4 h-4 accent-[#10b981]"
+                                      checked={selectedReceptionistLeadIds.includes(m.id)}
+                                      aria-label={`Select message from ${m.callerName || 'unknown caller'}`}
+                                      onChange={() =>
+                                        setSelectedReceptionistLeadIds((prev) =>
+                                          prev.includes(m.id)
+                                            ? prev.filter((id) => id !== m.id)
+                                            : [...prev, m.id]
+                                        )
+                                      }
+                                    />
+                                  </label>
                                   <div className="min-w-0 flex-1">
                                     <div className="font-semibold text-sm text-slate-900 truncate">
                                       {m.callerName || 'Unknown caller'}
