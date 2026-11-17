@@ -1563,8 +1563,12 @@ export default function Home() {
     isLive?: boolean;
     isTest?: boolean;
     mode?: string;
+    isCrew?: boolean;
+    canManage?: boolean;
+    accountType?: string | null;
   } | null>(null);
   const [stripeConnectBusy, setStripeConnectBusy] = useState(false);
+  const [stripeDashboardBusy, setStripeDashboardBusy] = useState(false);
   const [jobCheckoutBusy, setJobCheckoutBusy] = useState(false);
   const [isEscrowModalOpen, setIsEscrowModalOpen] = useState(false);
   const [paymentType, setPaymentType] = useState<'deposit' | 'balance'>('deposit');
@@ -2722,14 +2726,17 @@ export default function Home() {
       window.history.replaceState({}, '', url.pathname + url.search);
     };
 
-    if (stripeConnect === 'return' || stripeConnect === 'refresh') {
-      showMessage(
-        stripeConnect === 'return'
-          ? '✅ Stripe Connect finished — checking account status…'
-          : 'Stripe Connect needs to be completed — try Connect again from Profile → Payments.'
-      );
+    if (stripeConnect === 'return') {
+      showMessage('✅ Back from Stripe — checking your account status…');
       void refreshStripeConnectStatus(true);
       cleanUrl();
+      return;
+    }
+    if (stripeConnect === 'refresh') {
+      // Stripe onboarding links are single-use and expire. Make a fresh one automatically.
+      showMessage('Reopening Stripe setup…');
+      cleanUrl();
+      void startStripeConnectOnboard();
       return;
     }
 
@@ -10004,7 +10011,11 @@ export default function Home() {
     // Stripe Checkout covers card + Apple Pay + eCheck/ACH (no separate echeck method)
     const orderClick = ['stripe', 'venmo', 'paypal', 'zelle'];
     const orderOther = ['mailcheck'];
-    const stripeConfigured = stripeConnectStatus?.stripeConfigured !== false;
+    // Card pay needs Stripe keys AND the owner's finished Stripe Connect account.
+    // (Status unknown → still listed; the server refuses if Connect is not ready.)
+    const stripeConfigured =
+      stripeConnectStatus?.stripeConfigured !== false &&
+      stripeConnectStatus?.connectReady !== false;
 
     const pushIfReady = (method: string) => {
       if (HIDDEN_PAYMENT_METHODS.has(method) || method === 'echeck') return;
@@ -10014,7 +10025,7 @@ export default function Home() {
       if (method === 'venmo' && !hasVenmoHandle(s.handle)) return;
       if (method === 'zelle' && !hasZelleSetup(s)) return;
       if (method === 'paypal' && !hasPayPalSetup(s)) return;
-      // Stripe: need platform Stripe keys (Connect optional for payouts)
+      // Stripe: need platform Stripe keys and a ready Connect account
       if (method === 'stripe' && !stripeConfigured) return;
 
       const meta = getPaymentMethodMeta(method);
@@ -10789,7 +10800,9 @@ export default function Home() {
                 </div>
                 <div className="text-sm text-gray-500 mt-1">
                   {connectReady ? (
-                    <><span className="text-green-500">✓</span> Stripe Connect ready — charges enabled</>
+                    <><span className="text-green-500">✓</span> Stripe Connect ready — card payments go to your bank</>
+                  ) : stripeConnectStatus?.isCrew ? (
+                    'Card payments are not set up yet. The account owner connects Stripe.'
                   ) : stripeConnectStatus?.connected ? (
                     <><span className="text-amber-500">…</span> Connected — finish verification in Stripe if needed</>
                   ) : stripeConnectStatus?.stripeConfigured ? (
@@ -10810,18 +10823,31 @@ export default function Home() {
                 />
                 <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]" />
               </label>
-              <Button
-                type="button"
-                disabled={stripeConnectBusy}
-                onClick={() => void startStripeConnectOnboard()}
-                className="bg-[#635bff] hover:bg-[#5851ea] text-white"
-              >
-                {stripeConnectBusy
-                  ? 'Opening…'
-                  : connectReady
-                    ? 'Update Stripe'
-                    : 'Connect Stripe'}
-              </Button>
+              {!stripeConnectStatus?.isCrew && (
+                connectReady ? (
+                  <Button
+                    type="button"
+                    disabled={stripeDashboardBusy}
+                    onClick={() => void openStripeDashboard()}
+                    className="bg-[#635bff] hover:bg-[#5851ea] text-white"
+                  >
+                    {stripeDashboardBusy ? 'Opening…' : 'Stripe dashboard'}
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    disabled={stripeConnectBusy}
+                    onClick={() => void startStripeConnectOnboard()}
+                    className="bg-[#635bff] hover:bg-[#5851ea] text-white"
+                  >
+                    {stripeConnectBusy
+                      ? 'Opening…'
+                      : stripeConnectStatus?.connected
+                        ? 'Finish Stripe setup'
+                        : 'Connect Stripe'}
+                  </Button>
+                )
+              )}
             </div>
           </div>
           <p className="text-xs text-gray-500 sm:pl-14">
@@ -10951,6 +10977,9 @@ export default function Home() {
           stripeMode: json.stripeMode,
           isLive: !!json.isLive,
           isTest: !!json.isTest,
+          isCrew: !!json.isCrew,
+          canManage: json.canManage !== false,
+          accountType: json.accountType ?? null,
         });
         if (json.connectReady || json.connected) {
           const currentPay = mergePaymentSettings(profileRef.current.paymentSettings);
@@ -11003,6 +11032,37 @@ export default function Home() {
       showMessage('Network error starting Stripe Connect.');
     } finally {
       setStripeConnectBusy(false);
+    }
+  };
+
+  /** Stripe Express dashboard (payouts, bank account) for the account owner */
+  const openStripeDashboard = async () => {
+    if (!supabase) {
+      showMessage('Please log in first.');
+      return;
+    }
+    setStripeDashboardBusy(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) {
+        showMessage('Please log in again.');
+        return;
+      }
+      const res = await fetch('/api/payments/connect/dashboard', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.url) {
+        showMessage(json.error || 'Could not open the Stripe dashboard.');
+        return;
+      }
+      window.open(json.url, '_blank', 'noopener,noreferrer');
+    } catch {
+      showMessage('Network error opening the Stripe dashboard.');
+    } finally {
+      setStripeDashboardBusy(false);
     }
   };
 
@@ -11060,10 +11120,6 @@ export default function Home() {
             ? '⚠ Stripe is still in TEST mode (sk_test_). Replace STRIPE_SECRET_KEY with sk_live_… in Vercel for real money.'
             : '⚠ Card payments are in test mode. Contact support if you expected live charges.'
         );
-      } else if (json.mode === 'platform') {
-        showMessage(
-          'Opening card checkout (platform Stripe). Connect Stripe in Profile for payouts to your bank.'
-        );
       }
       if (json.feeAmount > 0) {
         showMessage(
@@ -11103,6 +11159,13 @@ export default function Home() {
       showMessage(`${meta.label} account linked successfully.`);
     }, 800);
   };
+
+  // Load Stripe Connect status once after login (pay buttons hide card pay when not ready)
+  useEffect(() => {
+    if (user?.id) {
+      void refreshStripeConnectStatus(false);
+    }
+  }, [user?.id]);
 
   // Load Stripe Connect status when viewing profile payments
   useEffect(() => {

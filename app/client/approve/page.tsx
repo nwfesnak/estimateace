@@ -76,6 +76,8 @@ type DocPayload = {
     clientSelected?: boolean;
   }>;
   paymentOptions?: PayOption[];
+  /** False when the contractor has not finished Stripe Connect (no card / bank via Stripe). */
+  stripeReady?: boolean;
   message?: string;
   error?: string;
 };
@@ -762,6 +764,11 @@ function ApprovePayInner() {
                       : primaryPay.label}
                   </span>
                 </button>
+              ) : doc?.stripeReady === false ? (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-center text-sm text-slate-700">
+                  Online payment is not set up for this contractor yet. Please contact your contractor
+                  to arrange payment.
+                </div>
               ) : (
                 <Button
                   className="w-full py-6 bg-emerald-600 text-white"

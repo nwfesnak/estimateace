@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyClientActionToken } from '@/lib/client-action-token';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
-import { createJobCheckoutSession } from '@/lib/job-payments';
+import { CARD_PAYMENTS_NOT_SET_UP_CODE, createJobCheckoutSession } from '@/lib/job-payments';
 import { getAppUrl } from '@/lib/stripe-server';
 
 /**
@@ -156,6 +156,18 @@ export async function POST(request: NextRequest) {
     });
 
     if (!result.ok || !result.url) {
+      if (result.code === CARD_PAYMENTS_NOT_SET_UP_CODE) {
+        // Contractor has not finished Stripe Connect. Never charge on the platform account;
+        // the pay page keeps showing Venmo / PayPal / Zelle / mail check.
+        return NextResponse.json(
+          {
+            error:
+              'Card payments are not available for this contractor yet. Please choose another way to pay below, or contact your contractor.',
+            code: result.code,
+          },
+          { status: 409 }
+        );
+      }
       return NextResponse.json(
         {
           error:

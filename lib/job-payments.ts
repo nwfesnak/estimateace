@@ -45,6 +45,36 @@ export async function upsertPaymentAccount(
   return { ok: true };
 }
 
+/** Message shown when a contractor has not finished Stripe Connect onboarding. */
+export const CARD_PAYMENTS_NOT_SET_UP =
+  'Card payments are not set up for this contractor yet. Please use another payment method or contact your contractor.';
+export const CARD_PAYMENTS_NOT_SET_UP_CODE = 'card_payments_not_set_up';
+
+/** True when Stripe says the connected account id does not exist (deleted, or test vs live key mismatch). */
+export function isNoSuchAccountError(e: unknown): boolean {
+  const err = e as { code?: string; message?: string; raw?: { code?: string; message?: string } } | null;
+  const code = String(err?.code || err?.raw?.code || '');
+  const msg = String(err?.message || err?.raw?.message || '');
+  if (/no such account/i.test(msg)) return true;
+  if (/account.*(does not exist|not connected to your platform|was deleted)/i.test(msg)) return true;
+  return code === 'account_invalid' && /account/i.test(msg);
+}
+
+function accountTypeFrom(acct: Stripe.Account | null | undefined, fallback = 'express'): string {
+  const t = String(acct?.type || '').trim();
+  return t && t !== 'none' ? t : fallback;
+}
+
+/** Clear a stored connected account id that no longer exists in Stripe. */
+async function clearStalePaymentAccount(userId: string): Promise<void> {
+  await upsertPaymentAccount(userId, {
+    stripe_account_id: null,
+    charges_enabled: false,
+    payouts_enabled: false,
+    details_submitted: false,
+  });
+}
+
 /** Refresh Connect account flags from Stripe */
 export async function syncConnectAccountStatus(userId: string): Promise<{
   ok: boolean;
@@ -66,13 +96,95 @@ export async function syncConnectAccountStatus(userId: string): Promise<{
       charges_enabled: !!acct.charges_enabled,
       payouts_enabled: !!acct.payouts_enabled,
       details_submitted: !!acct.details_submitted,
-      account_type: 'express',
+      account_type: accountTypeFrom(acct, existing.account_type || 'express'),
     };
     await upsertPaymentAccount(userId, row);
     const updated = await getPaymentAccount(userId);
     return { ok: true, account: updated };
   } catch (e: any) {
+    if (isNoSuchAccountError(e)) {
+      // Stale id (deleted account, or created with the other test/live key). Start fresh next time.
+      console.warn('Connect account missing in Stripe, clearing stored id for user', userId);
+      await clearStalePaymentAccount(userId);
+      return { ok: true, account: await getPaymentAccount(userId) };
+    }
     return { ok: false, account: existing, error: e?.message || 'Could not sync Stripe account' };
+  }
+}
+
+/**
+ * Is this owner's connected account able to take card payments?
+ * Uses stored flags first; when they say "not ready", re-checks Stripe live
+ * (there may be no account.updated webhook yet, or it may be delayed).
+ */
+export async function ensureConnectReady(ownerUserId: string): Promise<{
+  ready: boolean;
+  accountId: string | null;
+}> {
+  let account = await getPaymentAccount(ownerUserId);
+  if (account?.stripe_account_id && account.charges_enabled) {
+    return { ready: true, accountId: account.stripe_account_id };
+  }
+  if (account?.stripe_account_id) {
+    const synced = await syncConnectAccountStatus(ownerUserId);
+    if (synced.account) account = synced.account;
+  }
+  const accountId = account?.stripe_account_id || null;
+  return { ready: !!(accountId && account?.charges_enabled), accountId };
+}
+
+/** Webhook: update payment_accounts from a Stripe Account object (account.updated). */
+export async function updatePaymentAccountFromStripe(acct: Stripe.Account): Promise<{
+  ok: boolean;
+  matched: boolean;
+  error?: string;
+}> {
+  const admin = getSupabaseAdmin();
+  if (!admin) return { ok: false, matched: false, error: 'Missing SUPABASE_SERVICE_ROLE_KEY' };
+  const { data, error } = await admin
+    .from('payment_accounts')
+    .update({
+      charges_enabled: !!acct.charges_enabled,
+      payouts_enabled: !!acct.payouts_enabled,
+      details_submitted: !!acct.details_submitted,
+      account_type: accountTypeFrom(acct),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('stripe_account_id', acct.id)
+    .select('user_id');
+  if (error) return { ok: false, matched: false, error: error.message };
+  return { ok: true, matched: Array.isArray(data) && data.length > 0 };
+}
+
+/** Express dashboard login link so a contractor can see payouts and change their bank. */
+export async function createConnectDashboardLink(ownerUserId: string): Promise<{
+  ok: boolean;
+  url?: string;
+  error?: string;
+}> {
+  const stripe = getStripe();
+  if (!stripe) return { ok: false, error: 'Stripe is not configured (STRIPE_SECRET_KEY).' };
+  const account = await getPaymentAccount(ownerUserId);
+  if (!account?.stripe_account_id) {
+    return { ok: false, error: 'Connect Stripe first (Profile → Payments → Connect Stripe).' };
+  }
+  if (account.account_type && account.account_type !== 'express') {
+    return { ok: true, url: 'https://dashboard.stripe.com/' };
+  }
+  try {
+    const link = await stripe.accounts.createLoginLink(account.stripe_account_id);
+    return { ok: true, url: link.url };
+  } catch (e: unknown) {
+    if (isNoSuchAccountError(e)) {
+      await clearStalePaymentAccount(ownerUserId);
+      return { ok: false, error: 'Your Stripe account was not found. Tap Connect Stripe to set it up again.' };
+    }
+    return {
+      ok: false,
+      error:
+        (e as Error)?.message ||
+        'Could not open the Stripe dashboard. Finish Stripe onboarding first, then try again.',
+    };
   }
 }
 
@@ -86,6 +198,23 @@ export async function createConnectOnboardingLink(
 
   const appUrl = getAppUrl(requestUrl);
   let accountId = (await getPaymentAccount(userId))?.stripe_account_id || null;
+
+  // Reuse the existing account (abandoned onboarding resumes with a fresh link),
+  // but recreate it if Stripe no longer knows it (deleted, or test/live key mismatch).
+  if (accountId) {
+    try {
+      await stripe.accounts.retrieve(accountId);
+    } catch (e: unknown) {
+      if (isNoSuchAccountError(e)) {
+        console.warn('Stored Connect account missing in Stripe; creating a new one for user', userId);
+        await clearStalePaymentAccount(userId);
+        accountId = null;
+      } else {
+        console.error('Connect account retrieve:', e);
+        return { ok: false, error: (e as Error)?.message || 'Could not load your Stripe account.' };
+      }
+    }
+  }
 
   if (!accountId) {
     try {
@@ -169,8 +298,8 @@ export type JobCheckoutInput = {
 };
 
 /**
- * Create Stripe Checkout for a job invoice.
- * Prefer Connect Express account; fallback to platform account (money to platform).
+ * Create Stripe Checkout for a job invoice on the owner's connected account (direct charge).
+ * Returns code card_payments_not_set_up when the owner has not finished Stripe Connect.
  */
 export async function createJobCheckoutSession(
   input: JobCheckoutInput
@@ -179,6 +308,8 @@ export async function createJobCheckoutSession(
   url?: string;
   mode?: string;
   error?: string;
+  /** card_payments_not_set_up when the owner has not finished Stripe Connect */
+  code?: string;
   stripeMode?: string;
   baseAmount?: number;
   feeAmount?: number;
@@ -219,9 +350,13 @@ export async function createJobCheckoutSession(
   }
 
   const appUrl = getAppUrl(input.requestUrl);
-  const account = await getPaymentAccount(input.ownerUserId);
-  const connectedId = account?.stripe_account_id || null;
-  const canChargeConnected = !!(connectedId && account?.charges_enabled);
+  // Contractor money must only ever land on the contractor's own connected account.
+  const { ready: canChargeConnected, accountId: connectedId } = await ensureConnectReady(
+    input.ownerUserId
+  );
+  if (!canChargeConnected || !connectedId) {
+    return { ok: false, code: CARD_PAYMENTS_NOT_SET_UP_CODE, error: CARD_PAYMENTS_NOT_SET_UP };
+  }
   const stripeMode = getStripeMode();
 
   const kind = (input.paymentKind || 'payment').slice(0, 40);
@@ -397,36 +532,16 @@ export async function createJobCheckoutSession(
   };
 
   try {
-    if (canChargeConnected && connectedId) {
-      // Direct charge on connected account → money to contractor
-      const session = await createSession(sessionParams, {
-        stripeAccount: connectedId,
-      });
-      if (!session.url) return { ok: false, error: 'Stripe did not return a checkout URL.' };
-      return {
-        ok: true,
-        url: session.url,
-        mode: 'connect',
-        stripeMode,
-        baseAmount,
-        feeAmount: feeBreakdown?.feeAmount ?? 0,
-        totalCharged: chargeTotal,
-      };
-    }
-
-    // Platform fallback (same Stripe as SaaS — for testing or sole operator)
-    const session = await createSession({
-      ...sessionParams,
-      metadata: { ...metadata, settle_to: 'platform' },
-      payment_intent_data: {
-        metadata: { ...metadata, settle_to: 'platform' },
-      },
+    // Direct charge on the contractor's connected account → money goes to the contractor.
+    // There is deliberately no platform fallback: contractor money never settles to EstimateAce.
+    const session = await createSession(sessionParams, {
+      stripeAccount: connectedId,
     });
     if (!session.url) return { ok: false, error: 'Stripe did not return a checkout URL.' };
     return {
       ok: true,
       url: session.url,
-      mode: 'platform',
+      mode: 'connect',
       stripeMode,
       baseAmount,
       feeAmount: feeBreakdown?.feeAmount ?? 0,
@@ -445,16 +560,46 @@ export async function createJobCheckoutSession(
       ok: false,
       error:
         e?.message ||
-        'Could not create Stripe Checkout. Use live keys (sk_live_…) for real payments, complete Connect, or check Stripe keys.',
+        'Could not create Stripe Checkout. Finish Stripe Connect under Profile → Payments, or check Stripe keys.',
     };
   }
 }
 
-/** Mark estimate/invoice paid after successful job Checkout (service role). */
-export async function markDocumentPaidFromJobCheckout(session: Stripe.Checkout.Session): Promise<{
+const RECORDED_FLAG = 'estimateace_recorded';
+
+/**
+ * Has this Checkout's payment already been applied to the document?
+ * The flag lives on the PaymentIntent metadata (on the connected account for direct charges),
+ * so retried / duplicate webhook deliveries do not add the amount twice.
+ */
+async function getJobPaymentIntent(
+  session: Stripe.Checkout.Session,
+  opts?: Stripe.RequestOptions
+): Promise<Stripe.PaymentIntent | null> {
+  const stripe = getStripe();
+  const piRef = session.payment_intent;
+  if (!stripe || !piRef) return null;
+  if (typeof piRef !== 'string') return piRef;
+  try {
+    return await stripe.paymentIntents.retrieve(piRef, undefined, opts);
+  } catch (e: unknown) {
+    console.warn('job pay: could not load PaymentIntent', piRef, (e as Error)?.message);
+    return null;
+  }
+}
+
+/** Mark estimate/invoice paid after successful job Checkout (service role). Idempotent. */
+export async function markDocumentPaidFromJobCheckout(
+  session: Stripe.Checkout.Session,
+  options?: { stripeAccount?: string | null }
+): Promise<{
   ok: boolean;
   error?: string;
+  duplicate?: boolean;
 }> {
+  const reqOpts: Stripe.RequestOptions | undefined = options?.stripeAccount
+    ? { stripeAccount: options.stripeAccount }
+    : undefined;
   if (session.metadata?.purpose !== 'job_payment') {
     return { ok: false, error: 'Not a job payment session' };
   }
@@ -464,6 +609,11 @@ export async function markDocumentPaidFromJobCheckout(session: Stripe.Checkout.S
 
   const admin = getSupabaseAdmin();
   if (!admin) return { ok: false, error: 'No admin client' };
+
+  const paymentIntent = await getJobPaymentIntent(session, reqOpts);
+  if (paymentIntent?.metadata?.[RECORDED_FLAG] === '1') {
+    return { ok: true, duplicate: true };
+  }
 
   const invoiceId = String(session.metadata?.invoice_id || '').trim();
   const ownerId = String(session.metadata?.supabase_user_id || '').trim();
@@ -560,5 +710,42 @@ export async function markDocumentPaidFromJobCheckout(session: Stripe.Checkout.S
     return { ok: false, error: error.message };
   }
 
+  if (paymentIntent) {
+    try {
+      const stripe = getStripe();
+      await stripe?.paymentIntents.update(
+        paymentIntent.id,
+        { metadata: { [RECORDED_FLAG]: '1' } },
+        reqOpts
+      );
+    } catch (e: unknown) {
+      console.warn('job pay: could not flag PaymentIntent as recorded', (e as Error)?.message);
+    }
+  }
+
   return { ok: true };
+}
+
+/**
+ * Crew members act inside their owner's workspace. Payments (Connect account, status,
+ * dashboard) always belong to the owner; crew can view status but not change it.
+ */
+export async function resolveWorkspaceOwner(userId: string): Promise<{
+  ownerUserId: string;
+  isCrew: boolean;
+}> {
+  const admin = getSupabaseAdmin();
+  if (!admin) return { ownerUserId: userId, isCrew: false };
+  try {
+    const { data: crew } = await admin
+      .from('crew_members')
+      .select('owner_user_id')
+      .eq('crew_user_id', userId)
+      .maybeSingle();
+    const owner = String((crew as { owner_user_id?: string } | null)?.owner_user_id || '').trim();
+    if (owner && owner !== userId) return { ownerUserId: owner, isCrew: true };
+  } catch {
+    /* crew table optional */
+  }
+  return { ownerUserId: userId, isCrew: false };
 }

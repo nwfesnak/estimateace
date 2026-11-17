@@ -97,10 +97,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           error:
-            result.error ||
-            'Could not start checkout. Ask your contractor to enable card payments.',
+            result.code === 'card_payments_not_set_up'
+              ? 'Card payments are not available for this contractor yet. Please contact your contractor.'
+              : result.error ||
+                'Could not start checkout. Ask your contractor to enable card payments.',
+          code: result.code,
         },
-        { status: 400 }
+        { status: result.code === 'card_payments_not_set_up' ? 409 : 400 }
       );
     }
 

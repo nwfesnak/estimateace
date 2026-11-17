@@ -38,6 +38,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `Webhook Error: ${err?.message}` }, { status: 400 });
   }
 
+  // Events from contractors' connected accounts belong to /api/payments/connect/webhook.
+  // Ignore them here so a mis-configured endpoint can never touch SaaS billing.
+  if (event.account) {
+    return NextResponse.json({ received: true, ignored: 'connected_account_event' });
+  }
+
   try {
     switch (event.type) {
       case 'checkout.session.completed': {

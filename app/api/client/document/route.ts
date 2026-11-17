@@ -194,8 +194,18 @@ export async function GET(request: NextRequest) {
         : 2.9
       : 0;
 
+    // Only offer Stripe card / bank when the contractor's own connected account can take charges.
+    let stripeReady = false;
+    try {
+      const { ensureConnectReady } = await import('@/lib/job-payments');
+      stripeReady = (await ensureConnectReady(uid)).ready;
+    } catch (e: unknown) {
+      console.warn('client/document connect check:', (e as Error)?.message || e);
+    }
+
     const { buildClientPaymentOptions } = await import('@/lib/client-payment-options');
     const paymentOptions = buildClientPaymentOptions({
+      stripeReady,
       paymentSettings: profile.paymentSettings || {},
       amount: due.amountDueNow,
       invoiceNumber: String(invoiceNumber),
@@ -269,6 +279,7 @@ export async function GET(request: NextRequest) {
       chargeCCFee: chargeFees,
       ccFeePercentage: feePercent,
       paymentOptions,
+      stripeReady,
       ...((a) => ({
         estimateApproved: Boolean(a.approvedAt),
         approvedAt: a.approvedAt,
