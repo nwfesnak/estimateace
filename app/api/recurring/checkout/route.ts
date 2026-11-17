@@ -50,10 +50,14 @@ export async function POST(request: NextRequest) {
     if (!result.ok || !result.url) {
       return NextResponse.json(
         {
-          error: result.error || 'Could not create checkout',
+          error:
+            result.code === 'card_payments_not_set_up'
+              ? 'Card payments are not set up yet. Finish Stripe Connect under Profile → Payments first.'
+              : result.error || 'Could not create checkout',
+          code: result.code,
           clientLink: buildRecurringClientLink(ownerUserId, planId, request.url),
         },
-        { status: 400 }
+        { status: result.code === 'card_payments_not_set_up' ? 409 : 400 }
       );
     }
 

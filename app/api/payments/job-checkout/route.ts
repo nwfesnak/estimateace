@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
-import { createJobCheckoutSession } from '@/lib/job-payments';
+import { CARD_PAYMENTS_NOT_SET_UP_CODE, createJobCheckoutSession } from '@/lib/job-payments';
 
 /**
  * Create Stripe Checkout for an invoice/estimate balance (job payment).
@@ -69,6 +69,16 @@ export async function POST(request: NextRequest) {
     });
 
     if (!result.ok || !result.url) {
+      if (result.code === CARD_PAYMENTS_NOT_SET_UP_CODE) {
+        return NextResponse.json(
+          {
+            error:
+              'Card payments are not set up yet. Finish Stripe Connect under Profile → Payments so card payments go to your bank.',
+            code: result.code,
+          },
+          { status: 409 }
+        );
+      }
       return NextResponse.json(
         { error: result.error || 'Could not create checkout' },
         { status: 400 }
@@ -83,10 +93,7 @@ export async function POST(request: NextRequest) {
       baseAmount: result.baseAmount,
       feeAmount: result.feeAmount,
       totalCharged: result.totalCharged,
-      message:
-        result.mode === 'platform'
-          ? 'Checkout created on the platform Stripe account (complete Connect for payouts to your bank).'
-          : 'Checkout created on your connected Stripe account.',
+      message: 'Checkout created on your connected Stripe account.',
     });
   } catch (e: any) {
     console.error('job-checkout:', e);

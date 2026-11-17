@@ -228,14 +228,21 @@ export function buildClientPaymentOptions(input: {
    * Venmo never includes a fee.
    */
   chargeFees?: boolean;
+  /**
+   * False when the contractor has not finished Stripe Connect.
+   * Card / bank (Stripe) options are hidden so client money never lands on the platform.
+   * Defaults to true for callers that do not check.
+   */
+  stripeReady?: boolean;
 }): ClientPayOption[] {
   const settings = mergeSettings(input.paymentSettings);
+  const stripeReady = input.stripeReady !== false;
   const baseAmount = Math.max(0, Number(input.amount) || 0);
   const chargeFees = input.chargeFees === true;
   const feePct = chargeFees ? input.feePercentRate : 0;
   const options: ClientPayOption[] = [];
 
-  if (settings.stripe?.enabled !== false) {
+  if (stripeReady && settings.stripe?.enabled !== false) {
     const m = metaFor('stripe', chargeFees);
     const fee = withFee('stripe', baseAmount, { chargeFees, feePercentOverride: feePct });
     options.push({
@@ -350,7 +357,7 @@ export function buildClientPaymentOptions(input: {
     });
   }
 
-  if (options.length === 0) {
+  if (options.length === 0 && stripeReady) {
     const m = metaFor('stripe', chargeFees);
     const fee = withFee('stripe', baseAmount, { chargeFees, feePercentOverride: feePct });
     options.push({

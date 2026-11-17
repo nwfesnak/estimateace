@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
-import { createConnectOnboardingLink } from '@/lib/job-payments';
+import { createConnectOnboardingLink, resolveWorkspaceOwner } from '@/lib/job-payments';
 
 /**
  * Start Stripe Connect Express onboarding for job payments.
@@ -11,6 +11,15 @@ export async function POST(request: NextRequest) {
     const { user, error } = await getUserFromRequest(request);
     if (!user) {
       return NextResponse.json({ error: error || 'Unauthorized' }, { status: 401 });
+    }
+
+    // Only the workspace owner connects Stripe. Crew would otherwise create a stray account.
+    const { isCrew } = await resolveWorkspaceOwner(user.id);
+    if (isCrew) {
+      return NextResponse.json(
+        { error: 'Only the account owner can connect Stripe for payments.' },
+        { status: 403 }
+      );
     }
 
     const result = await createConnectOnboardingLink(

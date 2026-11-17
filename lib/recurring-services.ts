@@ -5,7 +5,12 @@
 import type Stripe from 'stripe';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { getStripe, getAppUrl } from '@/lib/stripe-server';
-import { getPaymentAccount } from '@/lib/job-payments';
+import {
+  CARD_PAYMENTS_NOT_SET_UP,
+  CARD_PAYMENTS_NOT_SET_UP_CODE,
+  ensureConnectReady,
+  getPaymentAccount,
+} from '@/lib/job-payments';
 import { createClientActionToken, verifyClientActionToken } from '@/lib/client-action-token';
 
 export type RecurringInterval = 'week' | 'month' | 'year';
@@ -55,6 +60,30 @@ export function intervalLabel(interval: RecurringInterval): string {
 
 export function money(n: number) {
   return `$${Number(n || 0).toFixed(2)}`;
+}
+
+/**
+ * Run a Stripe subscription call for a client recurring plan.
+ * New plans live on the contractor's connected account. Plans created before the
+ * platform fallback was removed may still live on the platform account, so retry there
+ * when the connected account does not have that subscription.
+ */
+async function withPlanSubscriptionAccount<T>(
+  ownerUserId: string,
+  call: (opts?: Stripe.RequestOptions) => Promise<T>
+): Promise<T> {
+  const account = await getPaymentAccount(ownerUserId);
+  const connectedId = account?.stripe_account_id || null;
+  if (!connectedId) return call(undefined);
+  try {
+    return await call({ stripeAccount: connectedId });
+  } catch (e: unknown) {
+    const code = String((e as { code?: string })?.code || (e as { raw?: { code?: string } })?.raw?.code || '');
+    if (code === 'resource_missing' || /no such subscription/i.test(String((e as Error)?.message || ''))) {
+      return call(undefined);
+    }
+    throw e;
+  }
 }
 
 function newRecurringId() {
@@ -495,7 +524,7 @@ export async function createClientRecurringCheckout(input: {
   planId: string;
   requestUrl: string;
   clientEmail?: string;
-}): Promise<{ ok: boolean; url?: string; mode?: string; error?: string }> {
+}): Promise<{ ok: boolean; url?: string; mode?: string; error?: string; code?: string }> {
   const stripe = getStripe();
   if (!stripe) return { ok: false, error: 'Stripe is not configured (STRIPE_SECRET_KEY).' };
 
@@ -508,9 +537,13 @@ export async function createClientRecurringCheckout(input: {
   const serviceCents = Math.round(plan.amount * 100);
   const feeCents = Math.round(fee.feeAmount * 100);
   const appUrl = getAppUrl(input.requestUrl);
-  const account = await getPaymentAccount(input.ownerUserId);
-  const connectedId = account?.stripe_account_id || null;
-  const canChargeConnected = !!(connectedId && account?.charges_enabled);
+  // Client recurring money must only land on the contractor's own connected account.
+  const { ready: canChargeConnected, accountId: connectedId } = await ensureConnectReady(
+    input.ownerUserId
+  );
+  if (!canChargeConnected || !connectedId) {
+    return { ok: false, code: CARD_PAYMENTS_NOT_SET_UP_CODE, error: CARD_PAYMENTS_NOT_SET_UP };
+  }
 
   const token = createClientActionToken({
     uid: input.ownerUserId,
@@ -591,30 +624,16 @@ export async function createClientRecurringCheckout(input: {
   }
 
   try {
-    if (canChargeConnected && connectedId) {
-      const session = await stripe.checkout.sessions.create(sessionParams, {
-        stripeAccount: connectedId,
-      });
-      if (!session.url) return { ok: false, error: 'Stripe did not return a checkout URL.' };
-      // Don't downgrade approved/active status when opening checkout
-      if (plan.status === 'draft' || plan.status === 'link_sent') {
-        await updateRecurringPlan(input.ownerUserId, input.planId, { status: 'link_sent' });
-      }
-      return { ok: true, url: session.url, mode: 'connect' };
-    }
-
-    const session = await stripe.checkout.sessions.create({
-      ...sessionParams,
-      metadata: { ...metadata, settle_to: 'platform' },
-      subscription_data: {
-        metadata: { ...metadata, settle_to: 'platform' },
-      },
+    // Direct charge on the contractor's connected account. No platform fallback.
+    const session = await stripe.checkout.sessions.create(sessionParams, {
+      stripeAccount: connectedId,
     });
     if (!session.url) return { ok: false, error: 'Stripe did not return a checkout URL.' };
+    // Don't downgrade approved/active status when opening checkout
     if (plan.status === 'draft' || plan.status === 'link_sent') {
       await updateRecurringPlan(input.ownerUserId, input.planId, { status: 'link_sent' });
     }
-    return { ok: true, url: session.url, mode: 'platform' };
+    return { ok: true, url: session.url, mode: 'connect' };
   } catch (e: any) {
     console.error('createClientRecurringCheckout:', e);
     return {
@@ -1055,14 +1074,11 @@ export async function cancelClientRecurringSubscription(
 
   const stripe = getStripe();
   if (stripe && plan.stripeSubscriptionId) {
-    const account = await getPaymentAccount(ownerUserId);
-    const connectedId = account?.stripe_account_id || null;
+    const subId = plan.stripeSubscriptionId;
     try {
-      const opts =
-        connectedId && account?.charges_enabled
-          ? ({ stripeAccount: connectedId } as Stripe.RequestOptions)
-          : undefined;
-      await stripe.subscriptions.cancel(plan.stripeSubscriptionId, undefined, opts);
+      await withPlanSubscriptionAccount(ownerUserId, (opts) =>
+        stripe.subscriptions.cancel(subId, undefined, opts)
+      );
     } catch (e: any) {
       console.warn('cancel subscription:', e?.message);
       // Still mark canceled locally
@@ -1125,14 +1141,11 @@ export async function deleteArchivedRecurringPlan(
   // Best-effort: cancel any leftover Stripe subscription before hard delete
   const stripe = getStripe();
   if (stripe && plan.stripeSubscriptionId) {
-    const account = await getPaymentAccount(ownerUserId);
-    const connectedId = account?.stripe_account_id || null;
+    const subId = plan.stripeSubscriptionId;
     try {
-      const opts =
-        connectedId && account?.charges_enabled
-          ? ({ stripeAccount: connectedId } as Stripe.RequestOptions)
-          : undefined;
-      await stripe.subscriptions.cancel(plan.stripeSubscriptionId, undefined, opts);
+      await withPlanSubscriptionAccount(ownerUserId, (opts) =>
+        stripe.subscriptions.cancel(subId, undefined, opts)
+      );
     } catch (e: any) {
       console.warn('delete archived recurring — stripe cancel:', e?.message);
     }
@@ -1186,17 +1199,14 @@ export async function pauseClientRecurringPayments(
 
   const stripe = getStripe();
   if (stripe && plan.stripeSubscriptionId) {
-    const account = await getPaymentAccount(ownerUserId);
-    const connectedId = account?.stripe_account_id || null;
+    const subId = plan.stripeSubscriptionId;
     try {
-      const opts =
-        connectedId && account?.charges_enabled
-          ? ({ stripeAccount: connectedId } as Stripe.RequestOptions)
-          : undefined;
-      await stripe.subscriptions.update(
-        plan.stripeSubscriptionId,
-        { pause_collection: { behavior: 'void' } },
-        opts
+      await withPlanSubscriptionAccount(ownerUserId, (opts) =>
+        stripe.subscriptions.update(
+          subId,
+          { pause_collection: { behavior: 'void' } },
+          opts
+        )
       );
     } catch (e: any) {
       console.warn('pause subscription:', e?.message);
@@ -1227,18 +1237,15 @@ export async function resumeClientRecurringPayments(
 
   const stripe = getStripe();
   if (stripe && plan.stripeSubscriptionId) {
-    const account = await getPaymentAccount(ownerUserId);
-    const connectedId = account?.stripe_account_id || null;
+    const subId = plan.stripeSubscriptionId;
     try {
-      const opts =
-        connectedId && account?.charges_enabled
-          ? ({ stripeAccount: connectedId } as Stripe.RequestOptions)
-          : undefined;
       // Empty string clears pause_collection in Stripe API
-      await stripe.subscriptions.update(
-        plan.stripeSubscriptionId,
-        { pause_collection: '' as any },
-        opts
+      await withPlanSubscriptionAccount(ownerUserId, (opts) =>
+        stripe.subscriptions.update(
+          subId,
+          { pause_collection: '' as any },
+          opts
+        )
       );
     } catch (e: any) {
       console.warn('resume subscription:', e?.message);
