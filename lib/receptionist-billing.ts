@@ -136,9 +136,14 @@ export async function syncReceptionistAddonForUser(userId: string): Promise<{
     };
   }
 
-  const customerId = await ensureStripeCustomerForOwner(userId);
+  // Status sync is read-only: never create a Stripe customer here (this path used to
+  // create a new empty customer on every Receptionist page load).
+  const customerId = await ensureStripeCustomerForOwner(userId, null, null, {
+    createIfMissing: false,
+  });
   if (!customerId) {
-    return { ok: false, active: false, billing: {}, error: 'No Stripe customer' };
+    const billing = await loadReceptionistBilling(userId);
+    return { ok: true, active: receptionistAddonHasAccess(billing), billing };
   }
 
   // Prefer checkout session sync if we have a recent subscription on customer

@@ -9,33 +9,19 @@ import {
 } from '@/lib/stripe-server';
 import type Stripe from 'stripe';
 import { isStripeConfigured } from '@/lib/billing';
+import { ensureStripeCustomerForOwner } from '@/lib/crew-billing';
 
 /** Stripe Checkout rejects subscription_data.trial_end less than 48h away; keep a buffer. */
 const CHECKOUT_MIN_TRIAL_MS = 49 * 60 * 60 * 1000;
 
 async function ensureStripeCustomer(
-  stripe: NonNullable<ReturnType<typeof getStripe>>,
   userId: string,
   email: string | undefined,
   existingCustomerId: string | null | undefined
 ): Promise<string> {
-  // Reuse only if customer still exists in Stripe
-  if (existingCustomerId) {
-    try {
-      const c = await stripe.customers.retrieve(existingCustomerId);
-      if (c && !('deleted' in c && c.deleted)) {
-        return existingCustomerId;
-      }
-    } catch {
-      // deleted or invalid — create a new one below
-    }
-  }
-
-  const customer = await stripe.customers.create({
-    email: email || undefined,
-    metadata: { supabase_user_id: userId },
-  });
-  return customer.id;
+  const id = await ensureStripeCustomerForOwner(userId, email, existingCustomerId);
+  if (!id) throw new Error('Stripe is not configured');
+  return id;
 }
 
 export async function POST(request: NextRequest) {
@@ -92,7 +78,6 @@ export async function POST(request: NextRequest) {
     }
 
     const customerId = await ensureStripeCustomer(
-      stripe,
       user.id,
       user.email,
       storedCustomerId
@@ -154,10 +139,13 @@ export async function POST(request: NextRequest) {
       // Race: customer deleted between retrieve and session create
       const msg = String(e?.message || '');
       if (msg.includes('No such customer') || e?.code === 'resource_missing') {
-        const fresh = await stripe.customers.create({
-          email: user.email || undefined,
-          metadata: { supabase_user_id: user.id },
-        });
+        const fresh = await stripe.customers.create(
+          {
+            email: user.email || undefined,
+            metadata: { supabase_user_id: user.id },
+          },
+          { idempotencyKey: `ea-customer-retry-${user.id}-${Math.floor(Date.now() / 3600000)}` }
+        );
         if (admin) {
           await admin.from('subscriptions').upsert({
             user_id: user.id,
