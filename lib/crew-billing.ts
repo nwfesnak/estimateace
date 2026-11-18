@@ -257,7 +257,12 @@ export async function upsertCrewSeatFromStripe(
   }
 
   const customerId = typeof sub.customer === 'string' ? sub.customer : sub.customer?.id || null;
-  const periodEnd = getSubscriptionPeriodEnd(sub);
+  // Immediate cancels keep the item period end in Stripe; access actually ended at ended_at.
+  const endedAt = Number((sub as any).ended_at) || 0;
+  const periodEnd =
+    sub.status === 'canceled' && endedAt > 0
+      ? new Date(endedAt * 1000).toISOString()
+      : getSubscriptionPeriodEnd(sub);
   const status = mapCrewSeatStatus(sub.status);
   const cancelAtPeriodEnd = !!sub.cancel_at_period_end;
 

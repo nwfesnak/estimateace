@@ -74,7 +74,14 @@ export async function upsertReceptionistAddonFromStripe(
   if (!userId) return { ok: false, error: 'Missing supabase_user_id on subscription' };
 
   const status = String(sub.status || 'incomplete');
-  const periodEndIso = getSubscriptionPeriodEnd(sub);
+  // An immediately-canceled subscription keeps its item period end in Stripe, but
+  // access ended at `ended_at`. Use that so a cancel-now doesn't leave the add-on
+  // looking active until the old period end.
+  const endedAt = Number((sub as any).ended_at) || 0;
+  const periodEndIso =
+    status === 'canceled' && endedAt > 0
+      ? new Date(endedAt * 1000).toISOString()
+      : getSubscriptionPeriodEnd(sub);
   const billing: ReceptionistBilling = {
     stripeCustomerId:
       typeof sub.customer === 'string' ? sub.customer : sub.customer?.id || null,
