@@ -45,6 +45,14 @@ export type ReceptionistCallSession = {
   /** Stashed SpeechResult while we ack Twilio quickly, then /think runs */
   pendingCallerText?: string;
   emptyListenCount?: number;
+  /** Snapshot of the owner's Spam screening setting at call start */
+  spamScreening?: boolean;
+  /** Press-1 gate was played; the AI only answers after gatePassed */
+  gateRequired?: boolean;
+  gatePassed?: boolean;
+  gateAttempts?: number;
+  /** One lead + one notification per call: set once finalizeReceptionistCall ran */
+  finalizedAt?: string;
   createdAt: string;
   updatedAt: string;
 };

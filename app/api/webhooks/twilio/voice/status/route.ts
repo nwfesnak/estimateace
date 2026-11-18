@@ -1,11 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import {
-  deleteCallSession,
-  loadCallSession,
-  transcriptToText,
-} from '@/lib/receptionist-call-session';
-import { summarizeVoiceCall } from '@/lib/receptionist-voice-agent';
-import { appendReceptionistLead } from '@/lib/receptionist-leads';
+import { deleteCallSession, loadCallSession } from '@/lib/receptionist-call-session';
+import { finalizeReceptionistCall } from '@/lib/receptionist-call-finalize';
+import { findReceptionistByPhoneNumber } from '@/lib/receptionist-store';
+import { readTwilioParams, verifyTwilioWebhook } from '@/lib/twilio-webhook-auth';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -16,64 +13,36 @@ function ok() {
   return new NextResponse(null, { status: 204 });
 }
 
-/** POST /api/webhooks/twilio/voice/status — finalize call session → inbox lead */
+/**
+ * POST /api/webhooks/twilio/voice/status — call ended → one lead per CallSid.
+ * Idempotent: Twilio retries and the final-turn finalizer never create a second lead.
+ */
 export async function POST(request: NextRequest) {
+  const params = await readTwilioParams(request);
+  const status = String(params.CallStatus || '');
+  const callSid = String(params.CallSid || '').trim();
+  const to = String(params.To || '');
+
+  const session = callSid ? await loadCallSession(callSid).catch(() => null) : null;
+  let userId = session?.userId || '';
+  if (!userId && to) {
+    userId = (await findReceptionistByPhoneNumber(to).catch(() => null))?.userId || '';
+  }
+  const denied = await verifyTwilioWebhook(request, params, { userId, label: 'twilio voice status' });
+  if (denied) return denied;
+
   try {
-    const form = await request.formData();
-    const status = String(form.get('CallStatus') || '');
-    const callSid = String(form.get('CallSid') || '');
-    const to = String(form.get('To') || '');
     console.info('twilio voice status:', { status, callSid, to });
 
     const terminal = ['completed', 'busy', 'no-answer', 'failed', 'canceled'].includes(status);
-    if (!terminal || !callSid) {
+    if (!terminal || !callSid || !session) {
       return ok();
     }
 
-    const session = await loadCallSession(callSid);
-    if (!session) {
-      return ok();
-    }
-
-    // Always write/update a final lead with name, phone, address when possible
-    if (session.transcript?.length) {
-      try {
-        const summary = await summarizeVoiceCall({
-          businessName: session.businessName,
-          transcript: session.transcript,
-          callerPhone: session.from,
-          urgentKeywords: session.urgentKeywords,
-          collectedName: session.collectedName,
-          collectedPhone: session.collectedPhone,
-          collectedAddress: session.collectedAddress,
-        });
-        const name = summary.callerName || session.collectedName || 'Unknown';
-        const phone = summary.callerPhone || session.collectedPhone || session.from;
-        const address = summary.address || session.collectedAddress || '';
-        await appendReceptionistLead({
-          userId: session.userId,
-          callerName: name,
-          callerPhone: phone,
-          address,
-          summary: [
-            `Name: ${name}`,
-            `Phone: ${phone}`,
-            address ? `Address: ${address}` : null,
-            summary.summary ? `Notes: ${summary.summary}` : null,
-          ]
-            .filter(Boolean)
-            .join('\n'),
-          actionItems: summary.actionItems?.length
-            ? summary.actionItems
-            : ['Follow up with caller'],
-          transcript: transcriptToText(session.transcript),
-          urgent: summary.urgent,
-          language: summary.language,
-          source: 'voice',
-        });
-      } catch (e) {
-        console.warn('twilio voice status lead:', e);
-      }
+    try {
+      await finalizeReceptionistCall(callSid, 'status_callback');
+    } catch (e) {
+      console.warn('twilio voice status finalize:', e);
     }
 
     try {

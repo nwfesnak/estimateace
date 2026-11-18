@@ -39,6 +39,35 @@ export function twimlResponse(inner: string) {
 /** Prefer relative webhook paths — Twilio resolves them against the current call webhook host. */
 export const VOICE_GATHER_PATH = '/api/webhooks/twilio/voice/gather';
 export const VOICE_THINK_PATH = '/api/webhooks/twilio/voice/think';
+export const VOICE_GATE_PATH = '/api/webhooks/twilio/voice/gate';
+
+/**
+ * "Press 1" robocall gate: keypad only. No press after two prompts → hang up
+ * (no AI turn, no lead). A press posts Digits to VOICE_GATE_PATH.
+ */
+export function pressOneGateTwiml(opts: { businessName: string; retry?: boolean }) {
+  const business = String(opts.businessName || 'our office').slice(0, 120);
+  const first = opts.retry
+    ? `Sorry, to reach ${business}, please press 1 now.`
+    : `Thanks for calling ${business}. To reach ${business}, press 1.`;
+  const action = escapeXml(VOICE_GATE_PATH);
+  return twimlResponse(
+    [
+      `  <Gather input="dtmf" numDigits="1" timeout="6" action="${action}" method="POST">`,
+      `    <Say voice="${SAY_VOICE}">${escapeXml(first.slice(0, 300))}</Say>`,
+      `  </Gather>`,
+      `  <Gather input="dtmf" numDigits="1" timeout="6" action="${action}" method="POST">`,
+      `    <Say voice="${SAY_VOICE}">${escapeXml(`Please press 1 to reach ${business}.`.slice(0, 300))}</Say>`,
+      `  </Gather>`,
+      `  <Hangup/>`,
+    ].join('\n')
+  );
+}
+
+/** Refuse a blocked caller before answering (caller hears busy; no call minutes). */
+export function rejectTwiml() {
+  return twimlResponse(`  <Reject reason="busy"/>`);
+}
 
 /**
  * Speak a prompt, then listen for speech.

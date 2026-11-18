@@ -14,6 +14,8 @@ export type ReceptionistSettings = {
   knowledgeBase: string;
   websiteUrl: string;
   spamScreening: boolean;
+  /** Ask callers to "press 1" before the AI answers (only when spamScreening is on). */
+  pressOneGate: boolean;
   bookAppointments: boolean;
   urgentKeywords: string;
   customVoicemail: string;
@@ -29,6 +31,12 @@ export type ReceptionistMessage = {
   transcript: string;
   urgent: boolean;
   spam: boolean;
+  /** Why the call was labelled spam (AI or keyword screen), when spam is true. */
+  spamReason?: string;
+  /** Twilio CallSid — one lead per call. */
+  callSid?: string;
+  /** Number the call/text actually came from (Twilio From). Used by "Mark as spam". */
+  fromNumber?: string;
   language: string;
   status: 'new' | 'read' | 'handled';
   source: 'test' | 'forwarded' | 'manual' | 'email' | 'voice' | 'sms';
@@ -60,6 +68,7 @@ export const DEFAULT_RECEPTIONIST_SETTINGS: ReceptionistSettings = {
   knowledgeBase: '',
   websiteUrl: '',
   spamScreening: true,
+  pressOneGate: true,
   bookAppointments: true,
   urgentKeywords: 'emergency, leak, no heat, no ac, flooding, urgent, asap, fire, smoke',
   customVoicemail: '',
@@ -86,6 +95,7 @@ export function normalizeReceptionistSettings(raw: unknown): ReceptionistSetting
     knowledgeBase: String(r.knowledgeBase ?? ''),
     websiteUrl: String(r.websiteUrl ?? ''),
     spamScreening: r.spamScreening !== false,
+    pressOneGate: r.pressOneGate !== false,
     bookAppointments: r.bookAppointments !== false,
     urgentKeywords: String(r.urgentKeywords ?? base.urgentKeywords),
     customVoicemail: String(r.customVoicemail ?? ''),
@@ -122,6 +132,9 @@ export function normalizeReceptionistMessages(raw: unknown): ReceptionistMessage
         transcript: String(row.transcript || ''),
         urgent: !!row.urgent,
         spam: !!row.spam,
+        ...(row.spamReason ? { spamReason: String(row.spamReason).slice(0, 300) } : {}),
+        ...(row.callSid ? { callSid: String(row.callSid).slice(0, 64) } : {}),
+        ...(row.fromNumber ? { fromNumber: String(row.fromNumber).slice(0, 40) } : {}),
         language: String(row.language || 'en'),
         status: (['new', 'read', 'handled'].includes(row.status)
           ? row.status
@@ -152,6 +165,13 @@ export function normalizeEmailLeadSummaries(raw: unknown): EmailLeadSummary[] {
       } as EmailLeadSummary;
     })
     .filter(Boolean) as EmailLeadSummary[];
+}
+
+/** Effective live-call screening flags (press-1 gate only applies when screening is on). */
+export function receptionistScreeningFlags(raw: unknown): { spamScreening: boolean; pressOneGate: boolean } {
+  const r = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const spamScreening = r.spamScreening !== false;
+  return { spamScreening, pressOneGate: spamScreening && r.pressOneGate !== false };
 }
 
 export function fillGreeting(template: string, company: string): string {

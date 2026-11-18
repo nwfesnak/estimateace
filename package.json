@@ -15,7 +15,8 @@
     "test:sms": "node scripts/test-sms.mjs",
     "test:google-places": "node scripts/test-google-places.mjs",
     "cap:sync": "cap sync ios",
-    "cap:open": "cap open ios"
+    "cap:open": "cap open ios",
+    "test:receptionist": "node --test scripts/test-receptionist-spam.test.mjs"
   },
   "dependencies": {
     "@capacitor/app": "^8.1.1",

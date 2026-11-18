@@ -8,6 +8,8 @@ import {
   VOICE_GATHER_PATH,
   VOICE_THINK_PATH,
 } from '@/lib/receptionist-twiml';
+import { findReceptionistByPhoneNumber } from '@/lib/receptionist-store';
+import { readTwilioParams, verifyTwilioWebhook } from '@/lib/twilio-webhook-auth';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 20;
@@ -18,16 +20,21 @@ export const runtime = 'nodejs';
  * Capture speech quickly → redirect to /think?CallSid=... (Grok runs there).
  */
 export async function POST(request: NextRequest) {
+  const params = await readTwilioParams(request);
+  const callSid = String(params.CallSid || '').trim();
+  const session = callSid ? await loadCallSession(callSid).catch(() => null) : null;
+  let userId = session?.userId || '';
+  if (!userId && params.To) {
+    userId = (await findReceptionistByPhoneNumber(params.To).catch(() => null))?.userId || '';
+  }
+  const denied = await verifyTwilioWebhook(request, params, { userId, label: 'twilio voice gather' });
+  if (denied) return denied;
+
   try {
-    const form = await request.formData();
-    const callSid = String(form.get('CallSid') || '').trim();
     const speech = String(
-      form.get('SpeechResult') ||
-        form.get('UnstableSpeechResult') ||
-        form.get('StableSpeechResult') ||
-        ''
+      params.SpeechResult || params.UnstableSpeechResult || params.StableSpeechResult || ''
     ).trim();
-    const digits = String(form.get('Digits') || '').trim();
+    const digits = String(params.Digits || '').trim();
 
     console.info('voice gather ok', {
       callSid: callSid.slice(0, 34),
@@ -35,8 +42,6 @@ export async function POST(request: NextRequest) {
       speechPreview: speech.slice(0, 80),
       digits,
     });
-
-    const session = callSid ? await loadCallSession(callSid) : null;
 
     if (!session) {
       // Still listen again instead of hard-failing the call
@@ -46,6 +51,10 @@ export async function POST(request: NextRequest) {
           gatherActionUrl: VOICE_GATHER_PATH,
         })
       );
+    }
+
+    if (session.gateRequired && !session.gatePassed) {
+      return twimlXmlResponse(sayHangupTwiml('Goodbye.'));
     }
 
     const callerText = speech || (digits ? `Pressed ${digits}` : '');
