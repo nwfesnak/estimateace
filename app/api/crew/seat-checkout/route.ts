@@ -9,6 +9,7 @@ import {
   ensureStripeCustomerForOwner,
   getCrewSeatPriceId,
 } from '@/lib/crew-billing';
+import { enforceAppAccess } from '@/lib/billing-access';
 
 /**
  * Start Stripe Checkout for a $14.99/mo crew seat (after crew login is created).
@@ -20,6 +21,8 @@ export async function POST(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: authError || 'Unauthorized' }, { status: 401 });
     }
+    const paywall = await enforceAppAccess(user.id);
+    if (paywall) return paywall;
 
     const stripe = getStripe();
     if (!stripe) {

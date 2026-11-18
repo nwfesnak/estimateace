@@ -3,6 +3,7 @@ import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { createClientActionToken } from '@/lib/client-action-token';
 import { getAppUrl } from '@/lib/stripe-server';
+import { enforceAppAccess } from '@/lib/billing-access';
 
 /**
  * Authenticated: build a public link to view this document's terms (not pasted on the PDF).
@@ -13,6 +14,8 @@ export async function POST(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: error || 'Unauthorized' }, { status: 401 });
     }
+    const paywall = await enforceAppAccess(user.id);
+    if (paywall) return paywall;
 
     const body = await request.json().catch(() => ({}));
     const invoiceNumber = String(body.invoiceNumber || body.id || '').trim();

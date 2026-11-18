@@ -7,7 +7,11 @@ import {
   getStripePriceId,
   type BillingPlan,
 } from '@/lib/stripe-server';
+import type Stripe from 'stripe';
 import { isStripeConfigured } from '@/lib/billing';
+
+/** Stripe Checkout rejects subscription_data.trial_end less than 48h away; keep a buffer. */
+const CHECKOUT_MIN_TRIAL_MS = 49 * 60 * 60 * 1000;
 
 async function ensureStripeCustomer(
   stripe: NonNullable<ReturnType<typeof getStripe>>,
@@ -118,6 +122,21 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Subscribing mid-trial keeps the rest of the free trial: Stripe won't charge until
+    // the trial would have ended. Checkout requires trial_end to be at least 48h out, so
+    // with less than ~2 days left the first charge happens at checkout instead.
+    const subscriptionData: Stripe.Checkout.SessionCreateParams.SubscriptionData = {
+      metadata: { supabase_user_id: user.id, plan },
+    };
+    const trialEndMs = storedTrial ? new Date(storedTrial).getTime() : NaN;
+    const minTrialEndMs = Date.now() + CHECKOUT_MIN_TRIAL_MS;
+    if (!isNaN(trialEndMs) && trialEndMs > minTrialEndMs) {
+      subscriptionData.trial_end = Math.floor(trialEndMs / 1000);
+      subscriptionData.trial_settings = {
+        end_behavior: { missing_payment_method: 'cancel' },
+      };
+    }
+
     let session;
     try {
       session = await stripe.checkout.sessions.create({
@@ -128,9 +147,7 @@ export async function POST(request: NextRequest) {
         success_url: `${appUrl}/?billing=success`,
         cancel_url: `${appUrl}/?billing=cancel`,
         allow_promotion_codes: true,
-        subscription_data: {
-          metadata: { supabase_user_id: user.id, plan },
-        },
+        subscription_data: subscriptionData,
         metadata: { supabase_user_id: user.id, plan },
       });
     } catch (e: any) {
@@ -159,9 +176,7 @@ export async function POST(request: NextRequest) {
           success_url: `${appUrl}/?billing=success`,
           cancel_url: `${appUrl}/?billing=cancel`,
           allow_promotion_codes: true,
-          subscription_data: {
-            metadata: { supabase_user_id: user.id, plan },
-          },
+          subscription_data: subscriptionData,
           metadata: { supabase_user_id: user.id, plan },
         });
       } else {

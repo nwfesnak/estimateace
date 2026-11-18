@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import { createConnectOnboardingLink, resolveWorkspaceOwner } from '@/lib/job-payments';
+import { enforceAppAccess } from '@/lib/billing-access';
 
 /**
  * Start Stripe Connect Express onboarding for job payments.
@@ -12,6 +13,8 @@ export async function POST(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: error || 'Unauthorized' }, { status: 401 });
     }
+    const paywall = await enforceAppAccess(user.id);
+    if (paywall) return paywall;
 
     // Only the workspace owner connects Stripe. Crew would otherwise create a stray account.
     const { isCrew } = await resolveWorkspaceOwner(user.id);

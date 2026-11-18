@@ -2507,6 +2507,11 @@ export default function Home() {
     });
     const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       if (cancelled) return;
+      // Older reset emails redirect to the app root: send them to the set-password screen.
+      if (event === 'PASSWORD_RECOVERY') {
+        window.location.replace('/reset-password');
+        return;
+      }
       if (event === 'SIGNED_OUT' || !session?.user) {
         setUser(null);
         setRequires2FA(false);
@@ -2564,6 +2569,13 @@ export default function Home() {
             canSeePricing: json.canSeePricing === true,
             canSeeEstimatesAndFinancials: json.canSeeEstimatesAndFinancials === true,
           });
+        } else if (json.seatExpired) {
+          // Crew seat unpaid/ended or owner's plan lapsed: don't fall through into a
+          // personal trial workspace — sign the crew login out with the reason.
+          setCurrentCrew(null);
+          showMessage(json.error || 'This crew login is not active. Ask the account owner.');
+          await supabase.auth.signOut();
+          return;
         } else {
           setCurrentCrew(null);
         }
@@ -2765,7 +2777,7 @@ export default function Home() {
               ? '2-month (60-day)'
               : '14-day';
       showMessage(
-        `✅ ${trialLabel} free trial started! After the trial you will be billed ${planLabel} unless you cancel in Billing / Contact Us.`
+        `✅ ${trialLabel} free trial started! No card needed now. To keep access after the trial, subscribe ${planLabel} in Profile → Billing.`
       );
       if (user?.id && supabase) void refreshBillingStatus();
       cleanUrl();
@@ -3113,6 +3125,9 @@ export default function Home() {
         let msg = error.message;
         if (code === 'email_not_confirmed') {
           msg = 'Email not confirmed yet. Check your inbox for the confirmation link.';
+        } else if (code === 'user_banned' || /banned/i.test(msg)) {
+          msg =
+            'This crew login is turned off. Ask the account owner to pay for (or renew) your crew seat ($14.99/mo) in Billing, then try again.';
         } else if (code === 'invalid_credentials') {
           msg =
             'Invalid email or password. New accounts start from the free trial / pricing page (not Sign Up here). Use Forgot password? if you already have an account.';
@@ -3286,7 +3301,9 @@ export default function Home() {
     }
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail.trim(), {
-        redirectTo: typeof window !== 'undefined' ? window.location.origin : undefined,
+        // Lands on the "Set a new password" screen (Supabase recovery session).
+        redirectTo:
+          typeof window !== 'undefined' ? `${window.location.origin}/reset-password` : undefined,
       });
       if (error) {
         showMessage(error.message);

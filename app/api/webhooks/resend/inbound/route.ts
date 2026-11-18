@@ -2,10 +2,13 @@
  * Resend inbound webhook — email.received
  * Configure in Resend: https://app.estimateace.com/api/webhooks/resend/inbound
  * Event: email.received
+ * Security: set RESEND_WEBHOOK_SECRET (the webhook's whsec_... signing secret from
+ * Resend → Webhooks) so only signed requests from Resend are accepted.
  *
  * Users forward ANY inbox (Gmail, Outlook, Yahoo, etc.) to their unique
  * u{userIdHex}@EMAIL_INBOUND_DOMAIN address.
  */
+import { createHmac, timingSafeEqual } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import {
   appendEmailLeadSummary,
@@ -18,32 +21,73 @@ import {
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let out = 0;
-  for (let i = 0; i < a.length; i++) out |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return out === 0;
-}
+/** Max clock skew accepted for svix-timestamp (seconds), same as the svix library. */
+const SIGNATURE_TOLERANCE_SECONDS = 5 * 60;
 
-function verifyOptionalSecret(request: NextRequest): boolean {
+/**
+ * Verify Resend's webhook signature (Resend signs with Svix).
+ * Signed content is `${svix-id}.${svix-timestamp}.${rawBody}`, HMAC-SHA256 with the
+ * base64 part of the `whsec_...` signing secret; header `svix-signature` holds one or
+ * more space-separated `v1,<base64sig>` entries.
+ *
+ * RESEND_WEBHOOK_SECRET unset → allowed (soft launch, logs a warning).
+ * RESEND_WEBHOOK_SECRET set   → unsigned / bad / stale requests are rejected.
+ */
+function verifyResendSignature(request: NextRequest, rawBody: string): { ok: boolean; reason?: string } {
   const secret = process.env.RESEND_WEBHOOK_SECRET?.trim();
-  if (!secret) return true; // soft-launch: allow until secret is set
-  const header =
-    request.headers.get('resend-signature') ||
-    request.headers.get('x-resend-signature') ||
-    request.headers.get('authorization')?.replace(/^Bearer\s+/i, '') ||
-    '';
-  const query = request.nextUrl.searchParams.get('secret') || '';
-  return timingSafeEqual(header, secret) || timingSafeEqual(query, secret);
+  if (!secret) {
+    console.warn('resend inbound: RESEND_WEBHOOK_SECRET not set — accepting unsigned webhook');
+    return { ok: true };
+  }
+  const id = request.headers.get('svix-id') || request.headers.get('webhook-id') || '';
+  const ts = request.headers.get('svix-timestamp') || request.headers.get('webhook-timestamp') || '';
+  const sigHeader =
+    request.headers.get('svix-signature') || request.headers.get('webhook-signature') || '';
+  if (!id || !ts || !sigHeader) return { ok: false, reason: 'Missing signature headers' };
+
+  const tsNum = Number(ts);
+  if (!Number.isFinite(tsNum)) return { ok: false, reason: 'Bad timestamp' };
+  if (Math.abs(Math.floor(Date.now() / 1000) - tsNum) > SIGNATURE_TOLERANCE_SECONDS) {
+    return { ok: false, reason: 'Stale timestamp' };
+  }
+
+  let key: Buffer;
+  try {
+    key = Buffer.from(secret.startsWith('whsec_') ? secret.slice(6) : secret, 'base64');
+  } catch {
+    return { ok: false, reason: 'Bad secret' };
+  }
+  const expected = createHmac('sha256', key).update(`${id}.${ts}.${rawBody}`).digest();
+
+  for (const part of sigHeader.split(' ')) {
+    const [version, sig] = part.split(',');
+    if (version !== 'v1' || !sig) continue;
+    let given: Buffer;
+    try {
+      given = Buffer.from(sig, 'base64');
+    } catch {
+      continue;
+    }
+    if (given.length === expected.length && timingSafeEqual(given, expected)) return { ok: true };
+  }
+  return { ok: false, reason: 'Signature mismatch' };
 }
 
 export async function POST(request: NextRequest) {
   try {
-    if (!verifyOptionalSecret(request)) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const rawBody = await request.text();
+    const verified = verifyResendSignature(request, rawBody);
+    if (!verified.ok) {
+      console.warn('resend inbound: rejected webhook —', verified.reason);
+      return NextResponse.json({ error: 'Invalid webhook signature' }, { status: 401 });
     }
 
-    const payload = await request.json().catch(() => null);
+    let payload: unknown = null;
+    try {
+      payload = JSON.parse(rawBody);
+    } catch {
+      payload = null;
+    }
     if (!payload || typeof payload !== 'object') {
       return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
     }

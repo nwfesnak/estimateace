@@ -31,8 +31,9 @@
       <h4>Support</h4>
       <ul>
         <li><a href="mailto:support@estimateace.com">support@estimateace.com</a></li>
-        <li><a href="/resources.php#privacy">Privacy</a></li>
-        <li><a href="/resources.php#terms">Terms</a></li>
+        <li><a href="<?= $app_url ?>/privacy">Privacy</a></li>
+        <li><a href="<?= $app_url ?>/terms">Terms</a></li>
+        <li><a href="<?= $app_url ?>/terms#cancellation">Cancellation &amp; refunds</a></li>
       </ul>
     </div>
   </div>

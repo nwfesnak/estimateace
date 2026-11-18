@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { getXaiApiKey, getXaiImageModel } from '@/lib/xai-config';
 import { extractMediaStoragePath } from '@/lib/media-url';
+import { enforceAppAccess } from '@/lib/billing-access';
 
 /** Image edit is slow — needs elevated duration on Vercel */
 export const maxDuration = 120;
@@ -246,6 +247,8 @@ export async function POST(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: authError || 'Unauthorized' }, { status: 401 });
     }
+    const paywall = await enforceAppAccess(user.id);
+    if (paywall) return paywall;
 
     const rate = checkRateLimit(user.id);
     if (!rate.allowed) {

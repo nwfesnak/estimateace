@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
+import { hasAppAccess } from '@/lib/billing';
+import { subscriptionRowToSnapshot } from '@/lib/billing-access';
 
 /**
  * Resolve whether the logged-in user is crew on someone's workspace.
@@ -66,6 +68,14 @@ export async function GET(request: NextRequest) {
     const periodEnd = (row as any).seat_period_end
       ? new Date((row as any).seat_period_end).getTime()
       : 0;
+    if (seatStatus === 'pending_payment' || seatStatus === 'incomplete' || seatStatus === 'incomplete_expired') {
+      return NextResponse.json({
+        isCrew: false,
+        seatExpired: true,
+        seatPending: true,
+        error: 'This crew login turns on once the account owner pays for the crew seat.',
+      });
+    }
     if (seatStatus === 'expired') {
       return NextResponse.json({
         isCrew: false,
@@ -82,6 +92,22 @@ export async function GET(request: NextRequest) {
         isCrew: false,
         seatExpired: true,
         error: 'This crew seat has ended. Ask the account owner to renew.',
+      });
+    }
+
+    // Crew inherit the owner's plan: when the owner's trial/subscription has lapsed
+    // (and billing is enforced), crew are locked out too.
+    const { data: ownerSub } = await admin
+      .from('subscriptions')
+      .select('*')
+      .eq('user_id', row.owner_user_id)
+      .maybeSingle();
+    if (ownerSub && !hasAppAccess(subscriptionRowToSnapshot(ownerSub))) {
+      return NextResponse.json({
+        isCrew: false,
+        seatExpired: true,
+        ownerInactive: true,
+        error: "The account owner's EstimateAce subscription is not active. Ask them to subscribe.",
       });
     }
 

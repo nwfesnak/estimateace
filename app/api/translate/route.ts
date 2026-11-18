@@ -3,6 +3,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getXaiApiKey, getXaiChatModel } from '@/lib/xai-config';
+import { enforceAppAccess } from '@/lib/billing-access';
 
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
 const RATE_LIMIT = 30;
@@ -117,6 +118,8 @@ export async function POST(request: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: authError || 'Unauthorized' }, { status: 401 });
   }
+  const paywall = await enforceAppAccess(user.id);
+  if (paywall) return paywall;
 
   const rate = checkRateLimit(user.id);
   if (!rate.allowed) {

@@ -5,6 +5,7 @@ import {
   ensureTrialEndsAt,
   isThreeMonthPromo,
   normalizeBillingSnapshot,
+  normalizePromo,
   resolveTrialDaysFromPromo,
   THREE_MONTH_PROMO_DAYS,
   THREE_MONTH_PROMO_LIMIT,
@@ -13,7 +14,8 @@ import { claimThreeMonthPromoSpot } from '@/lib/promo-3mo';
 
 /**
  * Seed free trial + preferred plan (monthly|yearly) after signup from /trial page.
- * Optional body.promo=2mo (or trialDays) for longer promo trials from special landers.
+ * Optional body.promo=2mo|6mo for the longer promo trials on the public landers.
+ * body.trialDays, if sent, must equal the offer's length (no arbitrary trial lengths).
  */
 export async function POST(request: NextRequest) {
   try {
@@ -28,10 +30,18 @@ export async function POST(request: NextRequest) {
     const name = String(body.name || '').trim().slice(0, 120);
     const phone = String(body.phone || '').trim().slice(0, 40);
     const promo = String(body.promo || '').trim();
-    const trialDays = resolveTrialDaysFromPromo(
-      promo,
-      body.trialDays != null ? Number(body.trialDays) : null
-    );
+    // Only approved offers (standard / 2mo / 6mo / capped 3mo). Reject anything else
+    // instead of silently honoring a client-chosen trial length.
+    if (promo && !normalizePromo(promo)) {
+      return NextResponse.json({ error: 'Unknown promo code.' }, { status: 400 });
+    }
+    const trialDays = resolveTrialDaysFromPromo(promo);
+    if (body.trialDays != null && Number(body.trialDays) !== trialDays) {
+      return NextResponse.json(
+        { error: `Trial length must match the offer (${trialDays} days).` },
+        { status: 400 }
+      );
+    }
 
     const admin = getSupabaseAdmin();
     if (!admin) {

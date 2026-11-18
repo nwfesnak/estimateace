@@ -8,6 +8,7 @@ import {
   toMinimalEstimateRow,
   type EstimateSaveInput,
 } from '@/lib/estimate-save';
+import { enforceAppAccess } from '@/lib/billing-access';
 
 /**
  * Reliable estimate/invoice save via service role (after JWT auth).
@@ -19,6 +20,8 @@ export async function POST(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: authError || 'Unauthorized' }, { status: 401 });
     }
+    const paywall = await enforceAppAccess(user.id);
+    if (paywall) return paywall;
 
     const admin = getSupabaseAdmin();
     if (!admin) {

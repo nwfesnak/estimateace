@@ -9,6 +9,8 @@ import {
   isStripeConfigured,
   isThreeMonthPromo,
   normalizeBillingSnapshot,
+  normalizePromo,
+  resolveTrialDaysFromPromo,
   THREE_MONTH_PROMO_DAYS,
   type BillingSnapshot,
 } from '@/lib/billing';
@@ -96,6 +98,10 @@ export async function GET(request: NextRequest) {
           } else if (claim.ok && !snapshot.trialEndsAt) {
             promoDays = THREE_MONTH_PROMO_DAYS;
           }
+        }
+        if (promoDays == null && normalizePromo(String(meta.promo || ''))) {
+          // 2mo / 6mo landers when signup needed email confirmation (start-trial never ran)
+          promoDays = resolveTrialDaysFromPromo(String(meta.promo || ''));
         }
         const withTrial = ensureTrialEndsAt(seed, new Date(), promoDays);
         if (

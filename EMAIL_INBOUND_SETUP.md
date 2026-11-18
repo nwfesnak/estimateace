@@ -23,7 +23,7 @@ Summaries appear on the dashboard when mail is **forwarded** to each user’s un
    - `EMAIL_INBOUND_DOMAIN=inbound.estimateace.com`
    - `NEXT_PUBLIC_EMAIL_INBOUND_DOMAIN=inbound.estimateace.com`
    - `RESEND_API_KEY` (if using Resend receiving.get for body text)
-   - Optional: `RESEND_WEBHOOK_SECRET=...`
+   - **Required for launch:** `RESEND_WEBHOOK_SECRET=whsec_...` (Resend → Webhooks → open the inbound webhook → copy *Signing secret*). The route verifies Resend's Svix signature (`svix-id`, `svix-timestamp`, `svix-signature`) and rejects unsigned or forged requests once this is set.
 
 ## API
 

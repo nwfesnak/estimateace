@@ -5,6 +5,7 @@ import { sendEmailNotification, sendSmsNotification } from '@/lib/notifications'
 import { createClientActionToken } from '@/lib/client-action-token';
 import { getAppUrl } from '@/lib/stripe-server';
 import { isClientSelectedOption, isOptionalLine } from '@/lib/optional-line-items';
+import { enforceAppAccess } from '@/lib/billing-access';
 
 type LineItem = {
   description?: string;
@@ -42,6 +43,8 @@ export async function POST(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: authError || 'Unauthorized' }, { status: 401 });
     }
+    const paywall = await enforceAppAccess(user.id);
+    if (paywall) return paywall;
 
     const body = await request.json().catch(() => ({}));
     const emails: string[] = Array.isArray(body.emails)

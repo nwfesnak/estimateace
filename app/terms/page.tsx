@@ -17,12 +17,14 @@ export default function TermsPage() {
           </Link>
         </p>
         <h1>Terms of Service</h1>
-        <p className="text-sm text-slate-500">Last updated: September 14, 2026</p>
+        <p className="text-sm text-slate-500">Last updated: November 18, 2026</p>
 
         <p>
           These Terms govern your use of EstimateAce (&quot;Service&quot;), a software platform for
-          contractors to create estimates, invoices, job documentation, and related tools. By
-          creating an account or using the Service, you agree to these Terms.
+          contractors to create estimates, invoices, job documentation, and related tools.
+          EstimateAce is operated by Nathan Fesnak, a sole proprietor based in Charlotte, North
+          Carolina (&quot;EstimateAce,&quot; &quot;we,&quot; &quot;us&quot;). By creating an account or using the
+          Service, you agree to these Terms.
         </p>
 
         <h2>1. Account</h2>
@@ -32,12 +34,25 @@ export default function TermsPage() {
           <a href={`mailto:${SUPPORT}`}>{SUPPORT}</a>.
         </p>
 
-        <h2>2. Subscription &amp; trial</h2>
+        <h2>2. Subscription &amp; free trial</h2>
         <p>
-          Access may be provided under a free trial and/or paid subscription. Fees, if any, are
-          charged through Stripe. Unless required by law, fees are non-refundable except where we
-          state otherwise. You may cancel via the billing portal; access continues until the end of
-          the paid period when applicable.
+          New accounts start with a free trial. No payment card is required to start the trial.
+          When the trial ends, you must subscribe to a paid plan (currently $29.99 per month or $249
+          per year, plus any applicable taxes) to keep using the Service. If you subscribe before
+          your trial ends, your first charge happens when the trial would have ended. Subscriptions
+          renew automatically at the end of each billing period until canceled. Optional add-ons
+          (such as crew seats and AI Receptionist) are billed separately at the prices shown in the
+          app. Subscription fees are charged through our payment processor, Stripe. We may change
+          prices with advance notice; changes apply from your next billing period.
+        </p>
+
+        <h2 id="cancellation">2A. Cancellation &amp; refunds</h2>
+        <p>
+          You can cancel at any time from <strong>Profile → Billing → Manage billing</strong>{' '}
+          (the Stripe billing portal) or by emailing <a href={`mailto:${SUPPORT}`}>{SUPPORT}</a>.
+          When you cancel, your subscription will not renew and you keep access through the end of
+          the period you already paid for. We do not provide refunds or credits for partial billing
+          periods, unused time, or downgrades, except where required by law.
         </p>
 
         <h2>3. Your content</h2>
@@ -78,11 +93,32 @@ export default function TermsPage() {
           engineer the Service except as allowed by law, or use it for unlawful activity.
         </p>
 
-        <h2>7. Payment links to third parties</h2>
+        <h2 id="payments">7. Payments between you and your clients</h2>
         <p>
-          Payment methods you configure (PayPal, Venmo, Zelle, etc.) are between you and those
-          processors. EstimateAce does not hold client funds unless a future feature expressly
-          states otherwise.
+          If you accept card or bank payments from your clients through EstimateAce, those payments
+          are processed by Stripe and paid out to your own Stripe connected account. Payment
+          processing services for contractors on EstimateAce are provided by Stripe and are subject
+          to the{' '}
+          <a href="https://stripe.com/connect-account/legal" target="_blank" rel="noopener noreferrer">
+            Stripe Connected Account Agreement
+          </a>
+          , which includes the{' '}
+          <a href="https://stripe.com/legal" target="_blank" rel="noopener noreferrer">
+            Stripe Terms of Service
+          </a>{' '}
+          (collectively, the &quot;Stripe Services Agreement&quot;). By agreeing to these Terms or
+          continuing to use payment features, you agree to be bound by the Stripe Services Agreement,
+          as Stripe may modify it from time to time. As a condition of EstimateAce enabling payment
+          processing through Stripe, you agree to provide us accurate and complete information about
+          you and your business, and you authorize us to share it and transaction information
+          related to your use of the payment processing services provided by Stripe.
+        </p>
+        <p>
+          EstimateAce provides software only. We are not a party to any transaction, contract, or
+          dispute between you and your clients, and we do not hold your clients&apos; funds. You are
+          responsible for your work, pricing, taxes, refunds, chargebacks, and disputes with your
+          clients. Other payment methods you list on documents (such as PayPal, Venmo, Zelle, checks,
+          or cash) are solely between you, your client, and that provider.
         </p>
 
         <h2>7A. Text messaging (SMS)</h2>
@@ -136,6 +172,8 @@ export default function TermsPage() {
         <p>
           Questions about these Terms:{' '}
           <a href={`mailto:${SUPPORT}`}>{SUPPORT}</a>
+          <br />
+          EstimateAce (operated by Nathan Fesnak, sole proprietor), Charlotte, NC
         </p>
       </div>
     </main>

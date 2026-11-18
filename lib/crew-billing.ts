@@ -40,7 +40,12 @@ export function crewSeatHasAccess(seat: {
   const periodEnd = seat.current_period_end ? new Date(seat.current_period_end).getTime() : 0;
   const now = Date.now();
 
-  if (status === 'active' || status === 'trialing' || status === 'past_due') {
+  if (
+    status === 'active' ||
+    status === 'trialing' ||
+    status === 'past_due' ||
+    status === 'canceling'
+  ) {
     return true;
   }
   // Canceled but paid through end of month
@@ -50,10 +55,7 @@ export function crewSeatHasAccess(seat: {
   ) {
     return true;
   }
-  // Incomplete checkout — brief grace for just-created seats without sub yet
-  if (status === 'incomplete' || status === 'pending') {
-    return true;
-  }
+  // Unpaid (pending_payment / incomplete / pending): no access until Stripe confirms payment.
   return false;
 }
 
@@ -126,6 +128,30 @@ export async function ensureStripeCustomerForOwner(
   return customer.id;
 }
 
+/** Seat status written on invite, before the $14.99 seat is paid. Login is disabled. */
+export const CREW_SEAT_PENDING = 'pending_payment';
+
+/** Long Supabase ban = crew login disabled until the seat is paid (or after it ends). */
+const CREW_LOGIN_BAN = '876000h';
+
+/**
+ * Enable/disable a crew member's Supabase login. Crew can only sign in while
+ * their seat is paid; invite disables it, the seat webhook re-enables it.
+ */
+export async function setCrewLoginEnabled(crewUserId: string | null | undefined, enabled: boolean) {
+  if (!crewUserId) return;
+  const admin = getSupabaseAdmin();
+  if (!admin) return;
+  try {
+    const { error } = await admin.auth.admin.updateUserById(crewUserId, {
+      ban_duration: enabled ? 'none' : CREW_LOGIN_BAN,
+    });
+    if (error) console.warn('setCrewLoginEnabled:', error.message);
+  } catch (e) {
+    console.warn('setCrewLoginEnabled:', e);
+  }
+}
+
 export async function upsertCrewSeatFromStripe(
   sub: Stripe.Subscription
 ): Promise<{ ok: boolean; error?: string }> {
@@ -191,10 +217,12 @@ export async function upsertCrewSeatFromStripe(
   }
 
   // Mirror onto crew_members when we can match
-  let memberQuery = admin.from('crew_members').select('id').eq('owner_user_id', ownerUserId);
+  let memberQuery = admin.from('crew_members').select('id, crew_user_id').eq('owner_user_id', ownerUserId);
   if (crewUserId) memberQuery = memberQuery.eq('crew_user_id', crewUserId);
   else memberQuery = memberQuery.eq('email', crewEmail);
   const { data: member } = await memberQuery.maybeSingle();
+  const memberCrewUserId =
+    (member as { crew_user_id?: string | null } | null)?.crew_user_id || crewUserId;
 
   if (member?.id) {
     const accessOk =
@@ -223,6 +251,9 @@ export async function upsertCrewSeatFromStripe(
         updated_at: new Date().toISOString(),
       })
       .eq('stripe_subscription_id', sub.id);
+
+    // Seat paid (or still inside a paid period) → crew can log in; otherwise keep disabled.
+    await setCrewLoginEnabled(memberCrewUserId, !!accessOk);
   }
 
   // Fully ended: revoke seat after period
@@ -240,6 +271,7 @@ export async function upsertCrewSeatFromStripe(
           updated_at: new Date().toISOString(),
         })
         .eq('id', member.id);
+      await setCrewLoginEnabled(memberCrewUserId, false);
     }
   }
 

@@ -31,6 +31,9 @@ export type BillingSnapshot = {
 
 export const DEFAULT_TRIAL_DAYS = 14;
 
+/** Grace after a Stripe-managed trial ends while we wait for the subscription webhook. */
+export const TRIAL_WEBHOOK_GRACE_MS = 2 * 24 * 60 * 60 * 1000;
+
 export const DEFAULT_BILLING_SNAPSHOT: BillingSnapshot = {
   status: 'none',
   stripeCustomerId: null,
@@ -98,17 +101,51 @@ export function getTrialDays(): number {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_TRIAL_DAYS;
 }
 
-/** Promo codes from marketing landers (e.g. ?promo=2mo → 60 days). A named promo wins over a client-sent day count. */
-export function resolveTrialDaysFromPromo(promo?: string | null, explicitDays?: number | null): number {
+/**
+ * Approved trial offers. Anything else is rejected server-side so nobody can
+ * hand themselves an arbitrary trial length by editing the request.
+ *  - standard: NEXT_PUBLIC_TRIAL_DAYS (default 14)
+ *  - 2mo: estimateace.com/2-months-free.html  (?promo=2mo)  → 60 days
+ *  - 6mo: estimateace.com/6-months-free.html  (?promo=6mo)  → 180 days
+ *  - 3mo: legacy capped offer (first 20 signups, enforced by claimThreeMonthPromoSpot) → 90 days
+ */
+export const TRIAL_OFFERS = {
+  standard: () => getTrialDays(),
+  '2mo': () => 60,
+  '3mo': () => 90,
+  '6mo': () => 180,
+} as const;
+
+export type TrialOffer = keyof typeof TRIAL_OFFERS;
+
+export function normalizePromo(promo?: string | null): TrialOffer | null {
   const p = String(promo || '')
     .trim()
     .toLowerCase();
-  if (p === '3mo' || p === '3months' || p === '90' || p === 'three-months') return 90;
-  if (p === '2mo' || p === '2months' || p === '60' || p === 'two-months') return 60;
-  if (p === '6mo' || p === '6months' || p === '180' || p === 'six-months') return 180;
-  if (explicitDays != null && Number.isFinite(explicitDays) && explicitDays > 0) {
-    return Math.min(365, Math.floor(Number(explicitDays)));
-  }
+  if (!p) return null;
+  if (p === '3mo' || p === '3months' || p === '90' || p === 'three-months') return '3mo';
+  if (p === '2mo' || p === '2months' || p === '60' || p === 'two-months') return '2mo';
+  if (p === '6mo' || p === '6months' || p === '180' || p === 'six-months') return '6mo';
+  return null;
+}
+
+/** Every trial length (in days) the server will accept. */
+export function allowedTrialDays(): number[] {
+  return Array.from(new Set(Object.values(TRIAL_OFFERS).map((f) => f())));
+}
+
+export function isAllowedTrialDays(days: unknown): boolean {
+  const n = Number(days);
+  return Number.isFinite(n) && allowedTrialDays().includes(Math.floor(n));
+}
+
+/**
+ * Promo codes from marketing landers (e.g. ?promo=2mo → 60 days).
+ * Unknown promos and arbitrary client-sent day counts fall back to the standard trial.
+ */
+export function resolveTrialDaysFromPromo(promo?: string | null): number {
+  const offer = normalizePromo(promo);
+  if (offer) return TRIAL_OFFERS[offer]();
   return getTrialDays();
 }
 
@@ -172,8 +209,8 @@ export function ensureTrialEndsAt(
   // Don't start a new trial if account is scheduled to close or already canceled period
   if (snapshot.accountClosesAt) return snapshot;
   const days =
-    trialDaysOverride != null && Number.isFinite(trialDaysOverride) && trialDaysOverride > 0
-      ? Math.min(365, Math.floor(trialDaysOverride))
+    trialDaysOverride != null && isAllowedTrialDays(trialDaysOverride)
+      ? Math.floor(trialDaysOverride)
       : getTrialDays();
   const end = new Date(now);
   end.setDate(end.getDate() + days);
@@ -235,13 +272,25 @@ export function hasAppAccess(snapshot: BillingSnapshot, now = new Date()): boole
   if (!isBillingEnforced()) return true;
 
   const status = snapshot.status;
-  if (status === 'active' || status === 'trialing') return true;
+  if (status === 'active') return true;
   if (status === 'past_due') return false;
 
-  if (snapshot.trialEndsAt) {
-    const end = new Date(snapshot.trialEndsAt).getTime();
-    if (!isNaN(end) && end > now.getTime()) return true;
+  const trialEnd = snapshot.trialEndsAt ? new Date(snapshot.trialEndsAt).getTime() : NaN;
+  const trialStillRunning = !isNaN(trialEnd) && trialEnd > now.getTime();
+
+  if (status === 'trialing') {
+    // App-managed trial (no Stripe subscription yet): access only until trial end.
+    if (trialStillRunning) return true;
+    // Stripe-managed trial (they subscribed mid-trial, card on file). Stripe converts it
+    // to active/past_due at trial end; allow a short grace for webhook lag.
+    if (snapshot.stripeSubscriptionId) {
+      if (isNaN(trialEnd)) return true;
+      return trialEnd + TRIAL_WEBHOOK_GRACE_MS > now.getTime();
+    }
+    return false;
   }
+
+  if (trialStillRunning) return true;
 
   // Canceled / closing but still inside paid period
   if (snapshot.currentPeriodEnd) {
@@ -269,7 +318,7 @@ export function accessBlockedReason(snapshot: BillingSnapshot, now = new Date())
   if (snapshot.trialEndsAt) {
     const end = new Date(snapshot.trialEndsAt);
     if (!isNaN(end.getTime()) && end.getTime() <= now.getTime()) {
-      return `Your ${getTrialDays()}-day free trial has ended. Subscribe to continue.`;
+      return 'Your free trial has ended. Subscribe to keep using EstimateAce.';
     }
   }
   return 'An active subscription is required to use EstimateAce.';

@@ -5,6 +5,7 @@ import {
   buildRecurringClientLink,
   createClientRecurringCheckout,
 } from '@/lib/recurring-services';
+import { enforceAppAccess } from '@/lib/billing-access';
 
 /**
  * Contractor creates Stripe subscription Checkout for a client plan.
@@ -14,6 +15,8 @@ export async function POST(request: NextRequest) {
   try {
     const { user, error } = await getUserFromRequest(request);
     if (!user) return NextResponse.json({ error: error || 'Unauthorized' }, { status: 401 });
+    const paywall = await enforceAppAccess(user.id);
+    if (paywall) return paywall;
 
     let ownerUserId = user.id;
     const admin = getSupabaseAdmin();
