@@ -78,53 +78,136 @@ export function mapCrewSeatStatus(status: Stripe.Subscription.Status | string): 
   return 'incomplete';
 }
 
+async function liveCustomerId(
+  stripe: NonNullable<ReturnType<typeof getStripe>>,
+  id: string | null | undefined
+): Promise<string | null> {
+  if (!id) return null;
+  try {
+    const c = await stripe.customers.retrieve(id);
+    if (c && !('deleted' in c && c.deleted)) return id;
+  } catch {
+    /* missing / wrong mode */
+  }
+  return null;
+}
+
+/**
+ * Find this user's existing Stripe customer before ever creating one:
+ * metadata.supabase_user_id search, then customers with the same email that carry
+ * our metadata (or the oldest one with that email).
+ */
+async function findExistingStripeCustomer(
+  stripe: NonNullable<ReturnType<typeof getStripe>>,
+  ownerUserId: string,
+  email?: string | null
+): Promise<string | null> {
+  try {
+    const found = await stripe.customers.search({
+      query: `metadata['supabase_user_id']:'${ownerUserId.replace(/'/g, '')}'`,
+      limit: 10,
+    });
+    // Prefer one that has an email (real checkout customer), else oldest
+    const withEmail = found.data.filter((c) => c.email);
+    const pick = (withEmail.length ? withEmail : found.data).sort((a, b) => a.created - b.created)[0];
+    if (pick) return pick.id;
+  } catch {
+    /* search unavailable — fall through */
+  }
+  if (email) {
+    try {
+      const list = await stripe.customers.list({ email, limit: 20 });
+      const mine = list.data.filter((c) => c.metadata?.supabase_user_id === ownerUserId);
+      const pick = (mine.length ? mine : list.data).sort((a, b) => a.created - b.created)[0];
+      if (pick) return pick.id;
+    } catch {
+      /* ignore */
+    }
+  }
+  return null;
+}
+
+async function persistOwnerCustomerId(ownerUserId: string, customerId: string) {
+  const admin = getSupabaseAdmin();
+  if (!admin) return;
+  const { data } = await admin
+    .from('subscriptions')
+    .select('user_id')
+    .eq('user_id', ownerUserId)
+    .maybeSingle();
+  const { error } = data
+    ? await admin
+        .from('subscriptions')
+        .update({ stripe_customer_id: customerId, updated_at: new Date().toISOString() })
+        .eq('user_id', ownerUserId)
+    : await admin.from('subscriptions').insert({
+        user_id: ownerUserId,
+        stripe_customer_id: customerId,
+        updated_at: new Date().toISOString(),
+      });
+  if (error) console.warn('persistOwnerCustomerId:', error.message);
+}
+
+/**
+ * One Stripe customer per EstimateAce user.
+ *
+ * Order: explicit id → subscriptions.stripe_customer_id → existing customer in Stripe
+ * (metadata / email) → create (idempotency key per user, so retries and parallel
+ * requests within 24h return the same customer). Read-only callers (status syncs)
+ * pass `createIfMissing: false` and never create customers.
+ */
 export async function ensureStripeCustomerForOwner(
   ownerUserId: string,
   email?: string | null,
-  existingCustomerId?: string | null
+  existingCustomerId?: string | null,
+  opts: { createIfMissing?: boolean } = {}
 ): Promise<string | null> {
   const stripe = getStripe();
-  if (!stripe) return null;
+  if (!stripe || !ownerUserId) return null;
+  const createIfMissing = opts.createIfMissing !== false;
 
-  if (existingCustomerId) {
-    try {
-      const c = await stripe.customers.retrieve(existingCustomerId);
-      if (c && !('deleted' in c && c.deleted)) return existingCustomerId;
-    } catch {
-      /* create new */
-    }
-  }
+  const explicit = await liveCustomerId(stripe, existingCustomerId);
+  if (explicit) return explicit;
 
   const admin = getSupabaseAdmin();
+  let storedId: string | null = null;
   if (admin) {
     const { data } = await admin
       .from('subscriptions')
       .select('stripe_customer_id')
       .eq('user_id', ownerUserId)
       .maybeSingle();
-    if (data?.stripe_customer_id) {
-      try {
-        const c = await stripe.customers.retrieve(data.stripe_customer_id);
-        if (c && !('deleted' in c && c.deleted)) return data.stripe_customer_id;
-      } catch {
-        /* fall through */
-      }
+    storedId = data?.stripe_customer_id || null;
+    const stored = await liveCustomerId(stripe, storedId);
+    if (stored) return stored;
+  }
+
+  let userEmail = email || null;
+  if (!userEmail && admin) {
+    try {
+      const { data } = await admin.auth.admin.getUserById(ownerUserId);
+      userEmail = data?.user?.email || null;
+    } catch {
+      /* ignore */
     }
   }
 
-  const customer = await stripe.customers.create({
-    email: email || undefined,
-    metadata: { supabase_user_id: ownerUserId },
-  });
-
-  if (admin) {
-    await admin.from('subscriptions').upsert({
-      user_id: ownerUserId,
-      stripe_customer_id: customer.id,
-      updated_at: new Date().toISOString(),
-    });
+  const existing = await findExistingStripeCustomer(stripe, ownerUserId, userEmail);
+  if (existing) {
+    if (existing !== storedId) await persistOwnerCustomerId(ownerUserId, existing);
+    return existing;
   }
 
+  if (!createIfMissing) return null;
+
+  const customer = await stripe.customers.create(
+    {
+      email: userEmail || undefined,
+      metadata: { supabase_user_id: ownerUserId },
+    },
+    { idempotencyKey: `ea-customer-${ownerUserId}-${userEmail || 'noemail'}` }
+  );
+  await persistOwnerCustomerId(ownerUserId, customer.id);
   return customer.id;
 }
 
