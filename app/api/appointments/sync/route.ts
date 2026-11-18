@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { settingsDocId, type StoredAppointment } from '@/lib/appointment-reminders';
+import { enforceAppAccess } from '@/lib/billing-access';
 
 async function verifyUser(request: NextRequest) {
   const authHeader = request.headers.get('authorization');
@@ -34,6 +35,8 @@ export async function POST(request: NextRequest) {
     if (authError || !user || !supabase) {
       return NextResponse.json({ error: authError || 'Unauthorized' }, { status: 401 });
     }
+    const paywall = await enforceAppAccess(user.id);
+    if (paywall) return paywall;
 
     const body = await request.json();
     const appointments = Array.isArray(body.appointments) ? body.appointments as StoredAppointment[] : [];

@@ -133,6 +133,15 @@ export async function upsertSubscriptionFromStripe(
   return { ok: true, userId };
 }
 
+/** Active with no Stripe subscription and a period end in 2099+ = manually comped account. */
+export function isCompedSubscriptionRow(
+  row: { status?: string | null; stripe_subscription_id?: string | null; current_period_end?: string | null } | null | undefined
+): boolean {
+  if (!row || row.status !== 'active' || row.stripe_subscription_id) return false;
+  const end = row.current_period_end ? new Date(row.current_period_end).getTime() : NaN;
+  return !isNaN(end) && new Date(end).getUTCFullYear() >= 2099;
+}
+
 /**
  * Pull latest subscription from Stripe for this user and write to Supabase.
  * Used after Checkout when webhooks are delayed/misconfigured.
@@ -152,9 +161,15 @@ export async function syncUserSubscriptionFromStripe(
 
   const { data: row } = await admin
     .from('subscriptions')
-    .select('stripe_customer_id, stripe_subscription_id')
+    .select('stripe_customer_id, stripe_subscription_id, status, current_period_end')
     .eq('user_id', userId)
     .maybeSingle();
+
+  // Comped accounts (e.g. the platform owner): status 'active', no Stripe subscription,
+  // period end set far in the future. Never let a Stripe sync downgrade them.
+  if (isCompedSubscriptionRow(row)) {
+    return { ok: true, status: 'active' };
+  }
 
   let sub: Stripe.Subscription | null = null;
   let customerId = row?.stripe_customer_id || null;

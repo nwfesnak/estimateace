@@ -22,7 +22,7 @@ $savings = round($monthly * 12 - $annual, 2);
       <article class="price-card">
         <h3>Monthly</h3>
         <div class="price">$<?= number_format($monthly, 2) ?> <small>/ month</small></div>
-        <p class="price-note">Billed monthly · Cancel anytime</p>
+        <p class="price-note">Billed monthly after your free trial · Cancel anytime</p>
         <ul class="feature-list" style="margin-bottom:1.5rem;">
           <li>Unlimited estimates & invoices</li>
           <li>AI Price Quote & descriptions</li>
@@ -58,6 +58,8 @@ $savings = round($monthly * 12 - $annual, 2);
   <div class="container cards-2">
     <article class="card"><h3>Is there a free trial?</h3><p>Log in at app.estimateace.com to explore. Contact support for extended trial options.</p></article>
     <article class="card"><h3>Are SMS/email included?</h3><p>The software is included. Twilio and Resend usage fees are billed by those providers separately.</p></article>
+    <article class="card"><h3>Do I need a card for the trial?</h3><p>No. Start your free trial with no card. When it ends, subscribe to keep access — you are never charged unless you subscribe.</p></article>
+    <article class="card"><h3>Cancellation &amp; refunds</h3><p>Cancel anytime in the app under Profile → Billing → Manage billing. You keep access through the end of the period you paid for. We don't give refunds for partial months or years, except where required by law. See our <a href="https://app.estimateace.com/terms#cancellation">Terms</a>.</p></article>
     <article class="card"><h3>Per-user pricing?</h3><p>Main account included. Additional crew accounts may be billed as you add team members in-app.</p></article>
     <article class="card"><h3>Payment processing fees?</h3><p>Third-party processors charge their own rates. EstimateAce does not take a cut of your transactions.</p></article>
   </div>

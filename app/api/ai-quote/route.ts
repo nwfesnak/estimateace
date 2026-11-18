@@ -22,6 +22,7 @@ import {
   priceTemplate,
   type QuoteFacts,
 } from '@/lib/quote-templates';
+import { enforceAppAccess } from '@/lib/billing-access';
 
 export const maxDuration = 60;
 export const runtime = 'nodejs';
@@ -103,6 +104,8 @@ export async function POST(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: authError || 'Unauthorized' }, { status: 401 });
     }
+    const paywall = await enforceAppAccess(user.id);
+    if (paywall) return paywall;
 
     const rateCheck = checkRateLimit(user.id);
     if (!rateCheck.allowed) {

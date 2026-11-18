@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import { analyzeReceiptImage } from '@/lib/analyze-receipt-image';
+import { enforceAppAccess } from '@/lib/billing-access';
 
 /**
  * AI receipt scan — Grok vision extracts total / vendor / date from a receipt image.
@@ -12,6 +13,8 @@ export async function POST(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: authError || 'Unauthorized' }, { status: 401 });
     }
+    const paywall = await enforceAppAccess(user.id);
+    if (paywall) return paywall;
 
     const body = await request.json().catch(() => ({}));
     const imageUrl = String(body.imageUrl || '').trim();

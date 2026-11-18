@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { getAppUrl, getStripe } from '@/lib/stripe-server';
+import type Stripe from 'stripe';
 import { isStripeConfigured } from '@/lib/billing';
 
 export async function POST(request: NextRequest) {
@@ -37,12 +38,48 @@ export async function POST(request: NextRequest) {
     }
 
     const stripe = getStripe()!;
-    const session = await stripe.billingPortal.sessions.create({
+    // Uses the account's default portal configuration (cancel at period end, update card,
+    // invoice history, monthly <-> yearly). STRIPE_PORTAL_CONFIGURATION_ID pins a specific one.
+    const configuration = (process.env.STRIPE_PORTAL_CONFIGURATION_ID || '').trim() || undefined;
+    const params: Stripe.BillingPortal.SessionCreateParams = {
       customer: data.stripe_customer_id,
       return_url: `${getAppUrl(request.url)}/?billing=portal`,
-    });
+    };
+    if (configuration) params.configuration = configuration;
 
-    return NextResponse.json({ url: session.url });
+    try {
+      const session = await stripe.billingPortal.sessions.create(params);
+      return NextResponse.json({ url: session.url });
+    } catch (e: unknown) {
+      const err = e as { message?: string; code?: string };
+      const msg = String(err?.message || '');
+      if (configuration && /configuration/i.test(msg)) {
+        // Pinned config was deleted/deactivated — fall back to the account default.
+        delete params.configuration;
+        const session = await stripe.billingPortal.sessions.create(params);
+        return NextResponse.json({ url: session.url });
+      }
+      if (/No such customer/i.test(msg) || err?.code === 'resource_missing') {
+        await admin
+          .from('subscriptions')
+          .update({ stripe_customer_id: null, updated_at: new Date().toISOString() })
+          .eq('user_id', user.id);
+        return NextResponse.json(
+          { error: 'Your billing record was reset. Tap Subscribe to set up billing again.' },
+          { status: 409 }
+        );
+      }
+      if (/default configuration|portal settings|customer portal/i.test(msg)) {
+        return NextResponse.json(
+          {
+            error:
+              'Billing portal is not set up in Stripe yet. Contact support@estimateace.com to change or cancel your plan.',
+          },
+          { status: 503 }
+        );
+      }
+      throw e;
+    }
   } catch (e: any) {
     console.error('billing/portal:', e);
     return NextResponse.json({ error: e?.message || 'Portal failed' }, { status: 500 });

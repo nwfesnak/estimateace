@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { sendRecurringApprovalEmail } from '@/lib/recurring-services';
+import { enforceAppAccess } from '@/lib/billing-access';
 
 /**
  * Email client a recurring-charge approval button.
@@ -11,6 +12,8 @@ export async function POST(request: NextRequest) {
   try {
     const { user, error } = await getUserFromRequest(request);
     if (!user) return NextResponse.json({ error: error || 'Unauthorized' }, { status: 401 });
+    const paywall = await enforceAppAccess(user.id);
+    if (paywall) return paywall;
 
     let ownerUserId = user.id;
     const admin = getSupabaseAdmin();

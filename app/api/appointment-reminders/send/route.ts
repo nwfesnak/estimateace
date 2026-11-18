@@ -8,6 +8,7 @@ import {
   type StoredAppointment,
 } from '@/lib/appointment-reminders';
 import { sendEmailNotification, sendSmsNotification } from '@/lib/notifications';
+import { enforceAppAccess } from '@/lib/billing-access';
 
 async function verifyUser(request: NextRequest) {
   const authHeader = request.headers.get('authorization');
@@ -41,6 +42,8 @@ export async function POST(request: NextRequest) {
     if (authError || !user || !supabase) {
       return NextResponse.json({ error: authError || 'Unauthorized' }, { status: 401 });
     }
+    const paywall = await enforceAppAccess(user.id);
+    if (paywall) return paywall;
 
     const { data, error } = await supabase
       .from('estimates')

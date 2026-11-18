@@ -62,7 +62,7 @@ function TrialForm() {
 
   const billingNote = useMemo(
     () =>
-      `After your ${trialLabel} free trial (${trialDays} days), you will be billed ${planPrice} (${planLabel.toLowerCase()}) unless you cancel. You can change plans or cancel in Profile → Billing / Contact Us.`,
+      `No credit card is needed to start. Your ${trialLabel} free trial lasts ${trialDays} days. When it ends, you'll need to subscribe at ${planPrice} (${planLabel.toLowerCase()}) to keep access. You won't be charged unless you subscribe, and if you subscribe early your first charge waits until the trial ends. Cancel anytime in Profile → Billing → Manage billing.`,
     [plan, planPrice, planLabel, trialDays, trialLabel]
   );
 
@@ -232,7 +232,7 @@ function TrialForm() {
               Up). Enter your details for a {trialLabel} free trial ({trialDays} days).
               {threeMonthOffer
                 ? ' No credit card is required to start. After 90 days you will need to pay for the plan you choose below to keep the account. '
-                : ' After the trial you will be billed for the plan you choose below unless you cancel. '}
+                : ' No credit card is required to start. After the trial you will need to subscribe to the plan you choose below to keep access. '}
               Then use the same email and password to log in at app.estimateace.com.
               {threeMonthOffer ? ' This offer is limited to the first 20 signups.' : ''}
             </p>
@@ -355,8 +355,8 @@ function TrialForm() {
             />
             <span>
               I understand this is a <strong>{trialLabel} free trial</strong> ({trialDays} days), and
-              after that I will be billed <strong>{planPrice}</strong> ({planLabel.toLowerCase()})
-              unless I cancel. I agree to the{' '}
+              after that I will need to subscribe at <strong>{planPrice}</strong> (
+              {planLabel.toLowerCase()}) to keep using EstimateAce. I agree to the{' '}
               <Link href="/terms" className="text-emerald-700 underline">
                 Terms
               </Link>{' '}

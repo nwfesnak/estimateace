@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { CARD_PAYMENTS_NOT_SET_UP_CODE, createJobCheckoutSession } from '@/lib/job-payments';
+import { enforceAppAccess } from '@/lib/billing-access';
 
 /**
  * Create Stripe Checkout for an invoice/estimate balance (job payment).
@@ -20,6 +21,8 @@ export async function POST(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: error || 'Unauthorized' }, { status: 401 });
     }
+    const paywall = await enforceAppAccess(user.id);
+    if (paywall) return paywall;
 
     const body = await request.json().catch(() => ({}));
     const amount = Number(body.amount);

@@ -11,6 +11,7 @@ import {
   loadReceptionistBilling,
   receptionistAddonHasAccess,
 } from '@/lib/receptionist-billing';
+import { enforceAppAccess } from '@/lib/billing-access';
 
 /**
  * POST /api/receptionist/checkout
@@ -23,6 +24,8 @@ export async function POST(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: authError || 'Unauthorized' }, { status: 401 });
     }
+    const paywall = await enforceAppAccess(user.id);
+    if (paywall) return paywall;
 
     const stripe = getStripe();
     if (!stripe) {

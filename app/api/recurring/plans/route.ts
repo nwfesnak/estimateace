@@ -14,6 +14,7 @@ import {
   buildRecurringClientLink,
   type RecurringInterval,
 } from '@/lib/recurring-services';
+import { enforceAppAccess } from '@/lib/billing-access';
 
 async function resolveOwnerId(userId: string): Promise<string> {
   let ownerUserId = userId;
@@ -38,6 +39,8 @@ export async function GET(request: NextRequest) {
   try {
     const { user, error } = await getUserFromRequest(request);
     if (!user) return NextResponse.json({ error: error || 'Unauthorized' }, { status: 401 });
+    const paywall = await enforceAppAccess(user.id);
+    if (paywall) return paywall;
 
     const ownerId = await resolveOwnerId(user.id);
     const plans = await listRecurringPlans(ownerId);
@@ -57,6 +60,8 @@ export async function POST(request: NextRequest) {
   try {
     const { user, error } = await getUserFromRequest(request);
     if (!user) return NextResponse.json({ error: error || 'Unauthorized' }, { status: 401 });
+    const paywall = await enforceAppAccess(user.id);
+    if (paywall) return paywall;
 
     const ownerId = await resolveOwnerId(user.id);
     const body = await request.json().catch(() => ({}));
@@ -98,6 +103,8 @@ export async function PATCH(request: NextRequest) {
   try {
     const { user, error } = await getUserFromRequest(request);
     if (!user) return NextResponse.json({ error: error || 'Unauthorized' }, { status: 401 });
+    const paywall = await enforceAppAccess(user.id);
+    if (paywall) return paywall;
 
     const ownerId = await resolveOwnerId(user.id);
     const body = await request.json().catch(() => ({}));

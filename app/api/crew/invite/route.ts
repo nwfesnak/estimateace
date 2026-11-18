@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
+import { CREW_SEAT_PENDING, crewSeatHasAccess, setCrewLoginEnabled } from '@/lib/crew-billing';
+import { enforceAppAccess } from '@/lib/billing-access';
 
 /**
  * Owner invites a crew member: creates a real Supabase Auth user with the
@@ -12,6 +14,8 @@ export async function POST(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: authError || 'Unauthorized' }, { status: 401 });
     }
+    const paywall = await enforceAppAccess(user.id);
+    if (paywall) return paywall;
 
     // Crew cannot invite other crew
     const admin = getSupabaseAdmin();
@@ -83,6 +87,26 @@ export async function POST(request: NextRequest) {
           } catch (e) {
             console.warn('crew invite: password update on existing', e);
           }
+        }
+        if (existingLink.crew_user_id) {
+          const { data: seatRow } = await admin
+            .from('crew_members')
+            .select('seat_status, seat_period_end, seat_cancel_at_period_end')
+            .eq('id', existingLink.id)
+            .maybeSingle();
+          const seat = seatRow as {
+            seat_status?: string | null;
+            seat_period_end?: string | null;
+            seat_cancel_at_period_end?: boolean | null;
+          } | null;
+          const paid = seat
+            ? crewSeatHasAccess({
+                status: seat.seat_status,
+                current_period_end: seat.seat_period_end,
+                cancel_at_period_end: seat.seat_cancel_at_period_end,
+              })
+            : false;
+          await setCrewLoginEnabled(existingLink.crew_user_id, paid);
         }
         return NextResponse.json({
           ok: true,
@@ -188,6 +212,8 @@ export async function POST(request: NextRequest) {
           role,
           can_see_pricing: canSeePricing,
           can_see_estimates_and_financials: canSeeEstimatesAndFinancials,
+          // Login stays disabled until the $14.99 seat is paid (seat webhook activates it).
+          seat_status: CREW_SEAT_PENDING,
           updated_at: new Date().toISOString(),
         },
         { onConflict: 'crew_user_id' }
@@ -208,8 +234,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    await setCrewLoginEnabled(crewUserId, false);
+
     return NextResponse.json({
       ok: true,
+      seatPending: true,
+      message: 'Crew login created. It turns on as soon as the $14.99/month seat is paid.',
       crew: {
         email,
         userId: crewUserId,
