@@ -75,7 +75,9 @@ export function AIReceptionist({
   const [callerInput, setCallerInput] = React.useState('');
   const [testBusy, setTestBusy] = React.useState(false);
   const [testError, setTestError] = React.useState<string | null>(null);
-  const [filter, setFilter] = React.useState<'all' | 'new' | 'urgent'>('all');
+  const [filter, setFilter] = React.useState<'all' | 'new' | 'urgent' | 'spam'>('all');
+  const [spamBusyId, setSpamBusyId] = React.useState<string | null>(null);
+  const [spamNote, setSpamNote] = React.useState<string | null>(null);
   const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
   const [linePhone, setLinePhone] = React.useState<string | null>(null);
   const [lineReady, setLineReady] = React.useState(false);
@@ -321,7 +323,12 @@ export function AIReceptionist({
     }
   };
 
+  // With Spam screening on, spam stays out of the normal views (see the Spam filter).
+  const hideSpam = settings.spamScreening;
+  const spamCount = messages.filter((m) => m.spam).length;
   const filtered = messages.filter((m) => {
+    if (filter === 'spam') return m.spam;
+    if (hideSpam && m.spam) return false;
     if (filter === 'new') return m.status === 'new';
     if (filter === 'urgent') return m.urgent && !m.spam;
     return true;
@@ -540,6 +547,77 @@ export function AIReceptionist({
 
   const deleteMsg = (id: string) => deleteMessages([id]);
 
+  /** Label as spam and block the number that called/texted (owner-only blocklist). */
+  const markAsSpam = async (m: ReceptionistMessage) => {
+    const number = (m.fromNumber || m.callerPhone || '').trim();
+    const ok = window.confirm(
+      number
+        ? `Mark as spam and block ${number}? Future calls and texts from this number will be rejected.`
+        : 'Mark this message as spam?'
+    );
+    if (!ok) return;
+    setSpamBusyId(m.id);
+    setSpamNote(null);
+    try {
+      if (number) {
+        const token = await getAccessToken();
+        const res = await fetch('/api/receptionist/blocklist', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({ phone: number, leadId: m.id, reason: 'Marked as spam' }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          setSpamNote(`Marked as spam, but blocking the number failed: ${data.error || res.status}`);
+        } else {
+          setSpamNote(`Blocked ${number}.`);
+        }
+      }
+      const next = messages.map((x) =>
+        x.id === m.id
+          ? { ...x, spam: true, spamReason: x.spamReason || 'Marked as spam by you', status: 'handled' as const }
+          : x
+      );
+      onChangeMessages(next);
+      void onSave(settings, next);
+    } finally {
+      setSpamBusyId(null);
+    }
+  };
+
+  /** Undo a spam label (AI or manual) and unblock the number. */
+  const markNotSpam = async (m: ReceptionistMessage) => {
+    const number = (m.fromNumber || m.callerPhone || '').trim();
+    setSpamBusyId(m.id);
+    setSpamNote(null);
+    try {
+      if (number) {
+        const token = await getAccessToken();
+        await fetch('/api/receptionist/blocklist', {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({ phone: number }),
+        }).catch(() => null);
+      }
+      const next = messages.map((x) => {
+        if (x.id !== m.id) return x;
+        const { spamReason: _drop, ...rest } = x;
+        void _drop;
+        return { ...rest, spam: false, status: 'new' as const };
+      });
+      onChangeMessages(next);
+      void onSave(settings, next);
+    } finally {
+      setSpamBusyId(null);
+    }
+  };
+
   const deleteSelected = () => {
     const ids = filtered.filter((m) => selectedIds.includes(m.id)).map((m) => m.id);
     deleteMessages(ids);
@@ -719,7 +797,7 @@ export function AIReceptionist({
       {tab === 'inbox' && (
         <div className="space-y-4">
           <div className="flex flex-wrap gap-2 items-center">
-            {(['all', 'new', 'urgent'] as const).map((f) => (
+            {(['all', 'new', 'urgent', 'spam'] as const).map((f) => (
               <button
                 key={f}
                 type="button"
@@ -730,13 +808,21 @@ export function AIReceptionist({
                     : 'bg-white text-gray-600 border-gray-200'
                 }`}
               >
-                {f === 'all' ? 'All' : f === 'new' ? 'New' : 'Urgent'}
+                {f === 'all'
+                  ? 'All'
+                  : f === 'new'
+                    ? 'New'
+                    : f === 'urgent'
+                      ? 'Urgent'
+                      : `Spam${spamCount ? ` (${spamCount})` : ''}`}
               </button>
             ))}
             <Button type="button" size="sm" className="ml-auto bg-[#10b981] text-white" onClick={startTestCall}>
               ▶ Test call
             </Button>
           </div>
+
+          {spamNote && <p className="text-xs text-slate-600">{spamNote}</p>}
 
           {filtered.length > 0 && (
             <div className="flex flex-wrap items-center gap-3">
@@ -831,6 +917,9 @@ export function AIReceptionist({
                       </span>
                     </div>
                   </div>
+                  {m.spam && m.spamReason ? (
+                    <p className="text-xs text-gray-500 mb-1">Spam: {m.spamReason}</p>
+                  ) : null}
                   <p className="text-sm text-gray-800 mb-2">{m.summary}</p>
                   {m.actionItems.length > 0 && (
                     <ul className="text-xs text-gray-600 list-disc pl-5 mb-2">
@@ -854,6 +943,27 @@ export function AIReceptionist({
                     {m.status !== 'handled' && (
                       <Button type="button" size="sm" variant="outline" onClick={() => setStatus(m.id, 'handled')}>
                         Handled
+                      </Button>
+                    )}
+                    {m.spam ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={spamBusyId === m.id}
+                        onClick={() => void markNotSpam(m)}
+                      >
+                        Not spam
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={spamBusyId === m.id}
+                        onClick={() => void markAsSpam(m)}
+                      >
+                        Mark as spam
                       </Button>
                     )}
                     <Button type="button" size="sm" variant="outline" className="text-red-600" onClick={() => deleteMsg(m.id)}>
@@ -1170,6 +1280,17 @@ export function AIReceptionist({
                   />
                   Spam detection / screening
                 </label>
+                <label
+                  className={`flex items-center gap-2 ${settings.spamScreening ? 'cursor-pointer' : 'opacity-50'}`}
+                >
+                  <input
+                    type="checkbox"
+                    disabled={!settings.spamScreening}
+                    checked={settings.spamScreening && settings.pressOneGate}
+                    onChange={(e) => patch({ pressOneGate: e.target.checked })}
+                  />
+                  Ask callers to press 1 first (stops robocalls)
+                </label>
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="checkbox"
@@ -1179,6 +1300,11 @@ export function AIReceptionist({
                   Offer to schedule appointments
                 </label>
               </div>
+              <p className="text-xs text-gray-500 -mt-2">
+                With spam screening on, the AI checks each call when it ends. Sales calls, robocalls and
+                scams are kept under the Spam filter and you are not texted or emailed about them. Calls
+                where the caller says nothing create no message.
+              </p>
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">
                   Languages (multilingual support)

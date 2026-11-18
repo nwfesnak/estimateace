@@ -726,6 +726,8 @@ export async function runReceptionistVoiceTurn(input: {
   );
 }
 
+export type VoiceCallSpamCategory = 'customer' | 'spam' | 'sales' | 'robocall' | 'scam' | 'wrong_number';
+
 export async function summarizeVoiceCall(input: {
   businessName: string;
   transcript: CallTurn[];
@@ -734,6 +736,8 @@ export async function summarizeVoiceCall(input: {
   collectedName?: string;
   collectedPhone?: string;
   collectedAddress?: string;
+  /** Also classify the call as genuine customer vs spam / sales / robocall. */
+  classifySpam?: boolean;
 }): Promise<{
   callerName: string;
   callerPhone: string;
@@ -742,6 +746,10 @@ export async function summarizeVoiceCall(input: {
   actionItems: string[];
   urgent: boolean;
   language: string;
+  /** null = classifier unavailable / not asked */
+  isSpam: boolean | null;
+  spamCategory: VoiceCallSpamCategory | '';
+  spamReason: string;
 }> {
   const apiKey = getXaiApiKey();
   const text = transcriptToText(input.transcript);
@@ -753,8 +761,25 @@ export async function summarizeVoiceCall(input: {
     actionItems: ['Follow up with caller'],
     urgent: false,
     language: 'en',
+    isSpam: null as boolean | null,
+    spamCategory: '' as VoiceCallSpamCategory | '',
+    spamReason: '',
   };
   if (!apiKey || !text.trim()) return fallback;
+
+  const spamSchema = input.classifySpam
+    ? ',"category":"customer|spam|sales|robocall|scam|wrong_number","isSpam":false,"spamReason":""'
+    : '';
+  const spamRules = input.classifySpam
+    ? `
+Also classify the CALLER (not the receptionist):
+- "customer": a real person asking about service, a quote, a job, an existing appointment, a bill, or a vendor/partner with a real job question. When unsure, use "customer".
+- "sales": someone selling to the business (SEO, Google listing, marketing, loans/funding, merchant services, software, leads).
+- "robocall": recorded/automated message, warranty, insurance/medicare, "press 1" style calls, or silence/beeps with no real request.
+- "scam": IRS/SSA/police threats, gift cards, account-suspended scares.
+- "spam": other junk. "wrong_number": clearly meant to reach someone else.
+isSpam = true for sales, robocall, scam, spam, wrong_number. spamReason = one short phrase why (empty for customers).`
+    : '';
 
   try {
     const res = await fetch('https://api.x.ai/v1/chat/completions', {
@@ -763,16 +788,16 @@ export async function summarizeVoiceCall(input: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${apiKey}`,
       },
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(12000),
       body: JSON.stringify({
         model: getXaiChatModel(),
-        temperature: 0.2,
+        temperature: 0.1,
         messages: [
           {
             role: 'system',
             content: `Extract contact + summary from a contractor receptionist call. Return ONLY JSON:
-{"callerName":"","callerPhone":"","address":"","summary":"","actionItems":[],"urgent":false,"language":"en"}
-Prefer known values if provided. Never invent an address or phone.`,
+{"callerName":"","callerPhone":"","address":"","summary":"","actionItems":[],"urgent":false,"language":"en"${spamSchema}}
+Prefer known values if provided. Never invent an address or phone.${spamRules}`,
           },
           {
             role: 'user',
@@ -790,6 +815,13 @@ ${text}`,
     const json = await res.json().catch(() => ({}));
     const parsed = parseAgentJson(String(json.choices?.[0]?.message?.content || '')) as any;
     if (!parsed) return fallback;
+    const categories: VoiceCallSpamCategory[] = ['customer', 'spam', 'sales', 'robocall', 'scam', 'wrong_number'];
+    const category = categories.includes(parsed.category) ? (parsed.category as VoiceCallSpamCategory) : '';
+    let isSpam: boolean | null = null;
+    if (input.classifySpam) {
+      if (category) isSpam = category !== 'customer';
+      else if (typeof parsed.isSpam === 'boolean') isSpam = parsed.isSpam;
+    }
     return {
       callerName: String(parsed.callerName || fallback.callerName).slice(0, 120),
       callerPhone: String(parsed.callerPhone || fallback.callerPhone).slice(0, 40),
@@ -800,6 +832,9 @@ ${text}`,
         : fallback.actionItems,
       urgent: Boolean(parsed.urgent),
       language: String(parsed.language || 'en').slice(0, 12),
+      isSpam,
+      spamCategory: category,
+      spamReason: isSpam ? String(parsed.spamReason || category || 'Spam').slice(0, 200) : '',
     };
   } catch {
     return fallback;

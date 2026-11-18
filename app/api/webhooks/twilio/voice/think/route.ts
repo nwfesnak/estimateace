@@ -1,9 +1,8 @@
-import { NextRequest } from 'next/server';
+import { after, type NextRequest } from 'next/server';
 import {
   loadCallSession,
   saveCallSession,
   scriptComplete,
-  transcriptToText,
   type CallStage,
 } from '@/lib/receptionist-call-session';
 import {
@@ -11,7 +10,9 @@ import {
   runReceptionistVoiceTurn,
 } from '@/lib/receptionist-voice-agent';
 import { formatPhoneForSpeech } from '@/lib/receptionist-twiml';
-import { appendReceptionistLead, formatLeadSummary } from '@/lib/receptionist-leads';
+import { finalizeReceptionistCall } from '@/lib/receptionist-call-finalize';
+import { findReceptionistByPhoneNumber } from '@/lib/receptionist-store';
+import { readTwilioParams, verifyTwilioWebhook } from '@/lib/twilio-webhook-auth';
 import {
   sayGatherTwiml,
   sayHangupTwiml,
@@ -32,19 +33,33 @@ const MAX_TURNS = 14;
  * Staged script turn after gather stashed pendingCallerText.
  */
 export async function POST(request: NextRequest) {
-  try {
-    let callSid = request.nextUrl.searchParams.get('CallSid') || '';
-    try {
-      const form = await request.formData();
-      if (!callSid) callSid = String(form.get('CallSid') || '');
-    } catch {
-      /* query param only */
-    }
-    callSid = callSid.trim();
+  const params = await readTwilioParams(request);
+  const callSid = String(
+    request.nextUrl.searchParams.get('CallSid') || params.CallSid || ''
+  ).trim();
+  const session = callSid ? await loadCallSession(callSid).catch(() => null) : null;
+  let userId = session?.userId || '';
+  if (!userId && params.To) {
+    userId = (await findReceptionistByPhoneNumber(params.To).catch(() => null))?.userId || '';
+  }
+  const denied = await verifyTwilioWebhook(request, params, { userId, label: 'twilio voice think' });
+  if (denied) return denied;
 
+  /** Build the lead + notification once, after the goodbye is already playing. */
+  const finalizeAfterResponse = () => {
+    if (!callSid) return;
+    after(async () => {
+      try {
+        await finalizeReceptionistCall(callSid, 'final_turn');
+      } catch (e) {
+        console.warn('voice think finalize:', e);
+      }
+    });
+  };
+
+  try {
     console.info('voice think', { callSid: callSid.slice(0, 34) });
 
-    const session = callSid ? await loadCallSession(callSid) : null;
     if (!session) {
       return twimlXmlResponse(
         sayGatherTwiml({
@@ -102,6 +117,7 @@ export async function POST(request: NextRequest) {
       } catch {
         /* ignore */
       }
+      finalizeAfterResponse();
       return twimlXmlResponse(sayHangupTwiml(bye));
     }
 
@@ -263,48 +279,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Save / update lead once we have useful fields
-    try {
-      if (
-        session.collectedName ||
-        session.collectedPhone ||
-        session.collectedAddress ||
-        session.collectedNotes
-      ) {
-        const done = scriptComplete(session) || session.callStage === 'thanks';
-        const summary = formatLeadSummary({
-          name: session.collectedName,
-          phone: session.collectedPhone || session.from,
-          address: session.collectedAddress,
-          notes: [
-            session.collectedNotes || '',
-            session.smsOk === true
-              ? 'SMS OK: yes'
-              : session.smsOk === false
-                ? 'SMS OK: no'
-                : '',
-          ]
-            .filter(Boolean)
-            .join(' | '),
-        });
-        const lead = await appendReceptionistLead({
-          userId: session.userId,
-          callerName: session.collectedName || 'Unknown',
-          callerPhone: session.collectedPhone || session.from,
-          address: session.collectedAddress || '',
-          summary,
-          actionItems: done
-            ? ['Follow up ASAP — staged script complete (address optional)']
-            : ['Follow up — finish staged script fields'],
-          transcript: transcriptToText(session.transcript),
-          urgent: Boolean(result.lead?.urgent),
-          source: 'voice',
-        });
-        if (lead?.id) session.leadIds = [...(session.leadIds || []), lead.id];
-      }
-    } catch (e) {
-      console.warn('voice think lead:', e);
-    }
+    // No per-turn leads: one lead + one notification is built when the call ends
+    // (finalizeReceptionistCall from the status callback or the final goodbye turn).
 
     try {
       await saveCallSession(session);
@@ -323,6 +299,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (result.action === 'end' && (scriptComplete(session) || session.callStage === 'thanks')) {
+      finalizeAfterResponse();
       return twimlXmlResponse(
         sayHangupTwiml(
           speak ||

@@ -10,7 +10,7 @@ import {
   welcomeSms,
 } from '@/lib/sms-compliance';
 import { upsertSmsOptIn } from '@/lib/sms-opt-in-store';
-import { twilioWebhookUrl, validateTwilioSignature } from '@/lib/twilio-signature';
+import { twilioCandidateUrls, validateTwilioAgainstCandidates } from '@/lib/twilio-signature';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -59,8 +59,12 @@ export async function POST(request: NextRequest) {
 
     if (authToken) {
       const signature = request.headers.get('x-twilio-signature');
-      const url = twilioWebhookUrl(request, 'https://app.estimateace.com/api/sms/inbound');
-      const ok = validateTwilioSignature({ authToken, signature, url, params });
+      const ok = validateTwilioAgainstCandidates({
+        tokens: [authToken],
+        urls: twilioCandidateUrls(request),
+        signature,
+        params,
+      });
       if (!ok) {
         console.warn('sms inbound: invalid Twilio signature');
         return new NextResponse('Forbidden', { status: 403 });

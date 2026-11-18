@@ -3,12 +3,17 @@ import { findReceptionistByPhoneNumber } from '@/lib/receptionist-store';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { saveCallSession } from '@/lib/receptionist-call-session';
 import {
+  pressOneGateTwiml,
+  rejectTwiml,
   sayGatherTwiml,
   sayHangupTwiml,
   transferTwiml,
   twimlXmlResponse,
   VOICE_GATHER_PATH,
 } from '@/lib/receptionist-twiml';
+import { receptionistScreeningFlags } from '@/lib/ai-receptionist';
+import { isCallerBlocked } from '@/lib/receptionist-blocklist';
+import { readTwilioParams, verifyTwilioWebhook } from '@/lib/twilio-webhook-auth';
 import { formatPhoneE164 } from '@/lib/notifications';
 import { receptionistAddonHasAccess } from '@/lib/receptionist-billing';
 
@@ -35,22 +40,31 @@ function toE164(phone: string): string | null {
 
 /**
  * POST /api/webhooks/twilio/voice
- * - AI On  → live receptionist (relative Gather URLs — avoids bad NEXT_PUBLIC_APP_URL)
+ * - Signed by Twilio (X-Twilio-Signature) or 403
+ * - Blocked caller (owner hit "Mark as spam") → <Reject/>, no lead
+ * - AI On  → optional "press 1" gate, then live receptionist (relative Gather URLs)
  * - AI Off → silent Dial to host/business/cell
  */
 export async function POST(request: NextRequest) {
+  const params = await readTwilioParams(request);
+  const to = params.To || '';
+  const from = params.From || '';
+  const callSid = params.CallSid || '';
+
+  let tenant: Awaited<ReturnType<typeof findReceptionistByPhoneNumber>> = null;
   try {
-    const form = await request.formData();
-    const params: Record<string, string> = {};
-    form.forEach((v, k) => {
-      params[k] = String(v);
-    });
+    tenant = to ? await findReceptionistByPhoneNumber(to) : null;
+  } catch (e) {
+    console.warn('twilio voice tenant lookup:', e);
+  }
 
-    const to = params.To || '';
-    const from = params.From || '';
-    const callSid = params.CallSid || '';
+  const denied = await verifyTwilioWebhook(request, params, {
+    userId: tenant?.userId,
+    label: 'twilio voice',
+  });
+  if (denied) return denied;
 
-    const tenant = to ? await findReceptionistByPhoneNumber(to) : null;
+  try {
     if (!tenant) {
       return twimlXmlResponse(
         sayHangupTwiml(
@@ -69,6 +83,8 @@ export async function POST(request: NextRequest) {
     let profilePhone = '';
     let classicEnabled: boolean | null = null;
     let addonActive = false;
+    let companyName = '';
+    let screening = receptionistScreeningFlags(null);
 
     if (admin) {
       const { data } = await admin
@@ -85,9 +101,19 @@ export async function POST(request: NextRequest) {
       aiGreeting = String(ai.greeting || '');
       profilePhone = String(profile.phone || '');
       if (typeof ai.enabled === 'boolean') classicEnabled = ai.enabled;
+      companyName = String(profile.company || '').trim();
+      screening = receptionistScreeningFlags(ai);
       addonActive =
         profile.aiReceptionistAddonActive === true ||
         receptionistAddonHasAccess(profile.receptionistBilling);
+    }
+
+    if (from && (await isCallerBlocked(tenant.userId, from))) {
+      console.info('twilio voice: blocked caller rejected', {
+        callSid,
+        contractorId: tenant.userId,
+      });
+      return twimlXmlResponse(rejectTwiml());
     }
 
     const hasAiLine = Boolean(tenant.config.twilio?.phoneNumber);
@@ -137,15 +163,23 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const business = tenant.config.branding.businessName || 'our company';
-    const rawGreeting =
+    // Current Company Profile name wins over the copy saved when the line was enabled.
+    const business =
+      companyName ||
+      (tenant.config.branding.businessName !== 'Your Company'
+        ? tenant.config.branding.businessName
+        : '') ||
+      'our company';
+    const rawGreeting = (
       (tenant.config.branding.greeting || '').trim() ||
       aiGreeting ||
-      `Thanks for calling {company}. What are you calling about today?`;
+      `Thanks for calling {company}. What are you calling about today?`
+    ).replace(/\{company\}/gi, business);
     // Staged script open — ask why they are calling (need stage)
     const greeting = (
       `Thanks for calling ${business}. What are you calling about today?`
     ).slice(0, 400);
+    const gateRequired = screening.pressOneGate;
 
     const transferForAi =
       [tenant.config.transferNumber || '', profilePhone]
@@ -166,10 +200,14 @@ export async function POST(request: NextRequest) {
           greeting: rawGreeting,
           urgentKeywords,
           languages,
-          transcript: [{ role: 'agent', text: greeting }],
+          transcript: gateRequired ? [] : [{ role: 'agent', text: greeting }],
           leadIds: [],
           turn: 0,
           callStage: 'need',
+          spamScreening: screening.spamScreening,
+          gateRequired,
+          gatePassed: !gateRequired,
+          gateAttempts: 0,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         });
@@ -178,7 +216,17 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    console.info('twilio voice AI on:', { to, from, callSid, contractorId: tenant.userId });
+    console.info('twilio voice AI on:', {
+      to,
+      from,
+      callSid,
+      contractorId: tenant.userId,
+      gate: gateRequired,
+    });
+
+    if (gateRequired) {
+      return twimlXmlResponse(pressOneGateTwiml({ businessName: business }));
+    }
 
     return twimlXmlResponse(
       sayGatherTwiml({

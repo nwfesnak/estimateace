@@ -2,22 +2,43 @@ import { NextRequest, NextResponse } from 'next/server';
 import { findReceptionistByPhoneNumber } from '@/lib/receptionist-store';
 import { appendReceptionistLead } from '@/lib/receptionist-leads';
 import { escapeXml } from '@/lib/receptionist-twiml';
+import { isCallerBlocked } from '@/lib/receptionist-blocklist';
+import { readTwilioParams, verifyTwilioWebhook } from '@/lib/twilio-webhook-auth';
 
 export const dynamic = 'force-dynamic';
 
+function emptyTwiml() {
+  return new NextResponse(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`, {
+    status: 200,
+    headers: { 'Content-Type': 'text/xml' },
+  });
+}
+
 /**
  * POST /api/webhooks/twilio/sms
- * Resolve contractor by To, write Inbox lead, reply briefly.
+ * Signed by Twilio or 403. Resolve contractor by To, write Inbox lead, reply briefly.
+ * Blocked numbers get no lead and no reply.
  */
 export async function POST(request: NextRequest) {
-  try {
-    const form = await request.formData();
-    const to = String(form.get('To') || '');
-    const from = String(form.get('From') || '');
-    const body = String(form.get('Body') || '').slice(0, 2000);
+  const params = await readTwilioParams(request);
+  const to = String(params.To || '');
+  const from = String(params.From || '');
+  const body = String(params.Body || '').slice(0, 2000);
 
-    const tenant = to ? await findReceptionistByPhoneNumber(to) : null;
+  const tenant = to ? await findReceptionistByPhoneNumber(to).catch(() => null) : null;
+  const denied = await verifyTwilioWebhook(request, params, {
+    userId: tenant?.userId,
+    label: 'twilio sms',
+  });
+  if (denied) return denied;
+
+  try {
     const business = tenant?.config.branding.businessName || 'us';
+
+    if (tenant?.userId && from && (await isCallerBlocked(tenant.userId, from))) {
+      console.info('twilio sms: blocked sender ignored', { contractorId: tenant.userId });
+      return emptyTwiml();
+    }
 
     if (tenant?.userId) {
       await appendReceptionistLead({
@@ -28,6 +49,8 @@ export async function POST(request: NextRequest) {
         transcript: `SMS from ${from}: ${body}`,
         urgent: /urgent|emergency|asap/i.test(body),
         source: 'sms',
+        fromNumber: from,
+        ...(params.MessageSid ? { id: `sms-${String(params.MessageSid).slice(0, 64)}` } : {}),
       });
     }
 
@@ -46,9 +69,6 @@ export async function POST(request: NextRequest) {
     });
   } catch (e: any) {
     console.error('twilio sms webhook:', e);
-    return new NextResponse(
-      `<?xml version="1.0" encoding="UTF-8"?><Response></Response>`,
-      { status: 200, headers: { 'Content-Type': 'text/xml' } }
-    );
+    return emptyTwiml();
   }
 }

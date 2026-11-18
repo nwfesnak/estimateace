@@ -36,7 +36,15 @@ export async function appendReceptionistLead(input: {
   urgent?: boolean;
   language?: string;
   source?: ReceptionistMessage['source'];
-}): Promise<ReceptionistMessage | null> {
+  /** Stable id (e.g. `call-<CallSid>`): an existing lead with this id is updated, not duplicated. */
+  id?: string;
+  callSid?: string;
+  fromNumber?: string;
+  spam?: boolean;
+  spamReason?: string;
+  /** Send owner SMS/email (default true). Never re-sent when the lead already existed. */
+  notify?: boolean;
+}): Promise<(ReceptionistMessage & { notified?: boolean }) | null> {
   const admin = getSupabaseAdmin();
   if (!admin) return null;
 
@@ -61,20 +69,30 @@ export async function appendReceptionistLead(input: {
           notes: summaryBody,
         }).slice(0, 2000);
 
+  const stableId = input.id ? String(input.id).slice(0, 80) : '';
+  const existing = stableId ? messages.find((m) => m && m.id === stableId) : undefined;
+
   const msg: ReceptionistMessage = {
-    id: `lead-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-    createdAt: new Date().toISOString(),
+    id: stableId || `lead-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    createdAt: existing?.createdAt || new Date().toISOString(),
     callerName: name,
     callerPhone: phone,
     summary,
     actionItems: (input.actionItems || []).map(String).slice(0, 8),
     transcript: String(input.transcript || '').slice(0, 20000),
     urgent: Boolean(input.urgent),
-    spam: false,
+    spam: Boolean(input.spam),
+    ...(input.spam && input.spamReason ? { spamReason: String(input.spamReason).slice(0, 300) } : {}),
+    ...(input.callSid ? { callSid: String(input.callSid).slice(0, 64) } : {}),
+    ...(input.fromNumber ? { fromNumber: String(input.fromNumber).slice(0, 40) } : {}),
     language: String(input.language || 'en').slice(0, 12),
-    status: 'new',
+    status: existing?.status || 'new',
     source: input.source || 'forwarded',
   };
+
+  const nextMessages = existing
+    ? messages.map((m) => (m && m.id === msg.id ? msg : m))
+    : [msg, ...messages];
 
   const { error } = await admin.from('estimates').upsert({
     id: sid,
@@ -85,7 +103,7 @@ export async function appendReceptionistLead(input: {
     invoiceNumber: sid,
     profile: {
       ...profile,
-      aiReceptionistMessages: [msg, ...messages].slice(0, 200),
+      aiReceptionistMessages: nextMessages.slice(0, 200),
     },
     updated_at: new Date().toISOString(),
   });
@@ -94,7 +112,11 @@ export async function appendReceptionistLead(input: {
     return null;
   }
 
-  // Best-effort owner notify
+  const shouldNotify = input.notify !== false && !existing;
+  if (!shouldNotify) return { ...msg, notified: false };
+
+  // Best-effort owner notify (once per lead)
+  let notified = false;
   try {
     const notifyPhone = String(profile.aiReceptionist?.notifyPhone || profile.phone || '').trim();
     const notifyEmail = String(profile.aiReceptionist?.notifyEmail || profile.email || '').trim();
@@ -105,6 +127,7 @@ export async function appendReceptionistLead(input: {
     );
     if (notifyPhone && formatPhoneE164(notifyPhone)) {
       await sendSmsNotification(notifyPhone, smsBody, { skipOptInCheck: true });
+      notified = true;
     }
     if (notifyEmail && notifyEmail.includes('@')) {
       await sendEmailNotification(
@@ -116,10 +139,11 @@ export async function appendReceptionistLead(input: {
         ),
         { companyName: company }
       );
+      notified = true;
     }
   } catch (e) {
     console.warn('appendReceptionistLead notify:', e);
   }
 
-  return msg;
+  return { ...msg, notified };
 }
