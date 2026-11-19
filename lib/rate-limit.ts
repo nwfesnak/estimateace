@@ -126,16 +126,20 @@ export async function reserveSendQuota(
 
 // NANP area codes that are NOT in the United States (Canada + Caribbean/Atlantic).
 // Caribbean +1 numbers are a common SMS-pumping target, so they are refused.
-const NON_US_NANP_AREA_CODES = new Set(
+export const CANADA_AREA_CODES = new Set(
   (
-    // Canada
     '204 226 236 249 250 257 263 289 306 343 354 365 367 368 382 387 403 416 418 428 431 437 ' +
     '438 450 460 468 474 506 514 519 548 579 581 584 587 600 604 613 622 639 647 672 683 705 ' +
-    '709 742 753 778 780 782 807 819 825 867 873 879 902 905 942 ' +
-    // Caribbean / Atlantic (non-US territories)
-    '242 246 264 268 284 345 441 473 649 658 664 721 758 767 784 809 829 849 868 869 876'
+    '709 742 753 778 780 782 807 819 825 867 873 879 902 905 942'
   ).split(/\s+/)
 );
+
+/** +1 numbers outside the US and Canada (Caribbean / Atlantic): billed as international. */
+export const CARIBBEAN_NANP_AREA_CODES = new Set(
+  '242 246 264 268 284 345 441 473 649 658 664 721 758 767 784 809 829 849 868 869 876'.split(/\s+/)
+);
+
+const NON_US_NANP_AREA_CODES = new Set([...CANADA_AREA_CODES, ...CARIBBEAN_NANP_AREA_CODES]);
 
 /** True for a valid United States number in E.164 (+1NXXNXXXXXX, US area code). */
 export function isUsPhoneE164(e164: string | null | undefined): boolean {

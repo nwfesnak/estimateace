@@ -3,7 +3,7 @@ import { TWO_STEP_REQUIRED, twoStepPending } from '@/lib/supabase/auth-user';
 import { createClient } from '@supabase/supabase-js';
 import { buildWebsiteBusinessFacts } from '@/lib/receptionist-website-facts';
 import { reserveAiQuota } from '@/lib/rate-limit';
-import { workspaceOwnerId } from '@/lib/billing-access';
+import { enforceAppAccess, workspaceOwnerId } from '@/lib/billing-access';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -61,6 +61,10 @@ export async function POST(request: NextRequest) {
         { status: 429 }
       );
     }
+
+    // Paid feature: trial / active subscription (or promo) required before any AI spend.
+    const paywall = await enforceAppAccess(user.id);
+    if (paywall) return paywall;
 
     {
       const quota = await reserveAiQuota(await workspaceOwnerId(user.id), 'ai');

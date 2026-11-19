@@ -6,6 +6,7 @@ import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { enforceAppAccess, workspaceOwnerId } from '@/lib/billing-access';
 import { reserveAiQuota } from '@/lib/rate-limit';
 import { normalizeReceptionistInput, RECEPTIONIST_MAX_TOKENS } from '@/lib/receptionist-input';
+import { normalizeForwardNumberInput } from '@/lib/phone-forward';
 import {
   normalizeReceptionistConfig,
   toPublicReceptionistConfig,
@@ -108,6 +109,16 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: authError || 'Unauthorized' }, { status: 401 });
     }
     const body = await request.json().catch(() => ({}));
+    // Owner/cell handoff number: US or Canada only (international / premium numbers
+    // would be dialed on the platform's Twilio account).
+    let transferNumberInput: string | undefined;
+    if (body.transferNumber !== undefined) {
+      const checked = normalizeForwardNumberInput(body.transferNumber);
+      if (!checked.ok) {
+        return NextResponse.json({ error: checked.error, code: 'invalid_forward_number' }, { status: 400 });
+      }
+      transferNumberInput = checked.value;
+    }
     const current = await loadReceptionistConfig(user.id);
     const next = normalizeReceptionistConfig(
       {
@@ -127,9 +138,7 @@ export async function PATCH(request: NextRequest) {
             }
           : current.hours,
         transferNumber:
-          body.transferNumber !== undefined
-            ? String(body.transferNumber)
-            : current.transferNumber,
+          transferNumberInput !== undefined ? transferNumberInput : current.transferNumber,
         publicBusinessNumber:
           body.publicBusinessNumber !== undefined
             ? String(body.publicBusinessNumber)

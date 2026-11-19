@@ -11,6 +11,7 @@ import {
   markRecurringActiveFromCheckout,
   updateRecurringPlan,
 } from '@/lib/recurring-services';
+import { verifyConnectEventOwner } from '@/lib/connect-account-guard';
 
 export const runtime = 'nodejs';
 
@@ -72,6 +73,9 @@ export async function POST(request: NextRequest) {
           // ACH: completed fires with payment_status "unpaid"; the async_payment_succeeded
           // event marks it paid later.
           if (session.payment_status !== 'paid') break;
+          if (!(await eventIsFromOwnersAccount(event, session.metadata?.supabase_user_id, 'job_payment'))) {
+            break;
+          }
           const r = await markDocumentPaidFromJobCheckout(session, {
             stripeAccount: connectedAccount,
           });
@@ -82,6 +86,15 @@ export async function POST(request: NextRequest) {
           session.metadata?.purpose === 'client_recurring_subscription' &&
           event.type === 'checkout.session.completed'
         ) {
+          if (
+            !(await eventIsFromOwnersAccount(
+              event,
+              session.metadata?.supabase_user_id,
+              'client_recurring_checkout'
+            ))
+          ) {
+            break;
+          }
           const r = await markRecurringActiveFromCheckout(session);
           if (!r.ok) console.error('connect webhook client recurring:', r.error);
         }
@@ -96,6 +109,7 @@ export async function POST(request: NextRequest) {
         const sub = await stripe.subscriptions.retrieve(subId, undefined, reqOpts);
         const ids = recurringIds(sub);
         if (!ids) break;
+        if (!(await eventIsFromOwnersAccount(event, ids.ownerId, 'recurring_invoice'))) break;
         if (event.type === 'invoice.paid') {
           const paidAt = invoice.status_transitions?.paid_at
             ? new Date(invoice.status_transitions.paid_at * 1000).toISOString()
@@ -116,6 +130,7 @@ export async function POST(request: NextRequest) {
         const sub = event.data.object as Stripe.Subscription;
         const ids = recurringIds(sub);
         if (!ids) break;
+        if (!(await eventIsFromOwnersAccount(event, ids.ownerId, 'recurring_subscription'))) break;
         if (event.type === 'customer.subscription.deleted' || sub.status === 'canceled') {
           const plan = await getRecurringPlan(ids.ownerId, ids.planId);
           if (plan && plan.status !== 'canceled') {
@@ -146,6 +161,28 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json({ received: true });
+}
+
+/**
+ * Only act on an owner's records when the event came from that owner's own connected
+ * account (payment_accounts.stripe_account_id). Otherwise ignore and log — returns false.
+ */
+async function eventIsFromOwnersAccount(
+  event: Stripe.Event,
+  ownerId: string | null | undefined,
+  what: string
+): Promise<boolean> {
+  const check = await verifyConnectEventOwner(event.account, ownerId);
+  if (check.ok) return true;
+  console.warn('connect webhook: ignored event not from owner\'s connected account', {
+    eventId: event.id,
+    type: event.type,
+    what,
+    account: event.account || null,
+    ownerId: ownerId || null,
+    reason: check.reason,
+  });
+  return false;
 }
 
 function invoiceSubscriptionId(invoice: Stripe.Invoice): string | null {

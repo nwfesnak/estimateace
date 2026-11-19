@@ -14,7 +14,7 @@ import {
 import { receptionistScreeningFlags } from '@/lib/ai-receptionist';
 import { isCallerBlocked } from '@/lib/receptionist-blocklist';
 import { readTwilioParams, verifyTwilioWebhook } from '@/lib/twilio-webhook-auth';
-import { formatPhoneE164 } from '@/lib/notifications';
+import { forwardDialNumber } from '@/lib/phone-forward';
 import { loadReceptionistBilling, receptionistAddonHasAccess } from '@/lib/receptionist-billing';
 
 export const dynamic = 'force-dynamic';
@@ -32,10 +32,9 @@ function sameNumber(a: string, b: string) {
   return da === db || da.slice(-10) === db.slice(-10);
 }
 
+/** Only US/Canada numbers are ever dialed (no international / premium transfers). */
 function toE164(phone: string): string | null {
-  const raw = String(phone || '').trim();
-  if (!raw) return null;
-  return formatPhoneE164(raw) || (raw.startsWith('+') ? raw : null);
+  return forwardDialNumber(phone);
 }
 
 /**
@@ -207,7 +206,7 @@ export async function POST(request: NextRequest) {
           from,
           to,
           businessName: business,
-          transferNumber: transferForAi || tenant.config.transferNumber || '',
+          transferNumber: transferForAi || '',
           knowledgeBase,
           websiteUrl,
           greeting: rawGreeting,
