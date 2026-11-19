@@ -4,6 +4,7 @@ import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { enforceAppAccess } from '@/lib/billing-access';
 import { getCrewAccess, loadCrewRestoreSources, type CrewAccessResult } from '@/lib/crew-access';
 import { INJECTED_KEYS, redactRows, restoreRow } from '@/lib/crew-redaction';
+import { sanitizeCrewQuery } from '@/lib/crew-query';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -17,6 +18,9 @@ export const dynamic = 'force-dynamic';
  *   - hides prices / financials the crew member's access level hides in the UI
  *   - restores the owner's real values before any write (no zeroing via redacted copies)
  *   - blocks deletes, settings / reserved rows, and archive access without financials
+ *   - only accepts plain queries (lib/crew-query.ts): whole-row selects, filters and
+ *     sorting on non-sensitive columns, no PostgREST aliases / JSON paths / embeds, and
+ *     no schema-switching profile headers
  */
 
 const TABLES = new Set(['estimates', 'archive-est']);
@@ -27,8 +31,6 @@ const FORWARD_REQUEST_HEADERS = [
   'content-type',
   'range',
   'range-unit',
-  'accept-profile',
-  'content-profile',
 ];
 const FORWARD_RESPONSE_HEADERS = ['content-type', 'content-range', 'preference-applied'];
 const SENSITIVE_PATCH_KEYS = new Set([
@@ -134,8 +136,9 @@ async function handleRead(request: NextRequest, ctx: Ctx, method: 'GET' | 'HEAD'
   const r = await resolve(request, ctx);
   if ('error' in r) return r.error;
   const { table, access } = r;
-  const params = new URLSearchParams(request.nextUrl.searchParams);
-  if (params.has('and')) return deny(400, 'Unsupported query.');
+  const q = sanitizeCrewQuery(request.nextUrl.searchParams, 'read');
+  if (!q.ok) return deny(400, q.error, 'crew_query_rejected');
+  const params = q.params;
   if (table === 'archive-est' && !access.canSeeFinancials) {
     // Paid / archived work is a financial report: hidden at this access level.
     const single = /vnd\.pgrst\.object/i.test(request.headers.get('accept') || '');
@@ -222,7 +225,9 @@ export async function POST(request: NextRequest, ctx: Ctx) {
       restoreRow(row, access, { ...sources, existing: existingById.get(String(row.id)) || null })
     );
 
-    const params = new URLSearchParams(request.nextUrl.searchParams);
+    const q = sanitizeCrewQuery(request.nextUrl.searchParams, 'write');
+    if (!q.ok) return deny(400, q.error, 'crew_query_rejected');
+    const params = q.params;
     stripInjectedColumns(params);
     const upstream = await fetch(`${restBase()}/${table}?${params.toString()}`, {
       method: 'POST',
@@ -254,8 +259,10 @@ export async function PATCH(request: NextRequest, ctx: Ctx) {
       return deny(403, 'Document owner cannot be changed.');
     }
 
-    const params = new URLSearchParams(request.nextUrl.searchParams);
-    if (params.has('and')) return deny(400, 'Unsupported query.');
+    const q = sanitizeCrewQuery(request.nextUrl.searchParams, 'write');
+    if (!q.ok) return deny(400, q.error, 'crew_query_rejected');
+    const params = q.params;
+    params.delete('on_conflict');
     params.set('and', scopeFilter(access.ownerId));
     stripInjectedColumns(params);
     const base = `${restBase()}/${table}`;

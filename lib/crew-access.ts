@@ -10,18 +10,9 @@ import {
   type CrewAccess,
   type RestoreSources,
 } from '@/lib/crew-redaction';
+import { resolveWorkspace } from '@/lib/workspace';
 
 export type CrewAccessResult = CrewAccess & { role: 'full' | 'limited' };
-
-function seatIsActive(row: { seat_status?: string | null; seat_period_end?: string | null }): boolean {
-  const status = String(row.seat_status || 'active').toLowerCase();
-  if (['active', 'trialing', 'past_due', 'canceling'].includes(status)) return true;
-  if (status === 'canceled' || status === 'unpaid') {
-    const end = row.seat_period_end ? new Date(row.seat_period_end).getTime() : 0;
-    return end > Date.now();
-  }
-  return false;
-}
 
 /**
  * Returns the crew member's owner + permission flags, or null when the user is not
@@ -31,24 +22,11 @@ export async function getCrewAccess(
   admin: SupabaseClient,
   userId: string
 ): Promise<CrewAccessResult | null> {
-  const { data, error } = await admin
-    .from('crew_members')
-    .select('owner_user_id, role, can_see_pricing, can_see_estimates_and_financials, seat_status, seat_period_end')
-    .eq('crew_user_id', userId)
-    .maybeSingle();
-  if (error || !data) return null;
-  const row = data as {
-    owner_user_id?: string | null;
-    role?: string | null;
-    can_see_pricing?: boolean | null;
-    can_see_estimates_and_financials?: boolean | null;
-    seat_status?: string | null;
-    seat_period_end?: string | null;
-  };
-  if (!row.owner_user_id || String(row.owner_user_id) === userId) return null;
-  if (!seatIsActive(row)) return null;
+  const ws = await resolveWorkspace(userId, admin);
+  if (!ws.ok || !ws.isCrew || !ws.crew) return null;
+  const row = ws.crew;
   return {
-    ownerId: String(row.owner_user_id),
+    ownerId: ws.ownerUserId,
     role: row.role === 'full' ? 'full' : 'limited',
     canSeePricing: row.can_see_pricing === true,
     canSeeFinancials: row.can_see_estimates_and_financials === true,

@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { TWO_STEP_REQUIRED, twoStepPending } from '@/lib/supabase/auth-user';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { getXaiApiKey, getXaiImageModel } from '@/lib/xai-config';
-import { extractMediaStoragePath } from '@/lib/media-url';
 import { enforceAppAccess, workspaceOwnerId } from '@/lib/billing-access';
+import { ownedMediaPath } from '@/lib/storage-paths';
 import { reserveAiQuota } from '@/lib/rate-limit';
 
 /** Image edit is slow — needs elevated duration on Vercel */
@@ -43,6 +44,7 @@ async function verifyUser(request: NextRequest) {
   if (error || !user) {
     return { user: null as null, error: 'Unauthorized — log in again' };
   }
+  if (twoStepPending(request, user)) return { user: null, error: TWO_STEP_REQUIRED };
   return { user, error: null as null, token };
 }
 
@@ -99,8 +101,7 @@ Requirements:
 }
 
 /** Load photo from Supabase storage as a data URL (server-side, no client body size issue). */
-async function loadStorageImageAsDataUrl(storagePath: string): Promise<string> {
-  const path = extractMediaStoragePath(storagePath) || storagePath.replace(/^\/+/, '');
+async function loadStorageImageAsDataUrl(path: string): Promise<string> {
   if (!path) throw new Error('Invalid photo storage path');
 
   const admin = getSupabaseAdmin();
@@ -259,8 +260,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Workspace owner (active crew → owner). Storage paths must live in this folder.
+    const ownerId = await workspaceOwnerId(user.id);
     {
-      const quota = await reserveAiQuota(await workspaceOwnerId(user.id), 'render');
+      const quota = await reserveAiQuota(ownerId, 'render');
       if (quota) return quota;
     }
 
@@ -313,21 +316,19 @@ export async function POST(request: NextRequest) {
 
     // Resolve source image on the SERVER (tiny client payload)
     let imageDataUrl = '';
-    if (storagePathRaw) {
-      const path = extractMediaStoragePath(storagePathRaw) || storagePathRaw;
-      imageDataUrl = await loadStorageImageAsDataUrl(path);
-    } else if (imageUrl.startsWith('http')) {
-      // Server downloads the signed URL — client only sent the URL string
-      const imgRes = await fetch(imageUrl);
-      if (!imgRes.ok) {
+    // Only files inside this workspace's folder (or, for older crew renders, the
+    // caller's own folder) may be loaded with the service role. Arbitrary URLs are
+    // never fetched by the server.
+    const sourceRef = storagePathRaw || (imageUrl.startsWith('http') ? imageUrl : '');
+    if (sourceRef) {
+      const path = ownedMediaPath(sourceRef, [ownerId, user.id]);
+      if (!path) {
         return NextResponse.json(
-          { error: 'Could not load the site photo URL. Re-select the photo and try again.' },
-          { status: 400 }
+          { error: 'That photo is not in your workspace. Re-select a site photo and try again.' },
+          { status: 403 }
         );
       }
-      const buf = Buffer.from(await imgRes.arrayBuffer());
-      const mime = imgRes.headers.get('content-type') || 'image/jpeg';
-      imageDataUrl = `data:${mime};base64,${buf.toString('base64')}`;
+      imageDataUrl = await loadStorageImageAsDataUrl(path);
     } else if (imageBase64) {
       imageDataUrl = imageBase64.startsWith('data:image/')
         ? imageBase64
@@ -374,7 +375,7 @@ export async function POST(request: NextRequest) {
     let resultPath: string | null = null;
     let displayUrl: string | null = null;
     try {
-      resultPath = await uploadResult(user.id, buffer, contentType);
+      resultPath = await uploadResult(ownerId, buffer, contentType);
       const admin = getSupabaseAdmin();
       if (admin && resultPath) {
         const { data: signed } = await admin.storage

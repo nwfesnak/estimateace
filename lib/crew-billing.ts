@@ -342,6 +342,26 @@ export async function upsertCrewSeatFromStripe(
 
     // Seat paid (or still inside a paid period) → crew can log in; otherwise keep disabled.
     await setCrewLoginEnabled(memberCrewUserId, !!accessOk);
+
+    // First activation of an invite-style crew login (no password): email the crew
+    // member their one-time "set your password" link.
+    if (accessOk && memberCrewUserId) {
+      try {
+        const { data: got } = await admin.auth.admin.getUserById(memberCrewUserId);
+        const meta = (got?.user?.app_metadata || {}) as Record<string, unknown>;
+        if (meta.crew_invite_mode === 'link' && !meta.crew_setup_sent_at && got?.user?.email) {
+          const { sendCrewSetupLink } = await import('@/lib/crew-setup-link');
+          await sendCrewSetupLink(admin, {
+            crewUserId: memberCrewUserId,
+            email: got.user.email,
+            ownerUserId,
+            reason: 'activated',
+          });
+        }
+      } catch (e) {
+        console.warn('crew seat: setup link', e);
+      }
+    }
   }
 
   // Fully ended: revoke seat after period

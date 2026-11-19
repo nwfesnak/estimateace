@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireWorkspaceOwner } from '@/lib/workspace';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import {
@@ -18,20 +19,11 @@ export async function POST(request: NextRequest) {
     const paywall = await enforceAppAccess(user.id);
     if (paywall) return paywall;
 
-    let ownerUserId = user.id;
     const admin = getSupabaseAdmin();
-    if (admin) {
-      try {
-        const { data: crew } = await admin
-          .from('crew_members')
-          .select('owner_user_id')
-          .eq('crew_user_id', user.id)
-          .maybeSingle();
-        if (crew?.owner_user_id) ownerUserId = crew.owner_user_id;
-      } catch {
-        /* optional */
-      }
-    }
+    // Seat-aware: inactive crew never act in the owner's workspace.
+    const ws = await requireWorkspaceOwner(user.id, admin);
+    if (ws.denied) return ws.denied;
+    const ownerUserId = ws.ownerUserId;
 
     const body = await request.json().catch(() => ({}));
     const planId = String(body.planId || body.id || '').trim();

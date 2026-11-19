@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireWorkspaceOwner } from '@/lib/workspace';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { CARD_PAYMENTS_NOT_SET_UP_CODE, createJobCheckoutSession } from '@/lib/job-payments';
@@ -43,20 +44,11 @@ export async function POST(request: NextRequest) {
     }
 
     // Resolve owner workspace (crew → owner)
-    let ownerUserId = user.id;
     const admin = getSupabaseAdmin();
-    if (admin) {
-      try {
-        const { data: crew } = await admin
-          .from('crew_members')
-          .select('owner_user_id')
-          .eq('crew_user_id', user.id)
-          .maybeSingle();
-        if (crew?.owner_user_id) ownerUserId = crew.owner_user_id;
-      } catch {
-        /* optional */
-      }
-    }
+    // Seat-aware: inactive crew never act in the owner's workspace.
+    const ws = await requireWorkspaceOwner(user.id, admin);
+    if (ws.denied) return ws.denied;
+    const ownerUserId = ws.ownerUserId;
 
     const result = await createJobCheckoutSession({
       ownerUserId,

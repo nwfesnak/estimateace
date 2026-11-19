@@ -3,10 +3,15 @@ import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { CREW_SEAT_PENDING, crewSeatHasAccess, setCrewLoginEnabled } from '@/lib/crew-billing';
 import { enforceAppAccess } from '@/lib/billing-access';
+import { rateLimit, tooManyRequests } from '@/lib/rate-limit';
+import { findAuthUserByEmail, sendCrewSetupLink } from '@/lib/crew-setup-link';
 
 /**
- * Owner invites a crew member: creates a real Supabase Auth user with the
- * password the owner sets, and links them to the owner workspace.
+ * Owner invites a crew member: creates a Supabase Auth login WITHOUT a password and
+ * links it to the owner workspace. The login stays disabled until the $14.99 seat is
+ * paid; then the crew member gets a one-time "set your password" link at their own
+ * email (lib/crew-setup-link.ts). The owner never sets or sees a crew password, and an
+ * existing login that is not already this owner's crew is never taken over.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -38,23 +43,23 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    {
+      const hourly = await rateLimit(`crew-invite:h:${user.id}`, 60 * 60, 10);
+      if (!hourly.allowed) return tooManyRequests(hourly, 'Too many crew invites. Try again later.');
+      const daily = await rateLimit(`crew-invite:d:${user.id}`, 24 * 60 * 60, 30);
+      if (!daily.allowed) return tooManyRequests(daily, 'Daily crew invite limit reached. Try again tomorrow.');
+    }
+
     const body = await request.json().catch(() => ({}));
     const email = String(body.email || '')
       .trim()
       .toLowerCase();
-    const password = String(body.password || '');
     const role = body.role === 'full' ? 'full' : 'limited';
     const canSeePricing = Boolean(body.canSeePricing);
     const canSeeEstimatesAndFinancials = Boolean(body.canSeeEstimatesAndFinancials);
 
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return NextResponse.json({ error: 'Valid email is required.' }, { status: 400 });
-    }
-    if (password.length < 6) {
-      return NextResponse.json(
-        { error: 'Password must be at least 6 characters.' },
-        { status: 400 }
-      );
     }
     if (email === (user.email || '').toLowerCase()) {
       return NextResponse.json(
@@ -73,21 +78,8 @@ export async function POST(request: NextRequest) {
     if (existingLink) {
       if (existingLink.owner_user_id === user.id) {
         // Already on this owner's crew (often after failed Stripe checkout / UI desync).
-        // Reset password if provided and return existing row so UI can re-list + re-pay seat.
-        if (existingLink.crew_user_id && password.length >= 6) {
-          try {
-            await admin.auth.admin.updateUserById(existingLink.crew_user_id, {
-              password,
-              email_confirm: true,
-              app_metadata: {
-                is_crew: true,
-                owner_user_id: user.id,
-              },
-            });
-          } catch (e) {
-            console.warn('crew invite: password update on existing', e);
-          }
-        }
+        // Return the existing row so the UI can re-list + re-pay the seat. Never change
+        // the crew member's password here.
         if (existingLink.crew_user_id) {
           const { data: seatRow } = await admin
             .from('crew_members')
@@ -107,6 +99,15 @@ export async function POST(request: NextRequest) {
               })
             : false;
           await setCrewLoginEnabled(existingLink.crew_user_id, paid);
+          if (paid) {
+            // Re-adding an active crew member re-sends their setup link (rate limited).
+            await sendCrewSetupLink(admin, {
+              crewUserId: existingLink.crew_user_id,
+              email,
+              ownerUserId: user.id,
+              reason: 'resend',
+            });
+          }
         }
         return NextResponse.json({
           ok: true,
@@ -121,7 +122,7 @@ export async function POST(request: NextRequest) {
             id: existingLink.id,
           },
           message:
-            'That email was already on your crew (may have been hidden after a failed payment). Use Pay seat or open Manage billing to finish.',
+            'That email was already on your crew (may have been hidden after a failed payment). Use Pay seat or open Manage billing to finish. If their seat is active, we emailed them a fresh link to set their password.',
         });
       }
       return NextResponse.json(
@@ -130,73 +131,56 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create or reuse auth user
+    // Never reuse an existing login: it may belong to someone else, or to a former
+    // crew member who has since set their own password.
+    let existingAuth: { id: string } | null = null;
+    try {
+      existingAuth = await findAuthUserByEmail(admin, email);
+    } catch (e) {
+      console.error('crew invite: user lookup', e);
+      return NextResponse.json({ error: 'Could not check that email right now. Try again.' }, { status: 503 });
+    }
+    if (existingAuth) {
+      return NextResponse.json(
+        {
+          error:
+            'That email already has an EstimateAce login. Ask your crew member for a different email address for crew access.',
+        },
+        { status: 409 }
+      );
+    }
+
+    // New login with no password: only the inbox owner can set one (setup link after
+    // the seat is paid, or "Forgot your password?").
     let crewUserId: string | null = null;
     const { data: created, error: createError } = await admin.auth.admin.createUser({
       email,
-      password,
       email_confirm: true,
+      ban_duration: '876000h',
       app_metadata: {
         is_crew: true,
         owner_user_id: user.id,
+        crew_invite_mode: 'link',
       },
       user_metadata: {
         role: 'crew',
         invited_by: user.id,
       },
     });
-
     if (createError) {
       const msg = createError.message || '';
-      // User may already exist (e.g. previous invite)
       if (/already|registered|exists/i.test(msg)) {
-        const { data: listed } = await admin.auth.admin.listUsers({ perPage: 1000 });
-        const found = listed?.users?.find((u) => (u.email || '').toLowerCase() === email);
-        if (!found) {
-          return NextResponse.json(
-            { error: 'That email already has an account. Use a different email or reset their password.' },
-            { status: 409 }
-          );
-        }
-        // Only allow linking if they were already a crew account for this owner, or pure crew with no owner
-        const metaOwner = found.app_metadata?.owner_user_id as string | undefined;
-        const isCrew = found.app_metadata?.is_crew === true;
-        if (!isCrew && metaOwner !== user.id) {
-          // Check if they own estimates (main account)
-          const { count } = await admin
-            .from('estimates')
-            .select('id', { count: 'exact', head: true })
-            .eq('user_id', found.id);
-          if ((count || 0) > 0 || !isCrew) {
-            return NextResponse.json(
-              {
-                error:
-                  'That email is already a full EstimateAce account. Ask them to use a different email for crew access.',
-              },
-              { status: 409 }
-            );
-          }
-        }
-        // Update password + metadata for re-invite
-        const { error: updErr } = await admin.auth.admin.updateUserById(found.id, {
-          password,
-          email_confirm: true,
-          app_metadata: {
-            ...found.app_metadata,
-            is_crew: true,
-            owner_user_id: user.id,
+        return NextResponse.json(
+          {
+            error:
+              'That email already has an EstimateAce login. Ask your crew member for a different email address for crew access.',
           },
-        });
-        if (updErr) {
-          return NextResponse.json({ error: updErr.message }, { status: 400 });
-        }
-        crewUserId = found.id;
-      } else {
-        return NextResponse.json({ error: msg || 'Could not create crew login.' }, { status: 400 });
+          { status: 409 }
+        );
       }
-    } else {
-      crewUserId = created.user?.id || null;
+      return NextResponse.json({ error: msg || 'Could not create crew login.' }, { status: 400 });
     }
+    crewUserId = created.user?.id || null;
 
     if (!crewUserId) {
       return NextResponse.json({ error: 'Could not create crew user.' }, { status: 500 });
@@ -223,6 +207,8 @@ export async function POST(request: NextRequest) {
 
     if (insertError) {
       console.error('crew_members insert:', insertError);
+      // Don't leave an unlinked login behind (it would block re-inviting this email).
+      await admin.auth.admin.deleteUser(crewUserId).catch(() => undefined);
       return NextResponse.json(
         {
           error:
@@ -239,7 +225,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       ok: true,
       seatPending: true,
-      message: 'Crew login created. It turns on as soon as the $14.99/month seat is paid.',
+      message:
+        'Crew login created. As soon as the $14.99/month seat is paid, we email them a link to set their own password.',
       crew: {
         email,
         userId: crewUserId,

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { TWO_STEP_REQUIRED, twoStepPending } from '@/lib/supabase/auth-user';
 import { createClient } from '@supabase/supabase-js';
 import { buildWebsiteBusinessFacts } from '@/lib/receptionist-website-facts';
 import { reserveAiQuota } from '@/lib/rate-limit';
@@ -31,6 +32,7 @@ async function verifyUser(request: NextRequest) {
     error,
   } = await supabase.auth.getUser();
   if (error || !user) return { user: null, error: 'Unauthorized' };
+  if (twoStepPending(request, user)) return { user: null, error: TWO_STEP_REQUIRED };
   return { user, error: null };
 }
 
