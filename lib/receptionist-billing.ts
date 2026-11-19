@@ -6,6 +6,10 @@ import { getStripe } from '@/lib/stripe-server';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { getSubscriptionPeriodEnd } from '@/lib/billing-sync';
 import { ensureStripeCustomerForOwner } from '@/lib/crew-billing';
+import {
+  loadReceptionistPrivate,
+  saveReceptionistBillingPrivate,
+} from '@/lib/receptionist-private';
 
 export const RECEPTIONIST_ADDON_AMOUNT_CENTS = 4999;
 export const RECEPTIONIST_ADDON_AMOUNT_DISPLAY = '$49.99';
@@ -50,16 +54,14 @@ export function receptionistAddonHasAccess(billing: ReceptionistBilling | null |
   return false;
 }
 
+/**
+ * Authoritative add-on billing state. Read from server-only storage
+ * (receptionist_accounts), which only Stripe webhooks / Stripe sync write.
+ * Never read from the user-editable SETTINGS row.
+ */
 export async function loadReceptionistBilling(userId: string): Promise<ReceptionistBilling> {
-  const admin = getSupabaseAdmin();
-  if (!admin) return {};
-  const { data } = await admin
-    .from('estimates')
-    .select('profile')
-    .eq('id', `SETTINGS-${userId}`)
-    .maybeSingle();
-  const b = (data?.profile as any)?.receptionistBilling;
-  return b && typeof b === 'object' ? (b as ReceptionistBilling) : {};
+  const row = await loadReceptionistPrivate(userId);
+  return row?.billing ? (row.billing as ReceptionistBilling) : {};
 }
 
 export async function upsertReceptionistAddonFromStripe(
@@ -91,6 +93,13 @@ export async function upsertReceptionistAddonFromStripe(
     cancelAtPeriodEnd: Boolean(sub.cancel_at_period_end),
   };
   const active = receptionistAddonHasAccess(billing);
+
+  // Authoritative copy (server-only). The SETTINGS write below is a display mirror.
+  try {
+    await saveReceptionistBillingPrivate(userId, billing);
+  } catch (e: any) {
+    return { ok: false, error: e?.message || 'Could not save receptionist billing' };
+  }
 
   const sid = `SETTINGS-${userId}`;
   const { data: existing } = await admin.from('estimates').select('profile').eq('id', sid).maybeSingle();

@@ -8,7 +8,8 @@ import {
   type StoredAppointment,
 } from '@/lib/appointment-reminders';
 import { sendEmailNotification, sendSmsNotification } from '@/lib/notifications';
-import { enforceAppAccess } from '@/lib/billing-access';
+import { enforceAppAccess, workspaceOwnerId } from '@/lib/billing-access';
+import { guardUserSends } from '@/lib/send-guard';
 
 async function verifyUser(request: NextRequest) {
   const authHeader = request.headers.get('authorization');
@@ -44,6 +45,11 @@ export async function POST(request: NextRequest) {
     }
     const paywall = await enforceAppAccess(user.id);
     if (paywall) return paywall;
+    {
+      // One reminder email + text per request; per-account daily caps + confirmed email.
+      const denied = await guardUserSends(user, await workspaceOwnerId(user.id), { sms: 1, email: 1 });
+      if (denied) return denied;
+    }
 
     const { data, error } = await supabase
       .from('estimates')

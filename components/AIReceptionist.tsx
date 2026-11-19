@@ -294,7 +294,6 @@ export function AIReceptionist({
         body: JSON.stringify({
           transferNumber,
           publicBusinessNumber: companyPhone,
-          ...(lineReady ? { phoneNumber: String(linePhone || '').trim() } : {}),
           branding: { businessName: companyName, greeting: settings.greeting },
         }),
       });
@@ -1100,10 +1099,7 @@ export function AIReceptionist({
                         <Input
                           id="ai-forward-number"
                           value={linePhone || ''}
-                          onChange={(e) => {
-                            linePhoneDirtyRef.current = true;
-                            setLinePhone(e.target.value);
-                          }}
+                          readOnly
                           placeholder="Private AI number"
                           inputMode="tel"
                           className="font-semibold text-base max-w-xs bg-white"
@@ -1113,8 +1109,8 @@ export function AIReceptionist({
                         </Button>
                       </div>
                       <p className="text-xs text-slate-600">
-                        Correct this number if it is wrong, then tap Save phone settings. Your business
-                        line should forward to this number.
+                        This number is assigned by EstimateAce. Your business line should forward to
+                        this number. Contact support if it looks wrong.
                       </p>
                     </div>
                     <ol className="list-decimal pl-5 text-xs text-slate-700 space-y-1.5 pt-1">

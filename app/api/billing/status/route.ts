@@ -15,6 +15,7 @@ import {
   type BillingSnapshot,
 } from '@/lib/billing';
 import { claimPromoSpot } from '@/lib/promo-spots';
+import { isEmailConfirmed } from '@/lib/send-guard';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { purgeIfAccountClosed } from '@/lib/account-purge';
@@ -95,7 +96,12 @@ export async function GET(request: NextRequest) {
         // accounts get no trial until Stripe Checkout (card on file) creates one.
         // Active (paid/comped) accounts never claim a spot.
         const freeOffer = cardFreeOffer(String(meta.promo || ''));
-        if (freeOffer && snapshot.status !== 'active' && isEligibleForCardTrial(data)) {
+        if (
+          freeOffer &&
+          snapshot.status !== 'active' &&
+          isEligibleForCardTrial(data) &&
+          isEmailConfirmed(user)
+        ) {
           const claim = await claimPromoSpot(admin, freeOffer, user.id);
           if (claim.ok) {
             seed = { ...snapshot, status: 'none', trialEndsAt: null };

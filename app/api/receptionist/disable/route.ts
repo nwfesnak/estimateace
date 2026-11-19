@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
       twilio: releaseNumber ? null : config.twilio,
       provisionError: undefined,
     };
-    await saveReceptionistConfig(user.id, next);
+    await saveReceptionistConfig(user.id, next, null, releaseNumber ? { line: 'clear' } : undefined);
 
     return NextResponse.json({
       ok: true,

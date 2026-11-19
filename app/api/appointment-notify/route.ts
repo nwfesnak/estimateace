@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { enforceAppAccess } from '@/lib/billing-access';
+import { enforceAppAccess, workspaceOwnerId } from '@/lib/billing-access';
+import { guardUserSends } from '@/lib/send-guard';
 
 async function verifyUser(request: NextRequest) {
   const authHeader = request.headers.get('authorization');
@@ -74,6 +75,20 @@ export async function POST(request: NextRequest) {
     const clientPhones = (Array.isArray(phones) ? phones : [])
       .map((p: string) => p?.trim())
       .filter(Boolean);
+
+    if (clientEmails.length > 10 || clientPhones.length > 5) {
+      return NextResponse.json(
+        { error: 'Too many recipients. Send to at most 10 emails and 5 phone numbers at a time.' },
+        { status: 400 }
+      );
+    }
+    {
+      const denied = await guardUserSends(user, await workspaceOwnerId(user.id), {
+        email: clientEmails.length,
+        sms: clientPhones.length,
+      });
+      if (denied) return denied;
+    }
 
     const appointmentDate = new Date(appointmentDateTime);
     const formattedDate = appointmentDate.toLocaleString('en-US', {

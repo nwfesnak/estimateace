@@ -24,6 +24,7 @@ export default function SmsOptInPage() {
   const [phone, setPhone] = useState('');
   const [agreed, setAgreed] = useState(false);
   const [finalConfirm, setFinalConfirm] = useState(false);
+  const [website, setWebsite] = useState(''); // honeypot (hidden from people)
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -41,7 +42,7 @@ export default function SmsOptInPage() {
       const res = await fetch('/api/sms/opt-in', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, phone, agreed, finalConfirm }),
+        body: JSON.stringify({ name, phone, agreed, finalConfirm, website }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.ok === false) {
@@ -115,6 +116,16 @@ export default function SmsOptInPage() {
         </div>
 
         <form onSubmit={submit} className="mt-8 rounded-xl border bg-white p-6 space-y-4 shadow-sm">
+          <input
+            type="text"
+            name="website"
+            value={website}
+            onChange={(e) => setWebsite(e.target.value)}
+            tabIndex={-1}
+            autoComplete="off"
+            aria-hidden="true"
+            style={{ position: 'absolute', left: '-10000px', width: 1, height: 1, opacity: 0 }}
+          />
           <h2 className="text-lg font-semibold">Web form opt-in</h2>
           <div>
             <label className="block text-sm font-semibold mb-1">Name (optional)</label>

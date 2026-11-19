@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
+import { rateLimit, tooManyRequests } from '@/lib/rate-limit';
 import { sendEmailNotification } from '@/lib/notifications';
 
 export const runtime = 'nodejs';
@@ -22,6 +23,11 @@ export async function POST(request: NextRequest) {
     const { user, error } = await getUserFromRequest(request);
     if (!user) {
       return NextResponse.json({ error: error || 'Unauthorized' }, { status: 401 });
+    }
+
+    const limited = await rateLimit(`support:${user.id}`, 60 * 60, 5);
+    if (!limited.allowed) {
+      return tooManyRequests(limited, 'Too many support messages. Please wait a bit and try again.');
     }
 
     const body = await request.json().catch(() => ({}));

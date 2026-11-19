@@ -1,14 +1,26 @@
 /**
- * Load / save ReceptionistConfig + secrets via Supabase admin (service role).
+ * Load / save ReceptionistConfig via Supabase admin (service role).
+ *
+ * Trust model:
+ *   - Business settings (greeting, hours, services, …) live in the user's
+ *     SETTINGS-<uid> row (user-editable, that's fine).
+ *   - The Twilio line, its secrets and the add-on entitlement live in the
+ *     server-only receptionist_accounts table (lib/receptionist-private.ts).
+ *     Whatever `twilio` value sits in SETTINGS is display-only and is always
+ *     replaced by the server copy when loading.
  */
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import {
   normalizeReceptionistConfig,
-  receptionistSecretsRowId,
   type ReceptionistConfig,
   type ReceptionistTwilioSecrets,
   toPublicReceptionistConfig,
 } from '@/lib/receptionist-config';
+import {
+  findReceptionistUserIdByPhone,
+  loadReceptionistPrivate,
+  saveReceptionistLinePrivate,
+} from '@/lib/receptionist-private';
 
 function settingsId(userId: string) {
   return `SETTINGS-${userId}`;
@@ -20,20 +32,13 @@ export async function loadReceptionistSecretsRow(userId: string): Promise<{
   subaccountSid: string;
   numberSid: string;
 } | null> {
-  const admin = getSupabaseAdmin();
-  if (!admin) return null;
-  const { data } = await admin
-    .from('estimates')
-    .select('profile')
-    .eq('id', receptionistSecretsRowId(userId))
-    .maybeSingle();
-  const p = (data?.profile || {}) as any;
-  const token = String(p.subaccountAuthToken || '').trim();
+  const row = await loadReceptionistPrivate(userId);
+  if (!row) return null;
   return {
-    secrets: token ? { subaccountAuthToken: token } : null,
-    phoneNumber: String(p.phoneNumber || '').trim(),
-    subaccountSid: String(p.subaccountSid || '').trim(),
-    numberSid: String(p.numberSid || '').trim(),
+    secrets: row.subaccountAuthToken ? { subaccountAuthToken: row.subaccountAuthToken } : null,
+    phoneNumber: row.line?.phoneNumber || '',
+    subaccountSid: row.line?.subaccountSid || '',
+    numberSid: row.line?.numberSid || '',
   };
 }
 
@@ -45,41 +50,31 @@ export async function loadReceptionistConfig(
   if (!admin) {
     return normalizeReceptionistConfig(null, userId, businessName);
   }
-  const { data } = await admin
-    .from('estimates')
-    .select('profile')
-    .eq('id', settingsId(userId))
-    .maybeSingle();
+  const [{ data }, priv] = await Promise.all([
+    admin.from('estimates').select('profile').eq('id', settingsId(userId)).maybeSingle(),
+    loadReceptionistPrivate(userId),
+  ]);
   const profile = (data?.profile || {}) as any;
-  let config = normalizeReceptionistConfig(profile.receptionistConfig, userId, businessName);
+  const config = normalizeReceptionistConfig(profile.receptionistConfig, userId, businessName);
 
-  // Recover Twilio line from secrets row if SETTINGS config was wiped by a profile save
-  if (!config.twilio?.phoneNumber) {
-    const secretsRow = await loadReceptionistSecretsRow(userId);
-    if (secretsRow?.phoneNumber) {
-      config = normalizeReceptionistConfig(
-        {
-          ...config,
-          status: config.status === 'none' ? 'active' : config.status,
-          twilio: {
-            subaccountSid: secretsRow.subaccountSid || config.twilio?.subaccountSid || '',
-            numberSid: secretsRow.numberSid || config.twilio?.numberSid || '',
-            phoneNumber: secretsRow.phoneNumber,
-          },
-        },
-        userId,
-        businessName
-      );
-      // Heal SETTINGS so UI stops asking to enable again
-      try {
-        await saveReceptionistConfig(userId, { ...config, status: 'active' });
-      } catch (e) {
-        console.warn('heal receptionistConfig from secrets:', e);
-      }
-    }
-  }
-
-  return config;
+  // The provisioned line always comes from server-only storage, never from SETTINGS.
+  const line = priv?.line || null;
+  return normalizeReceptionistConfig(
+    {
+      ...config,
+      status: line ? (config.status === 'none' ? 'active' : config.status) : config.status === 'error' ? 'error' : 'none',
+      enabled: line ? config.enabled : false,
+      twilio: line
+        ? {
+            subaccountSid: line.subaccountSid,
+            numberSid: line.numberSid,
+            phoneNumber: line.phoneNumber,
+          }
+        : null,
+    },
+    userId,
+    businessName
+  );
 }
 
 export async function loadReceptionistSecrets(
@@ -89,13 +84,40 @@ export async function loadReceptionistSecrets(
   return row?.secrets || null;
 }
 
+/**
+ * Save business settings to SETTINGS (display copy).
+ *
+ * The Twilio line is only written to server-only storage when `secrets` is passed
+ * (fresh provisioning) or when `opts.line` is set explicitly (enable/disable/release).
+ */
 export async function saveReceptionistConfig(
   userId: string,
   config: ReceptionistConfig,
-  secrets?: ReceptionistTwilioSecrets | null
+  secrets?: ReceptionistTwilioSecrets | null,
+  opts?: { line?: 'set' | 'clear' }
 ): Promise<void> {
   const admin = getSupabaseAdmin();
   if (!admin) throw new Error('Server missing SUPABASE_SERVICE_ROLE_KEY.');
+
+  if (secrets?.subaccountAuthToken && config.twilio?.phoneNumber) {
+    await saveReceptionistLinePrivate(
+      userId,
+      {
+        phoneNumber: config.twilio.phoneNumber,
+        subaccountSid: config.twilio.subaccountSid || '',
+        numberSid: config.twilio.numberSid || '',
+      },
+      secrets.subaccountAuthToken
+    );
+  } else if (opts?.line === 'clear') {
+    await saveReceptionistLinePrivate(userId, null, null);
+  } else if (opts?.line === 'set' && config.twilio?.phoneNumber) {
+    await saveReceptionistLinePrivate(userId, {
+      phoneNumber: config.twilio.phoneNumber,
+      subaccountSid: config.twilio.subaccountSid || '',
+      numberSid: config.twilio.numberSid || '',
+    });
+  }
 
   const sid = settingsId(userId);
   const { data: existing } = await admin.from('estimates').select('profile').eq('id', sid).maybeSingle();
@@ -106,7 +128,7 @@ export async function saveReceptionistConfig(
     updatedAt: new Date().toISOString(),
   };
 
-  // Public config on SETTINGS (safe for client profile load — no auth token)
+  // Display copy on SETTINGS (safe for client profile load — never holds a token).
   const { error } = await admin.from('estimates').upsert({
     id: sid,
     user_id: userId,
@@ -116,89 +138,20 @@ export async function saveReceptionistConfig(
     profile: {
       ...prev,
       receptionistConfig: nextConfig,
-      // Convenience for dashboard / addon gating
-      aiReceptionistAddonActive:
-        nextConfig.status === 'active' && nextConfig.enabled
-          ? true
-          : prev.aiReceptionistAddonActive === true,
     },
     updated_at: new Date().toISOString(),
   });
   if (error) throw new Error(error.message);
-
-  if (nextConfig.twilio?.phoneNumber) {
-    const secretsId = receptionistSecretsRowId(userId);
-    const { data: secretsExisting } = await admin
-      .from('estimates')
-      .select('profile')
-      .eq('id', secretsId)
-      .maybeSingle();
-    const prevSecrets = secretsExisting?.profile;
-    if (prevSecrets && typeof prevSecrets === 'object') {
-      const prevPhone = String((prevSecrets as { phoneNumber?: string }).phoneNumber || '').trim();
-      if (prevPhone !== nextConfig.twilio.phoneNumber) {
-        await admin.from('estimates').upsert({
-          id: secretsId,
-          user_id: userId,
-          jobName: '__receptionist_secrets__',
-          documentType: 'settings',
-          items: [],
-          profile: {
-            ...(prevSecrets as Record<string, unknown>),
-            phoneNumber: nextConfig.twilio.phoneNumber,
-            updatedAt: new Date().toISOString(),
-          },
-          updated_at: new Date().toISOString(),
-        });
-      }
-    }
-  }
-
-  if (secrets?.subaccountAuthToken) {
-    const secretsId = receptionistSecretsRowId(userId);
-    await admin.from('estimates').upsert({
-      id: secretsId,
-      user_id: userId,
-      jobName: '__receptionist_secrets__',
-      documentType: 'settings',
-      items: [],
-      profile: {
-        subaccountAuthToken: secrets.subaccountAuthToken,
-        subaccountSid: nextConfig.twilio?.subaccountSid || '',
-        numberSid: nextConfig.twilio?.numberSid || '',
-        phoneNumber: nextConfig.twilio?.phoneNumber || '',
-        updatedAt: new Date().toISOString(),
-      },
-      updated_at: new Date().toISOString(),
-    });
-  }
 }
 
 /** Resolve contractor by Twilio To number (E.164). Used by webhooks. */
 export async function findReceptionistByPhoneNumber(
   toNumber: string
 ): Promise<{ userId: string; config: ReceptionistConfig } | null> {
-  const admin = getSupabaseAdmin();
-  if (!admin) return null;
-  const want = String(toNumber || '').replace(/\s/g, '');
-  if (!want) return null;
-
-  // Scan SETTINGS rows that have receptionistConfig (bounded — improve with index later)
-  const { data, error } = await admin
-    .from('estimates')
-    .select('id, user_id, profile')
-    .like('id', 'SETTINGS-%')
-    .limit(2000);
-  if (error || !data) return null;
-
-  for (const row of data) {
-    const cfg = normalizeReceptionistConfig((row.profile as any)?.receptionistConfig, row.user_id);
-    const phone = cfg.twilio?.phoneNumber || '';
-    if (phone && (phone === want || phone.replace(/\D/g, '') === want.replace(/\D/g, ''))) {
-      return { userId: row.user_id, config: cfg };
-    }
-  }
-  return null;
+  const userId = await findReceptionistUserIdByPhone(toNumber);
+  if (!userId) return null;
+  const config = await loadReceptionistConfig(userId);
+  return { userId, config };
 }
 
 export { toPublicReceptionistConfig };

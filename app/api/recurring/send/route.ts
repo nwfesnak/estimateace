@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { sendRecurringApprovalEmail } from '@/lib/recurring-services';
+import { guardUserSends } from '@/lib/send-guard';
 import { enforceAppAccess } from '@/lib/billing-access';
 
 /**
@@ -34,6 +35,12 @@ export async function POST(request: NextRequest) {
     const planId = String(body.planId || body.id || '').trim();
     if (!planId) {
       return NextResponse.json({ error: 'planId is required' }, { status: 400 });
+    }
+
+    {
+      // One approval email + optional text per request; daily caps + confirmed email.
+      const denied = await guardUserSends(user, ownerUserId, { email: 1, sms: 1 });
+      if (denied) return denied;
     }
 
     const result = await sendRecurringApprovalEmail({

@@ -53,6 +53,13 @@ async function resolveOwnerId(admin: NonNullable<ReturnType<typeof getSupabaseAd
  * Returns a 402 response when the user (or their workspace owner, for crew)
  * has no app access; returns null when the request may continue.
  */
+/** Workspace owner id for a user (crew → owner, otherwise the user). */
+export async function workspaceOwnerId(userId: string): Promise<string> {
+  const admin = getSupabaseAdmin();
+  if (!admin) return userId;
+  return resolveOwnerId(admin, userId);
+}
+
 export async function enforceAppAccess(userId: string): Promise<NextResponse | null> {
   const admin = getSupabaseAdmin();
   if (!admin) return null; // cannot check without service role; client gate still applies

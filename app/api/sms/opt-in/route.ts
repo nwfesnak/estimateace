@@ -1,27 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { sendSmsNotification } from '@/lib/notifications';
+import { formatPhoneE164, sendSmsNotification } from '@/lib/notifications';
+import { clientIp, isUsPhoneE164, rateLimit, tooManyRequests } from '@/lib/rate-limit';
 import { welcomeSms } from '@/lib/sms-compliance';
 import { upsertSmsOptIn } from '@/lib/sms-opt-in-store';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
-const RATE_LIMIT = 5;
-const WINDOW_MS = 15 * 60 * 1000;
+const DAY = 24 * 60 * 60;
 
-function checkRateLimit(identifier: string) {
-  const now = Date.now();
-  const entry = rateLimitMap.get(identifier);
-  if (!entry || now > entry.resetTime) {
-    rateLimitMap.set(identifier, { count: 1, resetTime: now + WINDOW_MS });
-    return { allowed: true };
+/** Only our own pages may post this form (blocks drive-by cross-site posts). */
+function originAllowed(request: NextRequest): boolean {
+  const origin = request.headers.get('origin');
+  if (!origin) return true; // same-origin fetches from some browsers omit Origin
+  try {
+    const host = new URL(origin).host.toLowerCase();
+    const self = request.nextUrl.host.toLowerCase();
+    return (
+      host === self ||
+      host === 'app.estimateace.com' ||
+      host === 'estimateace.com' ||
+      host === 'www.estimateace.com' ||
+      host.startsWith('localhost:') ||
+      host.startsWith('127.0.0.1:')
+    );
+  } catch {
+    return false;
   }
-  if (entry.count >= RATE_LIMIT) {
-    return { allowed: false };
-  }
-  entry.count++;
-  return { allowed: true };
 }
 
 /** Public web form SMS opt-in (double opt-in: welcome, then YES to confirm). */
@@ -33,17 +38,20 @@ export async function POST(request: NextRequest) {
     const agreed = body.agreed === true;
     const finalConfirm = body.finalConfirm === true;
 
-    const ip =
-      request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-      request.headers.get('x-real-ip') ||
-      'unknown';
+    const ip = clientIp(request);
     const userAgent = request.headers.get('user-agent') || '';
 
-    if (!checkRateLimit(`sms-opt-in:${ip}`).allowed) {
-      return NextResponse.json(
-        { error: 'Too many opt-in attempts. Please wait and try again.' },
-        { status: 429 }
-      );
+    if (!originAllowed(request)) {
+      return NextResponse.json({ error: 'Origin not allowed' }, { status: 403 });
+    }
+    // Honeypot: real users never fill the hidden "website" field.
+    if (String(body.website || '').trim()) {
+      return NextResponse.json({ ok: true, optedIn: false, pendingConfirm: true });
+    }
+
+    const perIp = await rateLimit(`sms-opt-in:ip:${ip}`, 60 * 60, 5);
+    if (!perIp.allowed) {
+      return tooManyRequests(perIp, 'Too many opt-in attempts. Please wait and try again.');
     }
 
     if (!agreed) {
@@ -60,6 +68,21 @@ export async function POST(request: NextRequest) {
     }
     if (!phone) {
       return NextResponse.json({ error: 'Mobile phone number is required.' }, { status: 400 });
+    }
+    const e164 = formatPhoneE164(phone);
+    if (!e164 || !isUsPhoneE164(e164)) {
+      return NextResponse.json(
+        { error: 'Enter a valid US mobile number.' },
+        { status: 400 }
+      );
+    }
+    const perPhone = await rateLimit(`sms-opt-in:phone:${e164}`, DAY, 3);
+    if (!perPhone.allowed) {
+      return tooManyRequests(perPhone, 'A confirmation text was already sent to this number. Check your phone.');
+    }
+    const global = await rateLimit('sms-opt-in:global', DAY, 200);
+    if (!global.allowed) {
+      return tooManyRequests(global, 'Opt-in is temporarily busy. Please try again later.');
     }
 
     // Do NOT mark opted-in until they reply YES to the SMS (double opt-in)

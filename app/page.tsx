@@ -8,6 +8,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { TouchDoubleTapTextarea } from '@/components/TouchDoubleTapTextarea';
 import { DeviceCamera, type DeviceCameraMode } from '@/components/DeviceCamera';
 import { RecurringServicesPanel } from '@/components/RecurringServicesPanel';
+import { DOC_ID_REFUSED_MESSAGE, isRlsRefusal, newDocumentNumber } from '@/lib/document-ids';
 import { computeStripeCardFee, STRIPE_CARD_FIXED_USD, STRIPE_CARD_PERCENT } from '@/lib/stripe-fees';
 import {
   MileageTracker,
@@ -3329,9 +3330,20 @@ export default function Home() {
   };
 
   /** Guarantee a stable document id before writing to Supabase */
+  const loadedDocNumberRef = useRef<string>('');
   const ensureDocumentId = (preferred?: string): string => {
     const existing = String(preferred || invoiceNumber || '').trim();
-    if (existing && existing.toLowerCase() !== 'undefined' && existing.toLowerCase() !== 'null') {
+    // The untouched editor default (EST-0001) is shared by every account; only keep it
+    // when the user actually opened their own saved document with that number.
+    const untouchedDefault =
+      /^(EST|INV)-0001$/i.test(existing) &&
+      !/^(EST|INV)-?0001$/i.test(String(loadedDocNumberRef.current || ''));
+    if (
+      existing &&
+      !untouchedDefault &&
+      existing.toLowerCase() !== 'undefined' &&
+      existing.toLowerCase() !== 'null'
+    ) {
       return existing;
     }
     let n = 0;
@@ -3347,7 +3359,7 @@ export default function Home() {
       /* ignore */
     }
     const prefix = documentType === 'invoice' ? 'INV' : 'EST';
-    const id = `${prefix}-${String(n).padStart(4, '0')}`;
+    const id = newDocumentNumber(prefix, n, workspaceUserId);
     setInvoiceNumber(id);
     return id;
   };
@@ -3507,7 +3519,17 @@ export default function Home() {
         clientErr = error;
       }
 
-      // 3) Server save (service role) — reliable when RLS or client path fails
+      // A refused write (RLS) means this id belongs to another account (or access ended).
+      // Never retry it through the server; that used to overwrite other accounts' documents.
+      if (isRlsRefusal(clientErr)) {
+        const refused = DOC_ID_REFUSED_MESSAGE;
+        setSaveStatus('error');
+        setSaveErrorDetail(refused);
+        showMessage(`❌ ${refused}`);
+        return { ok: false, error: refused, id: docId };
+      }
+
+      // 3) Server save (service role) — schema-mismatch fallback; server checks ownership
       const { data: sessionData } = await supabase.auth.getSession();
       const token = sessionData.session?.access_token;
       if (token) {
@@ -4657,6 +4679,7 @@ export default function Home() {
   };
 
   const loadSelectedEstimate = async (est: any) => {
+    loadedDocNumberRef.current = String(est?.invoiceNumber || est?.invoicenumber || est?.id || '');
     freshDocumentRef.current = false;
     setJobName(est.jobName || '');
     setAddress(est.address || '');
@@ -5224,7 +5247,7 @@ export default function Home() {
     const savedCount = parseInt(localStorage.getItem('estimateCount') || '0') + 1;
     localStorage.setItem('estimateCount', savedCount.toString());
     const prefix = nextType === 'invoice' ? 'INV' : 'EST';
-    setInvoiceNumber(`${prefix}-${String(savedCount).padStart(4, '0')}`);
+    setInvoiceNumber(newDocumentNumber(prefix, savedCount, workspaceUserId));
     const loadedProfile = await loadLatestProfile();
     // Force payment reset again after async profile load (guards against stale state races)
     setAmountPaid(0);
@@ -6903,7 +6926,11 @@ export default function Home() {
         }
       }
 
-      // 3) Server save (service role) — same path as Save button
+      // 3) Server save (service role) — same path as Save button (never after an RLS refusal)
+      if (!saved && /row-level security|42501|permission denied/i.test(lastErr)) {
+        showMessage(`❌ ${DOC_ID_REFUSED_MESSAGE}`);
+        return;
+      }
       if (!saved) {
         const { data: sessionData } = await supabase.auth.getSession();
         const token = sessionData.session?.access_token;

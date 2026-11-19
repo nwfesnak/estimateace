@@ -14,6 +14,7 @@ import {
   TRIAL_OFFERS,
 } from '@/lib/billing';
 import { claimPromoSpot } from '@/lib/promo-spots';
+import { EMAIL_NOT_CONFIRMED_MESSAGE, isEmailConfirmed } from '@/lib/send-guard';
 
 /**
  * Called by the /trial page right after signup. Seeds the company profile and
@@ -86,6 +87,14 @@ export async function POST(request: NextRequest) {
     // never consume a capped spot.
     if (snapshot.status !== 'active') {
       if (freeOffer) {
+        // Capped card-free spots go only to confirmed email addresses (stops one person
+        // burning all spots with made-up emails once email confirmation is on).
+        if (!isEmailConfirmed(user)) {
+          return NextResponse.json(
+            { error: EMAIL_NOT_CONFIRMED_MESSAGE, code: 'email_not_confirmed' },
+            { status: 403 }
+          );
+        }
         const claim = await claimPromoSpot(admin, freeOffer, user.id);
         if (!claim.ok) {
           const label = '6-month';
