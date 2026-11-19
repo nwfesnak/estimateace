@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireWorkspaceOwner } from '@/lib/workspace';
 import { overlayStoredDocumentForCrewSend } from '@/lib/crew-access';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
@@ -134,20 +135,11 @@ export async function POST(request: NextRequest) {
     }
 
     // Workspace owner (crew → owner) for client action links
-    let ownerUserId = user.id;
     const admin = getSupabaseAdmin();
-    if (admin) {
-      try {
-        const { data: crew } = await admin
-          .from('crew_members')
-          .select('owner_user_id')
-          .eq('crew_user_id', user.id)
-          .maybeSingle();
-        if (crew?.owner_user_id) ownerUserId = crew.owner_user_id;
-      } catch {
-        /* optional */
-      }
-    }
+    // Seat-aware: inactive crew never act in the owner's workspace.
+    const ws = await requireWorkspaceOwner(user.id, admin);
+    if (ws.denied) return ws.denied;
+    const ownerUserId = ws.ownerUserId;
 
     // Abuse guard: confirmed email, sane recipient count, per-account daily quotas.
     if (emails.length > 10 || phones.length > 5) {

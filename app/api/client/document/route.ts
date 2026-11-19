@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyClientActionToken } from '@/lib/client-action-token';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
-import { extractMediaStoragePath, isMediaPdfRef } from '@/lib/media-url';
+import { isMediaPdfRef } from '@/lib/media-url';
+import { ownedMediaPath } from '@/lib/storage-paths';
 import { readEstimateApproval } from '@/lib/estimate-approval';
 import {
   includedItemsSubtotal,
@@ -74,7 +75,8 @@ export async function GET(request: NextRequest) {
         const certRef = String(sp?.certificateUrl || '').trim();
         if (certRef) {
           certificateIsPdf = isMediaPdfRef(certRef);
-          const storagePath = extractMediaStoragePath(certRef);
+          // Only the contractor's own folder (never another account's file).
+          const storagePath = ownedMediaPath(certRef, [uid]);
           if (storagePath) {
             const { data: signed } = await admin.storage
               .from('media')
@@ -222,7 +224,8 @@ export async function GET(request: NextRequest) {
     const certRef = String(profile.certificateUrl || '').trim();
     if (certRef) {
       certificateIsPdf = isMediaPdfRef(certRef);
-      const storagePath = extractMediaStoragePath(certRef);
+      // Only the contractor's own folder (never another account's file).
+      const storagePath = ownedMediaPath(certRef, [uid]);
       if (storagePath) {
         try {
           const { data: signed } = await admin.storage

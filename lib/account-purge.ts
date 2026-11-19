@@ -1,50 +1,58 @@
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { getStripe } from '@/lib/stripe-server';
+import {
+  deleteAllUserMedia,
+  deleteOwnerCrewLogins,
+  releaseAccountPhoneLine,
+  stopAccountBilling,
+} from '@/lib/account-cleanup';
 
-/** Hard-delete user data + auth after account_closes_at. */
+/**
+ * Hard-delete user data + auth after account_closes_at.
+ *
+ * Order matters: stop every charge first (main plan, crew seats, AI Receptionist
+ * add-on, Twilio number). If any charge cannot be stopped the purge stops and the
+ * daily cron retries, so we never delete an account that is still being billed.
+ */
 export async function purgeClosedAccount(userId: string): Promise<{ ok: boolean; error?: string }> {
   const admin = getSupabaseAdmin();
   if (!admin) return { ok: false, error: 'No admin client' };
 
   try {
-    const { data: subRow } = await admin
-      .from('subscriptions')
-      .select('stripe_subscription_id')
-      .eq('user_id', userId)
-      .maybeSingle();
-
     const stripe = getStripe();
-    if (stripe && subRow?.stripe_subscription_id) {
-      try {
-        await stripe.subscriptions.cancel(subRow.stripe_subscription_id);
-      } catch {
-        /* may already be canceled */
+    if (stripe) {
+      await stopAccountBilling(admin, stripe, userId, 'now');
+    } else {
+      const { data: subRow } = await admin
+        .from('subscriptions')
+        .select('stripe_subscription_id')
+        .eq('user_id', userId)
+        .maybeSingle();
+      if (subRow?.stripe_subscription_id) {
+        return { ok: false, error: 'Stripe not configured; cannot confirm billing stopped' };
       }
     }
+
+    try {
+      await releaseAccountPhoneLine(userId);
+    } catch (e) {
+      return { ok: false, error: `Twilio release failed: ${(e as Error)?.message || e}` };
+    }
+
+    const media = await deleteAllUserMedia(admin, userId);
+    if (!media.complete) {
+      // Very large account: the rest is removed on the next cron run.
+      return { ok: false, error: `media purge partial (${media.removed} removed); will continue next run` };
+    }
+
+    await deleteOwnerCrewLogins(admin, userId);
 
     await admin.from('archive-est').delete().eq('user_id', userId);
     await admin.from('estimates').delete().eq('user_id', userId);
     await admin.from('subscriptions').delete().eq('user_id', userId);
 
-    try {
-      const { data: files } = await admin.storage.from('media').list(userId, { limit: 1000 });
-      if (files?.length) {
-        for (const f of files) {
-          const { data: nested } = await admin.storage
-            .from('media')
-            .list(`${userId}/${f.name}`, { limit: 500 });
-          if (nested?.length) {
-            await admin.storage
-              .from('media')
-              .remove(nested.map((n) => `${userId}/${f.name}/${n.name}`));
-          }
-        }
-        await admin.storage.from('media').remove(files.map((f) => `${userId}/${f.name}`));
-      }
-    } catch (e) {
-      console.warn('storage purge:', e);
-    }
-
+    // Remaining per-user rows (crew_members, crew seats, payment_accounts, receipts,
+    // receptionist tables, login codes, promo redemptions) cascade from auth.users.
     const { error } = await admin.auth.admin.deleteUser(userId);
     if (error) {
       console.error('auth deleteUser:', error);

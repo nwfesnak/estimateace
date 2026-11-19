@@ -23,7 +23,7 @@ async function twilioForm(
   accountSid: string,
   authToken: string,
   path: string,
-  method: 'GET' | 'POST' | 'POST_FORM',
+  method: 'GET' | 'POST' | 'POST_FORM' | 'DELETE',
   params?: Record<string, string>
 ): Promise<any> {
   const url = path.startsWith('http')
@@ -33,12 +33,12 @@ async function twilioForm(
     Authorization: basicAuth(accountSid, authToken),
   };
   let body: string | undefined;
-  if (method !== 'GET' && params) {
+  if (method !== 'GET' && method !== 'DELETE' && params) {
     headers['Content-Type'] = 'application/x-www-form-urlencoded';
     body = new URLSearchParams(params).toString();
   }
   const res = await fetch(url, {
-    method: method === 'GET' ? 'GET' : 'POST',
+    method: method === 'GET' || method === 'DELETE' ? method : 'POST',
     headers,
     body,
   });
@@ -159,17 +159,36 @@ export async function provisionContractorReceptionistLine(input: {
   };
 }
 
-/** Close / release number (optional). Soft-disable without release is preferred. */
+/**
+ * Release (delete) the contractor's purchased number so Twilio stops billing for it.
+ * Twilio releases a number with DELETE on the IncomingPhoneNumber resource.
+ */
 export async function releaseContractorNumber(input: {
   subaccountSid: string;
   subaccountAuthToken: string;
   numberSid: string;
 }): Promise<void> {
-  await twilioForm(
-    input.subaccountSid,
-    input.subaccountAuthToken,
-    `/Accounts/${input.subaccountSid}/IncomingPhoneNumbers/${input.numberSid}.json`,
-    'POST',
-    { Status: 'closed' }
-  );
+  try {
+    await twilioForm(
+      input.subaccountSid,
+      input.subaccountAuthToken,
+      `/Accounts/${input.subaccountSid}/IncomingPhoneNumbers/${input.numberSid}.json`,
+      'DELETE'
+    );
+  } catch (e) {
+    // Already released → nothing left to bill.
+    if (/not found|20404|was not found/i.test(String((e as Error)?.message || e))) return;
+    throw e;
+  }
+}
+
+/**
+ * Permanently close a contractor's Twilio subaccount (account purge). Closing a
+ * subaccount releases every number on it. Uses the platform master credentials.
+ */
+export async function closeContractorSubaccount(subaccountSid: string): Promise<void> {
+  if (!/^AC[0-9a-f]{32}$/i.test(subaccountSid)) throw new Error('Invalid Twilio subaccount SID');
+  const { accountSid, authToken } = masterCreds();
+  if (subaccountSid === accountSid) throw new Error('Refusing to close the platform master account');
+  await twilioForm(accountSid, authToken, `/Accounts/${subaccountSid}.json`, 'POST', { Status: 'closed' });
 }

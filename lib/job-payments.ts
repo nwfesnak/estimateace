@@ -734,18 +734,9 @@ export async function resolveWorkspaceOwner(userId: string): Promise<{
   ownerUserId: string;
   isCrew: boolean;
 }> {
-  const admin = getSupabaseAdmin();
-  if (!admin) return { ownerUserId: userId, isCrew: false };
-  try {
-    const { data: crew } = await admin
-      .from('crew_members')
-      .select('owner_user_id')
-      .eq('crew_user_id', userId)
-      .maybeSingle();
-    const owner = String((crew as { owner_user_id?: string } | null)?.owner_user_id || '').trim();
-    if (owner && owner !== userId) return { ownerUserId: owner, isCrew: true };
-  } catch {
-    /* crew table optional */
-  }
-  return { ownerUserId: userId, isCrew: false };
+  const { resolveWorkspace } = await import('@/lib/workspace');
+  const ws = await resolveWorkspace(userId);
+  // Inactive crew stay "crew" (no payment changes) but never see the owner's account.
+  if (!ws.ok) return { ownerUserId: userId, isCrew: true };
+  return { ownerUserId: ws.ownerUserId, isCrew: ws.isCrew };
 }

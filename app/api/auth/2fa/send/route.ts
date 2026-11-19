@@ -9,7 +9,7 @@ import {
 
 export async function POST(request: NextRequest) {
   try {
-    const { user, error } = await getUserFromRequest(request);
+    const { user, error } = await getUserFromRequest(request, { allowPendingTwoStep: true });
     if (!user) {
       return NextResponse.json({ error: error || 'Unauthorized' }, { status: 401 });
     }

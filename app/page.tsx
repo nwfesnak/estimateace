@@ -111,6 +111,7 @@ import {
   syncLineItemPricingFromJobTotal,
 } from '@/lib/breakdown-pricing';
 import { rankAddressSuggestions } from '@/lib/address-autocomplete';
+import { randomUploadId, safeUploadName } from '@/lib/upload-names';
 
 const DEFAULT_DISCOUNT_NAMES = ['Military', 'Return customer'];
 
@@ -451,7 +452,7 @@ export default function Home() {
       loginMain: "Log In",
       signUp: "Sign Up",
       logInAsCrew: "Crew login",
-      crewLoginNote: "Crew use the email and password the account owner set under Billing → Manage → Crew.",
+      crewLoginNote: "Crew: use the \"set your password\" link we emailed you, then sign in with your email and that password.",
       twoStepVerification: "Two-Step Verification",
       verifyCode: "Verify Code",
       resendCode: "Resend Code",
@@ -598,7 +599,7 @@ export default function Home() {
       loginMain: "Iniciar sesión",
       signUp: "Registrarse",
       logInAsCrew: "Acceso de equipo",
-      crewLoginNote: "El equipo usa el email y la contraseña que el dueño configuró en Facturación → Gestionar → Equipo.",
+      crewLoginNote: "Equipo: usa el enlace \"crea tu contraseña\" que te enviamos por email y luego inicia sesión con tu email y esa contraseña.",
       twoStepVerification: "Verificación en Dos Pasos",
       verifyCode: "Verificar Código",
       resendCode: "Reenviar Código",
@@ -745,7 +746,7 @@ export default function Home() {
       loginMain: "Connexion",
       signUp: "S'inscrire",
       logInAsCrew: "Connexion équipe",
-      crewLoginNote: "L'équipe utilise l'email et le mot de passe définis par le propriétaire sous Facturation → Gérer → Équipe.",
+      crewLoginNote: "Équipe : utilisez le lien « créer votre mot de passe » reçu par email, puis connectez-vous avec votre email et ce mot de passe.",
       twoStepVerification: "Vérification en Deux Étapes",
       verifyCode: "Vérifier le Code",
       resendCode: "Renvoyer le Code",
@@ -1855,7 +1856,6 @@ export default function Home() {
   /** overview = plan status; manage = crew + payment portal + delete account */
   const [billingPanel, setBillingPanel] = useState<'overview' | 'manage'>('overview');
   const [crewEmailInput, setCrewEmailInput] = useState('');
-  const [crewPasswordInput, setCrewPasswordInput] = useState('');
   const [crewInviteBusy, setCrewInviteBusy] = useState(false);
   /** $14.99/mo crew seat confirm popup before invite + Stripe */
   const [isCrewSeatConfirmOpen, setIsCrewSeatConfirmOpen] = useState(false);
@@ -2885,7 +2885,7 @@ export default function Home() {
     } else if (billingParam === 'crew_seat_success') {
       const crew = params.get('crew') || 'crew member';
       showMessage(
-        `✅ Crew seat paid for ${crew} ($14.99/mo). They can log in with the email and password you set.`
+        `✅ Crew seat paid for ${crew} ($14.99/mo). We emailed them a link to set their password and sign in.`
       );
       setProfileTab('billing');
       setBillingPanel('manage');
@@ -3717,10 +3717,10 @@ export default function Home() {
         }
 
         const { blob, ext, contentType } = prepared;
-        const filePath = `${workspaceUserId}/${type}/${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+        const filePath = `${workspaceUserId}/${type}/${Date.now()}-${i}-${randomUploadId()}.${ext}`;
 
         const { error } = await supabase.storage.from('media').upload(filePath, blob, {
-          upsert: true,
+          upsert: false, // unique name; crew may add files but never overwrite
           contentType,
           cacheControl: '3600',
         });
@@ -4055,8 +4055,8 @@ export default function Home() {
   const handleCertificateUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !user || !supabase) return;
-    const filePath = `${workspaceUserId}/certificate/${Date.now()}-${file.name}`;
-    const { error } = await supabase.storage.from('media').upload(filePath, file, { upsert: true });
+    const filePath = `${workspaceUserId}/certificate/${Date.now()}-${randomUploadId()}-${safeUploadName(file.name)}`;
+    const { error } = await supabase.storage.from('media').upload(filePath, file, { upsert: false });
     if (!error) {
       const next = { ...profileRef.current, certificateUrl: filePath };
       setProfile(next);
@@ -4085,8 +4085,8 @@ export default function Home() {
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !user || !supabase) return;
-    const filePath = `${workspaceUserId}/logo/${Date.now()}-${file.name}`;
-    const { error } = await supabase.storage.from('media').upload(filePath, file, { upsert: true });
+    const filePath = `${workspaceUserId}/logo/${Date.now()}-${randomUploadId()}-${safeUploadName(file.name)}`;
+    const { error } = await supabase.storage.from('media').upload(filePath, file, { upsert: false });
     if (!error) {
       const next = { ...profileRef.current, logoUrl: filePath };
       setProfile(next);
@@ -5846,9 +5846,9 @@ export default function Home() {
     if (!supabase || !workspaceUserId) return null;
     const ext = blob.type.includes('png') ? 'png' : 'jpg';
     const contentType = blob.type || (ext === 'png' ? 'image/png' : 'image/jpeg');
-    const filePath = `${workspaceUserId}/render/${kind}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    const filePath = `${workspaceUserId}/render/${kind}-${Date.now()}-${randomUploadId()}.${ext}`;
     const { error } = await supabase.storage.from('media').upload(filePath, blob, {
-      upsert: true,
+      upsert: false, // unique name; crew may add files but never overwrite
       contentType,
       cacheControl: '3600',
     });
@@ -8263,13 +8263,9 @@ export default function Home() {
       return showMessage('Crew accounts cannot invite other crew.');
     }
     const email = crewEmailInput.trim().toLowerCase();
-    const password = crewPasswordInput;
     if (!email) return showMessage('Enter email for the crew account');
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return showMessage('Enter a valid email address');
-    }
-    if (password.length < 6) {
-      return showMessage('Set a password (at least 6 characters) for this crew login');
     }
     if (!supabase || !user) return showMessage('Please log in first');
 
@@ -8290,7 +8286,6 @@ export default function Home() {
   const confirmCrewSeatAndPay = async () => {
     if (currentCrew) return;
     const email = crewEmailInput.trim().toLowerCase();
-    const password = crewPasswordInput;
     if (!supabase || !user) return showMessage('Please log in first');
 
     setCrewInviteBusy(true);
@@ -8308,7 +8303,6 @@ export default function Home() {
         },
         body: JSON.stringify({
           email,
-          password,
           role: 'limited',
           canSeePricing: false,
           canSeeEstimatesAndFinancials: false,
@@ -8336,7 +8330,6 @@ export default function Home() {
       });
 
       setCrewEmailInput('');
-      setCrewPasswordInput('');
     } catch {
       showMessage('Network error creating crew login / seat.');
     } finally {
@@ -10300,8 +10293,8 @@ export default function Home() {
       showMessage('Please upload an image of your Zelle QR code (PNG or JPG).');
       return;
     }
-    const filePath = `${workspaceUserId}/zelle-qr/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
-    const { error } = await supabase.storage.from('media').upload(filePath, file, { upsert: true });
+    const filePath = `${workspaceUserId}/zelle-qr/${Date.now()}-${randomUploadId()}-${safeUploadName(file.name)}`;
+    const { error } = await supabase.storage.from('media').upload(filePath, file, { upsert: false });
     if (error) {
       showMessage('Failed to upload Zelle QR. Try again.');
       return;
@@ -11960,8 +11953,8 @@ export default function Home() {
           )}
 
           <p className="text-[10px] text-gray-500 mt-4 text-center leading-relaxed">
-            Crew: log in here with the email and password your account owner created under Billing →
-            Manage → Crew.
+            Crew: use the &ldquo;set your password&rdquo; link we emailed you, then log in here with your
+            email. Link expired? Use &ldquo;Forgot your password?&rdquo;.
           </p>
         </Card>
       </div>
@@ -15261,9 +15254,9 @@ export default function Home() {
                     <CardContent className="p-6 space-y-4">
                       <h3 className="text-xl font-semibold text-[#1e293b]">👥 Crew / sub-contractors</h3>
                       <p className="text-sm text-gray-500">
-                        Create a login for each crew member. They use the <strong>same login page</strong> as
-                        you, with the email and password you set here. Share those credentials with them
-                        securely. They can use “Forgot your password?” on the main login if they need a reset.
+                        Add each crew member by email. Once their seat is paid, we email them a one-time
+                        link to <strong>set their own password</strong>, then they sign in on the same login page
+                        as you. If the link expires they can use “Forgot your password?” on the main login.
                       </p>
                       <div className="rounded-lg border border-amber-200 bg-amber-50 text-amber-950 text-sm p-3">
                         <strong>Each additional crew member is $14.99/month</strong> (month-to-month). You will
@@ -15271,8 +15264,8 @@ export default function Home() {
                         they keep access until the end of the paid month.
                       </div>
                       <div className="rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-900 text-xs p-3">
-                        Crew logins are real accounts. After you add someone, they sign in at app.estimateace.com
-                        with that email and password (no separate crew login form).
+                        Crew logins are real accounts tied to the crew member&apos;s own email. You never set or see
+                        their password.
                       </div>
                       <div className="flex flex-col gap-2">
                         <div className="flex flex-col sm:flex-row gap-2">
@@ -15281,14 +15274,6 @@ export default function Home() {
                             type="email"
                             value={crewEmailInput}
                             onChange={(e) => setCrewEmailInput(e.target.value)}
-                            className="flex-1"
-                          />
-                          <Input
-                            placeholder="Set their password"
-                            type="password"
-                            autoComplete="new-password"
-                            value={crewPasswordInput}
-                            onChange={(e) => setCrewPasswordInput(e.target.value)}
                             onKeyDown={(e) => {
                               if (e.key === 'Enter') {
                                 e.preventDefault();
@@ -15318,7 +15303,7 @@ export default function Home() {
                           </Button>
                         </div>
                         <p className="text-[11px] text-gray-500">
-                          Password must be at least 6 characters. Tell the crew member both email and password.
+                          We email the crew member a link to set their own password once the seat is paid.
                           If someone “already exists” but is missing here, tap Refresh list.
                         </p>
                       </div>

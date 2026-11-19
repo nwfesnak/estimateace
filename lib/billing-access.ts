@@ -18,6 +18,7 @@ import {
   normalizeBillingSnapshot,
   type BillingSnapshot,
 } from '@/lib/billing';
+import { crewSeatInactiveResponse, resolveWorkspace } from '@/lib/workspace';
 
 export function subscriptionRowToSnapshot(row: Record<string, unknown> | null | undefined): BillingSnapshot {
   if (!row) return { ...DEFAULT_BILLING_SNAPSHOT };
@@ -34,37 +35,25 @@ export function subscriptionRowToSnapshot(row: Record<string, unknown> | null | 
   });
 }
 
-async function resolveOwnerId(admin: NonNullable<ReturnType<typeof getSupabaseAdmin>>, userId: string) {
-  try {
-    const { data } = await admin
-      .from('crew_members')
-      .select('owner_user_id')
-      .eq('crew_user_id', userId)
-      .maybeSingle();
-    const owner = String((data as { owner_user_id?: string } | null)?.owner_user_id || '').trim();
-    if (owner && owner !== userId) return owner;
-  } catch {
-    /* crew table optional */
-  }
-  return userId;
+/** Workspace owner id for a user (active crew → owner, otherwise the user itself). */
+export async function workspaceOwnerId(userId: string): Promise<string> {
+  const ws = await resolveWorkspace(userId);
+  // Inactive crew never resolve to the owner's workspace.
+  return ws.ok ? ws.ownerUserId : userId;
 }
 
 /**
  * Returns a 402 response when the user (or their workspace owner, for crew)
- * has no app access; returns null when the request may continue.
+ * has no app access, a 403 when the user is crew whose seat is not active,
+ * and null when the request may continue.
  */
-/** Workspace owner id for a user (crew → owner, otherwise the user). */
-export async function workspaceOwnerId(userId: string): Promise<string> {
-  const admin = getSupabaseAdmin();
-  if (!admin) return userId;
-  return resolveOwnerId(admin, userId);
-}
-
 export async function enforceAppAccess(userId: string): Promise<NextResponse | null> {
   const admin = getSupabaseAdmin();
   if (!admin) return null; // cannot check without service role; client gate still applies
 
-  const ownerId = await resolveOwnerId(admin, userId);
+  const ws = await resolveWorkspace(userId, admin);
+  if (!ws.ok) return crewSeatInactiveResponse();
+  const ownerId = ws.ownerUserId;
   const { data, error } = await admin
     .from('subscriptions')
     .select('*')

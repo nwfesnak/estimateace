@@ -17,23 +17,15 @@ import {
 import { enforceAppAccess } from '@/lib/billing-access';
 import { getRestrictedCrewAccess } from '@/lib/crew-access';
 import { maskMoneyDeep } from '@/lib/crew-redaction';
+import { resolveWorkspace } from '@/lib/workspace';
 
+/**
+ * Seat-aware workspace owner. Inactive crew are already refused by enforceAppAccess;
+ * as a second line they resolve to their own (empty) workspace, never the owner's.
+ */
 async function resolveOwnerId(userId: string): Promise<string> {
-  let ownerUserId = userId;
-  const admin = getSupabaseAdmin();
-  if (admin) {
-    try {
-      const { data: crew } = await admin
-        .from('crew_members')
-        .select('owner_user_id')
-        .eq('crew_user_id', userId)
-        .maybeSingle();
-      if (crew?.owner_user_id) ownerUserId = crew.owner_user_id;
-    } catch {
-      /* optional */
-    }
-  }
-  return ownerUserId;
+  const ws = await resolveWorkspace(userId);
+  return ws.ok ? ws.ownerUserId : userId;
 }
 
 /** List recurring client service plans (not EstimateAce SaaS). */

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireWorkspaceOwner } from '@/lib/workspace';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import {
@@ -39,17 +40,10 @@ export async function POST(request: NextRequest) {
     }
 
     // Workspace: crew saves into owner account when linked
-    let workspaceUserId = user.id;
-    try {
-      const { data: crew } = await admin
-        .from('crew_members')
-        .select('owner_user_id')
-        .eq('crew_user_id', user.id)
-        .maybeSingle();
-      if (crew?.owner_user_id) workspaceUserId = crew.owner_user_id;
-    } catch {
-      /* crew table optional */
-    }
+    // Seat-aware: inactive crew never act in the owner's workspace.
+    const ws = await requireWorkspaceOwner(user.id, admin);
+    if (ws.denied) return ws.denied;
+    const workspaceUserId = ws.ownerUserId;
 
     // Reserved server-managed rows can never be written through this endpoint.
     if (/^(SETTINGS-|RECEPTIONIST-SECRETS-|PLATFORM-)/i.test(id)) {

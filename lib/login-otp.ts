@@ -79,42 +79,59 @@ export type MfaSettings = {
   phone: string | null;
 };
 
-/** Load 2FA settings from SETTINGS profile + auth metadata */
-export async function loadMfaSettings(userId: string, metaPhone?: string | null): Promise<MfaSettings> {
-  // Soft launch: SMS two-step is disabled until phone / Twilio line is active.
-  // Re-enable by restoring the SETTINGS profile check below.
-  void userId;
-  void metaPhone;
-  return { enabled: false, phone: null };
+/**
+ * Platform switch for SMS two-step sign-in (soft launch: off until the Twilio line is
+ * active). Set SMS_2FA_ENABLED=true on Vercel to turn the feature on.
+ */
+export function isSms2faAvailable(): boolean {
+  return (process.env.SMS_2FA_ENABLED || '').trim().toLowerCase() === 'true';
+}
 
-  /*
+type MetaCarrier = { app_metadata?: Record<string, unknown> | null } | null | undefined;
+
+/**
+ * The on/off switch and phone live in the user's auth app_metadata, which ONLY the
+ * server (service role) can write. They are never read from the user-editable
+ * SETTINGS row, so a stolen session cannot quietly turn two-step off.
+ */
+export function mfaSettingsFromUser(user: MetaCarrier): MfaSettings {
+  if (!isSms2faAvailable()) return { enabled: false, phone: null };
+  const raw = (user?.app_metadata?.sms_2fa || null) as { enabled?: unknown; phone?: unknown } | null;
+  const phone = raw?.phone ? formatPhoneE164(String(raw.phone)) : null;
+  if (raw?.enabled !== true || !phone) return { enabled: false, phone };
+  return { enabled: true, phone };
+}
+
+/** Load 2FA settings for a user id (server-only app_metadata). */
+export async function loadMfaSettings(userId: string, _metaPhone?: string | null): Promise<MfaSettings> {
+  void _metaPhone;
+  if (!isSms2faAvailable()) return { enabled: false, phone: null };
   const admin = getSupabaseAdmin();
-  let enabled = false;
-  let phone: string | null = null;
+  if (!admin) return { enabled: false, phone: null };
+  const { data } = await admin.auth.admin.getUserById(userId);
+  return mfaSettingsFromUser(data?.user as MetaCarrier);
+}
 
-  if (admin) {
-    const { data } = await admin
-      .from('estimates')
-      .select('profile')
-      .eq('id', `SETTINGS-${userId}`)
-      .maybeSingle();
-    const p = (data?.profile || {}) as Record<string, any>;
-    enabled = p.twoFactorEnabled === true || p.mfaSmsEnabled === true;
-    phone =
-      String(p.twoFactorPhone || p.mfaPhone || p.phone || '').trim() || null;
-  }
-
-  if (!phone && metaPhone) {
-    phone = String(metaPhone).trim() || null;
-  }
-
-  const normalized = phone ? formatPhoneE164(phone) : null;
-  // Only require 2FA when explicitly enabled AND we have a valid phone
-  if (!enabled || !normalized) {
-    return { enabled: false, phone: normalized };
-  }
-  return { enabled: true, phone: normalized };
-  */
+/** Server-only write of the 2FA switch (service role → auth app_metadata). */
+export async function saveMfaSettings(
+  userId: string,
+  next: { enabled: boolean; phone: string | null; pendingPhone?: string | null }
+): Promise<{ ok: boolean; error?: string }> {
+  const admin = getSupabaseAdmin();
+  if (!admin) return { ok: false, error: 'Server missing SUPABASE_SERVICE_ROLE_KEY.' };
+  const { data } = await admin.auth.admin.getUserById(userId);
+  const meta = { ...((data?.user?.app_metadata || {}) as Record<string, unknown>) };
+  meta.sms_2fa = {
+    enabled: next.enabled,
+    phone: next.phone,
+    updated_at: new Date().toISOString(),
+  };
+  if (next.pendingPhone === undefined) {
+    /* keep */
+  } else if (next.pendingPhone) meta.sms_2fa_pending = { phone: next.pendingPhone, at: new Date().toISOString() };
+  else delete meta.sms_2fa_pending;
+  const { error } = await admin.auth.admin.updateUserById(userId, { app_metadata: meta });
+  return error ? { ok: false, error: error.message } : { ok: true };
 }
 
 export async function storeLoginOtp(userId: string, code: string): Promise<void> {

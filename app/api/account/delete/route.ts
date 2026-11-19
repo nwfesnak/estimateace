@@ -9,6 +9,7 @@ import {
   type BillingSnapshot,
 } from '@/lib/billing';
 import { serverError } from '@/lib/rate-limit';
+import { stopAccountBilling } from '@/lib/account-cleanup';
 
 function rowToSnapshot(row: any): BillingSnapshot {
   if (!row) {
@@ -67,15 +68,19 @@ export async function POST(request: NextRequest) {
     const closesAtIso = closesAt.toISOString();
     const nowIso = new Date().toISOString();
 
-    // Cancel Stripe at period end (keep access until then)
+    // Stop renewals on EVERY subscription for this account (main plan, crew seats,
+    // AI Receptionist add-on). Paid periods run out; nothing renews. Refuse to
+    // schedule closure if a renewal could not be stopped.
     const stripe = getStripe();
-    if (stripe && subRow?.stripe_subscription_id) {
+    if (stripe) {
       try {
-        await stripe.subscriptions.update(subRow.stripe_subscription_id, {
-          cancel_at_period_end: true,
-        });
+        await stopAccountBilling(admin, stripe, uid, 'period_end');
       } catch (e) {
-        console.warn('Stripe cancel_at_period_end failed:', e);
+        console.error('account/delete: could not stop renewals:', e);
+        return NextResponse.json(
+          { error: 'Could not cancel your subscriptions right now. Please try again or contact support.' },
+          { status: 503 }
+        );
       }
     }
 

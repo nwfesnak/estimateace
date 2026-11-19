@@ -4,6 +4,7 @@
  * materials + labor === line total always (reconciled).
  */
 import { NextRequest, NextResponse } from 'next/server';
+import { TWO_STEP_REQUIRED, twoStepPending } from '@/lib/supabase/auth-user';
 import { createClient } from '@supabase/supabase-js';
 import {
   resolveRegionalPricing,
@@ -59,6 +60,7 @@ async function verifyUser(request: NextRequest) {
     return { user: null, error: 'Unauthorized' };
   }
 
+  if (twoStepPending(request, user)) return { user: null, error: TWO_STEP_REQUIRED };
   return { user, error: null };
 }
 

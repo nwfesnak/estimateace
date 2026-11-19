@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { TWO_STEP_REQUIRED, twoStepPending } from '@/lib/supabase/auth-user';
 import { createClient } from '@supabase/supabase-js';
 import { settingsDocId, type StoredAppointment } from '@/lib/appointment-reminders';
 import { enforceAppAccess } from '@/lib/billing-access';
@@ -26,6 +27,7 @@ async function verifyUser(request: NextRequest) {
     return { user: null, supabase: null, error: 'Unauthorized' };
   }
 
+  if (twoStepPending(request, user)) return { user: null, supabase: null, error: TWO_STEP_REQUIRED };
   return { user, supabase, error: null };
 }
 
