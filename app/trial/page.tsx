@@ -4,6 +4,13 @@ import { useEffect, useMemo, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { getSupabaseClient, getSupabaseConfigHelpMessage } from '@/lib/supabase/client';
+import { TurnstileWidget } from '@/components/TurnstileWidget';
+import {
+  captchaOption,
+  friendlyCaptchaError,
+  TURNSTILE_REQUIRED_MESSAGE,
+  turnstileEnabled,
+} from '@/lib/turnstile';
 
 const APP_HOME = '/';
 const DEFAULT_TRIAL_DAYS = 14;
@@ -74,6 +81,10 @@ function TrialForm() {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [spots, setSpots] = useState<Spots>(null);
+  // Cloudflare Turnstile (only when NEXT_PUBLIC_TURNSTILE_SITE_KEY is set). Tokens are
+  // single use, so the widget is remounted (captchaNonce) after every signup attempt.
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [captchaNonce, setCaptchaNonce] = useState(0);
 
   const offerFull = cappedOffer && spots?.open === false;
   const standardTrialHref = `/trial${plan === 'yearly' ? '?plan=yearly' : ''}`;
@@ -206,6 +217,12 @@ function TrialForm() {
       return;
     }
 
+    if (turnstileEnabled && !captchaToken) {
+      setError(TURNSTILE_REQUIRED_MESSAGE);
+      return;
+    }
+    const usedCaptchaToken = captchaToken;
+
     setBusy(true);
     let releaseBusy = true;
     try {
@@ -216,6 +233,7 @@ function TrialForm() {
           // Used when Supabase email confirmation is on: the link returns to the app,
           // which then shows the card step (standard/2-month) or starts the 6-month trial.
           emailRedirectTo: `${window.location.origin}/?plan=${plan}${promo ? `&promo=${encodeURIComponent(promo)}` : ''}`,
+          ...captchaOption(usedCaptchaToken),
           data: {
             company: trimmedCompany,
             full_name: trimmedName,
@@ -227,7 +245,7 @@ function TrialForm() {
       });
 
       if (signErr) {
-        setError(signErr.message);
+        setError(friendlyCaptchaError(signErr.message) || signErr.message);
         return;
       }
 
@@ -309,7 +327,14 @@ function TrialForm() {
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Signup failed. Try again.');
     } finally {
-      if (releaseBusy) setBusy(false);
+      if (releaseBusy) {
+        setBusy(false);
+        if (turnstileEnabled) {
+          // Token was consumed (or rejected): get a fresh challenge for any retry.
+          setCaptchaToken(null);
+          setCaptchaNonce((n) => n + 1);
+        }
+      }
     }
   };
 
@@ -544,6 +569,8 @@ function TrialForm() {
               .
             </span>
           </label>
+
+          <TurnstileWidget key={`signup-captcha-${captchaNonce}`} action="signup" onToken={setCaptchaToken} />
 
           {error && (
             <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl p-3">
