@@ -1,39 +1,47 @@
 'use client';
 
-import { useMemo, useState, Suspense } from 'react';
+import { useEffect, useMemo, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { getSupabaseClient, getSupabaseConfigHelpMessage } from '@/lib/supabase/client';
 
 const APP_HOME = '/';
 const DEFAULT_TRIAL_DAYS = 14;
+const CAPPED_OFFER_LIMIT = 20;
 
 type Plan = 'monthly' | 'yearly';
+type Offer = 'standard' | '2mo' | '3mo' | '6mo';
 
-function trialDaysForPromo(promo: string | null): number {
+function offerForPromo(promo: string | null): Offer {
   const p = String(promo || '')
     .trim()
     .toLowerCase();
-  if (p === '3mo' || p === '3months' || p === '90' || p === 'three-months') return 90;
-  if (p === '2mo' || p === '2months' || p === '60' || p === 'two-months') return 60;
-  if (p === '6mo' || p === '6months' || p === '180' || p === 'six-months') return 180;
-  return DEFAULT_TRIAL_DAYS;
+  if (p === '3mo' || p === '3months' || p === '90' || p === 'three-months') return '3mo';
+  if (p === '2mo' || p === '2months' || p === '60' || p === 'two-months') return '2mo';
+  if (p === '6mo' || p === '6months' || p === '180' || p === 'six-months') return '6mo';
+  return 'standard';
 }
 
-function isThreeMonthOffer(promo: string | null): boolean {
-  const p = String(promo || '')
-    .trim()
-    .toLowerCase();
-  return p === '3mo' || p === '3months' || p === '90' || p === 'three-months';
-}
+const OFFER_DAYS: Record<Offer, number> = {
+  standard: DEFAULT_TRIAL_DAYS,
+  '2mo': 60,
+  '3mo': 90,
+  '6mo': 180,
+};
+
+type Spots = { limit: number; remaining: number; open: boolean } | null;
 
 function TrialForm() {
   const searchParams = useSearchParams();
   const initialPlan: Plan =
     searchParams.get('plan') === 'yearly' ? 'yearly' : 'monthly';
   const promo = searchParams.get('promo');
-  const trialDays = trialDaysForPromo(promo);
-  const threeMonthOffer = isThreeMonthOffer(promo);
+  const offer = offerForPromo(promo);
+  // 6-month (and legacy 3-month) are card-free but capped at 20 signups.
+  // Standard and 2-month require a card up front in Stripe Checkout.
+  const cappedOffer = offer === '6mo' || offer === '3mo';
+  const cardRequired = !cappedOffer;
+  const trialDays = OFFER_DAYS[offer];
   const trialLabel =
     trialDays >= 180
       ? '6-month'
@@ -56,15 +64,66 @@ function TrialForm() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+  const [spots, setSpots] = useState<Spots>(null);
+
+  const offerFull = cappedOffer && spots?.open === false;
+  const standardTrialHref = `/trial${plan === 'yearly' ? '?plan=yearly' : ''}`;
+
+  useEffect(() => {
+    if (!cappedOffer) return;
+    let cancelled = false;
+    fetch(`/api/billing/promo-spots?promo=${offer}`, { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (cancelled || !d || typeof d.remaining !== 'number') return;
+        setSpots({
+          limit: Number(d.limit) || CAPPED_OFFER_LIMIT,
+          remaining: Math.max(0, Number(d.remaining) || 0),
+          open: d.open !== false,
+        });
+      })
+      .catch(() => {
+        /* server still enforces the cap */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [cappedOffer, offer]);
 
   const planLabel = plan === 'yearly' ? 'Yearly' : 'Monthly';
   const planPrice = plan === 'yearly' ? '$249/year' : '$29.99/month';
 
   const billingNote = useMemo(
     () =>
-      `No credit card is needed to start. Your ${trialLabel} free trial lasts ${trialDays} days. When it ends, you'll need to subscribe at ${planPrice} (${planLabel.toLowerCase()}) to keep access. You won't be charged unless you subscribe, and if you subscribe early your first charge waits until the trial ends. Cancel anytime in Profile → Billing → Manage billing.`,
-    [plan, planPrice, planLabel, trialDays, trialLabel]
+      cardRequired
+        ? `A credit card is required to start. Your ${trialLabel} free trial lasts ${trialDays} days and you won't be charged until it ends. After the trial, your card is charged ${planPrice} (${planLabel.toLowerCase()}) unless you cancel. Cancel anytime before the trial ends in Profile → Billing → Manage billing and you won't be charged.`
+        : `No credit card is needed to start. This ${trialLabel} free trial (${trialDays} days) is limited to the first ${spots?.limit ?? CAPPED_OFFER_LIMIT} signups. When it ends, you'll need to subscribe at ${planPrice} (${planLabel.toLowerCase()}) to keep access. You won't be charged unless you subscribe. Cancel anytime in Profile → Billing → Manage billing.`,
+    [cardRequired, planPrice, planLabel, trialDays, trialLabel, spots?.limit]
   );
+
+  /** Send a just-signed-up user to Stripe Checkout to add a card and start the trial. */
+  const goToCardCheckout = async (token: string) => {
+    try {
+      const res = await fetch('/api/billing/checkout', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ plan }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && json.url) {
+        setInfo('Account created — taking you to add your card…');
+        window.location.href = json.url;
+        return;
+      }
+    } catch {
+      /* fall through: the app's paywall offers the same Checkout */
+    }
+    // Account exists; the app will show "Start your free trial" with the card step.
+    window.location.href = `${APP_HOME}?trial=card&plan=${plan}`;
+  };
 
   const startTrial = async () => {
     setError(null);
@@ -74,6 +133,10 @@ function TrialForm() {
     const trimmedCompany = company.trim();
     const trimmedName = name.trim();
 
+    if (offerFull) {
+      setError(`This ${trialLabel} offer is full. Please start the standard free trial instead.`);
+      return;
+    }
     if (!trimmedCompany) {
       setError('Enter your company name.');
       return;
@@ -95,12 +158,15 @@ function TrialForm() {
       return;
     }
 
-    if (threeMonthOffer) {
+    if (cappedOffer) {
       try {
-        const spotsRes = await fetch('/api/billing/promo-3mo', { cache: 'no-store' });
-        const spots = await spotsRes.json().catch(() => ({}));
-        if (spotsRes.ok && spots.open === false) {
-          setError('This 3-month offer is full. All 20 spots are taken.');
+        const spotsRes = await fetch(`/api/billing/promo-spots?promo=${offer}`, {
+          cache: 'no-store',
+        });
+        const latest = await spotsRes.json().catch(() => ({}));
+        if (spotsRes.ok && latest.open === false) {
+          setSpots({ limit: Number(latest.limit) || CAPPED_OFFER_LIMIT, remaining: 0, open: false });
+          setError(`This ${trialLabel} offer is full. All ${latest.limit || CAPPED_OFFER_LIMIT} spots are taken.`);
           return;
         }
       } catch {
@@ -138,7 +204,7 @@ function TrialForm() {
       // Session present = logged in immediately; otherwise email confirmation required
       if (data.session?.user) {
         const token = data.session.access_token;
-        // Seed trial + preferred plan
+        let trialJson: { error?: string; full?: boolean; limit?: number } = {};
         try {
           const trialRes = await fetch('/api/billing/start-trial', {
             method: 'POST',
@@ -155,19 +221,28 @@ function TrialForm() {
               trialDays,
             }),
           });
-          if (threeMonthOffer && !trialRes.ok) {
-            const trialJson = await trialRes.json().catch(() => ({}));
+          trialJson = await trialRes.json().catch(() => ({}));
+          if (cappedOffer && !trialRes.ok) {
+            if (trialJson.full) {
+              setSpots({ limit: Number(trialJson.limit) || CAPPED_OFFER_LIMIT, remaining: 0, open: false });
+            }
             setError(
-              trialJson.error || 'This 3-month offer is full. All 20 spots are taken.'
+              (trialJson.error ||
+                `This ${trialLabel} offer is full. All ${CAPPED_OFFER_LIMIT} spots are taken.`) +
+                ' Your account was created — log in and add a card to start the standard free trial.'
             );
             return;
           }
         } catch {
-          if (threeMonthOffer) {
-            setError('Could not start the 3-month offer. Please try again.');
+          if (cappedOffer) {
+            setError(`Could not start the ${trialLabel} offer. Please try again.`);
             return;
           }
-          /* trial still seeds on first status poll */
+        }
+
+        if (cardRequired) {
+          await goToCardCheckout(token);
+          return;
         }
 
         setInfo('Account created — starting your free trial…');
@@ -179,10 +254,9 @@ function TrialForm() {
 
       if (data.user && !data.session) {
         setInfo(
-          `Account created! Check your email to confirm, then log in. Your ${trialLabel} free trial (${trialDays} days) starts on first login. You chose: ` +
-            planLabel +
-            ` (${planPrice} after trial).` +
-            (threeMonthOffer ? ' No credit card is required until the 3 months end.' : '')
+          cardRequired
+            ? `Account created! Check your email to confirm, then log in. You'll add a card to start your ${trialLabel} free trial (${trialDays} days). You won't be charged until the trial ends. You chose: ${planLabel} (${planPrice} after trial).`
+            : `Account created! Check your email to confirm, then log in. Your ${trialLabel} free trial (${trialDays} days) starts on first login, with no credit card needed. You chose: ${planLabel} (${planPrice} after trial).`
         );
         return;
       }
@@ -216,13 +290,8 @@ function TrialForm() {
           <div>
             <p className="text-xs font-bold uppercase tracking-wide text-emerald-600">
               {trialLabel} free trial
-              {promo === '2mo' ||
-              promo === '2months' ||
-              promo === '6mo' ||
-              promo === '6months' ||
-              threeMonthOffer
-                ? ' · Limited offer'
-                : ''}
+              {offer !== 'standard' ? ' · Limited offer' : ''}
+              {cardRequired ? ' · Card required' : ' · No card needed'}
             </p>
             <h1 className="text-2xl sm:text-3xl font-bold tracking-tight mt-1">
               Start free trial &amp; choose your plan
@@ -230,13 +299,37 @@ function TrialForm() {
             <p className="text-sm text-slate-600 mt-2">
               This is the only place to create a new EstimateAce account (from the website or Sign
               Up). Enter your details for a {trialLabel} free trial ({trialDays} days).
-              {threeMonthOffer
-                ? ' No credit card is required to start. After 90 days you will need to pay for the plan you choose below to keep the account. '
+              {cardRequired
+                ? ' A credit card is required to start, but you will not be charged until the trial ends. Cancel anytime before then and you pay nothing. '
                 : ' No credit card is required to start. After the trial you will need to subscribe to the plan you choose below to keep access. '}
               Then use the same email and password to log in at app.estimateace.com.
-              {threeMonthOffer ? ' This offer is limited to the first 20 signups.' : ''}
+              {cappedOffer ? ` This offer is limited to the first ${spots?.limit ?? CAPPED_OFFER_LIMIT} signups.` : ''}
             </p>
           </div>
+
+          {cappedOffer && offerFull && (
+            <div className="rounded-2xl border border-red-200 bg-red-50 text-red-900 text-sm p-4 leading-snug space-y-2">
+              <p>
+                <strong>This {trialLabel} offer is full.</strong> All {spots?.limit ?? CAPPED_OFFER_LIMIT}{' '}
+                spots have been taken.
+              </p>
+              <p>
+                You can still try EstimateAce free with our standard{' '}
+                {DEFAULT_TRIAL_DAYS}-day trial.
+              </p>
+              <Link
+                href={standardTrialHref}
+                className="inline-block mt-1 rounded-xl bg-slate-900 text-white px-4 py-2 font-semibold"
+              >
+                Start the standard free trial
+              </Link>
+            </div>
+          )}
+          {cappedOffer && !offerFull && spots && (
+            <p className="text-sm font-semibold text-emerald-700">
+              {spots.remaining} of {spots.limit} spots left.
+            </p>
+          )}
 
           {/* Plan choice */}
           <div>
@@ -354,9 +447,20 @@ function TrialForm() {
               onChange={(e) => setAgree(e.target.checked)}
             />
             <span>
-              I understand this is a <strong>{trialLabel} free trial</strong> ({trialDays} days), and
-              after that I will need to subscribe at <strong>{planPrice}</strong> (
-              {planLabel.toLowerCase()}) to keep using EstimateAce. I agree to the{' '}
+              {cardRequired ? (
+                <>
+                  I understand this is a <strong>{trialLabel} free trial</strong> ({trialDays} days),
+                  a card is required to start, and my card will be charged{' '}
+                  <strong>{planPrice}</strong> ({planLabel.toLowerCase()}) when the trial ends unless I
+                  cancel before then. I agree to the{' '}
+                </>
+              ) : (
+                <>
+                  I understand this is a <strong>{trialLabel} free trial</strong> ({trialDays} days), and
+                  after that I will need to subscribe at <strong>{planPrice}</strong> (
+                  {planLabel.toLowerCase()}) to keep using EstimateAce. I agree to the{' '}
+                </>
+              )}
               <Link href="/terms" className="text-emerald-700 underline">
                 Terms
               </Link>{' '}
@@ -381,11 +485,17 @@ function TrialForm() {
 
           <button
             type="button"
-            disabled={busy}
+            disabled={busy || offerFull}
             onClick={() => void startTrial()}
             className="w-full h-12 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white font-semibold disabled:opacity-50"
           >
-            {busy ? 'Creating account…' : `Start ${trialLabel} free trial`}
+            {busy
+              ? 'Creating account…'
+              : offerFull
+                ? 'Offer full'
+                : cardRequired
+                  ? `Continue to add card · ${trialLabel} free trial`
+                  : `Start ${trialLabel} free trial`}
           </button>
 
           <p className="text-center text-sm text-slate-500">

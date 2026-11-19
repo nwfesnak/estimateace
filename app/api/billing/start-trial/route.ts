@@ -2,19 +2,26 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import {
+  cardFreeOffer,
+  cardTrialDaysForPromo,
   ensureTrialEndsAt,
-  isThreeMonthPromo,
+  hasAppAccess,
+  isEligibleForCardTrial,
   normalizeBillingSnapshot,
   normalizePromo,
   resolveTrialDaysFromPromo,
-  THREE_MONTH_PROMO_DAYS,
-  THREE_MONTH_PROMO_LIMIT,
+  TRIAL_OFFERS,
 } from '@/lib/billing';
-import { claimThreeMonthPromoSpot } from '@/lib/promo-3mo';
+import { claimPromoSpot } from '@/lib/promo-spots';
 
 /**
- * Seed free trial + preferred plan (monthly|yearly) after signup from /trial page.
- * Optional body.promo=2mo|6mo for the longer promo trials on the public landers.
+ * Called by the /trial page right after signup. Seeds the company profile and
+ * preferred plan (monthly|yearly), then:
+ *  - standard / 2mo: does NOT grant any trial. The account has no access until the
+ *    user finishes Stripe Checkout with a card (trial_period_days = offer length).
+ *    Response has checkoutRequired: true and the page sends them to Checkout.
+ *  - 6mo (and legacy 3mo): card-free trial, but only if one of the 20 capped spots
+ *    can be claimed atomically in Postgres. Full → 409 { full: true }.
  * body.trialDays, if sent, must equal the offer's length (no arbitrary trial lengths).
  */
 export async function POST(request: NextRequest) {
@@ -69,43 +76,50 @@ export async function POST(request: NextRequest) {
       deletionRequestedAt: existing?.deletion_requested_at,
     });
 
-    // Only seed trial if not already active paid
+    const freeOffer = cardFreeOffer(promo);
+    let checkoutRequired = false;
+
+    // Active (paid or comped, e.g. the platform owner) accounts are never touched and
+    // never consume a capped spot.
     if (snapshot.status !== 'active') {
-      if (isThreeMonthPromo(promo)) {
-        const claim = await claimThreeMonthPromoSpot(admin, user.id);
+      if (freeOffer) {
+        const claim = await claimPromoSpot(admin, freeOffer, user.id);
         if (!claim.ok) {
+          const label = freeOffer === '6mo' ? '6-month' : '3-month';
           return NextResponse.json(
             {
-              error: `This 3-month offer is full. All ${THREE_MONTH_PROMO_LIMIT} spots are taken.`,
-              full: true,
-              limit: THREE_MONTH_PROMO_LIMIT,
+              error: claim.error
+                ? `Could not reserve a ${label} spot right now. Please try again, or start the standard free trial.`
+                : `This ${label} offer is full. All ${claim.limit} spots are taken. You can still start the standard free trial.`,
+              full: !claim.error,
+              limit: claim.limit,
+              remaining: 0,
             },
-            { status: 409 }
+            { status: claim.error ? 503 : 409 }
           );
         }
-        if (!claim.already || !snapshot.trialEndsAt) {
+        if (!snapshot.trialEndsAt) {
           snapshot = ensureTrialEndsAt(
             { ...snapshot, status: 'none', trialEndsAt: null },
             new Date(),
-            THREE_MONTH_PROMO_DAYS
+            TRIAL_OFFERS[freeOffer]()
           );
         } else if (snapshot.status === 'none') {
           snapshot = { ...snapshot, status: 'trialing' };
         }
-      } else if (!snapshot.trialEndsAt) {
-        snapshot = ensureTrialEndsAt(
-          { ...snapshot, status: 'none', trialEndsAt: null },
-          new Date(),
-          trialDays
-        );
-      } else if (snapshot.status === 'none') {
-        snapshot = { ...snapshot, status: 'trialing' };
+      } else {
+        // Card-required offer: never seed an app-managed trial here. Existing trials
+        // (older no-card accounts) are left exactly as they are.
+        if (snapshot.trialEndsAt && snapshot.status === 'none') {
+          snapshot = { ...snapshot, status: 'trialing' };
+        }
+        checkoutRequired = !hasAppAccess(snapshot) || isEligibleForCardTrial(existing);
       }
     }
 
     const subPayload: Record<string, unknown> = {
       user_id: user.id,
-      status: snapshot.status === 'active' ? 'active' : 'trialing',
+      status: snapshot.status,
       trial_ends_at: snapshot.trialEndsAt,
       stripe_customer_id: snapshot.stripeCustomerId,
       stripe_subscription_id: snapshot.stripeSubscriptionId,
@@ -142,7 +156,7 @@ export async function POST(request: NextRequest) {
       phone: phone || (prev as any).phone || '',
       email: user.email || (prev as any).email || '',
       preferredBillingPlan: plan,
-      ...(isThreeMonthPromo(promo) ? { signupPromo: '3mo' } : {}),
+      ...(freeOffer ? { signupPromo: freeOffer } : {}),
     };
 
     await admin.from('estimates').upsert({
@@ -192,9 +206,11 @@ export async function POST(request: NextRequest) {
       ok: true,
       plan,
       promo: promo || null,
-      trialDays,
+      trialDays: freeOffer ? trialDays : cardTrialDaysForPromo(promo),
       trialEndsAt: snapshot.trialEndsAt,
-      status: snapshot.status === 'active' ? 'active' : 'trialing',
+      status: snapshot.status,
+      cardRequired: !freeOffer,
+      checkoutRequired,
       welcomeOnboarding,
       ownerSignupAlert,
     });

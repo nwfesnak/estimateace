@@ -8,7 +8,7 @@ import {
   type BillingPlan,
 } from '@/lib/stripe-server';
 import type Stripe from 'stripe';
-import { isStripeConfigured } from '@/lib/billing';
+import { cardTrialDaysForPromo, isEligibleForCardTrial, isStripeConfigured } from '@/lib/billing';
 import { ensureStripeCustomerForOwner } from '@/lib/crew-billing';
 
 /** Stripe Checkout rejects subscription_data.trial_end less than 48h away; keep a buffer. */
@@ -65,16 +65,21 @@ export async function POST(request: NextRequest) {
     let storedCustomerId: string | null = null;
     let storedStatus = 'trialing';
     let storedTrial: string | null = null;
+    // Brand-new standard / 2-month accounts (never had a trial or subscription) start
+    // their free trial here, with a card collected up front. Without a service-role
+    // client we can't prove eligibility, so no new trial is granted.
+    let cardTrialEligible = false;
 
     if (admin) {
       const { data } = await admin
         .from('subscriptions')
-        .select('stripe_customer_id, status, trial_ends_at')
+        .select('stripe_customer_id, stripe_subscription_id, status, trial_ends_at')
         .eq('user_id', user.id)
         .maybeSingle();
       storedCustomerId = data?.stripe_customer_id || null;
-      storedStatus = data?.status || 'trialing';
+      storedStatus = data?.status || 'none';
       storedTrial = data?.trial_ends_at || null;
+      cardTrialEligible = isEligibleForCardTrial(data);
     }
 
     const customerId = await ensureStripeCustomer(
@@ -91,7 +96,7 @@ export async function POST(request: NextRequest) {
         stripe_customer_id: customerId,
         stripe_subscription_id: customerChanged ? null : undefined,
         status:
-          customerChanged && storedStatus === 'active' ? 'canceled' : storedStatus || 'trialing',
+          customerChanged && storedStatus === 'active' ? 'canceled' : storedStatus || 'none',
         trial_ends_at: storedTrial,
         updated_at: new Date().toISOString(),
       });
@@ -115,7 +120,19 @@ export async function POST(request: NextRequest) {
     };
     const trialEndMs = storedTrial ? new Date(storedTrial).getTime() : NaN;
     const minTrialEndMs = Date.now() + CHECKOUT_MIN_TRIAL_MS;
-    if (!isNaN(trialEndMs) && trialEndMs > minTrialEndMs) {
+    if (cardTrialEligible) {
+      // Card-required trial: 14 days (standard) or 60 days (?promo=2mo). Card is
+      // collected now; Stripe charges nothing until the trial ends.
+      const promo = String((user.user_metadata as Record<string, unknown> | null)?.promo || '');
+      subscriptionData.trial_period_days = cardTrialDaysForPromo(promo);
+      subscriptionData.trial_settings = {
+        end_behavior: { missing_payment_method: 'cancel' },
+      };
+      subscriptionData.metadata = {
+        ...subscriptionData.metadata,
+        signup_offer: promo.trim().toLowerCase() === '2mo' ? '2mo' : 'standard',
+      };
+    } else if (!isNaN(trialEndMs) && trialEndMs > minTrialEndMs) {
       subscriptionData.trial_end = Math.floor(trialEndMs / 1000);
       subscriptionData.trial_settings = {
         end_behavior: { missing_payment_method: 'cancel' },
@@ -126,6 +143,7 @@ export async function POST(request: NextRequest) {
     try {
       session = await stripe.checkout.sessions.create({
         mode: 'subscription',
+        payment_method_collection: 'always',
         customer: customerId,
         client_reference_id: user.id,
         line_items: [{ price: priceId, quantity: 1 }],
@@ -151,13 +169,15 @@ export async function POST(request: NextRequest) {
             user_id: user.id,
             stripe_customer_id: fresh.id,
             stripe_subscription_id: null,
-            status: 'trialing',
+            // Keep brand-new accounts at 'none' so they stay eligible for their card trial.
+            status: storedStatus === 'none' ? 'none' : 'trialing',
             trial_ends_at: storedTrial,
             updated_at: new Date().toISOString(),
           });
         }
         session = await stripe.checkout.sessions.create({
           mode: 'subscription',
+          payment_method_collection: 'always',
           customer: fresh.id,
           client_reference_id: user.id,
           line_items: [{ price: priceId, quantity: 1 }],

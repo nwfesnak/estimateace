@@ -1,20 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
+  cardFreeOffer,
+  cardTrialDaysForPromo,
   DEFAULT_BILLING_SNAPSHOT,
   ensureTrialEndsAt,
   getStripeConfigDiagnostics,
   hasAppAccess,
   isAccountClosed,
   isBillingEnforced,
+  isEligibleForCardTrial,
   isStripeConfigured,
-  isThreeMonthPromo,
   normalizeBillingSnapshot,
-  normalizePromo,
-  resolveTrialDaysFromPromo,
-  THREE_MONTH_PROMO_DAYS,
+  TRIAL_OFFERS,
   type BillingSnapshot,
 } from '@/lib/billing';
-import { claimThreeMonthPromoSpot } from '@/lib/promo-3mo';
+import { claimPromoSpot } from '@/lib/promo-spots';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { purgeIfAccountClosed } from '@/lib/account-purge';
@@ -90,20 +90,26 @@ export async function GET(request: NextRequest) {
         const meta = (user.user_metadata || {}) as Record<string, unknown>;
         let seed = snapshot;
         let promoDays: number | undefined;
-        if (isThreeMonthPromo(String(meta.promo || ''))) {
-          const claim = await claimThreeMonthPromoSpot(admin, user.id);
-          if (claim.ok && !claim.already) {
+        // Only the capped card-free offers (6mo / legacy 3mo) ever get an app-managed
+        // trial seeded here, and only after an atomic spot claim. Standard and 2mo
+        // accounts get no trial until Stripe Checkout (card on file) creates one.
+        // Active (paid/comped) accounts never claim a spot.
+        const freeOffer = cardFreeOffer(String(meta.promo || ''));
+        if (freeOffer && snapshot.status !== 'active' && isEligibleForCardTrial(data)) {
+          const claim = await claimPromoSpot(admin, freeOffer, user.id);
+          if (claim.ok) {
             seed = { ...snapshot, status: 'none', trialEndsAt: null };
-            promoDays = THREE_MONTH_PROMO_DAYS;
-          } else if (claim.ok && !snapshot.trialEndsAt) {
-            promoDays = THREE_MONTH_PROMO_DAYS;
+            promoDays = TRIAL_OFFERS[freeOffer]();
           }
         }
-        if (promoDays == null && normalizePromo(String(meta.promo || ''))) {
-          // 2mo / 6mo landers when signup needed email confirmation (start-trial never ran)
-          promoDays = resolveTrialDaysFromPromo(String(meta.promo || ''));
-        }
-        const withTrial = ensureTrialEndsAt(seed, new Date(), promoDays);
+        // ensureTrialEndsAt starts a new trial when none is set; we only want that for
+        // a claimed card-free spot. Otherwise it just normalizes 'none' + future trial.
+        const withTrial =
+          promoDays != null
+            ? ensureTrialEndsAt(seed, new Date(), promoDays)
+            : snapshot.trialEndsAt
+              ? ensureTrialEndsAt(snapshot)
+              : snapshot;
         if (
           !data ||
           (!data.trial_ends_at && withTrial.trialEndsAt) ||
@@ -155,8 +161,15 @@ export async function GET(request: NextRequest) {
 
     const closed = isAccountClosed(snapshot);
     const stripeDiag = getStripeConfigDiagnostics();
+    // New card-required accounts: tell the paywall how long the Checkout trial will be.
+    const metaPromo = String(((user.user_metadata || {}) as Record<string, unknown>).promo || '');
+    const cardTrialDays =
+      snapshot.status === 'none' && !snapshot.trialEndsAt && !snapshot.stripeSubscriptionId
+        ? cardTrialDaysForPromo(metaPromo)
+        : null;
     return NextResponse.json({
       billing: snapshot,
+      cardTrialDays,
       access: hasAppAccess(snapshot),
       accountClosed: closed,
       enforced: isBillingEnforced() || closed,

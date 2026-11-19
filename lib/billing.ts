@@ -107,7 +107,9 @@ export function getTrialDays(): number {
  *  - standard: NEXT_PUBLIC_TRIAL_DAYS (default 14)
  *  - 2mo: estimateace.com/2-months-free.html  (?promo=2mo)  → 60 days
  *  - 6mo: estimateace.com/6-months-free.html  (?promo=6mo)  → 180 days
- *  - 3mo: legacy capped offer (first 20 signups, enforced by claimThreeMonthPromoSpot) → 90 days
+ *  - 3mo: legacy capped offer (first 20 signups) → 90 days
+ * Standard and 2mo require a card up front (Stripe Checkout trial). 6mo and 3mo are
+ * card-free but capped at 20 signups each (see claim_promo_spot in Postgres).
  */
 export const TRIAL_OFFERS = {
   standard: () => getTrialDays(),
@@ -159,6 +161,56 @@ export function isThreeMonthPromo(promo?: string | null): boolean {
 
 export const THREE_MONTH_PROMO_DAYS = 90;
 export const THREE_MONTH_PROMO_LIMIT = 20;
+
+/** 6-month lander (?promo=6mo). Card-free, capped at the first 20 signups. */
+export const SIX_MONTH_PROMO_DAYS = 180;
+export const SIX_MONTH_PROMO_LIMIT = 20;
+
+/**
+ * Offers that start WITHOUT a card. Both are capped (20 signups each) and claimed
+ * atomically in Postgres (claim_promo_spot). Every other offer (standard 14-day,
+ * 2-month) requires a card up front through Stripe Checkout.
+ */
+export type CardFreeOffer = '6mo' | '3mo';
+export const CARD_FREE_OFFER_LIMITS: Record<CardFreeOffer, number> = {
+  '6mo': SIX_MONTH_PROMO_LIMIT,
+  '3mo': THREE_MONTH_PROMO_LIMIT,
+};
+
+export function cardFreeOffer(promo?: string | null): CardFreeOffer | null {
+  const offer = normalizePromo(promo);
+  return offer === '6mo' || offer === '3mo' ? offer : null;
+}
+
+/** True for the standard and 2-month offers: a card is collected before any access. */
+export function offerRequiresCard(promo?: string | null): boolean {
+  return cardFreeOffer(promo) === null;
+}
+
+/**
+ * Trial length for a card-required offer, used by Stripe Checkout. A capped
+ * card-free promo that was full falls back to the standard trial.
+ */
+export function cardTrialDaysForPromo(promo?: string | null): number {
+  const offer = normalizePromo(promo);
+  if (offer === '2mo') return TRIAL_OFFERS['2mo']();
+  return TRIAL_OFFERS.standard();
+}
+
+/**
+ * A brand-new account that has never had a trial or Stripe subscription can start
+ * its card-required trial in Checkout. Anyone who already had a trial (app-managed
+ * or Stripe) only keeps whatever is left of it, so re-subscribing never resets it.
+ */
+export function isEligibleForCardTrial(row: {
+  status?: string | null;
+  trial_ends_at?: string | null;
+  stripe_subscription_id?: string | null;
+} | null | undefined): boolean {
+  if (!row) return true;
+  const status = String(row.status || 'none');
+  return status === 'none' && !row.trial_ends_at && !row.stripe_subscription_id;
+}
 
 export function normalizeBillingSnapshot(raw: unknown): BillingSnapshot {
   const r = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};

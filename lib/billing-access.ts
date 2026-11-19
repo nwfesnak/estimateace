@@ -68,9 +68,9 @@ export async function enforceAppAccess(userId: string): Promise<NextResponse | n
     return null; // fail open on infra errors; never lock paying users out on a DB hiccup
   }
 
-  // No row yet = brand-new account whose trial seeds on first /api/billing/status poll.
-  if (!data) return null;
-
+  // No row = brand-new account that hasn't started a trial. Standard / 2-month trials
+  // now require a card in Stripe Checkout first, so treat it as status 'none'
+  // (blocked when enforcement is on) instead of failing open.
   const snapshot = subscriptionRowToSnapshot(data);
   if (hasAppAccess(snapshot)) return null;
 

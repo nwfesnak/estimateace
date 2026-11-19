@@ -1832,6 +1832,8 @@ export default function Home() {
   /** SaaS product subscription (Phase A) */
   const [billing, setBilling] = useState<BillingSnapshot>(DEFAULT_BILLING_SNAPSHOT);
   const [billingEnforced, setBillingEnforced] = useState(false);
+  /** Days of free trial a brand-new card-required account gets in Checkout (null = none). */
+  const [billingCardTrialDays, setBillingCardTrialDays] = useState<number | null>(null);
   const [billingStripeOk, setBillingStripeOk] = useState(false);
   const [billingStripeDiag, setBillingStripeDiag] = useState<{
     hasSecretKey?: boolean;
@@ -2776,6 +2778,8 @@ export default function Home() {
             : promo === '2mo' || promo === '2months' || promo === '60'
               ? '2-month (60-day)'
               : '14-day';
+      // Only the capped card-free offers (6mo / legacy 3mo) land here; standard and
+      // 2-month trials start in Stripe Checkout and return with ?billing=success.
       showMessage(
         `✅ ${trialLabel} free trial started! No card needed now. To keep access after the trial, subscribe ${planLabel} in Profile → Billing.`
       );
@@ -2784,10 +2788,19 @@ export default function Home() {
       return;
     }
 
+    if (trialParam === 'card') {
+      // Signed up on a card-required offer but Checkout didn't open; the paywall
+      // below shows the "add card to start your free trial" step.
+      showMessage('Account created. Add a card to start your free trial — you won’t be charged until it ends.');
+      if (user?.id && supabase) void refreshBillingStatus();
+      cleanUrl();
+      return;
+    }
+
     if (!user?.id || !supabase || !billingParam) return;
 
     if (billingParam === 'success') {
-      showMessage('✅ Payment received — syncing subscription…');
+      showMessage('✅ Checkout complete — syncing your subscription…');
       void (async () => {
         try {
           const { data: sessionData } = await supabase.auth.getSession();
@@ -8022,6 +8035,9 @@ export default function Home() {
           ...data.billing,
         });
         setBillingEnforced(!!data.enforced);
+        setBillingCardTrialDays(
+          typeof data.cardTrialDays === 'number' && data.cardTrialDays > 0 ? data.cardTrialDays : null
+        );
         setBillingStripeOk(!!data.stripeConfigured || !!data.stripe?.configured);
         setBillingStripeDiag(data.stripe || {});
       }
@@ -12001,6 +12017,7 @@ export default function Home() {
           stripeConfigured={billingStripeOk}
           busy={billingBusy}
           supportEmail={SUPPORT_EMAIL}
+          cardTrialDays={billingCardTrialDays}
           onCheckout={startSubscriptionCheckout}
           onPortal={openBillingPortal}
           onRefresh={refreshBillingStatus}
