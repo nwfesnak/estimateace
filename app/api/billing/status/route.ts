@@ -19,6 +19,7 @@ import { isEmailConfirmed } from '@/lib/send-guard';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { purgeIfAccountClosed } from '@/lib/account-purge';
+import { seedSettingsFromSignupMetadata } from '@/lib/signup-profile';
 
 function rowToSnapshot(row: any): BillingSnapshot {
   if (!row) return { ...DEFAULT_BILLING_SNAPSHOT };
@@ -144,6 +145,11 @@ export async function GET(request: NextRequest) {
               console.warn('billing/status owner signup alert:', alertErr);
             }
           }
+        }
+        try {
+          await seedSettingsFromSignupMetadata(admin, user);
+        } catch (seedErr) {
+          console.warn('billing/status signup profile seed:', seedErr);
         }
       }
     } else {

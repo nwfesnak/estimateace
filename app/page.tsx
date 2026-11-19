@@ -55,6 +55,8 @@ import {
   withEstimateApproval,
   type EstimateApprovedBy,
 } from '@/lib/estimate-approval';
+import { getTaxRateFromZip } from '@/lib/tax-rates';
+import { signupFieldsFromMetadata } from '@/lib/signup-profile';
 import { invoiceSentLabel, readInvoiceSentAt } from '@/lib/invoice-sent';
 import { firstInvoiceReminderDays, invoiceReminderHint } from '@/lib/invoice-reminders';
 import {
@@ -1021,32 +1023,6 @@ export default function Home() {
   const [discountNames, setDiscountNames] = useState<string[]>(DEFAULT_DISCOUNT_NAMES);
   const [newDiscountNameInput, setNewDiscountNameInput] = useState('');
 
-  const getTaxRateFromZip = (zip: string, fallbackState: string): number => {
-    const zipTaxMap: { [key: string]: number } = {
-      '33101': 7.0, '33139': 7.0, '90210': 9.5, '10001': 8.875,
-      '60601': 10.25, '77001': 8.25, '75201': 8.25, '94102': 8.5,
-      '30303': 8.9, '33131': 7.0,
-    };
-    const cleanZip = zip.trim().replace(/\D/g, '').slice(0, 5);
-    if (zipTaxMap[cleanZip]) return zipTaxMap[cleanZip];
-
-    const stateRates: { [key: string]: number } = {
-      'AL': 4, 'AK': 0, 'AZ': 5.6, 'AR': 6.5, 'CA': 7.25,
-      'CO': 2.9, 'CT': 6.35, 'DE': 0, 'FL': 6, 'GA': 4,
-      'HI': 4, 'ID': 6, 'IL': 6.25, 'IN': 7, 'IA': 6,
-      'KS': 6.5, 'KY': 6, 'LA': 4.45, 'ME': 5.5, 'MD': 6,
-      'MA': 6.25, 'MI': 6, 'MN': 6.875, 'MS': 7, 'MO': 4.225,
-      'MT': 0, 'NE': 5.5, 'NV': 6.85, 'NH': 0, 'NJ': 6.625,
-      'NM': 5.125, 'NY': 4, 'NC': 4.75, 'ND': 5, 'OH': 5.75,
-      'OK': 4.5, 'OR': 0, 'PA': 6, 'RI': 7, 'SC': 6,
-      'SD': 4.5, 'TN': 7, 'TX': 6.25, 'UT': 4.85, 'VT': 6,
-      'VA': 4.3, 'WA': 6.5, 'WV': 6, 'WI': 5, 'WY': 4,
-    };
-    return stateRates[fallbackState.toUpperCase()] || 7;
-  };
-
-  const baseTaxRate = getTaxRateFromZip(zipCode, state);
-
   // Profile (with payment settings) — blank defaults per account (never share across logins)
   const blankProfile = () => ({
     name: '', company: '', address: '', phone: '', email: '', slogan: '',
@@ -1319,6 +1295,10 @@ export default function Home() {
     void loadReceptionistFromSettings();
     setView('receptionistView');
   };
+
+  const taxZip = (zipCode || profile.zipCode || '').trim();
+  const taxState = (state || profile.state || '').trim();
+  const baseTaxRate = getTaxRateFromZip(taxZip, taxState);
 
   const estimateTotals = computeEstimateTotals({
     items,
@@ -2296,7 +2276,7 @@ export default function Home() {
             )}
             {getTaxesEnabled() && (
               <div className={`text-right font-semibold text-[#14b8a6] ${textClass}`}>
-                Taxes ({state || '—'} {baseTaxRate}%): ${taxAmount.toFixed(2)}
+                Taxes ({taxState || '—'} {baseTaxRate}%): ${taxAmount.toFixed(2)}
               </div>
             )}
             <div className={`text-right font-bold ${totalClass}`}>
@@ -4983,6 +4963,7 @@ export default function Home() {
       // Never keep previous React state from another login (start from blank)
       const s = serverProfile || {};
       const l = loaded || {};
+      const signupMeta = signupFieldsFromMetadata(user);
       const hasServerCompany = !!(
         pickFilled(s.company, s.name, s.email, s.phone, s.address) ||
         pickFilled(l.company, l.name, l.email, l.phone, l.address)
@@ -5011,12 +4992,12 @@ export default function Home() {
           // non-company fields may still come from latest estimate
           ...loadedWithoutBreakdown,
           // Company identity: server first; cache only for same account when empty cloud
-          name: pickFilled(s.name, useCache ? cachedCompany.name : '', l.name, ''),
-          company: pickFilled(s.company, useCache ? cachedCompany.company : '', l.company, ''),
+          name: pickFilled(s.name, useCache ? cachedCompany.name : '', l.name, signupMeta.name, ''),
+          company: pickFilled(s.company, useCache ? cachedCompany.company : '', l.company, signupMeta.company, ''),
           slogan: pickFilled(s.slogan, useCache ? cachedCompany.slogan : '', l.slogan, ''),
           address: pickFilled(s.address, useCache ? cachedCompany.address : '', l.address, ''),
-          phone: pickFilled(s.phone, useCache ? cachedCompany.phone : '', l.phone, ''),
-          email: pickFilled(s.email, useCache ? cachedCompany.email : '', l.email, ''),
+          phone: pickFilled(s.phone, useCache ? cachedCompany.phone : '', l.phone, signupMeta.phone, ''),
+          email: pickFilled(s.email, useCache ? cachedCompany.email : '', l.email, signupMeta.email, ''),
           city: pickFilled(s.city, useCache ? cachedCompany.city : '', l.city, ''),
           state: pickFilled(s.state, useCache ? cachedCompany.state : '', l.state, ''),
           zipCode: pickFilled(s.zipCode, useCache ? cachedCompany.zipCode : '', l.zipCode, ''),
@@ -5208,12 +5189,12 @@ export default function Home() {
       }
       // Sync fingerprint so auto-save does not re-write hydrate as a "change"
       lastSavedCompanyFingerprintRef.current = JSON.stringify({
-        name: pickFilled(s.name, useCache ? cachedCompany.name : '', l.name, ''),
-        company: pickFilled(s.company, useCache ? cachedCompany.company : '', l.company, ''),
+        name: pickFilled(s.name, useCache ? cachedCompany.name : '', l.name, signupMeta.name, ''),
+        company: pickFilled(s.company, useCache ? cachedCompany.company : '', l.company, signupMeta.company, ''),
         slogan: pickFilled(s.slogan, useCache ? cachedCompany.slogan : '', l.slogan, ''),
         address: pickFilled(s.address, useCache ? cachedCompany.address : '', l.address, ''),
-        phone: pickFilled(s.phone, useCache ? cachedCompany.phone : '', l.phone, ''),
-        email: pickFilled(s.email, useCache ? cachedCompany.email : '', l.email, ''),
+        phone: pickFilled(s.phone, useCache ? cachedCompany.phone : '', l.phone, signupMeta.phone, ''),
+        email: pickFilled(s.email, useCache ? cachedCompany.email : '', l.email, signupMeta.email, ''),
         city: pickFilled(s.city, useCache ? cachedCompany.city : '', l.city, ''),
         state: pickFilled(s.state, useCache ? cachedCompany.state : '', l.state, ''),
         zipCode: pickFilled(s.zipCode, useCache ? cachedCompany.zipCode : '', l.zipCode, ''),
@@ -10026,13 +10007,64 @@ export default function Home() {
     );
   };
 
+  const renderCustomerContactLines = () => {
+    const contactEmails = (emails || [])
+      .map((e) => String(e || '').trim())
+      .filter((e) => e.includes('@'));
+    const contactPhones = (phones || [])
+      .map((p) => String(p || '').trim())
+      .filter(Boolean);
+    if (contactEmails.length === 0 && contactPhones.length === 0) return null;
+    return (
+      <>
+        <br />
+        {contactEmails.map((e) => (
+          <span key={`em-${e}`}>
+            {e}
+            <br />
+          </span>
+        ))}
+        {contactPhones.map((p) => (
+          <span key={`ph-${p}`}>
+            {p}
+            <br />
+          </span>
+        ))}
+      </>
+    );
+  };
+
   const renderApprovedPaymentSection = (options?: { interactive?: boolean }) => {
     if (documentType === 'invoice') return null;
     if (!shouldShowDepositOnEstimate() && !shouldShowEscrowOnEstimate()) return null;
 
     const interactive = options?.interactive ?? true;
+    const isApproved = Boolean(estimateApprovedAt);
     const depositBase = grandTotal * (profile.depositPercentage || 0) / 100;
     const depositDue = getDepositDueAmount();
+
+    if (!isApproved) {
+      return (
+        <div className="mt-12 text-center border border-gray-300 rounded-3xl p-8">
+          {shouldShowDepositOnEstimate() && (
+            <div className="text-xl text-gray-800">
+              Upon approval, deposit due: <span className="font-semibold">${depositBase.toFixed(2)}</span>
+              <span className="text-sm text-gray-500 ml-2">({profile.depositPercentage || 0}% of total)</span>
+            </div>
+          )}
+          {shouldShowDepositOnEstimate() && profile.chargeCCFee && (
+            <div className="mt-2 text-sm text-gray-600">
+              Credit card payments include an additional {ccFeePercent}% processing fee
+            </div>
+          )}
+          {shouldShowEscrowOnEstimate() && (
+            <p className={`${shouldShowDepositOnEstimate() ? 'mt-4' : ''} text-lg text-gray-700`}>
+              Funds can be held in a third-party escrow account until work is complete.
+            </p>
+          )}
+        </div>
+      );
+    }
 
     return (
       <div className="mt-12 text-center border-2 border-dashed border-[#10b981] rounded-3xl p-8">
@@ -13647,7 +13679,7 @@ export default function Home() {
                       )}
                       {getTaxesEnabled() && (
                         <div className="flex justify-end text-2xl font-semibold mb-2">
-                          Taxes ({state || '—'} {baseTaxRate}%): <span className="text-[#14b8a6] ml-4">${taxAmount.toFixed(2)}</span>
+                          Taxes ({taxState || '—'} {baseTaxRate}%): <span className="text-[#14b8a6] ml-4">${taxAmount.toFixed(2)}</span>
                         </div>
                       )}
                       <div className="flex justify-end text-4xl font-bold">
@@ -14650,6 +14682,7 @@ export default function Home() {
                     <strong>Bill To:</strong><br />
                     {address}<br />
                     {city}, {state} {zipCode}
+                    {renderCustomerContactLines()}
                   </div>
                 </div>
                 <table className="w-full border-collapse mb-8">
@@ -18288,6 +18321,7 @@ export default function Home() {
                     <strong>Bill To:</strong><br />
                     {address}<br />
                     {city}, {state} {zipCode}
+                    {renderCustomerContactLines()}
                   </div>
                 </div>
                 <table className="w-full border-collapse mb-8">

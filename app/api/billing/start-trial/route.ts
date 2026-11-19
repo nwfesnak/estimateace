@@ -16,6 +16,7 @@ import {
 import { claimPromoSpot } from '@/lib/promo-spots';
 import { EMAIL_NOT_CONFIRMED_MESSAGE, isEmailConfirmed } from '@/lib/send-guard';
 import { rateLimit, serverError, tooManyRequests } from '@/lib/rate-limit';
+import { signupFieldsFromMetadata } from '@/lib/signup-profile';
 
 /**
  * Called by the /trial page right after signup. Seeds the company profile and
@@ -43,11 +44,17 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json().catch(() => ({}));
-    const plan = body.plan === 'yearly' ? 'yearly' : 'monthly';
-    const company = String(body.company || '').trim().slice(0, 200);
-    const name = String(body.name || '').trim().slice(0, 120);
-    const phone = String(body.phone || '').trim().slice(0, 40);
-    const rawPromo = String(body.promo || '').trim();
+    const meta = signupFieldsFromMetadata(user);
+    const plan =
+      body.plan === 'yearly' || body.plan === 'monthly'
+        ? body.plan
+        : meta.preferredPlan === 'yearly'
+          ? 'yearly'
+          : 'monthly';
+    const company = String(body.company || meta.company || '').trim().slice(0, 200);
+    const name = String(body.name || meta.name || '').trim().slice(0, 120);
+    const phone = String(body.phone || meta.phone || '').trim().slice(0, 40);
+    const rawPromo = String(body.promo || meta.promo || '').trim();
     const promo = isRetiredPromo(rawPromo) ? '' : rawPromo;
     // Only approved offers (standard / 2mo / capped 6mo). Reject anything else
     // instead of silently honoring a client-chosen trial length.
