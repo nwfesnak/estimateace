@@ -90,6 +90,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: result.error }, { status: 400 });
     }
 
+    // Customer pay links are owner / full-access crew only (see crewMayHandleClientMoney).
+    {
+      const admin = getSupabaseAdmin();
+      const restricted = admin ? await getRestrictedCrewAccess(admin, user.id) : null;
+      if (restricted) return NextResponse.json({ ok: true, plan: maskMoneyDeep(result.plan), clientLink: null });
+    }
     const clientLink = buildRecurringClientLink(ownerId, result.plan.id, request.url);
     return NextResponse.json({ ok: true, plan: result.plan, clientLink });
   } catch (e: any) {

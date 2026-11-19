@@ -3,6 +3,9 @@ import { TWO_STEP_REQUIRED, twoStepPending } from '@/lib/supabase/auth-user';
 import { createClient } from '@supabase/supabase-js';
 import { getXaiApiKey, getXaiChatModel } from '@/lib/xai-config';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
+import { enforceAppAccess, workspaceOwnerId } from '@/lib/billing-access';
+import { reserveAiQuota } from '@/lib/rate-limit';
+import { normalizeReceptionistInput, RECEPTIONIST_MAX_TOKENS } from '@/lib/receptionist-input';
 import {
   normalizeReceptionistConfig,
   toPublicReceptionistConfig,
@@ -194,20 +197,26 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: authError || 'Unauthorized' }, { status: 401 });
     }
 
-    const body = await request.json();
-    const mode = body.mode === 'summarize' ? 'summarize' : 'reply';
-    const company = String(body.company || 'the company').slice(0, 120);
-    const knowledgeBase = String(body.knowledgeBase || '').slice(0, 12000);
-    const greeting = String(body.greeting || '').slice(0, 500);
-    const languages = Array.isArray(body.languages)
-      ? body.languages.map(String).slice(0, 8)
-      : ['en'];
-    const transcript = String(body.transcript || '').slice(0, 20000);
-    const callerMessage = String(body.callerMessage || '').slice(0, 2000);
-    const urgentKeywords = String(body.urgentKeywords || 'emergency,urgent,leak,flooding').slice(
-      0,
-      500
-    );
+    // Same gates as the other AI routes: active subscription / trial (or an active crew
+    // seat), then the per-account daily AI quota (shared "ai" counter).
+    const paywall = await enforceAppAccess(user.id);
+    if (paywall) return paywall;
+    {
+      const quota = await reserveAiQuota(await workspaceOwnerId(user.id), 'ai');
+      if (quota) return quota;
+    }
+
+    const body = await request.json().catch(() => ({}));
+    const {
+      mode,
+      company,
+      knowledgeBase,
+      greeting,
+      languages,
+      transcript,
+      callerMessage,
+      urgentKeywords,
+    } = normalizeReceptionistInput(body);
 
     const apiKey = getXaiApiKey();
     if (!apiKey) {
@@ -273,6 +282,7 @@ ${transcript || '(empty)'}`;
       body: JSON.stringify({
         model,
         temperature: mode === 'summarize' ? 0.2 : 0.5,
+        max_tokens: RECEPTIONIST_MAX_TOKENS[mode],
         messages: [
           { role: 'system', content: system },
           { role: 'user', content: userContent },

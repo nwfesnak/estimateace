@@ -137,7 +137,7 @@ export async function POST(request: NextRequest) {
     // Workspace owner (crew → owner) for client action links
     const admin = getSupabaseAdmin();
     // Seat-aware: inactive crew never act in the owner's workspace.
-    const ws = await requireWorkspaceOwner(user.id, admin);
+    const ws = await requireWorkspaceOwner(user.id, admin, { requireFinancials: true });
     if (ws.denied) return ws.denied;
     const ownerUserId = ws.ownerUserId;
 
