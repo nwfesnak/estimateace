@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, Suspense } from 'react';
+import { useCallback, useEffect, useMemo, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import {
@@ -11,6 +11,7 @@ import {
 } from '@/lib/stripe-fees';
 import { quoteTotalsForItems } from '@/lib/optional-line-items';
 import { openPayPalPaymentPage, openVenmoPaymentPage } from '@/lib/payment-links';
+import { ClientJobMedia, type ClientJobMediaData } from '@/components/ClientJobMedia';
 
 type PayOption = {
   method: string;
@@ -78,6 +79,8 @@ type DocPayload = {
   paymentOptions?: PayOption[];
   /** False when the contractor has not finished Stripe Connect (no card / bank via Stripe). */
   stripeReady?: boolean;
+  /** Site photos + before/after concept renderings (short-lived signed URLs). */
+  media?: ClientJobMediaData;
   message?: string;
   error?: string;
 };
@@ -220,6 +223,20 @@ function ApprovePayInner() {
       cancelled = true;
     };
   }, [token, paidFlag]);
+
+  /** Signed media URLs are short-lived: fetch fresh ones (media only) when an image fails. */
+  const refreshMedia = useCallback(async () => {
+    if (!token) return;
+    try {
+      const res = await fetch(`/api/client/document?token=${encodeURIComponent(token)}`, {
+        cache: 'no-store',
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && json?.media) setDoc((prev) => (prev ? { ...prev, media: json.media } : prev));
+    } catch {
+      /* keep the page usable without media */
+    }
+  }, [token]);
 
   const persistClientApproval = async () => {
     if (!token) return false;
@@ -494,6 +511,8 @@ function ApprovePayInner() {
             <p className="font-semibold text-slate-900">{doc?.jobName}</p>
             {doc?.address ? <p className="text-sm text-slate-600 mt-1">{doc.address}</p> : null}
           </div>
+
+          <ClientJobMedia media={doc?.media} onExpired={refreshMedia} />
 
           {requiredItems.length > 0 && (
             <div className="border rounded-xl overflow-hidden">

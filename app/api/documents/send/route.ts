@@ -326,7 +326,7 @@ export async function POST(request: NextRequest) {
           return `<div style="margin:8px 0;">${before}${after}</div>`;
         })
         .join('');
-      mediaHtml += `<div style="margin-top:16px;"><p style="font-size:13px;font-weight:600;margin:0 0 4px;">AI job renderings</p><p style="font-size:11px;color:#92400e;margin:0 0 8px;">AI previews only — actual results may vary.</p>${blocks}</div>`;
+      mediaHtml += `<div style="margin-top:16px;"><p style="font-size:13px;font-weight:600;margin:0 0 4px;">Before / after (concept renderings)</p><p style="font-size:11px;color:#92400e;margin:0 0 8px;">Concept rendering: AI illustration of the finished work, not a guarantee. Actual results may vary; the written estimate controls.</p>${blocks}</div>`;
     }
     if (clientVideoUrls.length > 0) {
       mediaHtml += `<div style="margin-top:16px;"><p style="font-size:13px;font-weight:600;margin:0 0 6px;">Videos</p><p style="font-size:12px;color:#475569;margin:0;">${clientVideoUrls.length} video(s) available when you open the payment page.</p></div>`;
