@@ -80,9 +80,37 @@ export function crewSeatInactiveResponse(): NextResponse {
  */
 export async function requireWorkspaceOwner(
   userId: string,
-  adminClient?: SupabaseClient | null
+  adminClient?: SupabaseClient | null,
+  options?: { requireFinancials?: boolean }
 ): Promise<{ ownerUserId: string; isCrew: boolean; denied?: undefined } | { denied: NextResponse }> {
   const ws = await resolveWorkspace(userId, adminClient);
   if (!ws.ok) return { denied: crewSeatInactiveResponse() };
+  if (options?.requireFinancials && !crewMayHandleClientMoney(ws)) {
+    return { denied: crewPermissionDeniedResponse() };
+  }
   return { ownerUserId: ws.ownerUserId, isCrew: ws.isCrew };
+}
+
+/**
+ * Customer-facing links (estimate/invoice approve + pay, terms, recurring plan links,
+ * Stripe checkout) open the owner's real document with every price and total. Only the
+ * owner and crew with full data access ("See pricing" AND "See estimates & financials",
+ * the same rule as public.is_full_access_crew_of) may create or send them; restricted
+ * crew only ever see redacted documents in the app.
+ */
+export function crewMayHandleClientMoney(ws: WorkspaceResolution): boolean {
+  if (!ws.ok) return false;
+  if (!ws.isCrew) return true;
+  const row = ws.crew;
+  return row?.can_see_pricing === true && row?.can_see_estimates_and_financials === true;
+}
+
+export function crewPermissionDeniedResponse(): NextResponse {
+  return NextResponse.json(
+    {
+      error: "You don't have permission to do this. Ask the account owner.",
+      code: 'crew_permission_denied',
+    },
+    { status: 403 }
+  );
 }
