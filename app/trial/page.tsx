@@ -110,7 +110,7 @@ function TrialForm() {
   const billingNote = useMemo(
     () =>
       cardRequired
-        ? `A credit card is required to start. Your ${trialLabel} free trial lasts ${trialDays} days and you won't be charged until it ends. After the trial, your card is charged ${planPrice} (${planLabel.toLowerCase()}) unless you cancel. Cancel anytime before the trial ends in Profile → Billing → Manage billing and you won't be charged.`
+        ? `Your ${trialLabel} free trial lasts ${trialDays} days and you won't be charged until it ends. After the trial, your plan is billed at ${planPrice} (${planLabel.toLowerCase()}) unless you cancel. Cancel anytime before the trial ends in Profile → Billing → Manage billing and you won't be charged.`
         : `No credit card is needed to start. This ${trialLabel} free trial (${trialDays} days) is limited to the first ${spots?.limit ?? CAPPED_OFFER_LIMIT} signups. When it ends, you'll need to subscribe at ${planPrice} (${planLabel.toLowerCase()}) to keep access. You won't be charged unless you subscribe. Cancel anytime in Profile → Billing → Manage billing.`,
     [cardRequired, planPrice, planLabel, trialDays, trialLabel, spots?.limit]
   );
@@ -128,7 +128,7 @@ function TrialForm() {
       });
       const json = await res.json().catch(() => ({}));
       if (res.ok && json.url) {
-        setInfo('Account created — taking you to add your card…');
+        setInfo('Account created — taking you to secure checkout to start your free trial…');
         window.location.href = json.url;
         return;
       }
@@ -243,7 +243,7 @@ function TrialForm() {
             setError(
               (trialJson.error ||
                 `This ${trialLabel} offer is full. All ${CAPPED_OFFER_LIMIT} spots are taken.`) +
-                ' Your account was created — log in and add a card to start the standard free trial.'
+                ' Your account was created — log in to start the standard free trial.'
             );
             return;
           }
@@ -269,7 +269,7 @@ function TrialForm() {
       if (data.user && !data.session) {
         setInfo(
           cardRequired
-            ? `Account created! Check your email to confirm, then log in. You'll add a card to start your ${trialLabel} free trial (${trialDays} days). You won't be charged until the trial ends. You chose: ${planLabel} (${planPrice} after trial).`
+            ? `Account created! Check your email to confirm, then log in to start your ${trialLabel} free trial (${trialDays} days). You won't be charged until the trial ends. You chose: ${planLabel} (${planPrice} after trial).`
             : `Account created! Check your email to confirm, then log in. Your ${trialLabel} free trial (${trialDays} days) starts on first login, with no credit card needed. You chose: ${planLabel} (${planPrice} after trial).`
         );
         return;
@@ -305,7 +305,7 @@ function TrialForm() {
             <p className="text-xs font-bold uppercase tracking-wide text-emerald-600">
               {trialLabel} free trial
               {offer !== 'standard' ? ' · Limited offer' : ''}
-              {cardRequired ? ' · Card required' : ' · No card needed'}
+              {cardRequired ? '' : ' · No card needed'}
             </p>
             <h1 className="text-2xl sm:text-3xl font-bold tracking-tight mt-1">
               Start free trial &amp; choose your plan
@@ -314,7 +314,7 @@ function TrialForm() {
               This is the only place to create a new EstimateAce account (from the website or Sign
               Up). Enter your details for a {trialLabel} free trial ({trialDays} days).
               {cardRequired
-                ? ' A credit card is required to start, but you will not be charged until the trial ends. Cancel anytime before then and you pay nothing. '
+                ? ' You will not be charged until the trial ends. Cancel anytime before then and you pay nothing. '
                 : ' No credit card is required to start. After the trial you will need to subscribe to the plan you choose below to keep access. '}
               Then use the same email and password to log in at app.estimateace.com.
               {cappedOffer ? ` This offer is limited to the first ${spots?.limit ?? CAPPED_OFFER_LIMIT} signups.` : ''}
@@ -464,7 +464,7 @@ function TrialForm() {
               {cardRequired ? (
                 <>
                   I understand this is a <strong>{trialLabel} free trial</strong> ({trialDays} days),
-                  a card is required to start, and my card will be charged{' '}
+                  and my plan will be billed{' '}
                   <strong>{planPrice}</strong> ({planLabel.toLowerCase()}) when the trial ends unless I
                   cancel before then. I agree to the{' '}
                 </>
@@ -508,7 +508,7 @@ function TrialForm() {
               : offerFull
                 ? 'Offer full'
                 : cardRequired
-                  ? `Continue to add card · ${trialLabel} free trial`
+                  ? `Start ${trialLabel} free trial`
                   : `Start ${trialLabel} free trial`}
           </button>
 
