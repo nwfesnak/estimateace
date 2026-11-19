@@ -31,6 +31,8 @@ import {
 } from '@/lib/trade-quick-lines';
 import { getInboundAddressForUserClient } from '@/lib/email-inbound-address';
 import { AIReceptionist } from '@/components/AIReceptionist';
+import { PhotoEstimateModal } from '@/components/PhotoEstimateModal';
+import { RENDER_FINISH_PRESETS } from '@/lib/photo-estimate';
 import { SubscriptionGate } from '@/components/SubscriptionGate';
 import {
   DEFAULT_RECEPTIONIST_SETTINGS,
@@ -5333,6 +5335,26 @@ export default function Home() {
   const openQuickLinesModal = () => setIsQuickLinesModalOpen(true);
 
   const addRow = () => setItems(prev => [{ id: Date.now(), description: '', qty: 1, unit: '', price: 0, total: 0 }, ...prev]);
+
+  /** 📸 Photo estimate (components/PhotoEstimateModal) */
+  const [photoEstimateOpen, setPhotoEstimateOpen] = useState(false);
+  const applyPhotoEstimate = (rows: any[], summary: string) => {
+    setItems((prev) => {
+      // Replace the blank starter row instead of leaving an empty line on top.
+      const kept = prev.filter(
+        (r) => String(r.description || '').trim() || Number(r.total) > 0 || Number(r.price) > 0
+      );
+      return [...kept, ...rows];
+    });
+    const required = rows.filter((r) => !r.optional);
+    const sum = required.reduce((acc, r) => acc + (Number(r.total) || 0), 0);
+    showMessage(
+      `✅ Added ${rows.length} line${rows.length === 1 ? '' : 's'} from photos ($${sum.toFixed(2)}).` +
+        (rows.length > required.length ? ` ${rows.length - required.length} customer option(s) added.` : '') +
+        (summary ? `\n\n${summary}` : '') +
+        '\n\nEdit any line, or turn on Show Materials / Labor Breakdown to show the detail.'
+    );
+  };
 
   const priceMemorySaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const priceMemoryToastAt = useRef(0);
@@ -13262,6 +13284,32 @@ export default function Home() {
                 <div className="hidden sm:block w-px h-8 bg-gray-300 mx-1" aria-hidden />
                 <Button onClick={addRow} variant="outline">{t('addLineItem')}</Button>
                 <Button onClick={openQuickLinesModal} variant="outline">{t('quickLines')}</Button>
+                <Button
+                  type="button"
+                  onClick={() => setPhotoEstimateOpen(true)}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                >
+                  📸 Photo estimate
+                </Button>
+                <PhotoEstimateModal
+                  open={photoEstimateOpen}
+                  onClose={() => setPhotoEstimateOpen(false)}
+                  getAccessToken={async () => {
+                    if (!supabase) return null;
+                    const { data } = await supabase.auth.getSession();
+                    return data.session?.access_token || null;
+                  }}
+                  tradeId={selectedTradeId || profile.tradeId || ''}
+                  jobLocation={{ address, city, state, zipCode }}
+                  companyLocation={{
+                    address: profile.address,
+                    city: profile.city,
+                    state: profile.state,
+                    zipCode: profile.zipCode,
+                  }}
+                  priceMemory={normalizeAiPriceMemory(profile.aiPriceMemory)}
+                  onApply={applyPhotoEstimate}
+                />
               </div>
 
               <Card className="mb-8 overflow-hidden w-full max-w-full min-w-0">
@@ -14039,6 +14087,22 @@ export default function Home() {
                         placeholder="e.g. charcoal shingles, white trim — or full scope if no line linked"
                         className="bg-white"
                       />
+                      <div className="mt-2 flex flex-wrap gap-1.5" aria-label="Finish ideas">
+                        {RENDER_FINISH_PRESETS.map((f) => (
+                          <button
+                            key={f}
+                            type="button"
+                            onClick={() => setJobRenderNotes(f)}
+                            className={`rounded-full border px-2.5 py-1 text-xs ${
+                              jobRenderNotes === f
+                                ? 'bg-violet-600 text-white border-violet-600'
+                                : 'bg-white text-violet-800 border-violet-200 hover:bg-violet-50'
+                            }`}
+                          >
+                            {f}
+                          </button>
+                        ))}
+                      </div>
                     </div>
 
                     {/* Readiness checklist so the button clearly "goes live" */}
@@ -14789,9 +14853,13 @@ export default function Home() {
 
                 {getAiJobRenderingEnabled() && jobRenderings.length > 0 && (
                   <div className="mt-12">
-                    <h3 className="text-2xl font-semibold mb-4 border-b pb-3">
+                    <h3 className="text-2xl font-semibold mb-2 border-b pb-3">
                       AI Job Renderings (After Completing)
                     </h3>
+                    <p className="mb-4 text-xs text-amber-900">
+                      Concept rendering — an AI illustration of the finished work, not a guarantee of
+                      the final result. The written estimate controls.
+                    </p>
                     <div className="space-y-8">
                       {jobRenderings.map((r) => {
                         const beforeUrl = jobRenderDisplayMap[r.sourcePath];
@@ -14814,7 +14882,7 @@ export default function Home() {
                                 )}
                               </div>
                               <div>
-                                <div className="text-xs text-violet-700 mb-1">After (AI)</div>
+                                <div className="text-xs text-violet-700 mb-1">After (concept rendering)</div>
                                 {afterUrl && (
                                   <img
                                     src={afterUrl}
@@ -18541,7 +18609,7 @@ export default function Home() {
                       AI Job Renderings (After Completing)
                     </h3>
                     <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-950 leading-relaxed">
-                      <strong className="block mb-1">Important — AI-generated imagery disclosure</strong>
+                      <strong className="block mb-1">Concept renderings — AI-generated imagery disclosure</strong>
                       AI renderings are illustrative previews only. They are computer-generated
                       visualizations of possible completed work. Actual results may vary due to site
                       conditions, materials, weather, measurements, code requirements, and final scope.
@@ -18574,7 +18642,7 @@ export default function Home() {
                               </div>
                               <div>
                                 <div className="text-xs text-violet-700 mb-1 font-semibold">
-                                  After (AI rendering)
+                                  After (concept rendering)
                                 </div>
                                 {afterUrl ? (
                                   <img

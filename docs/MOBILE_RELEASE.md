@@ -118,6 +118,31 @@ New logo? Replace `assets/icon-only.png` (1024×1024, no transparency), `assets/
 - [ ] Airplane mode on → relaunch → the "You're offline" screen appears. Airplane mode off → **Try again** → the app loads.
 - [ ] Android: the back button goes back, and at the login screen it closes the app.
 
+## 3B. LiDAR room scan (iPhone Pro only) — build + test on the Mac mini
+
+The app has its own small native plugin, not an npm package:
+- `ios/App/App/RoomScanPlugin.swift` uses Apple RoomPlan.
+- `ios/App/App/EstimateAceBridgeViewController.swift` registers it. `SceneDelegate.swift` and `Main.storyboard` now use this controller.
+- The web code that calls it is `lib/room-scan.ts`.
+
+It could not be compiled on Linux, so the **first Xcode build on the Mac is the first compile**.
+
+1. `npm install && npm run mobile:sync`, then `npm run mobile:ios` (opens Xcode).
+2. In Xcode, check that the **App** target lists `RoomScanPlugin.swift` and `EstimateAceBridgeViewController.swift` under *Build Phases → Compile Sources*. They are already in the project file.
+3. Check that *Build Settings → Other Linker Flags* contains `-weak_framework RoomPlan`. This keeps the app launching on iOS 15 phones, which have no RoomPlan.
+4. Build onto a **LiDAR iPhone**: 12 Pro / 13 Pro / 14 Pro / 15 Pro / 16 Pro / 17 Pro (or Pro Max), iOS 16+. The simulator has no LiDAR, so "Scan room" stays hidden there. That is expected.
+5. In the app, open an estimate and tap **📸 Photo estimate**. The **Scan room (LiDAR)** button should appear.
+   - Tap it and allow camera access. The first time, iOS shows the camera permission text from Info.plist.
+   - Walk the room and tap **Done**.
+   - After a few seconds the floor sq ft, wall sq ft, perimeter, ceiling height, doors and windows fill in.
+6. Check the numbers against a tape measure. Within about 5% is normal. Floor area is exact on iOS 17+; on iOS 16 it is approximated from the walls (a little high for L-shaped rooms).
+7. Test **Cancel**: the sheet closes and the measurements stay unchanged.
+8. On a non-Pro iPhone and on Android, the scan button must not appear. Typing length × width × height must still work.
+
+Privacy: the 3D scan never leaves the phone. Only the summary numbers (sq ft, feet, counts) are sent with the estimate request, so the App Privacy answers don't change.
+
+If the build fails in `RoomScanPlugin.swift`, copy the error. RoomPlan APIs are guarded with `#available(iOS 16/17)`, and the deployment target stays iOS 15.
+
 ## 4. Signing
 
 **iOS**: Xcode handles it once your Team is chosen (step 3). No files to manage.

@@ -67,7 +67,7 @@
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>EstimateAce uses the camera so you can take job-site photos and videos for your estimates, and scan receipts and documents.</string>
+	<string>EstimateAce uses the camera so you can take job-site photos and videos for your estimates, scan receipts and documents, and measure rooms with the LiDAR room scanner.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>EstimateAce uses the microphone to record sound when you capture a job walkthrough video.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
