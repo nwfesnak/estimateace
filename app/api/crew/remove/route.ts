@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
     // if owner is removing immediately, cancel subscription now and delete access
     try {
       const { getStripe } = await import('@/lib/stripe-server');
-      const { upsertCrewSeatFromStripe } = await import('@/lib/crew-billing');
+      const { cancelCrewSeatNow } = await import('@/lib/crew-billing');
       const stripe = getStripe();
       let subId = row.stripe_subscription_id as string | null;
       if (!subId) {
@@ -67,8 +67,7 @@ export async function POST(request: NextRequest) {
       if (stripe && subId) {
         try {
           // Immediate cancel when removing login — owner chose delete
-          const canceled = await stripe.subscriptions.cancel(subId);
-          await upsertCrewSeatFromStripe(canceled);
+          await cancelCrewSeatNow(stripe, subId);
         } catch (subErr) {
           console.warn('crew remove: stripe cancel', subErr);
         }

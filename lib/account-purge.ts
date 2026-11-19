@@ -6,6 +6,7 @@ import {
   releaseAccountPhoneLine,
   stopAccountBilling,
 } from '@/lib/account-cleanup';
+import { crewSeatReleaseDeps, releaseSeatsForDeletedCrew } from '@/lib/crew-seat-release';
 
 /**
  * Every public table that holds a user's data, and the column that ties a row to them.
@@ -59,6 +60,8 @@ type PurgeAdmin = {
 
 export type PurgeSteps = {
   stopBilling: (userId: string) => Promise<void>;
+  /** If this user is someone's crew member: end the seat the owner pays for. */
+  releaseCrewSeats: (userId: string) => Promise<unknown>;
   releasePhoneLine: (userId: string) => Promise<unknown>;
   deleteMedia: (userId: string) => Promise<{ removed: number; complete: boolean }>;
   deleteCrewLogins: (userId: string) => Promise<number>;
@@ -96,6 +99,10 @@ export async function purgeAccountData(
     //    anything is still billing, so nothing is deleted while they're being charged.
     //    Stripe customers / invoices are kept for tax and accounting.
     await steps.stopBilling(userId);
+
+    // 1b. They were a crew member on someone else's account: cancel that owner's seat
+    //     for them (same as the owner deleting the crew member). Throws → retry later.
+    await steps.releaseCrewSeats(userId);
 
     // 2. Release the Twilio number and close the subaccount.
     try {
@@ -176,6 +183,14 @@ export async function purgeClosedAccount(userId: string): Promise<PurgeResult> {
         .maybeSingle();
       if (subRow?.stripe_subscription_id) {
         throw new Error('Stripe not configured; cannot confirm billing stopped');
+      }
+    },
+    releaseCrewSeats: async (uid) => {
+      const deps = crewSeatReleaseDeps(admin);
+      if (stripe) return releaseSeatsForDeletedCrew(stripe, uid, deps);
+      const seats = [...(await deps.memberships(uid)), ...(await deps.seatsByCrewUser(uid))];
+      if (seats.some((s) => s.stripe_subscription_id)) {
+        throw new Error('Stripe not configured; cannot end the crew seat this user occupies');
       }
     },
     releasePhoneLine: (uid) => releaseAccountPhoneLine(uid),
