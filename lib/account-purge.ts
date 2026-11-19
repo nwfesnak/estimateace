@@ -8,60 +8,180 @@ import {
 } from '@/lib/account-cleanup';
 
 /**
+ * Every public table that holds a user's data, and the column that ties a row to them.
+ * Order matters: rows other steps still read (crew_members for crew logins,
+ * receptionist_accounts for the Twilio line, crew_seat_subscriptions for billing) are
+ * removed only after those steps ran. `subscriptions` is deliberately NOT here: it
+ * holds account_closes_at, which is what makes the daily cron retry a purge that
+ * failed half-way, so it goes last (cascade from the auth user).
+ *
+ * All of these also cascade from auth.users (ON DELETE CASCADE, checked against the
+ * live schema), so deleting them explicitly is belt-and-braces: a future table
+ * without a cascade still gets cleaned, and a failure stops before the auth user goes.
+ */
+export const ACCOUNT_DATA_TABLES: ReadonlyArray<{ table: string; column: string; what: string }> = [
+  { table: 'estimates', column: 'user_id', what: 'estimates, invoices, jobs, customers, settings/profile, receptionist settings, call sessions, messages and email summaries' },
+  { table: 'archive-est', column: 'user_id', what: 'archived estimates and invoices' },
+  { table: 'receipts', column: 'user_id', what: 'receipt records' },
+  { table: 'payment_accounts', column: 'user_id', what: 'link to their Stripe Connect payout account' },
+  { table: 'receptionist_blocked_numbers', column: 'user_id', what: 'AI Receptionist blocked callers' },
+  { table: 'receptionist_call_finalizations', column: 'user_id', what: 'AI Receptionist call log' },
+  { table: 'receptionist_accounts', column: 'user_id', what: 'AI Receptionist line + add-on billing' },
+  { table: 'crew_seat_subscriptions', column: 'owner_user_id', what: 'crew seats they paid for' },
+  { table: 'crew_members', column: 'owner_user_id', what: 'their crew (access to this workspace)' },
+  { table: 'crew_members', column: 'crew_user_id', what: 'their own crew membership in someone else\'s workspace' },
+  { table: 'login_otp', column: 'user_id', what: 'login codes' },
+  { table: 'promo_redemptions', column: 'user_id', what: 'promo claims' },
+];
+
+/**
+ * Tables intentionally NOT purged per user, with the reason (kept in sync with the
+ * live schema by scripts/test-account-deletion.test.mjs).
+ */
+export const ACCOUNT_DATA_KEPT: Readonly<Record<string, string>> = {
+  subscriptions: 'deleted last, by cascade from the auth user (keeps the cron retry working until then)',
+  stripe_disputes: 'payment dispute record required for accounting; owner_user_id is set to NULL (no personal data)',
+  sms_opt_ins: 'SMS consent proof keyed by phone number only (carrier / TCPA compliance), not linked to an account',
+  rate_limit_counters: 'short-lived counters; any key containing the user id is deleted by the purge',
+  promo_limits: 'global promo settings, no user data',
+};
+
+type DeleteResult = PromiseLike<{ error: { message?: string } | null; count?: number | null }>;
+type PurgeAdmin = {
+  from: (table: string) => {
+    delete: (opts?: { count?: 'exact' }) => {
+      eq: (column: string, value: string) => DeleteResult;
+      like: (column: string, pattern: string) => DeleteResult;
+    };
+  };
+  auth: { admin: { deleteUser: (id: string) => Promise<{ error: { message?: string; status?: number } | null }> } };
+};
+
+export type PurgeSteps = {
+  stopBilling: (userId: string) => Promise<void>;
+  releasePhoneLine: (userId: string) => Promise<unknown>;
+  deleteMedia: (userId: string) => Promise<{ removed: number; complete: boolean }>;
+  deleteCrewLogins: (userId: string) => Promise<number>;
+};
+
+export type PurgeResult = {
+  ok: boolean;
+  error?: string;
+  /** Rows removed per table (explicit deletes; cascades are not counted). */
+  removed?: Record<string, number>;
+  mediaRemoved?: number;
+  crewLoginsDeleted?: number;
+};
+
+function isUserMissing(error: { message?: string; status?: number } | null): boolean {
+  return !!error && (error.status === 404 || /not.?found/i.test(error.message || ''));
+}
+
+/**
+ * Permanently delete an account. Safe to run again after a partial failure: every
+ * step is idempotent, and the auth user (and with it the subscriptions row the cron
+ * uses to retry) is removed only after everything else succeeded.
+ */
+export async function purgeAccountData(
+  admin: PurgeAdmin,
+  userId: string,
+  steps: PurgeSteps
+): Promise<PurgeResult> {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId)) {
+    return { ok: false, error: 'Refusing to purge: not a user id' };
+  }
+  const removed: Record<string, number> = {};
+  try {
+    // 1. Stop every charge (main plan, crew seats, AI Receptionist add-on). Throws if
+    //    anything is still billing, so nothing is deleted while they're being charged.
+    //    Stripe customers / invoices are kept for tax and accounting.
+    await steps.stopBilling(userId);
+
+    // 2. Release the Twilio number and close the subaccount.
+    try {
+      await steps.releasePhoneLine(userId);
+    } catch (e) {
+      return { ok: false, error: `Twilio release failed: ${(e as Error)?.message || e}` };
+    }
+
+    // 3. Files: everything under media/<userId>/ (crew uploads live there too).
+    const media = await steps.deleteMedia(userId);
+    if (!media.complete) {
+      return {
+        ok: false,
+        mediaRemoved: media.removed,
+        error: `media purge partial (${media.removed} removed); will continue next run`,
+      };
+    }
+
+    // 4. Crew logins this owner created (seat access ends with the workspace).
+    const crewLoginsDeleted = await steps.deleteCrewLogins(userId);
+
+    // 5. Every per-user table.
+    for (const { table, column } of ACCOUNT_DATA_TABLES) {
+      const { error, count } = await admin.from(table).delete({ count: 'exact' }).eq(column, userId);
+      if (error) {
+        return { ok: false, removed, error: `delete ${table}.${column}: ${error.message || error}` };
+      }
+      removed[`${table}.${column}`] = count || 0;
+    }
+
+    // 6. Rate-limit / AI-quota counters keyed by this user id.
+    {
+      const { error, count } = await admin
+        .from('rate_limit_counters')
+        .delete({ count: 'exact' })
+        .like('bucket', `%${userId.toLowerCase()}%`);
+      if (error) return { ok: false, removed, error: `delete rate_limit_counters: ${error.message || error}` };
+      removed['rate_limit_counters.bucket'] = count || 0;
+    }
+
+    // 7. The login itself. Cascades the subscriptions row (and anything left over).
+    const { error } = await admin.auth.admin.deleteUser(userId);
+    if (error && !isUserMissing(error)) {
+      console.error('auth deleteUser:', error);
+      return { ok: false, removed, error: error.message || 'auth delete failed' };
+    }
+    if (isUserMissing(error)) {
+      // Already gone (re-run): make sure no schedule row is left behind.
+      await admin.from('subscriptions').delete().eq('user_id', userId);
+    }
+    return { ok: true, removed, mediaRemoved: media.removed, crewLoginsDeleted };
+  } catch (e) {
+    return { ok: false, removed, error: (e as Error)?.message || 'purge failed' };
+  }
+}
+
+/**
  * Hard-delete user data + auth after account_closes_at.
  *
  * Order matters: stop every charge first (main plan, crew seats, AI Receptionist
  * add-on, Twilio number). If any charge cannot be stopped the purge stops and the
  * daily cron retries, so we never delete an account that is still being billed.
  */
-export async function purgeClosedAccount(userId: string): Promise<{ ok: boolean; error?: string }> {
+export async function purgeClosedAccount(userId: string): Promise<PurgeResult> {
   const admin = getSupabaseAdmin();
   if (!admin) return { ok: false, error: 'No admin client' };
-
-  try {
-    const stripe = getStripe();
-    if (stripe) {
-      await stopAccountBilling(admin, stripe, userId, 'now');
-    } else {
+  const stripe = getStripe();
+  return purgeAccountData(admin as unknown as PurgeAdmin, userId, {
+    stopBilling: async (uid) => {
+      if (stripe) {
+        await stopAccountBilling(admin, stripe, uid, 'now');
+        return;
+      }
       const { data: subRow } = await admin
         .from('subscriptions')
         .select('stripe_subscription_id')
-        .eq('user_id', userId)
+        .eq('user_id', uid)
         .maybeSingle();
       if (subRow?.stripe_subscription_id) {
-        return { ok: false, error: 'Stripe not configured; cannot confirm billing stopped' };
+        throw new Error('Stripe not configured; cannot confirm billing stopped');
       }
-    }
-
-    try {
-      await releaseAccountPhoneLine(userId);
-    } catch (e) {
-      return { ok: false, error: `Twilio release failed: ${(e as Error)?.message || e}` };
-    }
-
-    const media = await deleteAllUserMedia(admin, userId);
-    if (!media.complete) {
-      // Very large account: the rest is removed on the next cron run.
-      return { ok: false, error: `media purge partial (${media.removed} removed); will continue next run` };
-    }
-
-    await deleteOwnerCrewLogins(admin, userId);
-
-    await admin.from('archive-est').delete().eq('user_id', userId);
-    await admin.from('estimates').delete().eq('user_id', userId);
-    await admin.from('subscriptions').delete().eq('user_id', userId);
-
-    // Remaining per-user rows (crew_members, crew seats, payment_accounts, receipts,
-    // receptionist tables, login codes, promo redemptions) cascade from auth.users.
-    const { error } = await admin.auth.admin.deleteUser(userId);
-    if (error) {
-      console.error('auth deleteUser:', error);
-      return { ok: false, error: error.message };
-    }
-    return { ok: true };
-  } catch (e: any) {
-    return { ok: false, error: e?.message || 'purge failed' };
-  }
+    },
+    releasePhoneLine: (uid) => releaseAccountPhoneLine(uid),
+    deleteMedia: (uid) => deleteAllUserMedia(admin, uid),
+    deleteCrewLogins: (uid) => deleteOwnerCrewLogins(admin, uid),
+  });
 }
 
 /**

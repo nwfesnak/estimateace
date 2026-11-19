@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent } from '@/components/ui/card';
+import { NATIVE_MANAGE_PLAN_TEXT, useIsNativeApp } from '@/lib/native-app';
 import {
   type ReceptionistSettings,
   type ReceptionistMessage,
@@ -88,6 +89,8 @@ export function AIReceptionist({
   const [areaCode, setAreaCode] = React.useState('');
   const [transferNumber, setTransferNumber] = React.useState(companyPhone || '');
   const [addonActive, setAddonActive] = React.useState(subscriptionActive);
+  /** iOS / Android app: no add-on purchase button or price (store payment rules). */
+  const nativeApp = useIsNativeApp();
   const [addonAmountDisplay, setAddonAmountDisplay] = React.useState('$49.99');
   const [copiedForward, setCopiedForward] = React.useState(false);
   const [factsBusy, setFactsBusy] = React.useState(false);
@@ -180,7 +183,9 @@ export function AIReceptionist({
       if (!active) {
         setLineError(
           json.message ||
-            'Payment is not showing yet. Wait a few seconds and choose I already paid — or tap Subscribe.'
+            (nativeApp
+              ? 'The add-on is not showing as active yet. Wait a few seconds and check again.'
+              : 'Payment is not showing yet. Wait a few seconds and choose I already paid — or tap Subscribe.')
         );
       } else {
         setLineError(null);
@@ -254,8 +259,10 @@ export function AIReceptionist({
         if (json.needsPayment) {
           setAddonActive(false);
           setLineError(
-            json.error ||
-              `Pay for the add-on (${json.amountDisplay || addonAmountDisplay}/mo) before enabling the phone line.`
+            (!nativeApp && json.error) ||
+              (nativeApp
+                ? `The AI Receptionist add-on isn't active yet. ${NATIVE_MANAGE_PLAN_TEXT}`
+                : `Pay for the add-on (${json.amountDisplay || addonAmountDisplay}/mo) before enabling the phone line.`)
           );
           return;
         }
@@ -741,18 +748,24 @@ export function AIReceptionist({
           <p className="font-semibold text-violet-950">
             AI Receptionist is not subscribed yet.
           </p>
-          <p className="text-sm text-violet-900">
-            Subscribe for {addonAmountDisplay}/month. Stripe opens next. After payment, come back
-            here to turn on the AI phone line.
-          </p>
-          <Button
-            type="button"
-            className="w-full bg-violet-700 hover:bg-violet-800 text-white font-bold py-6 text-base"
-            disabled={lineBusy}
-            onClick={() => void startAddonCheckout()}
-          >
-            {lineBusy ? 'Opening Stripe…' : `Subscribe · ${addonAmountDisplay}/mo`}
-          </Button>
+          {nativeApp ? (
+            <p className="text-sm text-violet-900">{NATIVE_MANAGE_PLAN_TEXT}</p>
+          ) : (
+            <>
+              <p className="text-sm text-violet-900">
+                Subscribe for {addonAmountDisplay}/month. Stripe opens next. After payment, come back
+                here to turn on the AI phone line.
+              </p>
+              <Button
+                type="button"
+                className="w-full bg-violet-700 hover:bg-violet-800 text-white font-bold py-6 text-base"
+                disabled={lineBusy}
+                onClick={() => void startAddonCheckout()}
+              >
+                {lineBusy ? 'Opening Stripe…' : `Subscribe · ${addonAmountDisplay}/mo`}
+              </Button>
+            </>
+          )}
           <button
             type="button"
             className="text-xs text-violet-800 underline"
@@ -988,21 +1001,27 @@ export function AIReceptionist({
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm">
                 {addonActive ? (
                   <p className="font-semibold text-emerald-800">
-                    Subscription paid · {addonAmountDisplay}/month
+                    {nativeApp ? 'Subscription active' : <>Subscription paid · {addonAmountDisplay}/month</>}
                   </p>
                 ) : (
                   <div className="space-y-3">
-                    <p className="text-slate-800">
-                      Subscribe for {addonAmountDisplay}/month to turn on the AI phone line.
-                    </p>
-                    <Button
-                      type="button"
-                      className="w-full bg-violet-700 hover:bg-violet-800 text-white font-bold py-6 text-base"
-                      disabled={lineBusy}
-                      onClick={() => void startAddonCheckout()}
-                    >
-                      {lineBusy ? 'Opening Stripe…' : `Subscribe · ${addonAmountDisplay}/mo`}
-                    </Button>
+                    {nativeApp ? (
+                      <p className="text-slate-800">{NATIVE_MANAGE_PLAN_TEXT}</p>
+                    ) : (
+                      <>
+                        <p className="text-slate-800">
+                          Subscribe for {addonAmountDisplay}/month to turn on the AI phone line.
+                        </p>
+                        <Button
+                          type="button"
+                          className="w-full bg-violet-700 hover:bg-violet-800 text-white font-bold py-6 text-base"
+                          disabled={lineBusy}
+                          onClick={() => void startAddonCheckout()}
+                        >
+                          {lineBusy ? 'Opening Stripe…' : `Subscribe · ${addonAmountDisplay}/mo`}
+                        </Button>
+                      </>
+                    )}
                     <button
                       type="button"
                       className="text-xs text-slate-500 underline"

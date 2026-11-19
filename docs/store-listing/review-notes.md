@@ -1,0 +1,23 @@
+# Notes for App Review (Apple) and App access (Google)
+
+## Demo account (create before submitting; must stay working during review)
+- Email: `appreview@estimateace.com`   ← create this account on the **web** (estimateace.com)
+- Password: (choose a strong one and paste it into App Store Connect / Play Console only. Don't save it in this file.)
+- Give it an **active plan** (comped / promo) and 3–4 sample jobs with photos, one estimate, one invoice and one AI Receptionist message, so the reviewer sees real screens.
+- Don't connect a real Stripe payout account or a real phone line to it.
+
+## Text to paste into "Notes" (Apple) / "Instructions" (Google)
+
+EstimateAce is a free companion app to the EstimateAce web service for contractors (estimates, invoices, job photos, customer payments). An account is required; log in with the demo account above.
+
+What to try:
+1. Log in, open **New estimate**, and tap the camera button to take a job-site photo (the camera and microphone permission prompts appear here). Then attach a photo from the library.
+2. Generate an AI estimate from the photos and open the PDF preview.
+3. Open **Invoices** to see an invoice with a customer payment link. Links to Stripe and other websites open in Safari.
+4. **Profile → Billing → Manage billing → Delete account** is the in-app account deletion (guideline 5.1.1(v)).
+
+Payments (guideline 3.1.3(f)): EstimateAce subscriptions are sold only on our website. The app has no purchase buttons, prices or links to buy, and it only lets existing customers use the service. Payment links in invoices are for the contractor's **customers** paying for real-world construction and home services (guideline 3.1.5(a) physical goods/services), processed by Stripe.
+
+The app loads our live web app inside a native shell, and adds native camera/video capture, an offline screen, splash screen, system-browser handoff and in-app account deletion.
+
+Contact: support@estimateace.com

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { refuseInAppPurchase } from '@/lib/native-app-server';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { getAppUrl, getStripe } from '@/lib/stripe-server';
@@ -6,6 +7,9 @@ import type Stripe from 'stripe';
 import { isStripeConfigured } from '@/lib/billing';
 
 export async function POST(request: NextRequest) {
+  // Store apps never start a purchase of plans / add-ons / seats (Apple 3.1.1, Google Play).
+  const nativeBlocked = refuseInAppPurchase(request);
+  if (nativeBlocked) return nativeBlocked;
   try {
     if (!isStripeConfigured()) {
       return NextResponse.json({ error: 'Stripe is not configured.' }, { status: 503 });

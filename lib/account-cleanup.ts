@@ -177,11 +177,14 @@ export async function deleteOwnerCrewLogins(admin: SupabaseClient, ownerId: stri
     const { data: got } = await admin.auth.admin.getUserById(crewId);
     const meta = (got?.user?.app_metadata || {}) as { is_crew?: boolean; owner_user_id?: string };
     if (meta.is_crew !== true || meta.owner_user_id !== ownerId) continue;
-    // Never delete a login that also runs its own workspace.
+    // Never delete a login that also runs its own workspace (real documents of its
+    // own; a bare SETTINGS row doesn't count). Its crew_members row is still removed,
+    // so it loses access to this workspace either way.
     const { count } = await admin
       .from('estimates')
       .select('id', { count: 'exact', head: true })
-      .eq('user_id', crewId);
+      .eq('user_id', crewId)
+      .not('id', 'like', 'SETTINGS-%');
     if ((count || 0) > 0) continue;
     const { error } = await admin.auth.admin.deleteUser(crewId);
     if (!error) deleted++;
