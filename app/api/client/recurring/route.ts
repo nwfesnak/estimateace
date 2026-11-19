@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
     });
   } catch (e: any) {
     console.error('client/recurring GET:', e);
-    return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed' }, { status: 500 });
   }
 }
 
@@ -110,6 +110,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, url: result.url });
   } catch (e: any) {
     console.error('client/recurring POST:', e);
-    return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed' }, { status: 500 });
   }
 }

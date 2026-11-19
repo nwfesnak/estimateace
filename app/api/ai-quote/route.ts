@@ -22,7 +22,8 @@ import {
   priceTemplate,
   type QuoteFacts,
 } from '@/lib/quote-templates';
-import { enforceAppAccess } from '@/lib/billing-access';
+import { enforceAppAccess, workspaceOwnerId } from '@/lib/billing-access';
+import { reserveAiQuota } from '@/lib/rate-limit';
 
 export const maxDuration = 60;
 export const runtime = 'nodejs';
@@ -115,6 +116,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    {
+      const quota = await reserveAiQuota(await workspaceOwnerId(user.id), 'ai');
+      if (quota) return quota;
+    }
+
     // Extractor may run without Grok (deterministic). Pricing never needs Grok.
     // Photo analysis still needs the key.
     const body = await request.json().catch(() => ({}));
@@ -141,8 +147,9 @@ export async function POST(request: NextRequest) {
         });
         jobDescription = imageAnalysis.scopeDescription;
       } catch (err: any) {
+        console.error('ai-quote photo analysis:', err?.message || err);
         return NextResponse.json(
-          { error: err?.message || 'Could not analyze the photo' },
+          { error: 'Could not analyze the photo. Try another photo or type a description.' },
           { status: 400 }
         );
       }
@@ -269,7 +276,7 @@ export async function POST(request: NextRequest) {
   } catch (e: any) {
     console.error('ai-quote template error:', e);
     return NextResponse.json(
-      { error: e?.message || 'Could not price this description' },
+      { error: 'Could not price this description' },
       { status: 500 }
     );
   }

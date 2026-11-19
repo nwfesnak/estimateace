@@ -29,6 +29,6 @@ export async function GET(request: NextRequest) {
       note: 'Usage metering connects in a later phase (Twilio subaccount usage API).',
     });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed' }, { status: 500 });
   }
 }

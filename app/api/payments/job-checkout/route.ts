@@ -100,6 +100,6 @@ export async function POST(request: NextRequest) {
     });
   } catch (e: any) {
     console.error('job-checkout:', e);
-    return NextResponse.json({ error: e?.message || 'Checkout failed' }, { status: 500 });
+    return NextResponse.json({ error: 'Checkout failed' }, { status: 500 });
   }
 }

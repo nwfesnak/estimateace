@@ -113,7 +113,7 @@ export async function POST(request: NextRequest) {
       };
       await saveReceptionistConfig(user.id, failed);
       return NextResponse.json(
-        { error: e?.message || 'Could not provision Twilio number', status: 'error' },
+        { error: 'Could not provision Twilio number', status: 'error' },
         { status: 502 }
       );
     }
@@ -174,6 +174,6 @@ export async function POST(request: NextRequest) {
     });
   } catch (e: any) {
     console.error('receptionist/enable:', e);
-    return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed' }, { status: 500 });
   }
 }

@@ -251,6 +251,6 @@ export async function POST(request: NextRequest) {
     });
   } catch (e: any) {
     console.error('crew invite:', e);
-    return NextResponse.json({ error: e?.message || 'Invite failed' }, { status: 500 });
+    return NextResponse.json({ error: 'Invite failed' }, { status: 500 });
   }
 }

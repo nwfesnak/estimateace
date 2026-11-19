@@ -89,7 +89,7 @@ export async function GET(request: NextRequest) {
     });
   } catch (e: any) {
     console.error('receptionist GET:', e);
-    return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed' }, { status: 500 });
   }
 }
 
@@ -169,7 +169,7 @@ export async function PATCH(request: NextRequest) {
     });
   } catch (e: any) {
     console.error('receptionist PATCH:', e);
-    return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed' }, { status: 500 });
   }
 }
 

@@ -92,6 +92,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true });
   } catch (e: any) {
     console.error('crew remove:', e);
-    return NextResponse.json({ error: e?.message || 'Remove failed' }, { status: 500 });
+    return NextResponse.json({ error: 'Remove failed' }, { status: 500 });
   }
 }

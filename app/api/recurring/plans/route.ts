@@ -51,7 +51,7 @@ export async function GET(request: NextRequest) {
     });
   } catch (e: any) {
     console.error('recurring/plans GET:', e);
-    return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed' }, { status: 500 });
   }
 }
 
@@ -94,7 +94,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, plan: result.plan, clientLink });
   } catch (e: any) {
     console.error('recurring/plans POST:', e);
-    return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed' }, { status: 500 });
   }
 }
 
@@ -269,6 +269,6 @@ export async function PATCH(request: NextRequest) {
     });
   } catch (e: any) {
     console.error('recurring/plans PATCH:', e);
-    return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed' }, { status: 500 });
   }
 }

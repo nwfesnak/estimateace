@@ -8,6 +8,7 @@ import {
   resolveAccountCloseDate,
   type BillingSnapshot,
 } from '@/lib/billing';
+import { serverError } from '@/lib/rate-limit';
 
 function rowToSnapshot(row: any): BillingSnapshot {
   if (!row) {
@@ -93,38 +94,38 @@ export async function POST(request: NextRequest) {
     });
 
     if (upsertErr) {
-      // Columns may be missing — try without new cols then SETTINGS profile fallback
-      console.warn('subscriptions upsert with close cols failed:', upsertErr.message);
-      await admin.from('subscriptions').upsert({
-        user_id: uid,
-        stripe_customer_id: subRow?.stripe_customer_id || null,
-        stripe_subscription_id: subRow?.stripe_subscription_id || null,
-        status: 'canceled',
-        current_period_end: closesAtIso,
-        cancel_at_period_end: true,
-        trial_ends_at: subRow?.trial_ends_at || null,
-        updated_at: nowIso,
-      });
-      // Store close date on SETTINGS profile as fallback
+      // The close date must live in the server-only subscriptions row (never the
+      // user-editable SETTINGS row), so refuse rather than store it somewhere unsafe.
+      console.error('account/delete: could not store close date:', upsertErr.message);
+      return NextResponse.json(
+        { error: 'Could not schedule account deletion right now. Please try again or contact support.' },
+        { status: 503 }
+      );
+    }
+
+    // Display-only copy for the app UI. Never read by the server for purging.
+    try {
       const { data: settings } = await admin
         .from('estimates')
         .select('profile')
         .eq('id', `SETTINGS-${uid}`)
         .maybeSingle();
-      const profile = {
-        ...(settings?.profile && typeof settings.profile === 'object' ? settings.profile : {}),
-        accountClosesAt: closesAtIso,
-        deletionRequestedAt: nowIso,
-      };
-      await admin.from('estimates').upsert({
-        id: `SETTINGS-${uid}`,
-        user_id: uid,
-        jobName: '__settings__',
-        documentType: 'settings',
-        items: [],
-        profile,
-        updated_at: nowIso,
-      });
+      if (settings) {
+        await admin
+          .from('estimates')
+          .update({
+            profile: {
+              ...(settings.profile && typeof settings.profile === 'object' ? settings.profile : {}),
+              accountClosesAt: closesAtIso,
+              deletionRequestedAt: nowIso,
+            },
+            updated_at: nowIso,
+          })
+          .eq('id', `SETTINGS-${uid}`)
+          .eq('user_id', uid);
+      }
+    } catch {
+      /* display copy only */
     }
 
     const label = formatPeriodEnd(closesAtIso);
@@ -134,8 +135,7 @@ export async function POST(request: NextRequest) {
       accountClosesAt: closesAtIso,
       message: `Your account is scheduled to close on ${label}. You keep full access until that date. After that, access stops and your data is removed.`,
     });
-  } catch (e: any) {
-    console.error('account/delete schedule:', e);
-    return NextResponse.json({ error: e?.message || 'Failed to schedule deletion' }, { status: 500 });
+  } catch (e: unknown) {
+    return serverError('account/delete schedule', e, 'Failed to schedule deletion. Please try again.');
   }
 }

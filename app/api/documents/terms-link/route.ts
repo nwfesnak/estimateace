@@ -51,6 +51,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, url, token });
   } catch (e: any) {
     console.error('terms-link:', e);
-    return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed' }, { status: 500 });
   }
 }

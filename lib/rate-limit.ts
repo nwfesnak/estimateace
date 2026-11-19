@@ -143,3 +143,49 @@ export function isUsPhoneE164(e164: string | null | undefined): boolean {
   if (!m) return false;
   return !NON_US_NANP_AREA_CODES.has(m[1]);
 }
+
+/** Per-workspace daily caps for paid AI calls (override with env vars). */
+export const AI_LIMITS = {
+  /** Text / vision AI calls (quotes, chat suggestions, translate, receipt scan, website facts). */
+  callsPerAccountPerDay: () => envInt('AI_DAILY_LIMIT_PER_ACCOUNT', 300),
+  /** UI / document translation batches. */
+  translationsPerAccountPerDay: () => envInt('AI_TRANSLATE_DAILY_LIMIT_PER_ACCOUNT', 500),
+  /** AI image renders (most expensive). */
+  rendersPerAccountPerDay: () => envInt('AI_RENDER_DAILY_LIMIT_PER_ACCOUNT', 30),
+  /** Inbound email leads summarized per workspace per day. */
+  inboundEmailsPerAccountPerDay: () => envInt('INBOUND_EMAIL_DAILY_LIMIT_PER_ACCOUNT', 50),
+};
+
+/**
+ * Reserve one paid AI call of `kind` for a workspace today (crew share the owner's
+ * quota — pass the workspace owner id). Returns a 429 response when over the cap.
+ */
+export async function reserveAiQuota(
+  workspaceUserId: string,
+  kind: 'ai' | 'render' | 'translate',
+  cost = 1
+): Promise<NextResponse | null> {
+  if (!workspaceUserId) return null;
+  const max =
+    kind === 'render'
+      ? AI_LIMITS.rendersPerAccountPerDay()
+      : kind === 'translate'
+        ? AI_LIMITS.translationsPerAccountPerDay()
+        : AI_LIMITS.callsPerAccountPerDay();
+  const result = await rateLimit(`ai:${kind}:${workspaceUserId}`, DAY, max, cost);
+  if (result.allowed) return null;
+  return tooManyRequests(
+    result,
+    kind === 'render'
+      ? `Daily AI image limit reached (${max} per day). Try again tomorrow or contact support to raise it.`
+      : kind === 'translate'
+        ? `Daily translation limit reached (${max} per day). Try again tomorrow.`
+        : `Daily AI limit reached (${max} requests per day). Try again tomorrow or contact support to raise it.`
+  );
+}
+
+/** Generic 500 body: log the real error server-side, never return internals to the client. */
+export function serverError(label: string, e: unknown, message = 'Something went wrong. Please try again.'): NextResponse {
+  console.error(`${label}:`, e instanceof Error ? e.message : e);
+  return NextResponse.json({ error: message }, { status: 500 });
+}

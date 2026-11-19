@@ -17,6 +17,8 @@ import {
   resolveUserIdFromRecipients,
   summarizeInboundEmail,
 } from '@/lib/email-inbound';
+import { enforceAppAccess } from '@/lib/billing-access';
+import { AI_LIMITS, rateLimit } from '@/lib/rate-limit';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -133,12 +135,30 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true, matched: false });
     }
 
+    // Only workspaces with an active subscription/trial get AI lead summaries.
+    // Return 200 (not 4xx) so Resend does not keep retrying.
+    const paywall = await enforceAppAccess(userId);
+    if (paywall) {
+      return NextResponse.json({ ok: true, matched: true, skipped: 'no_active_subscription' });
+    }
+    // Per-workspace daily cap: anyone can email a forwarding address, and each one
+    // costs an AI summary.
+    const cap = await rateLimit(
+      `inbound-email:${userId}`,
+      24 * 60 * 60,
+      AI_LIMITS.inboundEmailsPerAccountPerDay()
+    );
+    if (!cap.allowed) {
+      console.warn('inbound email: daily cap reached for workspace', userId.slice(0, 8));
+      return NextResponse.json({ ok: true, matched: true, skipped: 'daily_limit' });
+    }
+
     const { name, email } = parseFromHeader(from);
     const summary = await summarizeInboundEmail({
-      subject,
+      subject: subject.slice(0, 500),
       fromName: name,
       fromEmail: email,
-      bodyText,
+      bodyText: bodyText.slice(0, 20000),
     });
 
     const saved = await appendEmailLeadSummary({
@@ -156,11 +176,8 @@ export async function POST(request: NextRequest) {
       id: saved?.id || null,
     });
   } catch (e: any) {
-    console.error('resend inbound webhook:', e);
-    return NextResponse.json(
-      { error: e?.message || 'Inbound processing failed' },
-      { status: 500 }
-    );
+    console.error('resend inbound webhook:', e?.message || e);
+    return NextResponse.json({ error: 'Inbound processing failed' }, { status: 500 });
   }
 }
 

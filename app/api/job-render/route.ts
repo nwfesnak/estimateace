@@ -3,7 +3,8 @@ import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { getXaiApiKey, getXaiImageModel } from '@/lib/xai-config';
 import { extractMediaStoragePath } from '@/lib/media-url';
-import { enforceAppAccess } from '@/lib/billing-access';
+import { enforceAppAccess, workspaceOwnerId } from '@/lib/billing-access';
+import { reserveAiQuota } from '@/lib/rate-limit';
 
 /** Image edit is slow — needs elevated duration on Vercel */
 export const maxDuration = 120;
@@ -258,6 +259,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    {
+      const quota = await reserveAiQuota(await workspaceOwnerId(user.id), 'render');
+      if (quota) return quota;
+    }
+
     let body: any = {};
     try {
       body = await request.json();
@@ -402,19 +408,7 @@ export async function POST(request: NextRequest) {
       model,
     });
   } catch (err: any) {
-    console.error('[job-render] error:', err);
-    const message = err?.message || 'Could not generate job rendering';
-    return NextResponse.json({ error: message }, { status: 500 });
+    console.error('[job-render] error:', err?.message || err);
+    return NextResponse.json({ error: 'Could not generate job rendering. Please try again.' }, { status: 500 });
   }
-}
-
-/** Quick health check — confirms route is deployed */
-export async function GET() {
-  return NextResponse.json({
-    ok: true,
-    service: 'job-render',
-    hasGrokKey: Boolean(getApiKey()),
-    hasServiceRole: Boolean(getSupabaseAdmin()),
-    model: getXaiImageModel(),
-  });
 }

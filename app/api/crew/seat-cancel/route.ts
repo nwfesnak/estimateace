@@ -83,6 +83,6 @@ export async function POST(request: NextRequest) {
     });
   } catch (e: any) {
     console.error('crew/seat-cancel:', e);
-    return NextResponse.json({ error: e?.message || 'Cancel failed' }, { status: 500 });
+    return NextResponse.json({ error: 'Cancel failed' }, { status: 500 });
   }
 }

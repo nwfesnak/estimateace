@@ -15,6 +15,7 @@ import {
 } from '@/lib/billing';
 import { claimPromoSpot } from '@/lib/promo-spots';
 import { EMAIL_NOT_CONFIRMED_MESSAGE, isEmailConfirmed } from '@/lib/send-guard';
+import { rateLimit, serverError, tooManyRequests } from '@/lib/rate-limit';
 
 /**
  * Called by the /trial page right after signup. Seeds the company profile and
@@ -32,6 +33,13 @@ export async function POST(request: NextRequest) {
     const { user, error } = await getUserFromRequest(request);
     if (!user) {
       return NextResponse.json({ error: error || 'Unauthorized' }, { status: 401 });
+    }
+
+    // Called once by the /trial page after signup. Cap replays (each call can send a
+    // welcome text/email and an owner alert).
+    const replay = await rateLimit(`start-trial:${user.id}`, 24 * 60 * 60, 3);
+    if (!replay.allowed) {
+      return tooManyRequests(replay, 'Too many attempts. Please try again tomorrow or contact support.');
     }
 
     const body = await request.json().catch(() => ({}));
@@ -79,6 +87,15 @@ export async function POST(request: NextRequest) {
       accountClosesAt: existing?.account_closes_at,
       deletionRequestedAt: existing?.deletion_requested_at,
     });
+
+    // Welcome text/email + owner alert only go out when this call creates the
+    // account's first billing record (never for existing / re-used accounts).
+    const firstCreation =
+      !existing ||
+      (!existing.stripe_subscription_id &&
+        !existing.stripe_customer_id &&
+        !existing.trial_ends_at &&
+        (!existing.status || existing.status === 'none'));
 
     const freeOffer = cardFreeOffer(promo);
     let checkoutRequired = false;
@@ -183,7 +200,7 @@ export async function POST(request: NextRequest) {
 
     // Auto welcome email + SMS with walkthrough video (no CRM). Once per account.
     let welcomeOnboarding: unknown = null;
-    try {
+    if (firstCreation) try {
       const { maybeSendAndPersistWelcomeOnboarding } = await import('@/lib/welcome-onboarding');
       welcomeOnboarding = await maybeSendAndPersistWelcomeOnboarding({
         admin,
@@ -199,7 +216,7 @@ export async function POST(request: NextRequest) {
 
     // Email + text the platform owner once. Separate from the contractor welcome.
     let ownerSignupAlert: unknown = null;
-    try {
+    if (firstCreation) try {
       const { maybeSendOwnerSignupAlert } = await import('@/lib/owner-signup-alert');
       ownerSignupAlert = await maybeSendOwnerSignupAlert({
         admin,
@@ -226,8 +243,7 @@ export async function POST(request: NextRequest) {
       welcomeOnboarding,
       ownerSignupAlert,
     });
-  } catch (e: any) {
-    console.error('start-trial:', e);
-    return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 });
+  } catch (e: unknown) {
+    return serverError('start-trial', e, 'Could not start your trial. Please try again.');
   }
 }

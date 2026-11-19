@@ -124,6 +124,6 @@ export async function GET(request: NextRequest) {
     });
   } catch (e: any) {
     console.error('crew/me:', e);
-    return NextResponse.json({ error: e?.message || 'Lookup failed' }, { status: 500 });
+    return NextResponse.json({ error: 'Lookup failed' }, { status: 500 });
   }
 }

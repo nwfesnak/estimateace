@@ -68,6 +68,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true });
   } catch (e: any) {
     console.error('support/contact:', e);
-    return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed' }, { status: 500 });
   }
 }

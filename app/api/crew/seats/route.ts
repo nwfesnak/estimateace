@@ -59,6 +59,6 @@ export async function GET(request: NextRequest) {
     });
   } catch (e: any) {
     console.error('crew/seats:', e);
-    return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed' }, { status: 500 });
   }
 }
