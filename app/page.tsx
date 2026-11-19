@@ -1157,6 +1157,8 @@ export default function Home() {
   const freshDocumentRef = useRef(false);
   /** Latest invoice send time, so a save that starts before React re-renders still keeps the mark. */
   const invoiceSentAtRef = useRef<string | null>(null);
+  /** Last "include on customer page" choice from Send (photos / renderings); null = default show. */
+  const clientMediaShareRef = useRef<{ photos: boolean; renderings: boolean } | null>(null);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const profileAutoSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const quickLinesProfileSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1557,6 +1559,8 @@ export default function Home() {
         }
       : {}),
     ...(invoiceSentAt ? { _invoiceSentAt: invoiceSentAt } : {}),
+    // What the customer approve page may show (set from the Send dialog toggles)
+    ...(clientMediaShareRef.current ? { _clientMedia: clientMediaShareRef.current } : {}),
   });
 
   // Payment modal states
@@ -3297,6 +3301,7 @@ export default function Home() {
     setEmails(['']);
     setTerms('');
     setPhotoUrls([]);
+    clientMediaShareRef.current = null;
     setVideoUrls([]);
     setReceiptUrls([]);
     setReceiptDetails([]);
@@ -4902,6 +4907,13 @@ export default function Home() {
     setAmountPaid(est.amountPaid || 0);
     setPaymentMethod(est.paymentMethod || '');
     setPhotoUrls(est.photoUrls || []);
+    {
+      const cm = est.profile?._clientMedia;
+      clientMediaShareRef.current =
+        cm && typeof cm === 'object'
+          ? { photos: cm.photos !== false, renderings: cm.renderings !== false }
+          : null;
+    }
     setPhotosFolderOpen(false);
     setVideoUrls(est.videoUrls || []);
     setReceiptUrls(est.receiptUrls || []);
@@ -5255,6 +5267,7 @@ export default function Home() {
     setJobName(''); setAddress(''); setCity(''); setState(''); setZipCode('');
     setPhones(['']); setEmails(['']); setTerms('');
     setPhotoUrls([]); setVideoUrls([]); setReceiptUrls([]); setReceiptDetails([]); setJobMileageLogs([]);
+    clientMediaShareRef.current = null;
     setJobRenderings([]);
     setJobRenderSourcePath('');
     setJobRenderLineId(null);
@@ -19014,7 +19027,11 @@ export default function Home() {
                       )
                     : [];
 
-                  // Persist last share choices on the document for future reference
+                  // Persist last share choices on the document (also gates the customer approve page)
+                  clientMediaShareRef.current = {
+                    photos: sendIncludeSitePhotos,
+                    renderings: getAiJobRenderingEnabled() && sendIncludeJobRenderings,
+                  };
                   void saveToDB({
                     quiet: true,
                     jobRenderings,

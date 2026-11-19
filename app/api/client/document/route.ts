@@ -4,6 +4,7 @@ import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { isMediaPdfRef } from '@/lib/media-url';
 import { ownedMediaPath } from '@/lib/storage-paths';
 import { readEstimateApproval } from '@/lib/estimate-approval';
+import { planClientMedia, signClientMedia, type ClientMediaPayload } from '@/lib/client-media';
 import {
   includedItemsSubtotal,
   isClientSelectedOption,
@@ -115,6 +116,7 @@ export async function GET(request: NextRequest) {
     }
 
     let profile = (row.profile || {}) as any;
+    let settingsProfile: Record<string, unknown> | null = null;
     // Merge latest company payment settings from SETTINGS so pay link shows all enabled methods
     try {
       const { data: settingsRow } = await admin
@@ -123,6 +125,7 @@ export async function GET(request: NextRequest) {
         .eq('id', `SETTINGS-${uid}`)
         .maybeSingle();
       const sp = (settingsRow?.profile || {}) as any;
+      if (sp && typeof sp === 'object') settingsProfile = sp;
       if (sp && typeof sp === 'object') {
         const { mergeFilledPaymentSettings } = await import('@/lib/client-payment-options');
         profile = {
@@ -244,9 +247,24 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // Site photos + before/after concept renderings for THIS document only (owner folder,
+    // short-lived signed URLs; storage paths never leave the server).
+    let media: ClientMediaPayload = { photos: [], renderings: [], expiresAt: null };
+    try {
+      const plan = planClientMedia(row, uid, settingsProfile);
+      media = await signClientMedia(plan, async (paths, ttl) => {
+        const { data, error } = await admin.storage.from('media').createSignedUrls(paths, ttl);
+        if (error) throw error;
+        return data as Array<{ path: string | null; signedUrl: string | null; error?: unknown }>;
+      });
+    } catch (e: unknown) {
+      console.warn('client/document media:', (e as Error)?.message || e);
+    }
+
     return NextResponse.json({
       ok: true,
       fromDb: true,
+      media,
       documentType: due.documentType,
       invoiceNumber,
       jobName: row.jobName || row.jobname || 'Your project',
@@ -302,7 +320,7 @@ export async function GET(request: NextRequest) {
         optional: isOptionalLine(it),
         clientSelected: isClientSelectedOption(it),
       })),
-    });
+    }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (e: any) {
     console.error('client/document:', e);
     return NextResponse.json({ error: 'Failed to load' }, { status: 500 });
