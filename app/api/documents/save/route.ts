@@ -50,9 +50,36 @@ export async function POST(request: NextRequest) {
       /* crew table optional */
     }
 
-    // Never allow writing as another user unless crew-of relationship
-    if (body.user_id && body.user_id !== workspaceUserId && body.user_id !== user.id) {
-      // ignore client-supplied user_id spoof
+    // Reserved server-managed rows can never be written through this endpoint.
+    if (/^(SETTINGS-|RECEPTIONIST-SECRETS-|PLATFORM-)/i.test(id)) {
+      return NextResponse.json({ error: 'Reserved document id.' }, { status: 400 });
+    }
+
+    // Ownership check: document ids are primary keys shared by every account, so an
+    // existing row with this id must already belong to this workspace. Otherwise we
+    // would overwrite (and take over) another contractor's document.
+    let ownsExisting = false;
+    {
+      const { data: existingRow, error: existingErr } = await admin
+        .from('estimates')
+        .select('user_id')
+        .eq('id', id)
+        .maybeSingle();
+      if (existingErr) {
+        console.error('documents/save ownership check:', existingErr);
+        return NextResponse.json({ error: 'Could not verify document ownership.' }, { status: 500 });
+      }
+      if (existingRow && String(existingRow.user_id) !== String(workspaceUserId)) {
+        return NextResponse.json(
+          {
+            error:
+              'That document number is already used by another account. Start a new estimate to get a fresh number.',
+            code: 'document_id_taken',
+          },
+          { status: 409 }
+        );
+      }
+      ownsExisting = Boolean(existingRow);
     }
 
     const input: EstimateSaveInput = {
@@ -99,7 +126,39 @@ export async function POST(request: NextRequest) {
 
     const errors: string[] = [];
     for (const attempt of attempts) {
-      const { error } = await admin.from('estimates').upsert(attempt.row, { onConflict: 'id' });
+      // Update only our own row; insert (never upsert) new ids so a concurrent insert of
+      // the same id by another account fails instead of being overwritten.
+      const writeRow = () =>
+        ownsExisting
+          ? admin
+              .from('estimates')
+              .update(attempt.row)
+              .eq('id', id)
+              .eq('user_id', workspaceUserId)
+          : admin.from('estimates').insert(attempt.row);
+      let { error } = await writeRow();
+      if (error && (error as { code?: string }).code === '23505') {
+        // Lost an insert race: fine if the row that won is ours (double-tap Save).
+        const { data: winner } = await admin
+          .from('estimates')
+          .select('user_id')
+          .eq('id', id)
+          .maybeSingle();
+        if (winner && String(winner.user_id) === String(workspaceUserId)) {
+          ownsExisting = true;
+          ({ error } = await writeRow());
+        }
+      }
+      if (error && (error as { code?: string }).code === '23505') {
+        return NextResponse.json(
+          {
+            error:
+              'That document number is already used by another account. Start a new estimate to get a fresh number.',
+            code: 'document_id_taken',
+          },
+          { status: 409 }
+        );
+      }
       if (!error) {
         return NextResponse.json({
           ok: true,

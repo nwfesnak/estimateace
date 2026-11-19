@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { clientIp, rateLimit } from '@/lib/rate-limit';
 import { getXaiApiKey, getXaiChatModel } from '@/lib/xai-config';
 import { MARKETING_FALLBACK, MARKETING_KNOWLEDGE } from '@/lib/marketing-knowledge';
 import { sendEmailNotification } from '@/lib/notifications';
@@ -13,9 +14,6 @@ const ALLOWED_ORIGINS = new Set([
   'http://127.0.0.1:3000',
 ]);
 
-const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
-const RATE_LIMIT = 20;
-const WINDOW_MS = 60 * 60 * 1000;
 
 function corsHeaders(origin: string | null): HeadersInit {
   // Reflect only allowlisted origins — never "*" and never a foreign Origin.
@@ -29,17 +27,6 @@ function corsHeaders(origin: string | null): HeadersInit {
   return headers;
 }
 
-function checkRateLimit(id: string) {
-  const now = Date.now();
-  const entry = rateLimitMap.get(id);
-  if (!entry || now > entry.resetTime) {
-    rateLimitMap.set(id, { count: 1, resetTime: now + WINDOW_MS });
-    return true;
-  }
-  if (entry.count >= RATE_LIMIT) return false;
-  entry.count += 1;
-  return true;
-}
 
 function supportInbox(): string {
   return (
@@ -76,11 +63,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Origin not allowed' }, { status: 403, headers });
     }
 
-    const ip =
-      request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-      request.headers.get('x-real-ip') ||
-      'unknown';
-    if (!checkRateLimit(`mkt-chat:${ip}`)) {
+    const ip = clientIp(request);
+    const perIp = await rateLimit(`mkt-chat:ip:${ip}`, 60 * 60, 20);
+    const global = perIp.allowed ? await rateLimit('mkt-chat:global', 24 * 60 * 60, 2000) : perIp;
+    if (!perIp.allowed || !global.allowed) {
       return NextResponse.json(
         { error: 'Too many messages. Please try again later.' },
         { status: 429, headers }

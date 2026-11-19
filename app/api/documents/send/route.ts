@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { sendEmailNotification, sendSmsNotification } from '@/lib/notifications';
+import { guardUserSends } from '@/lib/send-guard';
 import { createClientActionToken } from '@/lib/client-action-token';
 import { getAppUrl } from '@/lib/stripe-server';
 import { isClientSelectedOption, isOptionalLine } from '@/lib/optional-line-items';
@@ -138,6 +139,21 @@ export async function POST(request: NextRequest) {
       } catch {
         /* optional */
       }
+    }
+
+    // Abuse guard: confirmed email, sane recipient count, per-account daily quotas.
+    if (emails.length > 10 || phones.length > 5) {
+      return NextResponse.json(
+        { error: 'Too many recipients. Send to at most 10 emails and 5 phone numbers at a time.' },
+        { status: 400 }
+      );
+    }
+    {
+      const denied = await guardUserSends(user, ownerUserId, {
+        email: emails.length,
+        sms: phones.length,
+      });
+      if (denied) return denied;
     }
 
     // Certificate of Insurance — show email button only if contractor has one uploaded

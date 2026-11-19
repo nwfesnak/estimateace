@@ -1,6 +1,11 @@
 import { createHash, createHmac, randomInt, timingSafeEqual } from 'crypto';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { formatPhoneE164, sendSmsNotification } from '@/lib/notifications';
+import { rateLimit } from '@/lib/rate-limit';
+
+function isDeployed(): boolean {
+  return process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL);
+}
 
 const OTP_TTL_MS = 10 * 60 * 1000;
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // skip re-SMS for 12h after verify
@@ -129,8 +134,12 @@ export async function storeLoginOtp(userId: string, code: string): Promise<void>
       { onConflict: 'user_id' }
     );
     if (!error) return;
-    // Table may not exist yet — fall through to memory
-    console.warn('login_otp upsert failed (using memory store):', error.message);
+    // Never fall back to per-instance memory in production: codes would randomly fail
+    // across serverless instances. Run supabase/security-hardening-2026-11.sql.
+    if (isDeployed()) throw new Error(`login_otp unavailable: ${error.message}`);
+    console.warn('login_otp upsert failed (dev memory store):', error.message);
+  } else if (isDeployed()) {
+    throw new Error('Server missing SUPABASE_SERVICE_ROLE_KEY for login codes.');
   }
 
   memoryStore().set(userId, {
@@ -147,6 +156,12 @@ export async function verifyLoginOtp(
   const clean = String(code || '').replace(/\D/g, '').slice(0, 6);
   if (clean.length !== 6) {
     return { ok: false, error: 'Enter the 6-digit code from your text message.' };
+  }
+
+  // Shared limit across resends so "Resend code" can't be used to keep guessing.
+  const verifyLimit = await rateLimit(`2fa-verify:${userId}`, 60 * 60, 15);
+  if (!verifyLimit.allowed) {
+    return { ok: false, error: 'Too many attempts. Wait an hour and try again.' };
   }
 
   const admin = getSupabaseAdmin();
@@ -179,6 +194,11 @@ export async function verifyLoginOtp(
       await admin.from('login_otp').delete().eq('user_id', userId);
       return { ok: true };
     }
+    if (isDeployed()) {
+      return { ok: false, error: error ? 'Could not check the code. Try again.' : 'No code found. Tap Resend code.' };
+    }
+  } else if (isDeployed()) {
+    return { ok: false, error: 'Could not check the code. Try again.' };
   }
 
   const mem = memoryStore().get(userId);
@@ -206,8 +226,17 @@ export async function verifyLoginOtp(
 }
 
 export async function sendLoginOtpSms(userId: string, phone: string): Promise<{ ok: boolean; error?: string; phoneMasked?: string }> {
-  const code = String(randomInt(100000, 999999));
-  await storeLoginOtp(userId, code);
+  const sendLimit = await rateLimit(`2fa-send:${userId}`, 60 * 60, 5);
+  if (!sendLimit.allowed) {
+    return { ok: false, error: 'Too many codes requested. Wait a bit and try again.' };
+  }
+  const code = String(randomInt(100000, 1000000));
+  try {
+    await storeLoginOtp(userId, code);
+  } catch (e: unknown) {
+    console.error('login otp store:', e instanceof Error ? e.message : e);
+    return { ok: false, error: 'Could not create a login code. Try again shortly.' };
+  }
   const body = `EstimateAce login code: ${code}. Valid 10 minutes. If you did not try to sign in, ignore this message.`;
   const sms = await sendSmsNotification(phone, body, { skipOptInCheck: true });
   if (!sms.ok) {

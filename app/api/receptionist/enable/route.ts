@@ -11,6 +11,7 @@ import { provisionContractorReceptionistLine } from '@/lib/twilio-receptionist-p
 import {
   loadReceptionistBilling,
   receptionistAddonHasAccess,
+  syncReceptionistAddonForUser,
   RECEPTIONIST_ADDON_AMOUNT_DISPLAY,
 } from '@/lib/receptionist-billing';
 import { enforceAppAccess } from '@/lib/billing-access';
@@ -39,8 +40,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const billing = await loadReceptionistBilling(user.id);
-    if (!receptionistAddonHasAccess(billing)) {
+    // Entitlement: server-only billing record (Stripe webhook). If it isn't active yet
+    // (webhook lag right after checkout), confirm directly with Stripe before refusing.
+    let entitled = receptionistAddonHasAccess(await loadReceptionistBilling(user.id));
+    if (!entitled) {
+      try {
+        entitled = (await syncReceptionistAddonForUser(user.id)).active;
+      } catch (e) {
+        console.warn('receptionist/enable: Stripe sync failed', e);
+      }
+    }
+    if (!entitled) {
       return NextResponse.json(
         {
           error: `AI Receptionist is a paid add-on (${RECEPTIONIST_ADDON_AMOUNT_DISPLAY}/mo). Confirm payment first, then enable your phone line.`,

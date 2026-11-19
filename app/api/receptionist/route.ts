@@ -47,7 +47,6 @@ export async function GET(request: NextRequest) {
     }
     const admin = getSupabaseAdmin();
     let businessName = '';
-    let profilePaid = false;
     if (admin) {
       const { data } = await admin
         .from('estimates')
@@ -56,17 +55,11 @@ export async function GET(request: NextRequest) {
         .maybeSingle();
       const profile = (data?.profile || {}) as any;
       businessName = String(profile.company || '');
-      profilePaid = profile.aiReceptionistAddonActive === true;
     }
     const config = await loadReceptionistConfig(user.id, businessName);
     let billing = await loadReceptionistBilling(user.id);
-    const billingStatus = String(billing.status || '').toLowerCase();
-    const billingEnded =
-      (billingStatus === 'canceled' ||
-        billingStatus === 'unpaid' ||
-        billingStatus === 'incomplete_expired') &&
-      !(billing.currentPeriodEnd && new Date(billing.currentPeriodEnd).getTime() > Date.now());
-    let addonActive = receptionistAddonHasAccess(billing) || (profilePaid && !billingEnded);
+    // Entitlement only from server-only storage (Stripe webhook / Stripe sync).
+    let addonActive = receptionistAddonHasAccess(billing);
 
     // After Stripe pay, webhook can lag — sync from Stripe so UI shows Subscribed.
     // An existing phone number is not a subscription. Unpaid accounts must still be able to pay.
@@ -74,11 +67,7 @@ export async function GET(request: NextRequest) {
       try {
         const synced = await syncReceptionistAddonForUser(user.id);
         billing = synced.billing || billing;
-        const status = String(billing.status || '').toLowerCase();
-        const ended =
-          (status === 'canceled' || status === 'unpaid' || status === 'incomplete_expired') &&
-          !(billing.currentPeriodEnd && new Date(billing.currentPeriodEnd).getTime() > Date.now());
-        addonActive = synced.active || (profilePaid && !ended);
+        addonActive = synced.active;
       } catch (e) {
         console.warn('receptionist GET sync:', e);
       }
@@ -141,29 +130,19 @@ export async function PATCH(request: NextRequest) {
             ? String(body.publicBusinessNumber)
             : current.publicBusinessNumber,
         afterHours: body.afterHours || current.afterHours,
-        twilio:
-          body.phoneNumber !== undefined && current.twilio
-            ? {
-                ...current.twilio,
-                phoneNumber: String(body.phoneNumber || '').trim(),
-              }
-            : current.twilio,
+        // The AI line is assigned by the server (receptionist_accounts) and can't be edited here.
+        twilio: current.twilio,
       },
       user.id,
       current.branding.businessName
     );
 
     if (body.phoneNumber !== undefined) {
-      const editedLine = String(body.phoneNumber || '').trim();
-      if (!editedLine) {
+      const edited = String(body.phoneNumber || '').replace(/\D/g, '');
+      const assigned = String(current.twilio?.phoneNumber || '').replace(/\D/g, '');
+      if (edited && edited !== assigned) {
         return NextResponse.json(
-          { error: 'Enter the private AI line number calls should forward to.' },
-          { status: 400 }
-        );
-      }
-      if (!current.twilio) {
-        return NextResponse.json(
-          { error: 'No AI phone line yet. Enable the receptionist line first.' },
+          { error: 'The AI line number is assigned by EstimateAce and cannot be changed here.' },
           { status: 400 }
         );
       }

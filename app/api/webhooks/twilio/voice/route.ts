@@ -15,7 +15,7 @@ import { receptionistScreeningFlags } from '@/lib/ai-receptionist';
 import { isCallerBlocked } from '@/lib/receptionist-blocklist';
 import { readTwilioParams, verifyTwilioWebhook } from '@/lib/twilio-webhook-auth';
 import { formatPhoneE164 } from '@/lib/notifications';
-import { receptionistAddonHasAccess } from '@/lib/receptionist-billing';
+import { loadReceptionistBilling, receptionistAddonHasAccess } from '@/lib/receptionist-billing';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
@@ -103,10 +103,10 @@ export async function POST(request: NextRequest) {
       if (typeof ai.enabled === 'boolean') classicEnabled = ai.enabled;
       companyName = String(profile.company || '').trim();
       screening = receptionistScreeningFlags(ai);
-      addonActive =
-        profile.aiReceptionistAddonActive === true ||
-        receptionistAddonHasAccess(profile.receptionistBilling);
     }
+    // Entitlement comes only from server-only storage written by Stripe webhooks/sync
+    // (never from the user-editable SETTINGS row).
+    addonActive = receptionistAddonHasAccess(await loadReceptionistBilling(tenant.userId));
 
     if (from && (await isCallerBlocked(tenant.userId, from))) {
       console.info('twilio voice: blocked caller rejected', {
@@ -119,12 +119,25 @@ export async function POST(request: NextRequest) {
     const hasAiLine = Boolean(tenant.config.twilio?.phoneNumber);
     const explicitlyOff = classicEnabled === false;
     const aiSettingsEnabled =
+      addonActive &&
+      hasAiLine &&
       !explicitlyOff &&
       (classicEnabled === true ||
         tenant.config.enabled === true ||
-        (classicEnabled !== false &&
-          hasAiLine &&
-          (addonActive || tenant.config.status === 'active')));
+        tenant.config.status === 'active');
+
+    if (!addonActive) {
+      // Add-on not paid (or lapsed): don't run AI and don't keep forwarding on our Twilio bill.
+      console.info('twilio voice: receptionist add-on inactive', {
+        callSid,
+        contractorId: tenant.userId,
+      });
+      return twimlXmlResponse(
+        sayHangupTwiml(
+          'Thanks for calling. This line is not available right now. Please call the business directly.'
+        )
+      );
+    }
 
     const aiLine = tenant.config.twilio?.phoneNumber || to;
 

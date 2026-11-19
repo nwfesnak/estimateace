@@ -200,6 +200,9 @@ function TrialForm() {
         email: trimmedEmail,
         password,
         options: {
+          // Used when Supabase email confirmation is on: the link returns to the app,
+          // which then shows the card step (standard/2-month) or starts the 6-month trial.
+          emailRedirectTo: `${window.location.origin}/?plan=${plan}${promo ? `&promo=${encodeURIComponent(promo)}` : ''}`,
           data: {
             company: trimmedCompany,
             full_name: trimmedName,
@@ -511,6 +514,12 @@ function TrialForm() {
                   ? `Continue to add card · ${trialLabel} free trial`
                   : `Start ${trialLabel} free trial`}
           </button>
+          {cardRequired && (
+            <p className="text-center text-xs text-slate-600" data-testid="auto-renew-disclosure">
+              <strong>Card required.</strong> You&apos;ll be charged {planPrice} after your{' '}
+              {trialDays}-day trial unless you cancel. Renews automatically until canceled.
+            </p>
+          )}
 
           <p className="text-center text-sm text-slate-500">
             Already have an account?{' '}

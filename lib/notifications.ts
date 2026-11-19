@@ -221,6 +221,19 @@ export async function sendSmsNotification(
     return { ok: false, error: `Invalid phone number: ${phone}` };
   }
 
+  // US numbers only (blocks international / Caribbean SMS-pumping destinations).
+  const { isUsPhoneE164, rateLimit, SEND_LIMITS } = await import('@/lib/rate-limit');
+  if (!isUsPhoneE164(to)) {
+    return { ok: false, error: 'Text messages can only be sent to US phone numbers.', to };
+  }
+
+  // Platform-wide daily safety valve on our Twilio bill.
+  const globalCap = await rateLimit('send:sms:global', 24 * 60 * 60, SEND_LIMITS.smsGlobalPerDay());
+  if (!globalCap.allowed) {
+    console.error('SMS global daily cap reached; refusing send');
+    return { ok: false, error: 'Text messaging is temporarily paused. Please try again later.', to };
+  }
+
   // Respect STOP except for OTP, HELP/STOP replies, and double-opt-in prompts.
   // Missing row (null) = legacy / not tracked yet — allow transactional send.
   if (!options?.skipOptInCheck) {

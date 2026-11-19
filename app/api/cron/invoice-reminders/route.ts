@@ -38,7 +38,6 @@ function escapeHtml(s: string) {
 export async function GET(request: NextRequest) {
   const cronSecret = (process.env.CRON_SECRET || '').trim();
   const authHeader = request.headers.get('authorization');
-  const isVercelCron = request.headers.get('x-vercel-cron') === '1';
 
   if (!cronSecret) {
     if (process.env.NODE_ENV === 'production' || process.env.VERCEL) {
@@ -47,7 +46,9 @@ export async function GET(request: NextRequest) {
         { status: 503 }
       );
     }
-  } else if (authHeader !== `Bearer ${cronSecret}` && !isVercelCron) {
+  } else if (authHeader !== `Bearer ${cronSecret}`) {
+    // Vercel Cron sends Authorization: Bearer $CRON_SECRET. The x-vercel-cron header is
+    // not trusted because anyone can send it.
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

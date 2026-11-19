@@ -17,7 +17,7 @@ export default function TermsPage() {
           </Link>
         </p>
         <h1>Terms of Service</h1>
-        <p className="text-sm text-slate-500">Last updated: November 18, 2026</p>
+        <p className="text-sm text-slate-500">Last updated: November 19, 2026</p>
 
         <p>
           These Terms govern your use of EstimateAce (&quot;Service&quot;), a software platform for
@@ -36,11 +36,24 @@ export default function TermsPage() {
 
         <h2>2. Subscription &amp; free trial</h2>
         <p>
-          New accounts start with a free trial. No payment card is required to start the trial.
-          When the trial ends, you must subscribe to a paid plan (currently $29.99 per month or $249
-          per year, plus any applicable taxes) to keep using the Service. If you subscribe before
-          your trial ends, your first charge happens when the trial would have ended. Subscriptions
-          renew automatically at the end of each billing period until canceled. Optional add-ons
+          Paid plans currently cost $29.99 per month or $249 per year, plus any applicable taxes.
+        </p>
+        <p>
+          <strong>Standard (14-day) and 2-month free trials: a payment card is required.</strong>{' '}
+          You add a card through our payment processor, Stripe, before the trial starts. You are not
+          charged during the trial. <strong>When the trial ends, your card is automatically charged
+          for the plan you chose ($29.99 per month or $249 per year) unless you cancel before the
+          trial ends</strong>, and the subscription then renews automatically at the end of each
+          billing period until you cancel. You can cancel at any time before the trial ends (see
+          Section 2A) and you will not be charged.
+        </p>
+        <p>
+          <strong>6-month promotional trial (limited offer): no card is required.</strong> When that
+          trial ends, you must subscribe to a paid plan to keep using the Service; you are not charged
+          unless you subscribe.
+        </p>
+        <p>
+          Subscriptions renew automatically at the end of each billing period until canceled. Optional add-ons
           (such as crew seats and AI Receptionist) are billed separately at the prices shown in the
           app. Subscription fees are charged through our payment processor, Stripe. We may change
           prices with advance notice; changes apply from your next billing period.
