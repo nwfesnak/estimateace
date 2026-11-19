@@ -49,6 +49,41 @@ export function getSupabaseConfigHelpMessage(): string {
   return `Supabase is not configured (missing ${missing.join(' and ')}). Add them in ${where}. Copy URL + anon key from Supabase → Project Settings → API.`;
 }
 
+/**
+ * Restricted crew (missing "See pricing" or "See estimates & financials") cannot read
+ * the owner's documents directly — RLS blocks it. When enabled, this client sends
+ * their `estimates` / `archive-est` requests to /api/crew/data/*, which applies the
+ * crew member's access level server-side. Owners and fully-permitted crew are unaffected.
+ */
+let crewDataProxyEnabled = false;
+export function setCrewDataProxy(enabled: boolean): void {
+  crewDataProxyEnabled = enabled;
+}
+
+const CREW_PROXIED_TABLE = /^\/rest\/v1\/(estimates|archive-est)\/?$/;
+
+const crewAwareFetch: typeof fetch = (input, init) => {
+  if (crewDataProxyEnabled && typeof window !== 'undefined') {
+    try {
+      const rawUrl =
+        typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url;
+      const url = new URL(rawUrl);
+      const supabaseOrigin = new URL(getSupabaseUrl()).origin;
+      const m = url.origin === supabaseOrigin ? url.pathname.match(CREW_PROXIED_TABLE) : null;
+      if (m) {
+        const target = `${window.location.origin}/api/crew/data/${m[1]}${url.search}`;
+        if (typeof input !== 'string' && !(input instanceof URL)) {
+          return fetch(new Request(target, input as Request), init);
+        }
+        return fetch(target, init);
+      }
+    } catch {
+      /* fall through to a normal request */
+    }
+  }
+  return fetch(input, init);
+};
+
 export function getSupabaseClient(): SupabaseClient | null {
   const url = getSupabaseUrl();
   const key = getSupabaseAnonKey();
@@ -62,6 +97,7 @@ export function getSupabaseClient(): SupabaseClient | null {
         detectSessionInUrl: true,
         storageKey: 'estimateace-auth',
       },
+      global: { fetch: crewAwareFetch },
     });
   }
 

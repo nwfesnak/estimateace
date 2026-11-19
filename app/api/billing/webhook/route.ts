@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import type Stripe from 'stripe';
 import { getStripe } from '@/lib/stripe-server';
+import { handleDisputeEvent } from '@/lib/stripe-disputes';
 import { upsertSubscriptionFromStripe } from '@/lib/billing-sync';
 import { markDocumentPaidFromJobCheckout } from '@/lib/job-payments';
 import { markRecurringActiveFromCheckout } from '@/lib/recurring-services';
@@ -174,6 +175,13 @@ export async function POST(request: NextRequest) {
         if (!result.ok) console.error('webhook invoice upsert:', result.error);
         break;
       }
+      case 'charge.dispute.created':
+      case 'charge.dispute.closed': {
+        // Record once per dispute id and alert the EstimateAce owner.
+        await handleDisputeEvent(stripe, event, 'platform');
+        break;
+      }
+
       default:
         break;
     }
