@@ -12,6 +12,7 @@ import {
   getPaymentAccount,
 } from '@/lib/job-payments';
 import { createClientActionToken, verifyClientActionToken } from '@/lib/client-action-token';
+import { todayDateKey } from '@/lib/local-date';
 
 export type RecurringInterval = 'week' | 'month' | 'year';
 export type RecurringStatus =
@@ -197,7 +198,7 @@ function planToRow(plan: Partial<RecurringPlan> & { id: string; user_id: string 
       : Array.isArray(existing?.emails)
         ? existing.emails
         : [],
-    date: existing?.date || new Date().toISOString().slice(0, 10),
+    date: existing?.date || todayDateKey(),
     invoiceNumber: plan.id,
     items: [
       {
