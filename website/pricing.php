@@ -58,7 +58,7 @@ $savings = round($monthly * 12 - $annual, 2);
   <div class="container cards-2">
     <article class="card"><h3>Is there a free trial?</h3><p>Log in at app.estimateace.com to explore. Contact support for extended trial options.</p></article>
     <article class="card"><h3>Are SMS/email included?</h3><p>The software is included. Twilio and Resend usage fees are billed by those providers separately.</p></article>
-    <article class="card"><h3>Do I need a card for the trial?</h3><p>Yes, for the standard 14-day and 2-month trials. You add a card at signup but aren't charged until the trial ends, and you can cancel anytime before then to pay nothing. The 6-month offer needs no card, but it is limited to the first 20 signups.</p></article>
+    <article class="card"><h3>When am I charged?</h3><p>Not during your free trial. On the standard 14-day and 2-month trials you aren't charged until the trial ends, and you can cancel anytime before then to pay nothing. The 6-month offer is limited to the first 20 signups.</p></article>
     <article class="card"><h3>Cancellation &amp; refunds</h3><p>Cancel anytime in the app under Profile → Billing → Manage billing. You keep access through the end of the period you paid for. We don't give refunds for partial months or years, except where required by law. See our <a href="https://app.estimateace.com/terms#cancellation">Terms</a>.</p></article>
     <article class="card"><h3>Per-user pricing?</h3><p>Main account included. Additional crew accounts may be billed as you add team members in-app.</p></article>
     <article class="card"><h3>Payment processing fees?</h3><p>Third-party processors charge their own rates. EstimateAce does not take a cut of your transactions.</p></article>
