@@ -41,14 +41,18 @@ export default function DeleteAccountPage() {
 
         <h2>What gets deleted</h2>
         <p>
-          Your EstimateAce login and the business data stored in your account, such as your company
-          profile, customers, estimates and invoices. Any EstimateAce subscription is stopped.
+          Everything in your account: your login, company profile and settings, customers, jobs,
+          estimates, invoices (including archived ones), receipts, photos, videos and other files,
+          AI Receptionist settings, phone number, call logs and messages, crew logins you created
+          (and their access), and the link to your Stripe payout account. Any EstimateAce
+          subscription, crew seat or add-on is canceled.
         </p>
 
         <h2>What we keep</h2>
         <p>
-          Payment and tax records that the law requires us to keep (handled by Stripe), and
-          basic records of past payments your customers made to you, kept only as long as required.
+          Only what the law or payment networks require: billing and tax records at Stripe, payment
+          dispute records (with your account link removed), and SMS opt-in / opt-out consent records
+          for phone numbers. Routine backups roll off within about 30 days.
         </p>
 
         <h2>Can&apos;t log in?</h2>

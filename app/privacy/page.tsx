@@ -17,11 +17,11 @@ export default function PrivacyPage() {
           </Link>
         </p>
         <h1>Privacy Policy</h1>
-        <p className="text-sm text-slate-500">Last updated: September 14, 2026</p>
+        <p className="text-sm text-slate-500">Last updated: November 19, 2026</p>
 
         <p>
           This Privacy Policy explains how EstimateAce (&quot;we&quot;, &quot;us&quot;) collects and
-          uses information when you use our web application and related services.
+          uses information when you use our web application, our iPhone (iOS) and Android apps, and related services (together, the &quot;Service&quot;).
         </p>
 
         <h2>1. Information we collect</h2>
@@ -123,11 +123,41 @@ export default function PrivacyPage() {
           <Link href="/terms">Terms of Service</Link>.
         </p>
 
-        <h2>6. Retention</h2>
+        <h2>5B. iPhone and Android apps</h2>
+        <ul>
+          <li>
+            The apps open the same EstimateAce service as the website and store your data in the same
+            account. They do not use advertising identifiers and do not track you across other
+            companies&apos; apps or websites; the advertising pixel used on our website is not loaded
+            in the apps.
+          </li>
+          <li>
+            <strong>Camera, microphone and photos</strong> are used only when you choose to take or
+            attach job photos, videos or receipts. You can turn these permissions off at any time in
+            your phone&apos;s Settings.
+          </li>
+          <li>
+            Links to payment pages (Stripe), maps and other websites open in your phone&apos;s browser
+            and are covered by those sites&apos; own policies.
+          </li>
+        </ul>
+
+        <h2>6. Retention and account deletion</h2>
         <p>
           We retain account and job data while your account is active and as needed for backups,
-          legal, and security purposes. You may request deletion of your account by contacting
-          support.
+          legal, and security purposes.
+        </p>
+        <p>
+          <strong>Deleting your account:</strong> in the website or the iPhone / Android app, open
+          Profile → Billing → Manage billing → Delete account (instructions:{' '}
+          <Link href="/delete-account">app.estimateace.com/delete-account</Link>). Renewals stop right
+          away and you keep access until the end of the period you already paid for (or your trial).
+          Then we permanently delete your login, company profile, customers, estimates, invoices,
+          jobs, receipts, photos, videos and other files, AI Receptionist settings, phone number,
+          call logs and messages, crew logins you created, and your link to your Stripe payout
+          account. We keep only what the law or payment networks require: billing and tax records at
+          Stripe, payment dispute records (with your account link removed), and SMS opt-in / opt-out
+          consent records for phone numbers. Routine backups roll off within about 30 days.
         </p>
 
         <h2>7. Security</h2>
@@ -142,7 +172,8 @@ export default function PrivacyPage() {
           <li>Update profile and job data in the app</li>
           <li>Manage or cancel subscription via Stripe customer portal when available</li>
           <li>
-            Contact <a href={`mailto:${SUPPORT}`}>{SUPPORT}</a> for access or deletion requests
+            Delete your account in the app or on the web (see section 6), or contact{' '}
+            <a href={`mailto:${SUPPORT}`}>{SUPPORT}</a> for access or deletion requests
           </li>
         </ul>
 
