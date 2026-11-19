@@ -593,6 +593,38 @@ section.dark h2, section.dark h3 { color: #fff; }
 .site-footer h4 { color: #fff; margin: 0 0 0.85rem; font-size: 0.9rem; }
 .site-footer ul { display: grid; gap: 0.5rem; font-size: 0.9rem; }
 .site-footer a:hover { color: #fff; }
+.footer-social {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 1.15rem;
+}
+.footer-social a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  color: #e2e8f0;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+.site-footer .footer-social a:hover {
+  color: var(--brand);
+  background: rgba(13, 148, 136, 0.14);
+  border-color: rgba(13, 148, 136, 0.45);
+}
+.footer-social a:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+.footer-social svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
 .footer-bottom {
   margin-top: 2.5rem;
   padding-top: 1.25rem;
