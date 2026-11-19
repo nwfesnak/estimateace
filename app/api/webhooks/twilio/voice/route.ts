@@ -16,6 +16,18 @@ import { isCallerBlocked } from '@/lib/receptionist-blocklist';
 import { readTwilioParams, verifyTwilioWebhook } from '@/lib/twilio-webhook-auth';
 import { forwardDialNumber } from '@/lib/phone-forward';
 import { loadReceptionistBilling, receptionistAddonHasAccess } from '@/lib/receptionist-billing';
+import {
+  CAP_MESSAGES,
+  callerBucket,
+  decideInboundCall,
+  forwardOrCallBack,
+  RECEPTIONIST_CAPS,
+  usagePeriod,
+  type CapReason,
+  type ReceptionistUsage,
+} from '@/lib/receptionist-caps';
+import { loadReceptionistUsage } from '@/lib/receptionist-usage';
+import { rateLimit } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
@@ -105,7 +117,8 @@ export async function POST(request: NextRequest) {
     }
     // Entitlement comes only from server-only storage written by Stripe webhooks/sync
     // (never from the user-editable SETTINGS row).
-    addonActive = receptionistAddonHasAccess(await loadReceptionistBilling(tenant.userId));
+    const billing = await loadReceptionistBilling(tenant.userId);
+    addonActive = receptionistAddonHasAccess(billing);
 
     if (from && (await isCallerBlocked(tenant.userId, from))) {
       console.info('twilio voice: blocked caller rejected', {
@@ -114,6 +127,21 @@ export async function POST(request: NextRequest) {
       });
       return twimlXmlResponse(rejectTwiml());
     }
+
+    // Same number calling over and over (spam / dialer loop): busy, not billed.
+    const callerLimit = await rateLimit(
+      callerBucket(tenant.userId, from),
+      3600,
+      RECEPTIONIST_CAPS.callsPerCallerPerHour
+    );
+    if (!callerLimit.allowed) {
+      console.info('twilio voice: caller over hourly limit', { callSid, contractorId: tenant.userId });
+      return twimlXmlResponse(rejectTwiml());
+    }
+    const usage: ReceptionistUsage | null = await loadReceptionistUsage(
+      tenant.userId,
+      usagePeriod(billing)
+    );
 
     const hasAiLine = Boolean(tenant.config.twilio?.phoneNumber);
     const explicitlyOff = classicEnabled === false;
@@ -158,7 +186,7 @@ export async function POST(request: NextRequest) {
         contractorId: tenant.userId,
         hostRing: hostRing || null,
       });
-      if (hostRing) {
+      if (hostRing && forwardOrCallBack('ai_off', usage, true).action === 'forward') {
         return twimlXmlResponse(
           transferTwiml({
             silent: true,
@@ -167,6 +195,9 @@ export async function POST(request: NextRequest) {
             timeoutSec: 45,
           })
         );
+      }
+      if (hostRing) {
+        return twimlXmlResponse(sayHangupTwiml(CAP_MESSAGES.callBack(companyName || 'us')));
       }
       return twimlXmlResponse(
         sayHangupTwiml(
@@ -198,7 +229,33 @@ export async function POST(request: NextRequest) {
         .map((n) => toE164(n))
         .find((n) => n && !sameNumber(n, aiLine) && !sameNumber(n, to)) || '';
 
-    if (callSid) {
+    /** Cap hit (or can't tell): never run the AI. Forward (bounded) or "call back". */
+    const capped = (reason: CapReason) => {
+      const d = forwardOrCallBack(reason, usage, Boolean(transferForAi));
+      console.info('twilio voice: AI cap', { callSid, contractorId: tenant!.userId, reason: d.reason, action: d.action });
+      if (d.action === 'forward') {
+        return twimlXmlResponse(
+          transferTwiml({
+            say: CAP_MESSAGES.forward(business),
+            transferTo: transferForAi,
+            callerId: to || undefined,
+          })
+        );
+      }
+      return twimlXmlResponse(sayHangupTwiml(CAP_MESSAGES.callBack(business)));
+    };
+
+    const decision = decideInboundCall({
+      usage,
+      callerAllowed: true,
+      hasForwardNumber: Boolean(transferForAi),
+    });
+    if (decision.action !== 'ai') {
+      return capped(decision.action === 'reject' ? 'usage_unavailable' : (decision.reason as CapReason));
+    }
+    if (!callSid) return capped('session_unavailable');
+
+    {
       try {
         await saveCallSession({
           callSid,
@@ -220,11 +277,14 @@ export async function POST(request: NextRequest) {
           gateRequired,
           gatePassed: !gateRequired,
           gateAttempts: 0,
+          maxCallSeconds: decision.maxCallSeconds,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         });
       } catch (e) {
+        // Without a session every turn would loop on Twilio's bill: don't start the AI.
         console.warn('voice save session:', e);
+        return capped('session_unavailable');
       }
     }
 

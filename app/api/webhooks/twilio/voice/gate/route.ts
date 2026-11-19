@@ -51,8 +51,11 @@ export async function POST(request: NextRequest) {
     return twimlXmlResponse(pressOneGateTwiml({ businessName: business, retry: true }));
   }
 
+  if (!session) {
+    return twimlXmlResponse(twimlResponse('  <Hangup/>'));
+  }
   const greeting = 'Thanks! What are you calling about today?';
-  if (session) {
+  {
     session.gatePassed = true;
     session.transcript = [...(session.transcript || []), { role: 'agent', text: greeting }];
     try {

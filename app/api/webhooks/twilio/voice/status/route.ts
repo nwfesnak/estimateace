@@ -3,6 +3,7 @@ import { deleteCallSession, loadCallSession } from '@/lib/receptionist-call-sess
 import { finalizeReceptionistCall } from '@/lib/receptionist-call-finalize';
 import { findReceptionistByPhoneNumber } from '@/lib/receptionist-store';
 import { readTwilioParams, verifyTwilioWebhook } from '@/lib/twilio-webhook-auth';
+import { maybeSendUsageAlerts, recordReceptionistCall } from '@/lib/receptionist-usage';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -35,6 +36,30 @@ export async function POST(request: NextRequest) {
     console.info('twilio voice status:', { status, callSid, to });
 
     const terminal = ['completed', 'busy', 'no-answer', 'failed', 'canceled'].includes(status);
+
+    // Count the minutes against the owner's caps (once per CallSid). AI calls have a
+    // session; anything else on the line (AI off, cap reached → forwarded) is "forward".
+    const duration = Number(params.CallDuration) || 0;
+    if (terminal && callSid && userId && duration > 0) {
+      try {
+        const rec = await recordReceptionistCall({
+          callSid,
+          userId,
+          kind: session ? 'ai' : 'forward',
+          durationSeconds: duration,
+        });
+        if (rec?.recorded && session) {
+          await maybeSendUsageAlerts({
+            userId,
+            periodStart: rec.periodStart,
+            monthAiSeconds: rec.monthAiSeconds,
+          });
+        }
+      } catch (e) {
+        console.warn('twilio voice status usage:', e);
+      }
+    }
+
     if (!terminal || !callSid || !session) {
       return ok();
     }

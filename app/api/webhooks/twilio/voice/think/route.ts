@@ -21,6 +21,7 @@ import {
   VOICE_GATHER_PATH,
 } from '@/lib/receptionist-twiml';
 import { forwardDialNumber } from '@/lib/phone-forward';
+import { CAP_MESSAGES, callTimeUp } from '@/lib/receptionist-caps';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 55;
@@ -61,12 +62,13 @@ export async function POST(request: NextRequest) {
     console.info('voice think', { callSid: callSid.slice(0, 34) });
 
     if (!session) {
-      return twimlXmlResponse(
-        sayGatherTwiml({
-          say: 'Thanks for calling. What are you calling about today?',
-          gatherActionUrl: VOICE_GATHER_PATH,
-        })
-      );
+      // No session = no budget to enforce: end the call instead of looping.
+      return twimlXmlResponse(sayHangupTwiml(CAP_MESSAGES.callBack('us')));
+    }
+
+    if (callTimeUp(session)) {
+      finalizeAfterResponse();
+      return twimlXmlResponse(sayHangupTwiml(CAP_MESSAGES.timeUp(session.businessName || 'us')));
     }
 
     const callerText = String(session.pendingCallerText || '').trim();

@@ -1,4 +1,5 @@
 /** Small TwiML helpers for AI receptionist voice. */
+import { RECEPTIONIST_CAPS } from '@/lib/receptionist-caps';
 
 /** Warm, natural Amazon Polly neural voice (friendlier than classic alice). */
 export const SAY_VOICE = 'Polly.Joanna-Neural';
@@ -120,11 +121,15 @@ export function transferTwiml(opts: {
   callerId?: string;
   silent?: boolean;
   timeoutSec?: number;
+  /** Max seconds the forwarded call may last (Twilio hangs up after). Defaults to the cap. */
+  timeLimitSec?: number;
 }) {
   const to = escapeXml(opts.transferTo);
   const callerId = opts.callerId ? ` callerId="${escapeXml(opts.callerId)}"` : '';
   const timeout = Math.min(60, Math.max(10, Number(opts.timeoutSec) || 30));
-  const dial = `  <Dial${callerId} timeout="${timeout}">${to}</Dial>`;
+  const capSec = RECEPTIONIST_CAPS.forwardCallMaxMinutes * 60;
+  const timeLimit = Math.min(capSec, Math.max(60, Math.floor(Number(opts.timeLimitSec) || capSec)));
+  const dial = `  <Dial${callerId} timeout="${timeout}" timeLimit="${timeLimit}">${to}</Dial>`;
   if (opts.silent || !opts.say) {
     return twimlResponse(dial);
   }

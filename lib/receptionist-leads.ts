@@ -126,8 +126,14 @@ export async function appendReceptionistLead(input: {
       320
     );
     if (notifyPhone && formatPhoneE164(notifyPhone)) {
-      await sendSmsNotification(notifyPhone, smsBody, { skipOptInCheck: true });
-      notified = true;
+      // Monthly lead-text cap (RECEPTIONIST_CAPS.monthlyLeadSms); email below still goes.
+      const { takeLeadSms } = await import('@/lib/receptionist-usage');
+      if (await takeLeadSms(input.userId)) {
+        await sendSmsNotification(notifyPhone, smsBody, { skipOptInCheck: true });
+        notified = true;
+      } else {
+        console.info('receptionist lead SMS skipped: monthly text cap reached or usage unavailable');
+      }
     }
     if (notifyEmail && notifyEmail.includes('@')) {
       await sendEmailNotification(
