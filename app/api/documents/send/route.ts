@@ -547,6 +547,6 @@ export async function POST(request: NextRequest) {
     });
   } catch (e: any) {
     console.error('documents/send:', e);
-    return NextResponse.json({ error: e?.message || 'Send failed' }, { status: 500 });
+    return NextResponse.json({ error: 'Send failed' }, { status: 500 });
   }
 }

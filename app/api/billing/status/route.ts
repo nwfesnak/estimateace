@@ -68,23 +68,8 @@ export async function GET(request: NextRequest) {
 
       snapshot = rowToSnapshot(data);
 
-      // Fallback close date from SETTINGS profile
-      if (!snapshot.accountClosesAt) {
-        const { data: settings } = await admin
-          .from('estimates')
-          .select('profile')
-          .eq('id', `SETTINGS-${user.id}`)
-          .maybeSingle();
-        if (settings?.profile?.accountClosesAt) {
-          snapshot = {
-            ...snapshot,
-            accountClosesAt: String(settings.profile.accountClosesAt),
-            deletionRequestedAt: settings.profile.deletionRequestedAt
-              ? String(settings.profile.deletionRequestedAt)
-              : snapshot.deletionRequestedAt,
-          };
-        }
-      }
+      // Close date comes ONLY from the server-only subscriptions columns. It used to
+      // fall back to the SETTINGS row, which users (and their crew) can edit.
 
       // Don't re-seed trial if closing
       if (!snapshot.accountClosesAt) {

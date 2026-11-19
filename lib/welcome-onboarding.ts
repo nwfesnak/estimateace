@@ -3,6 +3,7 @@
  * No CRM — uses existing Resend + Twilio. Link comes from WELCOME_VIDEO_URL.
  */
 import { sendEmailNotification, sendSmsNotification } from '@/lib/notifications';
+import { claimSubscriptionMarker } from '@/lib/server-markers';
 
 export function getWelcomeVideoUrl(): string {
   return (
@@ -170,7 +171,10 @@ export async function sendWelcomeOnboarding(input: {
 
 /**
  * Send welcome once after landing-page signup (/api/billing/start-trial only).
- * Persists welcomeOnboardingSentAt on SETTINGS profile so later saves/logins never re-send.
+ * The "sent" marker is server-only (subscriptions.welcome_onboarding_sent_at) and is
+ * claimed atomically BEFORE sending, so replays / parallel calls never re-send.
+ * Each channel also counts against the workspace's daily send caps.
+ * SETTINGS keeps a display copy (welcomeOnboardingSentAt) for the UI only.
  */
 export async function maybeSendAndPersistWelcomeOnboarding(input: {
   admin: any;
@@ -182,6 +186,14 @@ export async function maybeSendAndPersistWelcomeOnboarding(input: {
 }): Promise<WelcomeSendResult> {
   const settingsId = `SETTINGS-${input.userId}`;
 
+  if (!getWelcomeVideoUrl()) {
+    return {
+      attempted: false,
+      skippedReason:
+        'WELCOME_VIDEO_URL is not set in Vercel. Add your YouTube/Loom/Vimeo (or MP4) link, then redeploy.',
+    };
+  }
+
   const { data: settings } = await input.admin
     .from('estimates')
     .select('profile')
@@ -191,31 +203,29 @@ export async function maybeSendAndPersistWelcomeOnboarding(input: {
   const prev =
     settings?.profile && typeof settings.profile === 'object' ? settings.profile : {};
 
-  if ((prev as any).welcomeOnboardingSentAt) {
+  const claim = await claimSubscriptionMarker(input.admin, input.userId, 'welcome_onboarding_sent_at');
+  if (claim === 'already') {
     return { attempted: false, skippedReason: 'Welcome already sent.' };
   }
+  if (claim === 'unavailable') {
+    return { attempted: false, skippedReason: 'Welcome marker unavailable; not sending.' };
+  }
+
+  let email = String(input.email || (prev as any).email || '').trim();
+  let phone = String(input.phone || (prev as any).phone || '').trim();
+  const { reserveSendQuota } = await import('@/lib/rate-limit');
+  if (email && (await reserveSendQuota(input.userId, 'email', 1))) email = '';
+  if (phone && (await reserveSendQuota(input.userId, 'sms', 1))) phone = '';
 
   const result = await sendWelcomeOnboarding({
-    email: input.email || (prev as any).email || '',
-    phone: input.phone || (prev as any).phone || '',
+    email,
+    phone,
     name: input.name || (prev as any).name || '',
     company: input.company || (prev as any).company || '',
   });
 
   const emailed = result.email?.ok === true;
   const texted = result.sms?.ok === true;
-  // Mark as sent whenever we attempted delivery with a configured video URL + contact,
-  // even if one channel failed — so later logins never spam.
-  const hasDestination = Boolean(
-    input.email || input.phone || (prev as any).email || (prev as any).phone
-  );
-  const shouldMarkSent =
-    emailed || texted || (result.attempted && Boolean(getWelcomeVideoUrl()) && hasDestination);
-
-  if (!shouldMarkSent) {
-    return result;
-  }
-
   const sentAt = new Date().toISOString();
   const profile = {
     ...prev,

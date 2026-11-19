@@ -82,6 +82,6 @@ export async function POST(request: NextRequest) {
     }
   } catch (e: any) {
     console.error('billing/portal:', e);
-    return NextResponse.json({ error: e?.message || 'Portal failed' }, { status: 500 });
+    return NextResponse.json({ error: 'Portal failed' }, { status: 500 });
   }
 }

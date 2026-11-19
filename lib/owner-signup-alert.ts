@@ -3,6 +3,7 @@
  * Welcome mail to the new contractor stays in welcome-onboarding.ts.
  */
 import { sendEmailNotification, sendSmsNotification } from '@/lib/notifications';
+import { claimSubscriptionMarker } from '@/lib/server-markers';
 
 const DEFAULT_OWNER_EMAILS = ['support@estimateace.com', 'nwfesnak@gmail.com'];
 /** Mitigation Hero / owner mobile. Override with PLATFORM_OWNER_ALERT_PHONE. */
@@ -111,8 +112,20 @@ export async function maybeSendOwnerSignupAlert(input: {
   const prev =
     settings?.profile && typeof settings.profile === 'object' ? settings.profile : {};
 
-  if ((prev as any).ownerSignupAlertSentAt) {
-    return { attempted: false, skippedReason: 'Owner already alerted for this account.' };
+  // Server-only one-time marker (users cannot reset it), claimed before sending.
+  const claim = await claimSubscriptionMarker(input.admin, input.userId, 'owner_signup_alert_sent_at');
+  if (claim !== 'claimed') {
+    return {
+      attempted: false,
+      skippedReason:
+        claim === 'already' ? 'Owner already alerted for this account.' : 'Alert marker unavailable; not sending.',
+    };
+  }
+  // Global backstop so signups can never flood the owner's phone/inbox.
+  const { rateLimit } = await import('@/lib/rate-limit');
+  const flood = await rateLimit('owner-signup-alert:global', 24 * 60 * 60, 200);
+  if (!flood.allowed) {
+    return { attempted: false, skippedReason: 'Owner signup alerts paused (daily cap).' };
   }
 
   const msg = buildOwnerSignupAlert(input);
@@ -137,6 +150,7 @@ export async function maybeSendOwnerSignupAlert(input: {
   if (!emailed && !sms.ok) {
     return result;
   }
+  // SETTINGS copy below is display-only; the authoritative marker is server-side.
 
   const sentAt = new Date().toISOString();
   await input.admin.from('estimates').upsert({

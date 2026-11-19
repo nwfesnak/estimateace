@@ -43,6 +43,6 @@ export async function POST(request: NextRequest) {
     return res;
   } catch (e: any) {
     console.error('2fa verify:', e);
-    return NextResponse.json({ error: e?.message || 'Verify failed' }, { status: 500 });
+    return NextResponse.json({ error: 'Verify failed' }, { status: 500 });
   }
 }

@@ -41,6 +41,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, status: sync.status, billing });
   } catch (e: any) {
     console.error('billing/sync:', e);
-    return NextResponse.json({ error: e?.message || 'Sync failed' }, { status: 500 });
+    return NextResponse.json({ error: 'Sync failed' }, { status: 500 });
   }
 }

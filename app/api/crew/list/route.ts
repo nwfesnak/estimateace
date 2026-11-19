@@ -137,6 +137,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ ok: true, crew });
   } catch (e: any) {
     console.error('crew/list:', e);
-    return NextResponse.json({ error: e?.message || 'List failed' }, { status: 500 });
+    return NextResponse.json({ error: 'List failed' }, { status: 500 });
   }
 }

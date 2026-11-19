@@ -302,6 +302,6 @@ export async function GET(request: NextRequest) {
     });
   } catch (e: any) {
     console.error('client/document:', e);
-    return NextResponse.json({ error: e?.message || 'Failed to load' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to load' }, { status: 500 });
   }
 }

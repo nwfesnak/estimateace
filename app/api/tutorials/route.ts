@@ -90,7 +90,7 @@ export async function GET(request: NextRequest) {
     });
   } catch (e: any) {
     console.error('tutorials GET:', e);
-    return NextResponse.json({ error: e?.message || 'Failed to load tutorials' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to load tutorials' }, { status: 500 });
   }
 }
 
@@ -186,7 +186,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, video: { ...entry, videoUrl }, videos: next.length });
   } catch (e: any) {
     console.error('tutorials POST:', e);
-    return NextResponse.json({ error: e?.message || 'Upload failed' }, { status: 500 });
+    return NextResponse.json({ error: 'Upload failed' }, { status: 500 });
   }
 }
 
@@ -232,6 +232,6 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ ok: true, remaining: next.length });
   } catch (e: any) {
     console.error('tutorials DELETE:', e);
-    return NextResponse.json({ error: e?.message || 'Delete failed' }, { status: 500 });
+    return NextResponse.json({ error: 'Delete failed' }, { status: 500 });
   }
 }

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getXaiApiKey, getXaiChatModel } from '@/lib/xai-config';
-import { enforceAppAccess } from '@/lib/billing-access';
+import { enforceAppAccess, workspaceOwnerId } from '@/lib/billing-access';
+import { reserveAiQuota } from '@/lib/rate-limit';
 
 // Simple rate limiter (demo only)
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
@@ -65,7 +66,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { description } = await request.json();
+    {
+      const quota = await reserveAiQuota(await workspaceOwnerId(user.id), 'ai');
+      if (quota) return quota;
+    }
+
+    const body = await request.json().catch(() => ({}));
+    const description = typeof body?.description === 'string' ? body.description : '';
+
+    if (description.length > 4000) {
+      return NextResponse.json(
+        { suggestion: 'That description is too long. Keep it under 4,000 characters.' },
+        { status: 400 }
+      );
+    }
 
     if (!description || description.trim().length < 5) {
       return NextResponse.json({ 

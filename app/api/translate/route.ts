@@ -3,7 +3,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getXaiApiKey, getXaiChatModel } from '@/lib/xai-config';
-import { enforceAppAccess } from '@/lib/billing-access';
+import { enforceAppAccess, workspaceOwnerId } from '@/lib/billing-access';
+import { reserveAiQuota } from '@/lib/rate-limit';
 
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
 const RATE_LIMIT = 30;
@@ -129,6 +130,11 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  {
+    const quota = await reserveAiQuota(await workspaceOwnerId(user.id), 'translate');
+    if (quota) return quota;
+  }
+
   try {
     const body = await request.json();
     const from = String(body.from || 'en');
@@ -193,7 +199,7 @@ Use natural, concise UI wording for contractor/estimating software.`;
   } catch (e: any) {
     console.error('Grok translate error:', e);
     return NextResponse.json(
-      { error: e?.message || 'Translation failed. Grok service may be unavailable.' },
+      { error: 'Translation failed. Grok service may be unavailable.' },
       { status: 500 }
     );
   }

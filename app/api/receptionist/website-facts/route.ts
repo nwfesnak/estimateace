@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { buildWebsiteBusinessFacts } from '@/lib/receptionist-website-facts';
+import { reserveAiQuota } from '@/lib/rate-limit';
+import { workspaceOwnerId } from '@/lib/billing-access';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -56,6 +58,11 @@ export async function POST(request: NextRequest) {
         { error: 'Wait a minute, then fill facts from the website again.' },
         { status: 429 }
       );
+    }
+
+    {
+      const quota = await reserveAiQuota(await workspaceOwnerId(user.id), 'ai');
+      if (quota) return quota;
     }
 
     const body = await request.json().catch(() => ({}));

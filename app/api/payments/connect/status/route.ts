@@ -57,6 +57,6 @@ export async function GET(request: NextRequest) {
     });
   } catch (e: any) {
     console.error('connect status:', e);
-    return NextResponse.json({ error: e?.message || 'Status failed' }, { status: 500 });
+    return NextResponse.json({ error: 'Status failed' }, { status: 500 });
   }
 }

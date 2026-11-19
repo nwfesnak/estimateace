@@ -56,32 +56,65 @@ export async function purgeClosedAccount(userId: string): Promise<{ ok: boolean;
   }
 }
 
-/** If account_closes_at is past, purge and return true. */
+/**
+ * If subscriptions.account_closes_at is past, purge and return true.
+ * The close date is read ONLY from the server-only subscriptions row (users and crew
+ * can only SELECT it). It is never read from the user-editable SETTINGS row.
+ */
 export async function purgeIfAccountClosed(userId: string): Promise<boolean> {
   const admin = getSupabaseAdmin();
   if (!admin) return false;
 
-  const { data: row } = await admin
+  const { data: row, error } = await admin
     .from('subscriptions')
     .select('account_closes_at')
     .eq('user_id', userId)
     .maybeSingle();
-
-  let closesAt = row?.account_closes_at as string | null | undefined;
-
-  if (!closesAt) {
-    const { data: settings } = await admin
-      .from('estimates')
-      .select('profile')
-      .eq('id', `SETTINGS-${userId}`)
-      .maybeSingle();
-    closesAt = settings?.profile?.accountClosesAt || null;
+  if (error) {
+    console.warn('purgeIfAccountClosed:', error.message);
+    return false;
   }
 
+  const closesAt = (row as { account_closes_at?: string | null } | null)?.account_closes_at;
   if (!closesAt) return false;
   const t = new Date(closesAt).getTime();
   if (isNaN(t) || t > Date.now()) return false;
 
   await purgeClosedAccount(userId);
   return true;
+}
+
+/**
+ * Daily cron: purge every account whose scheduled close date has passed, even if the
+ * user never logs in again. Bounded per run; the rest are picked up the next day.
+ */
+export async function purgeDueAccounts(limit = 25): Promise<{
+  checked: number;
+  purged: number;
+  failed: number;
+  error?: string;
+}> {
+  const admin = getSupabaseAdmin();
+  if (!admin) return { checked: 0, purged: 0, failed: 0, error: 'No admin client' };
+
+  const { data, error } = await admin
+    .from('subscriptions')
+    .select('user_id, account_closes_at')
+    .not('account_closes_at', 'is', null)
+    .lte('account_closes_at', new Date().toISOString())
+    .order('account_closes_at', { ascending: true })
+    .limit(limit);
+  if (error) return { checked: 0, purged: 0, failed: 0, error: error.message };
+
+  let purged = 0;
+  let failed = 0;
+  for (const row of (data || []) as { user_id: string }[]) {
+    const result = await purgeClosedAccount(row.user_id);
+    if (result.ok) purged++;
+    else {
+      failed++;
+      console.error('account purge failed for', String(row.user_id).slice(0, 8), result.error);
+    }
+  }
+  return { checked: (data || []).length, purged, failed };
 }

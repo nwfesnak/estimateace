@@ -8560,6 +8560,8 @@ export default function Home() {
 
   const upsertUserSettingsProfile = async (nextProfile: typeof profile) => {
     if (!workspaceUserId || !supabase) return;
+    // Workspace settings are owner-only (enforced in the database); crew sessions skip.
+    if (currentCrew) return;
     const existing = await fetchServerProfileSettings();
     const snapshot = getSafeProfileSnapshot(nextProfile);
     // Merge so we never wipe previously saved company fields with blanks
@@ -9242,6 +9244,10 @@ export default function Home() {
   };
 
   const deleteSelectedEstimate = async (id: string) => {
+    if (currentCrew) {
+      showMessage('Only the account owner can delete documents.');
+      return;
+    }
     if (!confirm('Delete permanently?')) return;
     if (!supabase) return;
     if (!workspaceUserId) return;
@@ -9365,6 +9371,10 @@ export default function Home() {
 
   const bulkDelete = async () => {
     if (selectedIds.length === 0) return;
+    if (currentCrew) {
+      showMessage('Only the account owner can delete documents.');
+      return;
+    }
     if (!confirm(`Delete ${selectedIds.length} documents permanently?`)) return;
     if (!supabase || !workspaceUserId) return;
 
