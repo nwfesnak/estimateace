@@ -112,6 +112,13 @@ import {
 } from '@/lib/breakdown-pricing';
 import { rankAddressSuggestions } from '@/lib/address-autocomplete';
 import { randomUploadId, safeUploadName } from '@/lib/upload-names';
+import { TurnstileWidget } from '@/components/TurnstileWidget';
+import {
+  captchaOption,
+  friendlyCaptchaError,
+  TURNSTILE_REQUIRED_MESSAGE,
+  turnstileEnabled,
+} from '@/lib/turnstile';
 
 const DEFAULT_DISCOUNT_NAMES = ['Military', 'Return customer'];
 
@@ -356,6 +363,15 @@ export default function Home() {
   // Forgot password states
   const [showMainForgot, setShowMainForgot] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
+  // Cloudflare Turnstile for login + forgot password (only when NEXT_PUBLIC_TURNSTILE_SITE_KEY
+  // is set). Single-use tokens: the widget is remounted after every attempt.
+  const [authCaptchaToken, setAuthCaptchaToken] = useState<string | null>(null);
+  const [authCaptchaNonce, setAuthCaptchaNonce] = useState(0);
+  const refreshAuthCaptcha = () => {
+    if (!turnstileEnabled) return;
+    setAuthCaptchaToken(null);
+    setAuthCaptchaNonce((n) => n + 1);
+  };
 
   // SMS 2-step verification (Twilio)
   const [requires2FA, setRequires2FA] = useState(false);
@@ -3139,15 +3155,23 @@ export default function Home() {
       return;
     }
 
+    if (turnstileEnabled && !authCaptchaToken) {
+      setLoginError(TURNSTILE_REQUIRED_MESSAGE);
+      showMessage(TURNSTILE_REQUIRED_MESSAGE);
+      return;
+    }
+    const usedCaptchaToken = authCaptchaToken;
+
     setLoginLoading(true);
     try {
       const { data, error } = await supabase.auth.signInWithPassword({
         email: trimmedEmail,
         password: trimmedPassword,
+        options: captchaOption(usedCaptchaToken),
       });
       if (error) {
         const code = (error as { code?: string }).code;
-        let msg = error.message;
+        let msg = friendlyCaptchaError(error.message) || error.message;
         if (code === 'email_not_confirmed') {
           msg = 'Email not confirmed yet. Check your inbox for the confirmation link.';
         } else if (code === 'user_banned' || /banned/i.test(msg)) {
@@ -3186,6 +3210,7 @@ export default function Home() {
       showMessage(msg);
     } finally {
       setLoginLoading(false);
+      refreshAuthCaptcha();
     }
   };
 
@@ -3324,14 +3349,20 @@ export default function Home() {
       showMessage('Please enter your email');
       return;
     }
+    if (turnstileEnabled && !authCaptchaToken) {
+      showMessage(TURNSTILE_REQUIRED_MESSAGE);
+      return;
+    }
+    const usedCaptchaToken = authCaptchaToken;
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail.trim(), {
         // Lands on the "Set a new password" screen (Supabase recovery session).
         redirectTo:
           typeof window !== 'undefined' ? `${window.location.origin}/reset-password` : undefined,
+        ...captchaOption(usedCaptchaToken),
       });
       if (error) {
-        showMessage(error.message);
+        showMessage(friendlyCaptchaError(error.message) || error.message);
       } else {
         showMessage('If an account exists with that email, a password reset link has been sent.');
         setForgotEmail('');
@@ -3339,6 +3370,8 @@ export default function Home() {
       }
     } catch (e: any) {
       showMessage('Failed to send reset link. Please try again.');
+    } finally {
+      refreshAuthCaptcha();
     }
   };
 
@@ -11880,6 +11913,12 @@ export default function Home() {
             <>
               <Input placeholder="Email" value={email} onChange={e => { setEmail(e.target.value); setLoginError(''); }} className="mb-3 mt-4" autoComplete="email" />
               <Input type="password" placeholder="Password" value={password} onChange={e => { setPassword(e.target.value); setLoginError(''); }} className="mb-4" autoComplete="current-password" onKeyDown={e => { if (e.key === 'Enter') login(); }} />
+              <TurnstileWidget
+                key={`login-captcha-${authCaptchaNonce}`}
+                action="login"
+                onToken={setAuthCaptchaToken}
+                className="mb-4 flex justify-center min-h-[65px]"
+              />
               {loginError && (
                 <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">
                   {loginError}
@@ -11941,6 +11980,12 @@ export default function Home() {
                 value={forgotEmail} 
                 onChange={e => setForgotEmail(e.target.value)} 
                 className="mb-4" 
+              />
+              <TurnstileWidget
+                key={`forgot-captcha-${authCaptchaNonce}`}
+                action="password_reset"
+                onToken={setAuthCaptchaToken}
+                className="mb-4 flex justify-center min-h-[65px]"
               />
               <Button onClick={requestMainPasswordReset} className="w-full mb-2">Send reset link</Button>
               <button 
