@@ -20,7 +20,7 @@ import {
   twimlXmlResponse,
   VOICE_GATHER_PATH,
 } from '@/lib/receptionist-twiml';
-import { formatPhoneE164 } from '@/lib/notifications';
+import { forwardDialNumber } from '@/lib/phone-forward';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 55;
@@ -93,7 +93,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (/^Pressed 0$/i.test(callerText)) {
-      const transferE164 = formatPhoneE164(session.transferNumber || '') || '';
+      const transferE164 = forwardDialNumber(session.transferNumber) || '';
       if (transferE164) {
         return twimlXmlResponse(
           transferTwiml({
@@ -121,7 +121,7 @@ export async function POST(request: NextRequest) {
       return twimlXmlResponse(sayHangupTwiml(bye));
     }
 
-    const transferE164 = formatPhoneE164(session.transferNumber || '') || '';
+    const transferE164 = forwardDialNumber(session.transferNumber) || '';
 
     let result;
     try {

@@ -1147,11 +1147,14 @@ export function AIReceptionist({
                     value={transferNumber}
                     onChange={(e) => setTransferNumber(e.target.value)}
                     placeholder={companyPhone || '(555) 123-4567'}
+                    inputMode="tel"
+                    autoComplete="tel-national"
                   />
                   <p className="text-xs text-gray-500 mt-1">
                     When AI is <strong>Off</strong>, calls ring this number (or your public business
                     number) with no AI announcement. Prefer a desk/cell that actually answers. Do not put
-                    the Twilio AI number here.
+                    the Twilio AI number here. US or Canada numbers only (+1, 10 digits) — international
+                    and premium-rate numbers can&apos;t be used for call forwarding.
                   </p>
                 </div>
                 <Button
