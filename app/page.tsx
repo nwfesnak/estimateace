@@ -65,7 +65,7 @@ import {
 } from '@/lib/optional-line-items';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { getSupabaseClient, getSupabaseConfigHelpMessage } from '@/lib/supabase/client';
+import { getSupabaseClient, getSupabaseConfigHelpMessage, setCrewDataProxy } from '@/lib/supabase/client';
 import { extractMediaStoragePath, isMediaPdfRef, resolveMediaDisplayUrl } from '@/lib/media-url';
 import { buildAccountExportZip } from '@/lib/account-export';
 import { mergeFilledPaymentSettings } from '@/lib/client-payment-options';
@@ -1173,6 +1173,11 @@ export default function Home() {
     (currentCrew?.ownerUserId as string) || user?.id || '';
   const canSeePricing = !currentCrew || currentCrew.canSeePricing !== false;
   const canSeeFinancials = !currentCrew || currentCrew.canSeeEstimatesAndFinancials !== false;
+  /**
+   * Document math (subtotals / tax / totals in the editor) needs unit prices. Crew without
+   * "See pricing" get prices redacted server-side, so only show totals when both are allowed.
+   */
+  const canSeeDocumentMath = canSeeFinancials && canSeePricing;
 
   /** Per-account cache only — never reuse another user's company/settings on this device */
   const profileSettingsCacheKey = (uid?: string | null) =>
@@ -2255,7 +2260,7 @@ export default function Home() {
 
     return (
       <>
-        {canSeeFinancials ? (
+        {canSeeDocumentMath ? (
           <>
             {showSubtotalBreakdown && (
               <div className={`text-right font-semibold text-gray-700 ${textClass}`}>
@@ -2300,7 +2305,7 @@ export default function Home() {
         ) : (
           <div className="text-right text-lg text-gray-500">Financial details restricted</div>
         )}
-        {profile.chargeCCFee && ccFeePercent > 0 && (
+        {canSeeDocumentMath && profile.chargeCCFee && ccFeePercent > 0 && (
           <div className="text-right mt-1 text-sm text-gray-600">
             Stripe credit card fee ({ccFeePercent}%): ${ccFeeAmount.toFixed(2)}
             <br />
@@ -2540,6 +2545,7 @@ export default function Home() {
   // After main login: if this user is crew, load owner workspace + permissions
   useEffect(() => {
     if (!user?.id || !supabase) {
+      setCrewDataProxy(false);
       setCurrentCrew(null);
       setCrewResolved(false);
       return;
@@ -2548,6 +2554,7 @@ export default function Home() {
     resetWorkspaceUi();
     let cancelled = false;
     setCrewResolved(false);
+    setCrewDataProxy(false);
     (async () => {
       try {
         const { data: sessionData } = await supabase.auth.getSession();
@@ -2565,6 +2572,11 @@ export default function Home() {
         const json = await res.json().catch(() => ({}));
         if (cancelled) return;
         if (res.ok && json.isCrew && json.ownerUserId) {
+          // Restricted crew read/write the owner's documents through /api/crew/data
+          // (server applies their access level); fully-permitted crew stay direct.
+          setCrewDataProxy(
+            !(json.canSeePricing === true && json.canSeeEstimatesAndFinancials === true)
+          );
           setCurrentCrew({
             email: json.email || user.email,
             ownerUserId: json.ownerUserId,
@@ -2575,6 +2587,7 @@ export default function Home() {
         } else if (json.seatExpired) {
           // Crew seat unpaid/ended or owner's plan lapsed: don't fall through into a
           // personal trial workspace — sign the crew login out with the reason.
+          setCrewDataProxy(false);
           setCurrentCrew(null);
           showMessage(json.error || 'This crew login is not active. Ask the account owner.');
           await supabase.auth.signOut();
@@ -13573,7 +13586,7 @@ export default function Home() {
                     )}
                   </div>
 
-                  {canSeeFinancials ? (
+                  {canSeeDocumentMath ? (
                     <>
                       <div className="flex justify-end text-xl font-semibold mb-2 text-gray-700">
                         Subtotal (line items): <span className="ml-4">${taxableSubtotal.toFixed(2)}</span>

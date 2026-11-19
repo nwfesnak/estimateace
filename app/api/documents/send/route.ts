@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { overlayStoredDocumentForCrewSend } from '@/lib/crew-access';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { sendEmailNotification, sendSmsNotification } from '@/lib/notifications';
@@ -48,6 +49,13 @@ export async function POST(request: NextRequest) {
     if (paywall) return paywall;
 
     const body = await request.json().catch(() => ({}));
+    // Restricted crew hold redacted prices in the browser: send the owner's real values.
+    {
+      const adminForCrew = getSupabaseAdmin();
+      if (adminForCrew && body && typeof body === 'object') {
+        await overlayStoredDocumentForCrewSend(adminForCrew, user.id, body);
+      }
+    }
     const emails: string[] = Array.isArray(body.emails)
       ? body.emails.map((e: any) => String(e || '').trim()).filter(Boolean)
       : [];

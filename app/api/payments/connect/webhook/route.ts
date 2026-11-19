@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import type Stripe from 'stripe';
 import { getStripe } from '@/lib/stripe-server';
+import { handleDisputeEvent } from '@/lib/stripe-disputes';
 import {
   markDocumentPaidFromJobCheckout,
   updatePaymentAccountFromStripe,
@@ -21,7 +22,8 @@ export const runtime = 'nodejs';
  *   Events: account.updated, checkout.session.completed,
  *           checkout.session.async_payment_succeeded, invoice.paid,
  *           invoice.payment_failed, customer.subscription.updated,
- *           customer.subscription.deleted
+ *           customer.subscription.deleted, charge.dispute.created,
+ *           charge.dispute.closed
  * Signing secret → STRIPE_CONNECT_WEBHOOK_SECRET (separate from STRIPE_WEBHOOK_SECRET).
  *
  * EstimateAce's own subscriptions (plans, crew seats, receptionist) stay on
@@ -124,6 +126,13 @@ export async function POST(request: NextRequest) {
             if (!r.ok) console.error('connect webhook recurring canceled:', r.error);
           }
         }
+        break;
+      }
+
+      case 'charge.dispute.created':
+      case 'charge.dispute.closed': {
+        // Record once per dispute id and alert the contractor (account owner).
+        await handleDisputeEvent(stripe, event, 'connect');
         break;
       }
 

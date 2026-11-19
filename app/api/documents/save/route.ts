@@ -9,6 +9,7 @@ import {
   type EstimateSaveInput,
 } from '@/lib/estimate-save';
 import { enforceAppAccess } from '@/lib/billing-access';
+import { restoreDocumentForCrewWrite } from '@/lib/crew-access';
 
 /**
  * Reliable estimate/invoice save via service role (after JWT auth).
@@ -82,7 +83,7 @@ export async function POST(request: NextRequest) {
       ownsExisting = Boolean(existingRow);
     }
 
-    const input: EstimateSaveInput = {
+    const rawInput: EstimateSaveInput = {
       id,
       user_id: workspaceUserId,
       jobName: body.jobName,
@@ -117,6 +118,14 @@ export async function POST(request: NextRequest) {
       taxLabor: body.taxLabor,
       updated_at: new Date().toISOString(),
     };
+    // Restricted crew only ever see redacted prices/financials: put the owner's real
+    // values back so a crew save can never zero them out.
+    const input = (await restoreDocumentForCrewWrite(
+      admin,
+      user.id,
+      id,
+      rawInput as unknown as Record<string, unknown>
+    )) as unknown as EstimateSaveInput;
 
     const attempts = [
       { name: 'camelCase', row: toCamelEstimateRow(input) },

@@ -15,6 +15,8 @@ import {
   type RecurringInterval,
 } from '@/lib/recurring-services';
 import { enforceAppAccess } from '@/lib/billing-access';
+import { getRestrictedCrewAccess } from '@/lib/crew-access';
+import { maskMoneyDeep } from '@/lib/crew-redaction';
 
 async function resolveOwnerId(userId: string): Promise<string> {
   let ownerUserId = userId;
@@ -43,7 +45,13 @@ export async function GET(request: NextRequest) {
     if (paywall) return paywall;
 
     const ownerId = await resolveOwnerId(user.id);
-    const plans = await listRecurringPlans(ownerId);
+    let plans = await listRecurringPlans(ownerId);
+    // Restricted crew: recurring amounts are pricing / financial data.
+    {
+      const admin = getSupabaseAdmin();
+      const restricted = admin ? await getRestrictedCrewAccess(admin, user.id) : null;
+      if (restricted) plans = maskMoneyDeep(plans);
+    }
     return NextResponse.json({
       ok: true,
       plans,
@@ -108,6 +116,14 @@ export async function PATCH(request: NextRequest) {
 
     const ownerId = await resolveOwnerId(user.id);
     const body = await request.json().catch(() => ({}));
+    {
+      // Restricted crew only see a redacted amount: never let that placeholder save.
+      const admin = getSupabaseAdmin();
+      const restricted = admin ? await getRestrictedCrewAccess(admin, user.id) : null;
+      if (restricted && body && typeof body === 'object' && !(Number(body.amount) > 0)) {
+        delete body.amount;
+      }
+    }
     // Treat missing action as field update (edit plan)
     const action = String(body.action || 'update').trim().toLowerCase() || 'update';
     const id = String(body.id || body.planId || body.archiveId || '').trim();
