@@ -23,8 +23,8 @@ PRODUCT
 PRICING
 - Monthly: $29.99/month after trial.
 - Yearly: $249/year after trial.
-- Standard signup: 14-day free trial via https://app.estimateace.com/trial
-- Promo landers: 2 months free (https://estimateace.com/2-months-free.html → trial?promo=2mo), 3 months free for the first 20 signups with no card until day 90 (https://estimateace.com/3-months-free.html → trial?promo=3mo), 6 months free (https://estimateace.com/6-months-free.html → trial?promo=6mo).
+- Standard signup: 14-day free trial via https://app.estimateace.com/trial. A credit card is required to start; not charged until the trial ends; cancel anytime before then to pay nothing.
+- Promo landers: 2 months free (https://estimateace.com/2-months-free.html → trial?promo=2mo; card required up front, not charged until day 61), 6 months free with NO card, limited to the first 20 signups (https://estimateace.com/6-months-free.html → trial?promo=6mo). When the 6-month offer is full, point people to the standard 14-day trial. There is no 3-month offer.
 - Cancel anytime in Profile → Billing / Contact Us before trial ends to avoid charges.
 - Soft launch: billing enforce may be off; still describe paid plans honestly.
 

@@ -18,6 +18,8 @@ type Props = {
   onRefresh: () => void | Promise<void>;
   busy?: boolean;
   supportEmail: string;
+  /** Set for brand-new standard / 2-month accounts: Checkout starts a free trial of this length. */
+  cardTrialDays?: number | null;
 };
 
 export function SubscriptionGate({
@@ -29,8 +31,12 @@ export function SubscriptionGate({
   onRefresh,
   busy,
   supportEmail,
+  cardTrialDays,
 }: Props) {
-  const reason = accessBlockedReason(billing);
+  const startingTrial = typeof cardTrialDays === 'number' && cardTrialDays > 0;
+  const reason = startingTrial
+    ? `Add a card to start your ${cardTrialDays}-day free trial. You won't be charged until the trial ends, and you can cancel anytime before then.`
+    : accessBlockedReason(billing);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#f4f4f4] p-4">
@@ -38,7 +44,9 @@ export function SubscriptionGate({
         <CardContent className="p-8 space-y-5">
           <div className="text-center">
             <div className="text-4xl mb-2">🔒</div>
-            <h1 className="text-2xl font-bold text-[#1e293b]">Subscribe to EstimateAce</h1>
+            <h1 className="text-2xl font-bold text-[#1e293b]">
+              {startingTrial ? 'Start your free trial' : 'Subscribe to EstimateAce'}
+            </h1>
             <p className="text-sm text-gray-600 mt-2">
               {reason || 'Choose a plan to keep estimating, invoicing, and using AI tools.'}
             </p>
@@ -79,14 +87,22 @@ export function SubscriptionGate({
               onClick={() => void onCheckout('monthly')}
               disabled={busy || !stripeConfigured}
             >
-              {busy ? 'Please wait…' : 'Subscribe monthly'}
+              {busy
+                ? 'Please wait…'
+                : startingTrial
+                  ? 'Start free trial · then $29.99/month'
+                  : 'Subscribe monthly'}
             </Button>
             <Button
               className="w-full bg-[#0ea5e9] hover:bg-[#0284c7] text-white h-12 text-base"
               onClick={() => void onCheckout('yearly')}
               disabled={busy || !stripeConfigured}
             >
-              {busy ? 'Please wait…' : 'Subscribe yearly'}
+              {busy
+                ? 'Please wait…'
+                : startingTrial
+                  ? 'Start free trial · then $249/year'
+                  : 'Subscribe yearly'}
             </Button>
             {billing.stripeCustomerId && (
               <Button

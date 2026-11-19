@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
-import { THREE_MONTH_PROMO_LIMIT } from '@/lib/billing';
-import { getThreeMonthPromoStatus } from '@/lib/promo-3mo';
+import { CARD_FREE_OFFER_LIMITS, cardFreeOffer } from '@/lib/billing';
+import { getPromoSpotStatus } from '@/lib/promo-spots';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -31,29 +31,30 @@ export async function OPTIONS(request: NextRequest) {
   });
 }
 
-/** How many of the 20 three-month spots are left. Used by the public landing page. */
+/**
+ * GET /api/billing/promo-spots?promo=6mo → { promo, limit, claimed, remaining, open }
+ * Public counter for the capped card-free offers. Read-only; the claim itself
+ * happens server-side in start-trial / billing status.
+ */
 export async function GET(request: NextRequest) {
   const headers = corsHeaders(request.headers.get('origin'));
+  const promo = cardFreeOffer(request.nextUrl.searchParams.get('promo') || '6mo');
+  if (!promo) {
+    return NextResponse.json({ error: 'Not a capped offer.' }, { status: 400, headers });
+  }
   const admin = getSupabaseAdmin();
   if (!admin) {
+    const limit = CARD_FREE_OFFER_LIMITS[promo];
     return NextResponse.json(
-      {
-        limit: THREE_MONTH_PROMO_LIMIT,
-        claimed: 0,
-        remaining: THREE_MONTH_PROMO_LIMIT,
-        open: true,
-      },
+      { promo, limit, claimed: 0, remaining: limit, open: true },
       { headers }
     );
   }
   try {
-    const status = await getThreeMonthPromoStatus(admin);
+    const status = await getPromoSpotStatus(admin, promo);
     return NextResponse.json(status, { headers });
   } catch (e) {
-    console.error('promo-3mo:', e);
-    return NextResponse.json(
-      { error: 'Could not read offer spots.' },
-      { status: 500, headers }
-    );
+    console.error('promo-spots:', e);
+    return NextResponse.json({ error: 'Could not read offer spots.' }, { status: 500, headers });
   }
 }

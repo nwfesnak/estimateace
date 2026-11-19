@@ -45,7 +45,7 @@
     <section class="bg-slate-900 text-white">
         <div class="max-w-5xl mx-auto px-6 py-16 md:py-24">
             <div class="inline-flex items-center gap-x-2 bg-emerald-500/20 text-emerald-300 px-4 py-1.5 rounded-full text-sm font-semibold mb-6">
-                Limited offer · New accounts
+                First 20 signups · No card to start
             </div>
             <h1 class="text-4xl md:text-6xl font-bold tracking-tighter leading-tight mb-6">
                 6 months free.<br>Then $29.99/mo.
@@ -54,12 +54,13 @@
                 Quote from the truck with Grok AI — photos and rough notes become customer-ready estimates. Then invoice, schedule, get paid, and manage crew in one app.
             </p>
             <p class="text-slate-400 max-w-2xl mb-10">
-                Start today at no charge for <strong class="text-slate-200">180 days</strong>. After your free period, Monthly is <strong class="text-slate-200">$29.99/month</strong> (or choose Yearly at signup). No card needed — you're only charged if you choose to subscribe.
+                Start today at no charge for <strong class="text-slate-200">180 days</strong>. After your free period, Monthly is <strong class="text-slate-200">$29.99/month</strong> (or choose Yearly at signup). No card needed — you're only charged if you choose to subscribe. Limited to the first 20 signups.
             </p>
+            <p id="promo-spots" class="text-emerald-300 font-semibold mb-10">Limited to the first 20 signups.</p>
             <div class="flex flex-col sm:flex-row gap-4">
                 <a
                   href="https://app.estimateace.com/trial?promo=6mo&plan=monthly"
-                  class="bg-emerald-500 hover:bg-emerald-400 text-slate-900 px-8 py-4 rounded-2xl font-bold text-lg text-center"
+                  class="claim-link bg-emerald-500 hover:bg-emerald-400 text-slate-900 px-8 py-4 rounded-2xl font-bold text-lg text-center"
                 >
                     Claim 6 months free
                 </a>
@@ -102,6 +103,7 @@
                     <li><strong>Sign up</strong> from this page (promo applied automatically).</li>
                     <li><strong>Use EstimateAce free for 180 days</strong> — full product access.</li>
                     <li>On day 181, subscribe to <strong>Monthly $29.99</strong> (or Yearly $249) to keep your account. No card is needed until then, and you are never charged unless you subscribe.</li>
+                    <li>This offer is limited to the <strong>first 20 signups</strong>. Once it's full, the standard 14-day trial is still available.</li>
                     <li>Manage or cancel anytime under <strong>Profile → Billing / Contact Us</strong>.</li>
                 </ol>
             </div>
@@ -117,7 +119,7 @@
                 </ul>
                 <a
                   href="https://app.estimateace.com/trial?promo=6mo&plan=monthly"
-                  class="mt-8 block w-full text-center py-4 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl font-semibold"
+                  class="claim-link mt-8 block w-full text-center py-4 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl font-semibold"
                 >
                     Claim 6 months free
                 </a>
@@ -128,10 +130,10 @@
 
     <section class="max-w-5xl mx-auto px-6 py-14 text-center">
         <h2 class="text-3xl font-bold tracking-tight mb-4">Ready to quote from the truck?</h2>
-        <p class="text-slate-600 mb-8 max-w-lg mx-auto">This offer is for new accounts that sign up through this page.</p>
+        <p class="text-slate-600 mb-8 max-w-lg mx-auto">This offer is for new accounts that sign up through this page, and only the first 20 signups.</p>
         <a
           href="https://app.estimateace.com/trial?promo=6mo&plan=monthly"
-          class="inline-flex px-10 py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-2xl text-lg"
+          class="claim-link inline-flex px-10 py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-2xl text-lg"
         >
             Start 6 months free
         </a>
@@ -146,6 +148,26 @@
     <footer class="bg-slate-900 text-white/70 text-sm py-8 text-center">
         <p>© 2026 EstimateAce. All rights reserved.</p>
     </footer>
+    <script>
+      (function () {
+        var spots = document.getElementById('promo-spots');
+        fetch('https://app.estimateace.com/api/billing/promo-spots?promo=6mo', { cache: 'no-store' })
+          .then(function (res) { return res.json(); })
+          .then(function (data) {
+            if (!data || typeof data.remaining !== 'number') return;
+            if (!data.open) {
+              if (spots) spots.textContent = 'This offer is full — all 20 spots are taken. The standard 14-day free trial is still open.';
+              document.querySelectorAll('a.claim-link').forEach(function (link) {
+                link.textContent = 'Offer full — start the 14-day trial';
+                link.setAttribute('href', 'https://app.estimateace.com/trial?plan=monthly');
+              });
+              return;
+            }
+            if (spots) spots.textContent = data.remaining + ' of 20 spots left. No credit card to start.';
+          })
+          .catch(function () {});
+      })();
+    </script>
     <script src="js/chat-widget.js?v=20260907c" defer></script>
 </body>
 </html>

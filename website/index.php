@@ -259,7 +259,7 @@ $app_url = 'https://app.estimateace.com';
     <h2>You've got this. We've got your back.</h2>
     <p>Join contractors who quote faster, look sharper, and get paid without the paperwork headache.</p>
     <a class="btn btn-primary btn-lg" href="<?= $app_url ?>">Start Free Trial</a>
-    <p class="hero-note" style="margin-top:0.75rem;">No credit card required</p>
+    <p class="hero-note" style="margin-top:0.75rem;">Card required · not charged until your free trial ends</p>
   </div>
 </section>
 

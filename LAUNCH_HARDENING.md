@@ -24,7 +24,8 @@ What this change does and the steps that must happen after it merges.
 - **Subscribe mid-trial:** Checkout passes `subscription_data.trial_end` = remaining trial
   (when ≥ ~49h away — Stripe's 48h minimum), so the first charge happens when the trial ends.
 - **Trial lengths:** only standard (`NEXT_PUBLIC_TRIAL_DAYS`, default 14), `2mo` (60),
-  `6mo` (180) and the capped legacy `3mo` (90, first 20). Unknown promos / mismatched
+  `6mo` (180, card-free, first 20 signups). Standard and `2mo` require a card in Stripe
+  Checkout. Retired `3mo` links get the standard trial. Unknown promos / mismatched
   `trialDays` → 400.
 - **Password reset:** email links to `/reset-password` (set-new-password screen). Old links that
   land on `/` are redirected there on `PASSWORD_RECOVERY`.
