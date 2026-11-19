@@ -1,12 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import { loadReceptionistConfig } from '@/lib/receptionist-store';
+import { RECEPTIONIST_CAPS } from '@/lib/receptionist-caps';
+import { currentUsagePeriod, loadReceptionistUsage } from '@/lib/receptionist-usage';
 
 export const dynamic = 'force-dynamic';
 
+const minutes = (sec: number) => Math.ceil(Math.max(0, sec) / 60);
+
 /**
- * GET /api/receptionist/usage?from=&to=
- * Phase 1 stub — returns zeros until UsageMeter pulls Twilio subaccount usage.
+ * GET /api/receptionist/usage — this billing period's AI Receptionist usage vs the caps
+ * (lib/receptionist-caps.ts). `available: false` means usage can't be read right now, in
+ * which case calls are forwarded instead of answered by the AI.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -14,21 +19,33 @@ export async function GET(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: authError || 'Unauthorized' }, { status: 401 });
     }
-    const config = await loadReceptionistConfig(user.id);
-    const from = request.nextUrl.searchParams.get('from') || '';
-    const to = request.nextUrl.searchParams.get('to') || '';
-    return NextResponse.json({
-      ok: true,
-      from: from || null,
-      to: to || null,
-      phoneNumber: config.twilio?.phoneNumber || null,
-      voiceMinutes: 0,
-      smsCount: 0,
-      numberRent: 0,
-      estimatedCost: 0,
-      note: 'Usage metering connects in a later phase (Twilio subaccount usage API).',
-    });
-  } catch (e: any) {
+    const [config, period] = await Promise.all([
+      loadReceptionistConfig(user.id),
+      currentUsagePeriod(user.id),
+    ]);
+    const usage = await loadReceptionistUsage(user.id, period);
+    const caps = RECEPTIONIST_CAPS;
+    return NextResponse.json(
+      {
+        ok: true,
+        available: Boolean(usage),
+        phoneNumber: config.twilio?.phoneNumber || null,
+        periodStart: period.periodStart,
+        periodEnd: period.periodEnd,
+        aiMinutesUsed: minutes(usage?.monthAiSeconds || 0),
+        aiMinutesCap: caps.monthlyAiMinutes,
+        aiMinutesToday: minutes(usage?.dayAiSeconds || 0),
+        aiMinutesDailyCap: caps.dailyAiMinutes,
+        forwardMinutesUsed: minutes(usage?.monthForwardSeconds || 0),
+        forwardMinutesCap: caps.monthlyForwardMinutes,
+        leadTextsUsed: usage?.monthSms || 0,
+        leadTextsCap: caps.monthlyLeadSms,
+        maxCallMinutes: caps.maxCallMinutes,
+        callsPerCallerPerHour: caps.callsPerCallerPerHour,
+      },
+      { headers: { 'Cache-Control': 'no-store' } }
+    );
+  } catch {
     return NextResponse.json({ error: 'Failed' }, { status: 500 });
   }
 }

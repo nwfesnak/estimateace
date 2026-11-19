@@ -51,6 +51,8 @@ export type ReceptionistCallSession = {
   gateRequired?: boolean;
   gatePassed?: boolean;
   gateAttempts?: number;
+  /** AI time budget for this call (≤ RECEPTIONIST_CAPS.maxCallMinutes, less near a cap) */
+  maxCallSeconds?: number;
   /** One lead + one notification per call: set once finalizeReceptionistCall ran */
   finalizedAt?: string;
   createdAt: string;
@@ -111,7 +113,7 @@ export async function saveCallSession(session: ReceptionistCallSession): Promise
   if (!admin) throw new Error('Missing SUPABASE_SERVICE_ROLE_KEY');
   const now = new Date().toISOString();
   const next = { ...session, updatedAt: now };
-  await admin.from('estimates').upsert({
+  const { error } = await admin.from('estimates').upsert({
     id: sessionRowId(session.callSid),
     user_id: session.userId,
     jobName: '__receptionist_call__',
@@ -120,6 +122,7 @@ export async function saveCallSession(session: ReceptionistCallSession): Promise
     profile: next,
     updated_at: now,
   });
+  if (error) throw new Error(`save call session: ${error.message}`);
 }
 
 export async function deleteCallSession(callSid: string): Promise<void> {

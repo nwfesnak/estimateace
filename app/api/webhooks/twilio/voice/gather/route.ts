@@ -1,4 +1,6 @@
-import { NextRequest } from 'next/server';
+import { after, type NextRequest } from 'next/server';
+import { CAP_MESSAGES, callTimeUp } from '@/lib/receptionist-caps';
+import { finalizeReceptionistCall } from '@/lib/receptionist-call-finalize';
 import { loadCallSession, saveCallSession } from '@/lib/receptionist-call-session';
 import {
   sayGatherTwiml,
@@ -44,13 +46,20 @@ export async function POST(request: NextRequest) {
     });
 
     if (!session) {
-      // Still listen again instead of hard-failing the call
-      return twimlXmlResponse(
-        sayGatherTwiml({
-          say: 'Thanks for calling. How can I help you today?',
-          gatherActionUrl: VOICE_GATHER_PATH,
-        })
-      );
+      // No session = no budget to enforce: end the call instead of listening forever.
+      return twimlXmlResponse(sayHangupTwiml(CAP_MESSAGES.callBack('us')));
+    }
+
+    if (callTimeUp(session)) {
+      // Per-call time cap: wrap up politely; the lead is still saved.
+      after(async () => {
+        try {
+          await finalizeReceptionistCall(callSid, 'final_turn');
+        } catch (e) {
+          console.warn('voice gather time-up finalize:', e);
+        }
+      });
+      return twimlXmlResponse(sayHangupTwiml(CAP_MESSAGES.timeUp(session.businessName || 'us')));
     }
 
     if (session.gateRequired && !session.gatePassed) {

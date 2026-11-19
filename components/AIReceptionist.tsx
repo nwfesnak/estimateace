@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent } from '@/components/ui/card';
+import { ReceptionistUsageCard } from '@/components/ReceptionistUsageCard';
 import { NATIVE_MANAGE_PLAN_TEXT, useIsNativeApp } from '@/lib/native-app';
 import {
   type ReceptionistSettings,
@@ -1187,6 +1188,7 @@ export function AIReceptionist({
               </div>
             </CardContent>
           </Card>
+          {addonActive && <ReceptionistUsageCard getAccessToken={getAccessToken} />}
         </div>
       )}
 
