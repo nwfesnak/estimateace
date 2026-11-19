@@ -1,4 +1,5 @@
 import { getXaiVisionModel, requireXaiApiKey } from '@/lib/xai-config';
+import { toLocalDateKey } from '@/lib/local-date';
 
 export type ReceiptScanResult = {
   total: number;
@@ -49,7 +50,7 @@ function parseScanJson(aiText: string): ReceiptScanResult | null {
     if (/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) date = rawDate;
     else if (rawDate) {
       const d = new Date(rawDate);
-      if (!Number.isNaN(d.getTime())) date = d.toISOString().slice(0, 10);
+      if (!Number.isNaN(d.getTime())) date = toLocalDateKey(d);
     }
 
     return {

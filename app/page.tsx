@@ -110,6 +110,7 @@ import {
   syncLineItemPricingFromJobTotal,
 } from '@/lib/breakdown-pricing';
 import { rankAddressSuggestions } from '@/lib/address-autocomplete';
+import { todayDateKey, parseDateOnly } from '@/lib/local-date';
 
 const DEFAULT_DISCOUNT_NAMES = ['Military', 'Return customer'];
 
@@ -3768,7 +3769,7 @@ export default function Home() {
             setCurrentReceiptPath(newUrls[0]);
             if (firstUrl) setCurrentReceiptUrl(firstUrl);
             setTempReceiptData({
-              date: new Date().toISOString().split('T')[0],
+              date: todayDateKey(),
               vendor: 'Material/Supplies',
               amount: 0,
               notes: '',
@@ -3937,7 +3938,7 @@ export default function Home() {
       return {
         url: storagePath,
         path: storagePath,
-        date: json.date || new Date().toISOString().split('T')[0],
+        date: json.date || todayDateKey(),
         vendor: category,
         amount: Number(json.total) || 0,
         notes: [json.lineItemsSummary, json.notes, json.confidence ? `AI confidence: ${json.confidence}` : '']
@@ -3966,7 +3967,7 @@ export default function Home() {
         if (signed) setCurrentReceiptUrl(signed);
         const existing = findReceiptDetail(path, index);
         setTempReceiptData({
-          date: existing?.date || new Date().toISOString().split('T')[0],
+          date: existing?.date || todayDateKey(),
           vendor: existing?.vendor || 'Material/Supplies',
           amount: Number(existing?.amount) || 0,
           notes: existing?.notes || '',
@@ -5219,7 +5220,7 @@ export default function Home() {
     setPaymentStatus('pending');
     setPaymentMethod('');
     setDueDate('');
-    const today = new Date().toISOString().split('T')[0];
+    const today = todayDateKey();
     setDate(today);
     const savedCount = parseInt(localStorage.getItem('estimateCount') || '0') + 1;
     localStorage.setItem('estimateCount', savedCount.toString());
@@ -6796,7 +6797,7 @@ export default function Home() {
           zipCode: String(g('zipCode') ?? ''),
           phones: Array.isArray(g('phones')) ? g('phones') : g('phones') ? [g('phones')] : [],
           emails: Array.isArray(g('emails')) ? g('emails') : g('emails') ? [g('emails')] : [],
-          date: String(g('date') ?? new Date().toISOString().slice(0, 10)),
+          date: String(g('date') ?? todayDateKey()),
           items: Array.isArray(g('items')) ? g('items') : [],
           terms: String(g('terms') ?? ''),
           profile: g('profile') ?? getDocumentProfileSnapshot(),
@@ -9377,7 +9378,7 @@ export default function Home() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `EstimateAce_Export_${new Date().toISOString().slice(0, 10)}.zip`;
+      a.download = `EstimateAce_Export_${todayDateKey()}.zip`;
       a.click();
       URL.revokeObjectURL(url);
       const missNote = missing.length ? ` ${missing.length} file(s) could not be downloaded and are listed in the zip.` : '';
@@ -11405,8 +11406,8 @@ export default function Home() {
   const salesYTD = allDocs
     .filter(doc => {
       if (!doc.date) return false;
-      const docDate = new Date(doc.date);
-      if (isNaN(docDate.getTime())) return false;
+      const docDate = parseDateOnly(doc.date);
+      if (!docDate) return false;
       return docDate.getFullYear() === currentYear &&
              (doc.documentType === 'invoice' || doc.invoiceNumber?.startsWith('INV')) &&
              doc.paymentStatus === 'paid';
@@ -11416,8 +11417,8 @@ export default function Home() {
   const totalSalesTaxCollected = allDocs
     .filter(doc => {
       if (!doc.date) return false;
-      const docDate = new Date(doc.date);
-      if (isNaN(docDate.getTime())) return false;
+      const docDate = parseDateOnly(doc.date);
+      if (!docDate) return false;
       return docDate.getFullYear() === currentYear &&
              (doc.documentType === 'invoice' || doc.invoiceNumber?.startsWith('INV')) &&
              doc.paymentStatus === 'paid';
@@ -11426,8 +11427,8 @@ export default function Home() {
   const totalTaxDeductibleReceipts = allDocs
     .filter(doc => {
       if (!doc.date) return false;
-      const docDate = new Date(doc.date);
-      if (isNaN(docDate.getTime())) return false;
+      const docDate = parseDateOnly(doc.date);
+      if (!docDate) return false;
       return docDate.getFullYear() === currentYear &&
              (doc.documentType === 'invoice' || doc.invoiceNumber?.startsWith('INV')) &&
              doc.paymentStatus === 'paid';
@@ -11438,8 +11439,8 @@ export default function Home() {
   const netTaxableProfit = allDocs
     .filter(doc => {
       if (!doc.date) return false;
-      const docDate = new Date(doc.date);
-      if (isNaN(docDate.getTime())) return false;
+      const docDate = parseDateOnly(doc.date);
+      if (!docDate) return false;
       return docDate.getFullYear() === currentYear &&
              (doc.documentType === 'invoice' || doc.invoiceNumber?.startsWith('INV')) &&
              doc.paymentStatus === 'paid';
@@ -11456,8 +11457,8 @@ export default function Home() {
     const end = new Date(currentYear, q*3, 0);
     const filtered = allDocs.filter(doc => {
       if (!doc.date) return false;
-      const d = new Date(doc.date);
-      if (isNaN(d.getTime())) return false;
+      const d = parseDateOnly(doc.date);
+      if (!d) return false;
       return d >= start && d <= end &&
              (doc.documentType === 'invoice' || doc.invoiceNumber?.startsWith('INV')) &&
              doc.paymentStatus === 'paid';
