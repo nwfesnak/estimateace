@@ -65,6 +65,7 @@ export default function PrivacyPage() {
           <li>xAI — AI model API when you use AI features</li>
           <li>Stripe — payments</li>
           <li>Resend / Twilio — email/SMS when you enable notifications</li>
+          <li>Meta Platforms — advertising measurement on our website only (see section 5C)</li>
         </ul>
 
         <h2>4. AI processing (including xAI)</h2>
@@ -97,7 +98,7 @@ export default function PrivacyPage() {
         <p>
           We do not sell your personal information. We share data with processors only as needed to
           run the Service, or if required by law, or with your direction (e.g. payment links you open
-          to third-party apps).
+          to third-party apps). Our website also uses the Meta Pixel described in section 5C.
         </p>
         <p>
           <strong>Mobile phone numbers:</strong> We do not sell, rent, or share mobile phone numbers
@@ -142,6 +143,59 @@ export default function PrivacyPage() {
           </li>
         </ul>
 
+        <h2>5C. Advertising cookies on our website (Meta Pixel)</h2>
+        <p>
+          Our websites (estimateace.com and app.estimateace.com in a web browser) use the{' '}
+          <strong>Meta Pixel</strong>, a small piece of code from Meta Platforms,
+          Inc. (Facebook / Instagram), so we can measure how well our ads work and show EstimateAce
+          ads to people who have visited our website (retargeting).
+        </p>
+        <ul>
+          <li>
+            <strong>What it collects:</strong> when a page loads, your browser sends Meta the page
+            address (URL) and the referring page, the fact that the page was viewed, your IP address,
+            browser and device information (user agent, screen size), the time of the visit, and
+            cookie identifiers (such as Meta&apos;s <code>_fbp</code> cookie, and Facebook cookies
+            already in your browser if you use Facebook or Instagram). We do not send Meta your
+            estimates, invoices, customer details, or other business content.
+          </li>
+          <li>
+            <strong>How it is used:</strong> Meta uses this information to tell us how many people
+            visit after seeing an ad, to build audiences for our ads, and for its own purposes as
+            described in{' '}
+            <a href="https://www.facebook.com/privacy/policy/" target="_blank" rel="noopener noreferrer">
+              Meta&apos;s Privacy Policy
+            </a>
+            . Meta may link it to your Facebook or Instagram account.
+          </li>
+          <li>
+            <strong>Not in the mobile apps:</strong> the Meta Pixel is turned off inside the EstimateAce
+            iPhone and Android apps and is never loaded there.
+          </li>
+          <li>
+            <strong>How to opt out:</strong> block third-party cookies or clear cookies in your browser
+            settings, or use a browser or extension that blocks trackers such as connect.facebook.net.
+            If you have a Facebook or Instagram
+            account, you can limit ads based on activity from websites like ours in your{' '}
+            <a href="https://www.facebook.com/adpreferences" target="_blank" rel="noopener noreferrer">
+              Meta ad preferences
+            </a>{' '}
+            (Ad settings → Activity information from ad partners) and disconnect past activity in{' '}
+            <a
+              href="https://accountscenter.facebook.com/info_and_permissions/off_facebook_activity"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Your activity off Meta technologies
+            </a>
+            . You can also use the industry opt-out at{' '}
+            <a href="https://optout.aboutads.info" target="_blank" rel="noopener noreferrer">
+              optout.aboutads.info
+            </a>
+            . Opting out does not affect your use of EstimateAce.
+          </li>
+        </ul>
+
         <h2>6. Retention and account deletion</h2>
         <p>
           We retain account and job data while your account is active and as needed for backups,
@@ -159,6 +213,11 @@ export default function PrivacyPage() {
           Stripe, payment dispute records (with your account link removed), and SMS opt-in / opt-out
           consent records for phone numbers. Routine backups roll off within about 30 days.
         </p>
+        <p>
+          If you are a <strong>crew member</strong> on someone else&apos;s EstimateAce account and you
+          delete your own login, the crew seat the account owner was paying for is canceled
+          automatically, the same as if the owner had removed you.
+        </p>
 
         <h2>7. Security</h2>
         <p>
@@ -171,6 +230,7 @@ export default function PrivacyPage() {
         <ul>
           <li>Update profile and job data in the app</li>
           <li>Manage or cancel subscription via Stripe customer portal when available</li>
+          <li>Opt out of website advertising cookies (see section 5C)</li>
           <li>
             Delete your account in the app or on the web (see section 6), or contact{' '}
             <a href={`mailto:${SUPPORT}`}>{SUPPORT}</a> for access or deletion requests

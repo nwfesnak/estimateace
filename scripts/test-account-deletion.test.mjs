@@ -72,6 +72,7 @@ function fakeAdmin({ failTable, deleteUserError } = {}) {
 function steps(log, over = {}) {
   return {
     stopBilling: async (u) => void log.push(`stopBilling ${u}`),
+    releaseCrewSeats: async (u) => void log.push(`releaseCrewSeats ${u}`),
     releasePhoneLine: async (u) => void log.push(`releasePhoneLine ${u}`),
     deleteMedia: async (u) => (log.push(`deleteMedia ${u}`), { removed: 7, complete: true }),
     deleteCrewLogins: async (u) => (log.push(`deleteCrewLogins ${u}`), 1),
@@ -95,7 +96,9 @@ test('full purge order: billing → phone → files → crew logins → tables �
   const L = admin.log;
   const at = (s) => L.findIndex((x) => x.startsWith(s));
   assert.ok(at('stopBilling') === 0);
-  assert.ok(at('releasePhoneLine') > at('stopBilling'));
+  assert.ok(at('releaseCrewSeats') > at('stopBilling'));
+  assert.ok(at('delete crew_members.crew_user_id') > at('releaseCrewSeats'), 'seat lookup reads crew_members first');
+  assert.ok(at('releasePhoneLine') > at('releaseCrewSeats'));
   assert.ok(at('deleteMedia') > at('releasePhoneLine'));
   assert.ok(at('deleteCrewLogins') > at('deleteMedia'));
   assert.ok(at('delete crew_members.owner_user_id') > at('deleteCrewLogins'), 'crew logins read crew_members first');

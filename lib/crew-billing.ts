@@ -281,9 +281,16 @@ export async function upsertCrewSeatFromStripe(
     updated_at: new Date().toISOString(),
   };
 
-  const { error } = await admin.from('crew_seat_subscriptions').upsert(payload, {
+  let { error } = await admin.from('crew_seat_subscriptions').upsert(payload, {
     onConflict: 'stripe_subscription_id',
   });
+  if (error && (error as { code?: string }).code === '23503' && payload.crew_user_id) {
+    // The crew login was deleted (account deletion); keep the seat history without it.
+    payload.crew_user_id = null;
+    ({ error } = await admin.from('crew_seat_subscriptions').upsert(payload, {
+      onConflict: 'stripe_subscription_id',
+    }));
+  }
 
   if (error) {
     // Table may not exist yet or unique constraint name differs — try update/insert
@@ -388,4 +395,55 @@ export async function upsertCrewSeatFromStripe(
 
 export function isCrewSeatSubscription(sub: Stripe.Subscription | null | undefined): boolean {
   return sub?.metadata?.purpose === CREW_SEAT_PURPOSE;
+}
+
+const SEAT_ENDED = new Set(['canceled', 'incomplete_expired']);
+
+function isMissingSubscription(e: unknown): boolean {
+  const err = e as { code?: string; statusCode?: number; message?: string } | null;
+  return err?.code === 'resource_missing' || err?.statusCode === 404 || /No such subscription/i.test(err?.message || '');
+}
+
+/**
+ * End a crew seat right away (the same billing path as the owner tapping Delete on a
+ * crew member): cancel the seat subscription in Stripe now and record it. Idempotent:
+ * an already-canceled or missing subscription is a no-op. Refuses anything that is
+ * not a crew-seat subscription (never touches the main plan or add-ons).
+ */
+export async function cancelCrewSeatNow(
+  stripe: Pick<Stripe, 'subscriptions'>,
+  subscriptionId: string,
+  record: (sub: Stripe.Subscription) => Promise<{ ok: boolean; error?: string }> = upsertCrewSeatFromStripe,
+  expect?: { crewUserId?: string | null; crewEmail?: string | null; ownerUserId?: string | null }
+): Promise<'canceled' | 'already_ended' | 'missing' | 'not_a_seat' | 'not_this_crew'> {
+  let sub: Stripe.Subscription;
+  try {
+    sub = await stripe.subscriptions.retrieve(subscriptionId);
+  } catch (e) {
+    if (isMissingSubscription(e)) return 'missing';
+    throw e;
+  }
+  if (!isCrewSeatSubscription(sub)) return 'not_a_seat';
+  if (expect) {
+    const meta = sub.metadata || {};
+    const owner = String(meta.supabase_user_id || meta.owner_user_id || '');
+    if (expect.ownerUserId && owner && owner !== expect.ownerUserId) return 'not_this_crew';
+    const byUser = !!expect.crewUserId && meta.crew_user_id === expect.crewUserId;
+    const byEmail =
+      !!expect.crewEmail && String(meta.crew_email || '').toLowerCase() === expect.crewEmail.toLowerCase();
+    if (!byUser && !byEmail) return 'not_this_crew';
+  }
+  if (SEAT_ENDED.has(sub.status)) {
+    await record(sub);
+    return 'already_ended';
+  }
+  let canceled: Stripe.Subscription;
+  try {
+    canceled = await stripe.subscriptions.cancel(sub.id);
+  } catch (e) {
+    if (isMissingSubscription(e)) return 'missing';
+    throw e;
+  }
+  await record(canceled);
+  return 'canceled';
 }
