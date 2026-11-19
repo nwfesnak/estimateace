@@ -8,6 +8,7 @@ import {
   formatPeriodEnd,
   type BillingSnapshot,
 } from '@/lib/billing';
+import { NATIVE_MANAGE_PLAN_TEXT, useIsNativeApp } from '@/lib/native-app';
 
 type Props = {
   billing: BillingSnapshot;
@@ -33,8 +34,12 @@ export function SubscriptionGate({
   supportEmail,
   cardTrialDays,
 }: Props) {
-  const startingTrial = typeof cardTrialDays === 'number' && cardTrialDays > 0;
-  const reason = startingTrial
+  // iOS / Android app: no purchase buttons or prices (store payment rules).
+  const nativeApp = useIsNativeApp();
+  const startingTrial = !nativeApp && typeof cardTrialDays === 'number' && cardTrialDays > 0;
+  const reason = nativeApp
+    ? 'Your EstimateAce plan is not active on this account yet.'
+    : startingTrial
     ? `Add a card to start your ${cardTrialDays}-day free trial. You won't be charged until the trial ends, and you can cancel anytime before then.`
     : accessBlockedReason(billing);
 
@@ -45,7 +50,11 @@ export function SubscriptionGate({
           <div className="text-center">
             <div className="text-4xl mb-2">🔒</div>
             <h1 className="text-2xl font-bold text-[#1e293b]">
-              {startingTrial ? 'Start your free trial' : 'Subscribe to EstimateAce'}
+              {nativeApp
+                ? 'Your plan isn’t active'
+                : startingTrial
+                  ? 'Start your free trial'
+                  : 'Subscribe to EstimateAce'}
             </h1>
             <p className="text-sm text-gray-600 mt-2">
               {reason || 'Choose a plan to keep estimating, invoicing, and using AI tools.'}
@@ -67,6 +76,12 @@ export function SubscriptionGate({
             </div>
           </div>
 
+          {nativeApp && (
+            <p className="text-sm text-slate-700 bg-slate-50 border rounded-lg p-3">
+              {NATIVE_MANAGE_PLAN_TEXT} Then tap <strong>Refresh status</strong>.
+            </p>
+          )}
+
           {!enforced && (
             <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
               Billing enforcement is off (<code className="text-[10px]">NEXT_PUBLIC_BILLING_ENFORCE</code>
@@ -74,7 +89,7 @@ export function SubscriptionGate({
             </p>
           )}
 
-          {!stripeConfigured && (
+          {!stripeConfigured && !nativeApp && (
             <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg p-3">
               Stripe is not configured on the server. Add <code>STRIPE_SECRET_KEY</code> and{' '}
               <code>STRIPE_PRICE_ID</code> in Vercel.
@@ -82,37 +97,41 @@ export function SubscriptionGate({
           )}
 
           <div className="flex flex-col gap-2">
-            <Button
-              className="w-full bg-[#10b981] hover:bg-[#059669] text-white h-12 text-base"
-              onClick={() => void onCheckout('monthly')}
-              disabled={busy || !stripeConfigured}
-            >
-              {busy
-                ? 'Please wait…'
-                : startingTrial
-                  ? 'Start free trial · then $29.99/month'
-                  : 'Subscribe monthly'}
-            </Button>
-            <Button
-              className="w-full bg-[#0ea5e9] hover:bg-[#0284c7] text-white h-12 text-base"
-              onClick={() => void onCheckout('yearly')}
-              disabled={busy || !stripeConfigured}
-            >
-              {busy
-                ? 'Please wait…'
-                : startingTrial
-                  ? 'Start free trial · then $249/year'
-                  : 'Subscribe yearly'}
-            </Button>
-            {billing.stripeCustomerId && (
-              <Button
-                variant="outline"
-                className="w-full"
-                onClick={() => void onPortal()}
-                disabled={busy || !stripeConfigured}
-              >
-                Manage billing
-              </Button>
+            {!nativeApp && (
+              <>
+                <Button
+                  className="w-full bg-[#10b981] hover:bg-[#059669] text-white h-12 text-base"
+                  onClick={() => void onCheckout('monthly')}
+                  disabled={busy || !stripeConfigured}
+                >
+                  {busy
+                    ? 'Please wait…'
+                    : startingTrial
+                      ? 'Start free trial · then $29.99/month'
+                      : 'Subscribe monthly'}
+                </Button>
+                <Button
+                  className="w-full bg-[#0ea5e9] hover:bg-[#0284c7] text-white h-12 text-base"
+                  onClick={() => void onCheckout('yearly')}
+                  disabled={busy || !stripeConfigured}
+                >
+                  {busy
+                    ? 'Please wait…'
+                    : startingTrial
+                      ? 'Start free trial · then $249/year'
+                      : 'Subscribe yearly'}
+                </Button>
+                {billing.stripeCustomerId && (
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => void onPortal()}
+                    disabled={busy || !stripeConfigured}
+                  >
+                    Manage billing
+                  </Button>
+                )}
+              </>
             )}
             <Button variant="outline" className="w-full" onClick={() => void onRefresh()} disabled={busy}>
               Refresh status

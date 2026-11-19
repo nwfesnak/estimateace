@@ -2,6 +2,8 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { PWA_THEME_COLOR } from "@/lib/pwa-icon";
 import "./globals.css";
+import { NativeAppBridge } from "@/components/NativeAppBridge";
+import { NATIVE_UA_TOKEN } from "@/lib/native-app-shared";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -42,13 +44,21 @@ export default function RootLayout({
 }>) {
   return (
     <html
+      suppressHydrationWarning
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <head>
+        {/* Store app (Capacitor) detection before paint: tags <html> for safe-area CSS. */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');fbq('init','3714943865320390');fbq('track','PageView');`,
+            __html: `try{if(/\\b${NATIVE_UA_TOKEN}\\b/.test(navigator.userAgent)||(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform())){document.documentElement.classList.add('native-app')}}catch(e){}`,
+          }}
+        />
+        {/* Meta pixel: website only. Not loaded inside the iOS / Android app (no tracking there). */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `if(!document.documentElement.classList.contains('native-app')){!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');fbq('init','3714943865320390');fbq('track','PageView');}`,
           }}
         />
         <noscript>
@@ -61,7 +71,10 @@ export default function RootLayout({
           />
         </noscript>
       </head>
-      <body className="min-h-full flex flex-col bg-[#ffffff]">{children}</body>
+      <body className="min-h-full flex flex-col bg-[#ffffff]">
+        {children}
+        <NativeAppBridge />
+      </body>
     </html>
   );
 }

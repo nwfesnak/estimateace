@@ -1,0 +1,5 @@
+# Native app projects and source art are built on the Mac, not on Vercel.
+/android
+/ios
+/assets
+/mobile

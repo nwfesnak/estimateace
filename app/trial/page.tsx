@@ -11,6 +11,7 @@ import {
   TURNSTILE_REQUIRED_MESSAGE,
   turnstileEnabled,
 } from '@/lib/turnstile';
+import { NATIVE_SIGNUP_TEXT, useIsNativeApp } from '@/lib/native-app';
 
 const APP_HOME = '/';
 const DEFAULT_TRIAL_DAYS = 14;
@@ -618,7 +619,27 @@ function TrialForm() {
   );
 }
 
+/** iOS / Android app: no signup / plan purchase in the app (store payment rules). */
+function NativeSignupNotice() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-[#f4f4f4] p-6 font-sans">
+      <div className="w-full max-w-md rounded-2xl bg-white shadow p-8 text-center space-y-4">
+        <h1 className="text-2xl font-bold text-[#1e293b]">Welcome to EstimateAce</h1>
+        <p className="text-sm text-gray-600">{NATIVE_SIGNUP_TEXT}</p>
+        <Link
+          href={APP_HOME}
+          className="inline-block w-full rounded-lg bg-[#10b981] px-4 py-3 font-semibold text-white"
+        >
+          Go to log in
+        </Link>
+      </div>
+    </div>
+  );
+}
+
 export default function TrialPage() {
+  const nativeApp = useIsNativeApp();
+  if (nativeApp) return <NativeSignupNotice />;
   return (
     <Suspense
       fallback={

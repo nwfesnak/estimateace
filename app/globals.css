@@ -614,3 +614,24 @@ textarea.line-item-description-textarea {
   min-width: 0;
   box-sizing: border-box;
 }
+/* ========== EstimateAce iOS / Android app (Capacitor) ==========
+ * html.native-app is only set inside the store app (layout.tsx / NativeAppBridge), never
+ * on the website. The app draws edge-to-edge, so keep content clear of the notch /
+ * status bar. Bottom insets are already handled by .app-shell-bottom-nav.
+ */
+html.native-app .app-shell {
+  box-sizing: border-box;
+  padding-top: env(safe-area-inset-top, 0px);
+}
+html.native-app body:not(:has(.app-shell)) {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+html.native-app,
+html.native-app body {
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+}
+/* Anything marked web-only (prices, plan purchase) never shows in the app. */
+html.native-app [data-web-only] {
+  display: none !important;
+}

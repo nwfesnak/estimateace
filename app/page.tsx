@@ -116,6 +116,12 @@ import { rankAddressSuggestions } from '@/lib/address-autocomplete';
 import { randomUploadId, safeUploadName } from '@/lib/upload-names';
 import { TurnstileWidget } from '@/components/TurnstileWidget';
 import {
+  isNativeApp,
+  NATIVE_MANAGE_PLAN_TEXT,
+  NATIVE_SIGNUP_TEXT,
+  useIsNativeApp,
+} from '@/lib/native-app';
+import {
   captchaOption,
   friendlyCaptchaError,
   TURNSTILE_REQUIRED_MESSAGE,
@@ -1872,6 +1878,8 @@ export default function Home() {
   const [crewSeatCancelBusy, setCrewSeatCancelBusy] = useState<string | null>(null);
   const [deleteAccountBusy, setDeleteAccountBusy] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  /** Inside the iOS / Android store app: hide plan / add-on / seat purchase UI and prices. */
+  const nativeApp = useIsNativeApp();
   const SUPPORT_EMAIL =
     (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_SUPPORT_EMAIL) ||
     'support@estimateace.com';
@@ -3156,10 +3164,13 @@ export default function Home() {
           msg = 'Email not confirmed yet. Check your inbox for the confirmation link.';
         } else if (code === 'user_banned' || /banned/i.test(msg)) {
           msg =
-            'This crew login is turned off. Ask the account owner to pay for (or renew) your crew seat ($14.99/mo) in Billing, then try again.';
+            isNativeApp()
+              ? 'This crew login is turned off. Ask the account owner to renew your crew seat, then try again.'
+              : 'This crew login is turned off. Ask the account owner to pay for (or renew) your crew seat ($14.99/mo) in Billing, then try again.';
         } else if (code === 'invalid_credentials') {
-          msg =
-            'Invalid email or password. New accounts start from the free trial / pricing page (not Sign Up here). Use Forgot password? if you already have an account.';
+          msg = isNativeApp()
+            ? `Invalid email or password. Use Forgot password? if you already have an account. ${NATIVE_SIGNUP_TEXT}`
+            : 'Invalid email or password. New accounts start from the free trial / pricing page (not Sign Up here). Use Forgot password? if you already have an account.';
         }
         setLoginError(msg);
         showMessage(msg);
@@ -11960,22 +11971,30 @@ export default function Home() {
                 <Button onClick={login} className="flex-1" disabled={loginLoading}>
                   {loginLoading ? 'Logging in...' : t('loginMain')}
                 </Button>
-                <Button
-                  type="button"
-                  onClick={goToSignupPayScreen}
-                  variant="outline"
-                  className="flex-1"
-                  disabled={loginLoading}
-                >
-                  {t('signUp')}
-                </Button>
+                {!nativeApp && (
+                  <Button
+                    type="button"
+                    onClick={goToSignupPayScreen}
+                    variant="outline"
+                    className="flex-1"
+                    disabled={loginLoading}
+                  >
+                    {t('signUp')}
+                  </Button>
+                )}
               </div>
-              <p className="text-[11px] text-gray-500 mb-3 text-center leading-relaxed">
-                New customers: the <strong>Sign Up</strong>
-                {' '}
-                button opens the free trial and plan page. Accounts are not created on this screen
-                — only through the trial / pricing signup.
-              </p>
+              {nativeApp ? (
+                <p className="text-[11px] text-gray-500 mb-3 text-center leading-relaxed">
+                  {NATIVE_SIGNUP_TEXT}
+                </p>
+              ) : (
+                <p className="text-[11px] text-gray-500 mb-3 text-center leading-relaxed">
+                  New customers: the <strong>Sign Up</strong>
+                  {' '}
+                  button opens the free trial and plan page. Accounts are not created on this screen
+                  — only through the trial / pricing signup.
+                </p>
+              )}
               <button 
                 onClick={() => setShowMainForgot(true)} 
                 className="text-sm text-blue-600 hover:underline w-full text-left"
@@ -14898,26 +14917,35 @@ export default function Home() {
                         the app will stop access and remove your data.
                       </div>
                     )}
+                    {nativeApp && (
+                      <p className="text-sm text-slate-700 bg-slate-50 border rounded-lg p-3">
+                        {NATIVE_MANAGE_PLAN_TEXT}
+                      </p>
+                    )}
                     <div className="flex flex-wrap gap-2">
-                      <Button
-                        className="bg-[#10b981] hover:bg-[#059669] text-white"
-                        disabled={billingBusy || billingStripeDiag.hasPriceIdMonthly === false}
-                        onClick={() => void startSubscriptionCheckout('monthly')}
-                      >
-                        {billingBusy ? 'Opening Stripe…' : 'Subscribe monthly'}
-                      </Button>
-                      <Button
-                        className="bg-[#0ea5e9] hover:bg-[#0284c7] text-white"
-                        disabled={billingBusy || !billingStripeDiag.hasPriceIdYearly}
-                        onClick={() => void startSubscriptionCheckout('yearly')}
-                        title={
-                          !billingStripeDiag.hasPriceIdYearly
-                            ? 'Add STRIPE_PRICE_ID_YEARLY in Vercel'
-                            : undefined
-                        }
-                      >
-                        {billingBusy ? 'Opening Stripe…' : 'Subscribe yearly'}
-                      </Button>
+                      {!nativeApp && (
+                        <>
+                          <Button
+                            className="bg-[#10b981] hover:bg-[#059669] text-white"
+                            disabled={billingBusy || billingStripeDiag.hasPriceIdMonthly === false}
+                            onClick={() => void startSubscriptionCheckout('monthly')}
+                          >
+                            {billingBusy ? 'Opening Stripe…' : 'Subscribe monthly'}
+                          </Button>
+                          <Button
+                            className="bg-[#0ea5e9] hover:bg-[#0284c7] text-white"
+                            disabled={billingBusy || !billingStripeDiag.hasPriceIdYearly}
+                            onClick={() => void startSubscriptionCheckout('yearly')}
+                            title={
+                              !billingStripeDiag.hasPriceIdYearly
+                                ? 'Add STRIPE_PRICE_ID_YEARLY in Vercel'
+                                : undefined
+                            }
+                          >
+                            {billingBusy ? 'Opening Stripe…' : 'Subscribe yearly'}
+                          </Button>
+                        </>
+                      )}
                       <Button
                         variant="outline"
                         disabled={billingBusy}
@@ -14963,7 +14991,15 @@ export default function Home() {
                       </div>
                     )}
                     <p className="text-xs text-gray-500">
-                      <strong>Manage billing</strong> opens crew members, payment method (Stripe), and account deletion.
+                      {nativeApp ? (
+                        <>
+                          <strong>Manage billing</strong> opens crew members and account deletion.
+                        </>
+                      ) : (
+                        <>
+                          <strong>Manage billing</strong> opens crew members, payment method (Stripe), and account deletion.
+                        </>
+                      )}
                     </p>
                   </CardContent>
                 </Card>
@@ -14997,9 +15033,15 @@ export default function Home() {
                         </h3>
                         <p className="text-sm text-gray-600 mt-1 max-w-lg">
                           {hasAiReceptionistAddon() ? (
-                            <>
-                              Paid, $49.99/mo. Open the receptionist to manage the phone line and incoming calls.
-                            </>
+                            nativeApp ? (
+                              <>Active. Open the receptionist to manage the phone line and incoming calls.</>
+                            ) : (
+                              <>
+                                Paid, $49.99/mo. Open the receptionist to manage the phone line and incoming calls.
+                              </>
+                            )
+                          ) : nativeApp ? (
+                            <>Not active on this account. {NATIVE_MANAGE_PLAN_TEXT}</>
                           ) : (
                             <>
                               $49.99/mo. Open the receptionist and tap Subscribe. Email summaries stay on your plan.
@@ -15185,14 +15227,14 @@ export default function Home() {
                                       : ''}
                                   </>
                                 ) : (
-                                  <>Not subscribed · $49.99/month add-on</>
+                                  <>{nativeApp ? 'Not subscribed' : 'Not subscribed · $49.99/month add-on'}</>
                                 )}
                               </div>
                             </div>
                             <div className="flex flex-wrap gap-2 items-center">
                               {hasAiReceptionistAddon() ? (
                                 <span className="text-sm font-semibold text-emerald-700">Subscribed</span>
-                              ) : (
+                              ) : nativeApp ? null : (
                                 <Button
                                   size="sm"
                                   className="bg-violet-700 hover:bg-violet-800 text-white"
@@ -15218,8 +15260,14 @@ export default function Home() {
                           )}
                           {!crewSeatsLoading && crewSeats.length === 0 && (
                             <li className="p-4 text-sm text-gray-500">
-                              No crew seats yet. Add a crew member below — each seat is{' '}
-                              <strong>$14.99/month</strong>.
+                              {nativeApp ? (
+                                'No crew seats yet.'
+                              ) : (
+                                <>
+                                  No crew seats yet. Add a crew member below — each seat is{' '}
+                                  <strong>$14.99/month</strong>.
+                                </>
+                              )}
                             </li>
                           )}
                           {crewSeats.map((seat) => (
@@ -15232,7 +15280,7 @@ export default function Home() {
                                   Crew seat — {seat.crewEmail}
                                 </div>
                                 <div className="text-sm text-gray-500">
-                                  {seat.amountDisplay}/month ·{' '}
+                                  {nativeApp ? null : <>{seat.amountDisplay}/month · </>}
                                   <span className="capitalize">{seat.status}</span>
                                   {seat.cancelAtPeriodEnd ? ' · Cancels at period end' : ''}
                                   {seat.currentPeriodEnd
@@ -15269,28 +15317,37 @@ export default function Home() {
                         </ul>
                       </div>
 
+                      {nativeApp && (
+                        <p className="text-sm text-slate-700 bg-slate-50 border rounded-lg p-3">
+                          {NATIVE_MANAGE_PLAN_TEXT}
+                        </p>
+                      )}
                       <div className="flex flex-wrap gap-2">
-                        <Button
-                          className="bg-[#10b981] text-white"
-                          disabled={billingBusy || billingStripeDiag.hasPriceIdMonthly === false}
-                          onClick={() => void startSubscriptionCheckout('monthly')}
-                        >
-                          Subscribe monthly
-                        </Button>
-                        <Button
-                          className="bg-[#0ea5e9] text-white"
-                          disabled={billingBusy || !billingStripeDiag.hasPriceIdYearly}
-                          onClick={() => void startSubscriptionCheckout('yearly')}
-                        >
-                          Subscribe yearly
-                        </Button>
-                        <Button
-                          variant="outline"
-                          disabled={billingBusy || !billing.stripeCustomerId}
-                          onClick={() => void openBillingPortal()}
-                        >
-                          Update card / cancel in Stripe
-                        </Button>
+                        {!nativeApp && (
+                          <>
+                            <Button
+                              className="bg-[#10b981] text-white"
+                              disabled={billingBusy || billingStripeDiag.hasPriceIdMonthly === false}
+                              onClick={() => void startSubscriptionCheckout('monthly')}
+                            >
+                              Subscribe monthly
+                            </Button>
+                            <Button
+                              className="bg-[#0ea5e9] text-white"
+                              disabled={billingBusy || !billingStripeDiag.hasPriceIdYearly}
+                              onClick={() => void startSubscriptionCheckout('yearly')}
+                            >
+                              Subscribe yearly
+                            </Button>
+                            <Button
+                              variant="outline"
+                              disabled={billingBusy || !billing.stripeCustomerId}
+                              onClick={() => void openBillingPortal()}
+                            >
+                              Update card / cancel in Stripe
+                            </Button>
+                          </>
+                        )}
                         <Button
                           variant="outline"
                           disabled={billingBusy}
@@ -15336,11 +15393,17 @@ export default function Home() {
                         link to <strong>set their own password</strong>, then they sign in on the same login page
                         as you. If the link expires they can use “Forgot your password?” on the main login.
                       </p>
+                      {nativeApp ? (
+                        <div className="rounded-lg border bg-slate-50 text-slate-700 text-sm p-3">
+                          Add new crew seats on the web. {NATIVE_MANAGE_PLAN_TEXT}
+                        </div>
+                      ) : (
                       <div className="rounded-lg border border-amber-200 bg-amber-50 text-amber-950 text-sm p-3">
                         <strong>Each additional crew member is $14.99/month</strong> (month-to-month). You will
                         confirm and pay before the seat is active. Cancel anytime under Your subscriptions —
                         they keep access until the end of the paid month.
                       </div>
+                      )}
                       <div className="rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-900 text-xs p-3">
                         Crew logins are real accounts tied to the crew member&apos;s own email. You never set or see
                         their password.
@@ -15360,14 +15423,16 @@ export default function Home() {
                             }}
                             className="flex-1"
                           />
-                          <Button
-                            type="button"
-                            onClick={() => void addCrewMember()}
-                            disabled={crewInviteBusy}
-                            className="bg-[#10b981] text-white"
-                          >
-                            {crewInviteBusy ? 'Creating…' : 'Add crew'}
-                          </Button>
+                          {!nativeApp && (
+                            <Button
+                              type="button"
+                              onClick={() => void addCrewMember()}
+                              disabled={crewInviteBusy}
+                              className="bg-[#10b981] text-white"
+                            >
+                              {crewInviteBusy ? 'Creating…' : 'Add crew'}
+                            </Button>
+                          )}
                           <Button
                             type="button"
                             variant="outline"
@@ -15404,13 +15469,13 @@ export default function Home() {
                                   {(crew as any).needsSeatPayment ? (
                                     <span className="text-amber-700 font-semibold">
                                       {' '}
-                                      · Payment needed ($14.99/mo)
+                                      · {nativeApp ? 'Payment needed' : 'Payment needed ($14.99/mo)'}
                                     </span>
                                   ) : null}
                                 </div>
                               </div>
                               <div className="flex flex-wrap items-center gap-4">
-                                {(crew as any).needsSeatPayment && (
+                                {(crew as any).needsSeatPayment && !nativeApp && (
                                   <Button
                                     size="sm"
                                     className="bg-amber-500 hover:bg-amber-600 text-white"
@@ -16246,7 +16311,9 @@ export default function Home() {
                           </button>
                           {!hasAiReceptionistAddon() && (
                             <p className="text-xs text-amber-800 mt-1">
-                              Not subscribed yet — open setup and tap Subscribe · $49.99/mo.
+                              {nativeApp
+                                ? `Not active on this account. ${NATIVE_MANAGE_PLAN_TEXT}`
+                                : 'Not subscribed yet — open setup and tap Subscribe · $49.99/mo.'}
                             </p>
                           )}
                           {hasAiReceptionistAddon() && !receptionistSettings.enabled && (

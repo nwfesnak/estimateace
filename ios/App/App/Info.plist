@@ -49,7 +49,7 @@
 	<string>Main</string>
 	<key>UIRequiredDeviceCapabilities</key>
 	<array>
-		<string>armv7</string>
+		<string>arm64</string>
 	</array>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
@@ -67,13 +67,13 @@
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>EstimateAce uses the camera to photograph jobs, receipts, and documents.</string>
+	<string>EstimateAce uses the camera so you can take job-site photos and videos for your estimates, and scan receipts and documents.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>EstimateAce uses the microphone when you record job video.</string>
+	<string>EstimateAce uses the microphone to record sound when you capture a job walkthrough video.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>EstimateAce uses your photo library to attach job photos and receipts.</string>
+	<string>EstimateAce lets you choose job photos and receipts from your library to attach to estimates and invoices.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>EstimateAce saves job photos to your photo library when you choose to.</string>
+	<string>EstimateAce saves job photos and documents to your photo library when you choose Save.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 </dict>
