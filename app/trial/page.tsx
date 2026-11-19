@@ -70,6 +70,7 @@ function TrialForm() {
   const [password2, setPassword2] = useState('');
   const [agree, setAgree] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [signupComplete, setSignupComplete] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [spots, setSpots] = useState<Spots>(null);
@@ -139,7 +140,18 @@ function TrialForm() {
     window.location.href = `${APP_HOME}?trial=card&plan=${plan}`;
   };
 
+  const clearSignupForm = () => {
+    setCompany('');
+    setName('');
+    setEmail('');
+    setPhone('');
+    setPassword('');
+    setPassword2('');
+    setAgree(false);
+  };
+
   const startTrial = async () => {
+    if (busy || signupComplete || offerFull) return;
     setError(null);
     setInfo(null);
 
@@ -195,6 +207,7 @@ function TrialForm() {
     }
 
     setBusy(true);
+    let releaseBusy = true;
     try {
       const { data, error: signErr } = await supabase.auth.signUp({
         email: trimmedEmail,
@@ -258,11 +271,17 @@ function TrialForm() {
         }
 
         if (cardRequired) {
+          clearSignupForm();
+          setSignupComplete(true);
+          releaseBusy = false;
           await goToCardCheckout(token);
           return;
         }
 
         setInfo('Account created — starting your free trial…');
+        clearSignupForm();
+        setSignupComplete(true);
+        releaseBusy = false;
         window.location.href = `${APP_HOME}?trial=started&plan=${plan}${
           promo ? `&promo=${encodeURIComponent(promo)}` : ''
         }`;
@@ -270,6 +289,11 @@ function TrialForm() {
       }
 
       if (data.user && !data.session) {
+        const confirmEmail = trimmedEmail;
+        clearSignupForm();
+        setEmail(confirmEmail);
+        setSignupComplete(true);
+        releaseBusy = false;
         setInfo(
           cardRequired
             ? `Account created! Check your email to confirm, then log in. You'll add a card to start your ${trialLabel} free trial (${trialDays} days). You won't be charged until the trial ends. You chose: ${planLabel} (${planPrice} after trial).`
@@ -279,10 +303,13 @@ function TrialForm() {
       }
 
       setInfo('Account created. You can log in to start your trial.');
-    } catch (e: any) {
-      setError(e?.message || 'Signup failed. Try again.');
+      clearSignupForm();
+      setSignupComplete(true);
+      releaseBusy = false;
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Signup failed. Try again.');
     } finally {
-      setBusy(false);
+      if (releaseBusy) setBusy(false);
     }
   };
 
@@ -304,6 +331,26 @@ function TrialForm() {
 
       <main className="max-w-lg mx-auto px-4 py-10">
         <div className="bg-white border border-slate-200 rounded-3xl shadow-sm p-6 sm:p-8 space-y-6">
+          {signupComplete ? (
+            <div className="space-y-5 text-center">
+              <p className="text-xs font-bold uppercase tracking-wide text-emerald-600">Check your email</p>
+              <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Account created</h1>
+              <p className="text-sm text-slate-600 leading-relaxed">
+                {info ||
+                  'We sent a confirmation link to your email. Open it to confirm your account, then log in.'}
+              </p>
+              {email && (
+                <p className="text-sm font-medium text-slate-800 break-all">{email}</p>
+              )}
+              <Link
+                href="/"
+                className="inline-flex items-center justify-center w-full h-12 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white font-semibold"
+              >
+                Go to log in
+              </Link>
+            </div>
+          ) : (
+          <>
           <div>
             <p className="text-xs font-bold uppercase tracking-wide text-emerald-600">
               {trialLabel} free trial
@@ -354,6 +401,7 @@ function TrialForm() {
             <div className="grid grid-cols-2 gap-3">
               <button
                 type="button"
+                disabled={busy}
                 onClick={() => setPlan('monthly')}
                 className={`rounded-2xl border-2 p-4 text-left transition ${
                   plan === 'monthly'
@@ -367,6 +415,7 @@ function TrialForm() {
               </button>
               <button
                 type="button"
+                disabled={busy}
                 onClick={() => setPlan('yearly')}
                 className={`rounded-2xl border-2 p-4 text-left transition relative ${
                   plan === 'yearly'
@@ -393,7 +442,8 @@ function TrialForm() {
             <div>
               <label className="block text-xs font-medium text-slate-600 mb-1">Company name *</label>
               <input
-                className="w-full h-11 rounded-xl border border-slate-300 px-3 text-sm"
+                className="w-full h-11 rounded-xl border border-slate-300 px-3 text-sm disabled:opacity-60"
+                disabled={busy}
                 value={company}
                 onChange={(e) => setCompany(e.target.value)}
                 placeholder="Your company LLC"
@@ -403,7 +453,8 @@ function TrialForm() {
             <div>
               <label className="block text-xs font-medium text-slate-600 mb-1">Your name</label>
               <input
-                className="w-full h-11 rounded-xl border border-slate-300 px-3 text-sm"
+                className="w-full h-11 rounded-xl border border-slate-300 px-3 text-sm disabled:opacity-60"
+                disabled={busy}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Full name"
@@ -414,7 +465,8 @@ function TrialForm() {
               <label className="block text-xs font-medium text-slate-600 mb-1">Work email *</label>
               <input
                 type="email"
-                className="w-full h-11 rounded-xl border border-slate-300 px-3 text-sm"
+                className="w-full h-11 rounded-xl border border-slate-300 px-3 text-sm disabled:opacity-60"
+                disabled={busy}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@company.com"
@@ -425,7 +477,8 @@ function TrialForm() {
               <label className="block text-xs font-medium text-slate-600 mb-1">Phone</label>
               <input
                 type="tel"
-                className="w-full h-11 rounded-xl border border-slate-300 px-3 text-sm"
+                className="w-full h-11 rounded-xl border border-slate-300 px-3 text-sm disabled:opacity-60"
+                disabled={busy}
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
                 placeholder="(555) 555-5555"
@@ -436,7 +489,8 @@ function TrialForm() {
               <label className="block text-xs font-medium text-slate-600 mb-1">Password *</label>
               <input
                 type="password"
-                className="w-full h-11 rounded-xl border border-slate-300 px-3 text-sm"
+                className="w-full h-11 rounded-xl border border-slate-300 px-3 text-sm disabled:opacity-60"
+                disabled={busy}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="At least 6 characters"
@@ -447,7 +501,8 @@ function TrialForm() {
               <label className="block text-xs font-medium text-slate-600 mb-1">Confirm password *</label>
               <input
                 type="password"
-                className="w-full h-11 rounded-xl border border-slate-300 px-3 text-sm"
+                className="w-full h-11 rounded-xl border border-slate-300 px-3 text-sm disabled:opacity-60"
+                disabled={busy}
                 value={password2}
                 onChange={(e) => setPassword2(e.target.value)}
                 placeholder="Repeat password"
@@ -460,6 +515,7 @@ function TrialForm() {
             <input
               type="checkbox"
               className="mt-1 accent-emerald-600"
+              disabled={busy}
               checked={agree}
               onChange={(e) => setAgree(e.target.checked)}
             />
@@ -527,6 +583,8 @@ function TrialForm() {
               Log in
             </Link>
           </p>
+          </>
+          )}
         </div>
       </main>
     </div>
