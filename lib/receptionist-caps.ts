@@ -18,7 +18,7 @@ export const RECEPTIONIST_CAPS = {
   /** Calls from one number to one line per hour; more are rejected as busy (not billed). */
   callsPerCallerPerHour: 5,
   /** Forwarded minutes per billing period (AI off, or after an AI cap). Then "call back". */
-  monthlyForwardMinutes: 600,
+  monthlyForwardMinutes: 300,
   /** Longest single forwarded call (<Dial timeLimit>). */
   forwardCallMaxMinutes: 30,
   /** Lead text messages to the owner per billing period (email still goes after this). */
