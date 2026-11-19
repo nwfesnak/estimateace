@@ -107,14 +107,13 @@ export function getTrialDays(): number {
  *  - standard: NEXT_PUBLIC_TRIAL_DAYS (default 14)
  *  - 2mo: estimateace.com/2-months-free.html  (?promo=2mo)  → 60 days
  *  - 6mo: estimateace.com/6-months-free.html  (?promo=6mo)  → 180 days
- *  - 3mo: legacy capped offer (first 20 signups) → 90 days
- * Standard and 2mo require a card up front (Stripe Checkout trial). 6mo and 3mo are
- * card-free but capped at 20 signups each (see claim_promo_spot in Postgres).
+ * Standard and 2mo require a card up front (Stripe Checkout trial). 6mo is card-free
+ * but capped at 20 signups (see claim_promo_spot in Postgres).
+ * The old 3-month offer (?promo=3mo) is retired and treated as the standard trial.
  */
 export const TRIAL_OFFERS = {
   standard: () => getTrialDays(),
   '2mo': () => 60,
-  '3mo': () => 90,
   '6mo': () => 180,
 } as const;
 
@@ -125,7 +124,6 @@ export function normalizePromo(promo?: string | null): TrialOffer | null {
     .trim()
     .toLowerCase();
   if (!p) return null;
-  if (p === '3mo' || p === '3months' || p === '90' || p === 'three-months') return '3mo';
   if (p === '2mo' || p === '2months' || p === '60' || p === 'two-months') return '2mo';
   if (p === '6mo' || p === '6months' || p === '180' || p === 'six-months') return '6mo';
   return null;
@@ -151,35 +149,34 @@ export function resolveTrialDaysFromPromo(promo?: string | null): number {
   return getTrialDays();
 }
 
-/** 3-month lander (?promo=3mo). Card is not collected at signup. */
-export function isThreeMonthPromo(promo?: string | null): boolean {
+/**
+ * Retired promo codes (the old 3-month lander). Accepted so old links and ads don't
+ * error, but they get the standard card-required trial.
+ */
+export function isRetiredPromo(promo?: string | null): boolean {
   const p = String(promo || '')
     .trim()
     .toLowerCase();
   return p === '3mo' || p === '3months' || p === '90' || p === 'three-months';
 }
 
-export const THREE_MONTH_PROMO_DAYS = 90;
-export const THREE_MONTH_PROMO_LIMIT = 20;
-
 /** 6-month lander (?promo=6mo). Card-free, capped at the first 20 signups. */
 export const SIX_MONTH_PROMO_DAYS = 180;
 export const SIX_MONTH_PROMO_LIMIT = 20;
 
 /**
- * Offers that start WITHOUT a card. Both are capped (20 signups each) and claimed
- * atomically in Postgres (claim_promo_spot). Every other offer (standard 14-day,
- * 2-month) requires a card up front through Stripe Checkout.
+ * The only offer that starts WITHOUT a card: 6-month, capped at 20 signups and
+ * claimed atomically in Postgres (claim_promo_spot). Every other offer (standard
+ * 14-day, 2-month) requires a card up front through Stripe Checkout.
  */
-export type CardFreeOffer = '6mo' | '3mo';
+export type CardFreeOffer = '6mo';
 export const CARD_FREE_OFFER_LIMITS: Record<CardFreeOffer, number> = {
   '6mo': SIX_MONTH_PROMO_LIMIT,
-  '3mo': THREE_MONTH_PROMO_LIMIT,
 };
 
 export function cardFreeOffer(promo?: string | null): CardFreeOffer | null {
   const offer = normalizePromo(promo);
-  return offer === '6mo' || offer === '3mo' ? offer : null;
+  return offer === '6mo' ? offer : null;
 }
 
 /** True for the standard and 2-month offers: a card is collected before any access. */

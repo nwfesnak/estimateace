@@ -90,7 +90,7 @@ export async function GET(request: NextRequest) {
         const meta = (user.user_metadata || {}) as Record<string, unknown>;
         let seed = snapshot;
         let promoDays: number | undefined;
-        // Only the capped card-free offers (6mo / legacy 3mo) ever get an app-managed
+        // Only the capped card-free offers (6mo) ever get an app-managed
         // trial seeded here, and only after an atomic spot claim. Standard and 2mo
         // accounts get no trial until Stripe Checkout (card on file) creates one.
         // Active (paid/comped) accounts never claim a spot.

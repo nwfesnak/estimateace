@@ -2773,12 +2773,10 @@ export default function Home() {
       const trialLabel =
         promo === '6mo' || promo === '6months' || promo === '180'
           ? '6-month (180-day)'
-          : promo === '3mo' || promo === '3months' || promo === '90'
-            ? '3-month (90-day)'
-            : promo === '2mo' || promo === '2months' || promo === '60'
+          : promo === '2mo' || promo === '2months' || promo === '60'
               ? '2-month (60-day)'
               : '14-day';
-      // Only the capped card-free offers (6mo / legacy 3mo) land here; standard and
+      // Only the capped card-free offers (6mo) land here; standard and
       // 2-month trials start in Stripe Checkout and return with ?billing=success.
       showMessage(
         `✅ ${trialLabel} free trial started! No card needed now. To keep access after the trial, subscribe ${planLabel} in Profile → Billing.`

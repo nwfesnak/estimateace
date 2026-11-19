@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState, Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { getSupabaseClient, getSupabaseConfigHelpMessage } from '@/lib/supabase/client';
 
@@ -10,13 +10,20 @@ const DEFAULT_TRIAL_DAYS = 14;
 const CAPPED_OFFER_LIMIT = 20;
 
 type Plan = 'monthly' | 'yearly';
-type Offer = 'standard' | '2mo' | '3mo' | '6mo';
+type Offer = 'standard' | '2mo' | '6mo';
+
+/** The old 3-month offer is retired; its links go to the standard trial. */
+function isRetiredPromo(promo: string | null): boolean {
+  const p = String(promo || '')
+    .trim()
+    .toLowerCase();
+  return p === '3mo' || p === '3months' || p === '90' || p === 'three-months';
+}
 
 function offerForPromo(promo: string | null): Offer {
   const p = String(promo || '')
     .trim()
     .toLowerCase();
-  if (p === '3mo' || p === '3months' || p === '90' || p === 'three-months') return '3mo';
   if (p === '2mo' || p === '2months' || p === '60' || p === 'two-months') return '2mo';
   if (p === '6mo' || p === '6months' || p === '180' || p === 'six-months') return '6mo';
   return 'standard';
@@ -25,7 +32,6 @@ function offerForPromo(promo: string | null): Offer {
 const OFFER_DAYS: Record<Offer, number> = {
   standard: DEFAULT_TRIAL_DAYS,
   '2mo': 60,
-  '3mo': 90,
   '6mo': 180,
 };
 
@@ -33,21 +39,23 @@ type Spots = { limit: number; remaining: number; open: boolean } | null;
 
 function TrialForm() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const initialPlan: Plan =
     searchParams.get('plan') === 'yearly' ? 'yearly' : 'monthly';
-  const promo = searchParams.get('promo');
+  const rawPromo = searchParams.get('promo');
+  const retiredPromo = isRetiredPromo(rawPromo);
+  // Retired ?promo=3mo → standard card-required trial (never sent to the server).
+  const promo = retiredPromo ? null : rawPromo;
   const offer = offerForPromo(promo);
-  // 6-month (and legacy 3-month) are card-free but capped at 20 signups.
+  // 6-month is card-free but capped at 20 signups.
   // Standard and 2-month require a card up front in Stripe Checkout.
-  const cappedOffer = offer === '6mo' || offer === '3mo';
+  const cappedOffer = offer === '6mo';
   const cardRequired = !cappedOffer;
   const trialDays = OFFER_DAYS[offer];
   const trialLabel =
     trialDays >= 180
       ? '6-month'
-      : trialDays >= 90
-        ? '3-month'
-        : trialDays >= 60
+      : trialDays >= 60
           ? '2-month'
           : trialDays === 14
             ? '14-day'
@@ -68,6 +76,12 @@ function TrialForm() {
 
   const offerFull = cappedOffer && spots?.open === false;
   const standardTrialHref = `/trial${plan === 'yearly' ? '?plan=yearly' : ''}`;
+
+  useEffect(() => {
+    if (retiredPromo) {
+      router.replace(`/trial${initialPlan === 'yearly' ? '?plan=yearly' : ''}`);
+    }
+  }, [retiredPromo, router, initialPlan]);
 
   useEffect(() => {
     if (!cappedOffer) return;

@@ -1,5 +1,5 @@
 /**
- * Capped card-free trial offers (6-month and legacy 3-month): first 20 signups each.
+ * Capped card-free trial offer (6-month): first 20 signups.
  *
  * The cap is enforced in Postgres (supabase/trial-offers-2026-11.sql):
  * claim_promo_spot() takes a per-promo advisory lock and a BEFORE INSERT trigger

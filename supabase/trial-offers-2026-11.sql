@@ -1,7 +1,7 @@
 -- ============================================================================
 -- EstimateAce — trial offers (2026-11)
 --   * Standard + 2-month trials now require a card (Stripe Checkout); no DB change.
---   * 6-month (and legacy 3-month) card-free offers are capped at 20 signups each.
+--   * The 6-month card-free offer is capped at 20 signups. (3-month offer retired.)
 --
 -- The cap is enforced in Postgres so two signups at the same instant can never
 -- both take spot #20:
@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS public.promo_limits (
 );
 
 INSERT INTO public.promo_limits (promo, max_redemptions)
-VALUES ('6mo', 20), ('3mo', 20)
+VALUES ('6mo', 20)
 ON CONFLICT (promo) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS public.promo_redemptions (
@@ -127,12 +127,3 @@ REVOKE ALL ON FUNCTION public.claim_promo_spot(TEXT, UUID) FROM PUBLIC, anon, au
 REVOKE ALL ON FUNCTION public.promo_spot_status(TEXT) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.claim_promo_spot(TEXT, UUID) TO service_role;
 GRANT EXECUTE ON FUNCTION public.promo_spot_status(TEXT) TO service_role;
-
--- Carry over any legacy 3-month claims that lived on the PROMO-3MO-SIGNUPS settings row.
-INSERT INTO public.promo_redemptions (promo, user_id)
-SELECT '3mo', u.id
-FROM public.estimates e
-CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(e.profile->'userIds', '[]'::jsonb)) AS ids(uid)
-JOIN auth.users u ON u.id::text = ids.uid
-WHERE e.id = 'PROMO-3MO-SIGNUPS'
-ON CONFLICT DO NOTHING;

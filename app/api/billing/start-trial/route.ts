@@ -7,6 +7,7 @@ import {
   ensureTrialEndsAt,
   hasAppAccess,
   isEligibleForCardTrial,
+  isRetiredPromo,
   normalizeBillingSnapshot,
   normalizePromo,
   resolveTrialDaysFromPromo,
@@ -20,8 +21,9 @@ import { claimPromoSpot } from '@/lib/promo-spots';
  *  - standard / 2mo: does NOT grant any trial. The account has no access until the
  *    user finishes Stripe Checkout with a card (trial_period_days = offer length).
  *    Response has checkoutRequired: true and the page sends them to Checkout.
- *  - 6mo (and legacy 3mo): card-free trial, but only if one of the 20 capped spots
- *    can be claimed atomically in Postgres. Full → 409 { full: true }.
+ *  - 6mo: card-free trial, but only if one of the 20 capped spots can be claimed
+ *    atomically in Postgres. Full → 409 { full: true }.
+ *  - Retired ?promo=3mo is treated as the standard card-required trial.
  * body.trialDays, if sent, must equal the offer's length (no arbitrary trial lengths).
  */
 export async function POST(request: NextRequest) {
@@ -36,8 +38,9 @@ export async function POST(request: NextRequest) {
     const company = String(body.company || '').trim().slice(0, 200);
     const name = String(body.name || '').trim().slice(0, 120);
     const phone = String(body.phone || '').trim().slice(0, 40);
-    const promo = String(body.promo || '').trim();
-    // Only approved offers (standard / 2mo / 6mo / capped 3mo). Reject anything else
+    const rawPromo = String(body.promo || '').trim();
+    const promo = isRetiredPromo(rawPromo) ? '' : rawPromo;
+    // Only approved offers (standard / 2mo / capped 6mo). Reject anything else
     // instead of silently honoring a client-chosen trial length.
     if (promo && !normalizePromo(promo)) {
       return NextResponse.json({ error: 'Unknown promo code.' }, { status: 400 });
@@ -85,7 +88,7 @@ export async function POST(request: NextRequest) {
       if (freeOffer) {
         const claim = await claimPromoSpot(admin, freeOffer, user.id);
         if (!claim.ok) {
-          const label = freeOffer === '6mo' ? '6-month' : '3-month';
+          const label = '6-month';
           return NextResponse.json(
             {
               error: claim.error
