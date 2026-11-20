@@ -117,6 +117,7 @@ import {
 import { rankAddressSuggestions } from '@/lib/address-autocomplete';
 import { randomUploadId, safeUploadName } from '@/lib/upload-names';
 import { TurnstileWidget } from '@/components/TurnstileWidget';
+import { translateFailureMessage } from '@/lib/xai-chat';
 import {
   isNativeApp,
   NATIVE_MANAGE_PLAN_TEXT,
@@ -1742,6 +1743,8 @@ export default function Home() {
   const [translateFrom, setTranslateFrom] = useState('en');
   const [translateTo, setTranslateTo] = useState('es');
   const [itemTranslations, setItemTranslations] = useState<{ [key: number]: string }>({});
+  const [translatingItemId, setTranslatingItemId] = useState<number | null>(null);
+  const [itemTranslateErrors, setItemTranslateErrors] = useState<{ [key: number]: string }>({});
 
   const [isQuickLinesModalOpen, setIsQuickLinesModalOpen] = useState(false);
   const [isBreakdownModalOpen, setIsBreakdownModalOpen] = useState(false);
@@ -6431,11 +6434,18 @@ export default function Home() {
 
   // === TRANSLATE FUNCTION (added exactly as requested) ===
   const translateDescription = async (text: string, itemId: number) => {
-    if (!text.trim()) return showMessage('Enter text first');
-    
+    if (!text.trim()) return showMessage('Enter a description first, then tap Translate.');
+    if (translatingItemId != null) return;
+
+    setTranslatingItemId(itemId);
+    setItemTranslateErrors((prev) => {
+      const next = { ...prev };
+      delete next[itemId];
+      return next;
+    });
+
     try {
-      // Use our authenticated proxy (enforces login + rate limit)
-      const headers: any = { 'Content-Type': 'application/json' };
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (supabase) {
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.access_token) headers['Authorization'] = `Bearer ${session.access_token}`;
@@ -6444,15 +6454,20 @@ export default function Home() {
       const res = await fetch('/api/translate', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ text, from: translateFrom, to: translateTo })
+        body: JSON.stringify({ text, from: translateFrom, to: translateTo }),
+        signal: AbortSignal.timeout(30000),
       });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      setItemTranslations(prev => ({ ...prev, [itemId]: data.translatedText }));
+      const data = await res.json().catch(() => ({}));
+      const fail = translateFailureMessage({ ok: res.ok, status: res.status, data });
+      if (fail) throw new Error(fail);
+      setItemTranslations((prev) => ({ ...prev, [itemId]: String(data.translatedText).trim() }));
       showMessage('✅ Translation added (internal use only)');
-    } catch (err: any) {
-      const msg = err?.message || 'Translation service temporarily unavailable.';
-      showMessage(`⚠️ ${msg}. Using Grok for translation (GROK_API_KEY required).`);
+    } catch (err: unknown) {
+      const msg = translateFailureMessage({ err });
+      setItemTranslateErrors((prev) => ({ ...prev, [itemId]: msg }));
+      showMessage(`⚠️ ${msg}`);
+    } finally {
+      setTranslatingItemId(null);
     }
   };
 
@@ -13546,14 +13561,22 @@ export default function Home() {
                             </select>
 
                             <Button
+                              type="button"
                               size="sm"
                               variant="outline"
                               className="text-xs"
-                              onClick={() => translateDescription(item.description, item.id)}
+                              disabled={translatingItemId === item.id}
+                              onClick={() => void translateDescription(item.description, item.id)}
                             >
-                              🔄 Translate
+                              {translatingItemId === item.id ? '⏳ Translating...' : '🔄 Translate'}
                             </Button>
                           </div>
+
+                          {itemTranslateErrors[item.id] ? (
+                            <p className="mt-2 text-xs text-red-600" role="alert" data-testid="translate-error">
+                              {itemTranslateErrors[item.id]}
+                            </p>
+                          ) : null}
 
                           {itemTranslations[item.id] && (
                             <div className="mt-2 relative">

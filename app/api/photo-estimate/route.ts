@@ -8,7 +8,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import { enforceAppAccess, workspaceOwnerId } from '@/lib/billing-access';
 import { rateLimit, reserveAiQuota, tooManyRequests } from '@/lib/rate-limit';
-import { getXaiApiKey, getXaiVisionModel } from '@/lib/xai-config';
+import { getXaiApiKey, getXaiVisionModel, reasoningEffortFor } from '@/lib/xai-config';
 import { resolveRegionalPricing, type QuoteLocationInput } from '@/lib/ai-quote-region';
 import { formatPriceMemoryForPrompt } from '@/lib/ai-price-memory';
 import {
@@ -27,11 +27,6 @@ export const maxDuration = 180;
 const AI_TIMEOUT_MS = 150_000;
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-/** grok-4.x reasoning models accept reasoning_effort; other models may reject it. */
-function reasoningEffortFor(model: string): 'low' | null {
-  return /^grok-4\.\d/i.test(model) ? 'low' : null;
-}
 
 export async function POST(request: NextRequest) {
   try {

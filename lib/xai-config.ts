@@ -51,6 +51,11 @@ function resolveXaiModel(
   return trimmed;
 }
 
+/** grok-4.x defaults to high reasoning (slow / empty content). Short tasks should use 'low'. */
+export function reasoningEffortFor(model: string): 'low' | null {
+  return /^grok-4\.\d/i.test(String(model || '').trim()) ? 'low' : null;
+}
+
 export function getXaiApiKey(): string | undefined {
   return process.env.GROK_API_KEY?.trim() || process.env.XAI_API_KEY?.trim() || undefined;
 }

@@ -4,8 +4,19 @@ import { NextRequest, NextResponse } from 'next/server';
 import { TWO_STEP_REQUIRED, twoStepPending } from '@/lib/supabase/auth-user';
 import { createClient } from '@supabase/supabase-js';
 import { getXaiApiKey, getXaiChatModel } from '@/lib/xai-config';
+import {
+  buildXaiChatBody,
+  extractChatText,
+  isAbortError,
+  translationFromEmptyContent,
+  XAI_CHAT_COMPLETIONS_URL,
+} from '@/lib/xai-chat';
 import { enforceAppAccess, workspaceOwnerId } from '@/lib/billing-access';
 import { reserveAiQuota } from '@/lib/rate-limit';
+
+/** grok-4.x with default (high) reasoning can exceed the platform default. */
+export const maxDuration = 60;
+const TRANSLATE_AI_TIMEOUT_MS = 25_000;
 
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
 const RATE_LIMIT = 30;
@@ -53,30 +64,46 @@ async function callGrok(
   userContent: string,
   maxTokens: number
 ) {
-  const response = await fetch('https://api.x.ai/v1/chat/completions', {
+  const model = getXaiChatModel();
+  const started = Date.now();
+  const response = await fetch(XAI_CHAT_COMPLETIONS_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({
-      model: getXaiChatModel(),
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userContent },
-      ],
-      temperature: 0.2,
-      max_tokens: maxTokens,
-    }),
+    signal: AbortSignal.timeout(TRANSLATE_AI_TIMEOUT_MS),
+    body: JSON.stringify(
+      buildXaiChatBody({
+        model,
+        systemPrompt,
+        userContent,
+        maxTokens,
+      })
+    ),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Grok translation error: ${errorText}`);
+    console.error('Grok translate upstream:', response.status, model, errorText.slice(0, 300));
+    throw new Error(`Grok translation error: ${response.status}`);
   }
 
   const data = await response.json();
-  return String(data.choices?.[0]?.message?.content || '').trim();
+  const extracted = extractChatText(data);
+  console.info(
+    'translate:',
+    JSON.stringify({
+      model,
+      ms: Date.now() - started,
+      finish: extracted.finish,
+      promptTokens: data?.usage?.prompt_tokens,
+      completionTokens: data?.usage?.completion_tokens,
+      reasoningTokens: data?.usage?.completion_tokens_details?.reasoning_tokens,
+      chars: extracted.text.length,
+    })
+  );
+  return extracted;
 }
 
 function parseJsonObject(raw: string): Record<string, string> | null {
@@ -169,7 +196,7 @@ Do not add markdown, commentary, or extra keys. Keep placeholders like {count} u
 Use natural, concise UI wording for contractor/estimating software.`;
 
       const raw = await callGrok(apiKey, systemPrompt, JSON.stringify(texts), 8000);
-      const translations = parseJsonObject(raw);
+      const translations = parseJsonObject(raw.text);
       if (!translations || Object.keys(translations).length === 0) {
         return NextResponse.json(
           { error: 'Could not parse UI translation pack.' },
@@ -192,17 +219,25 @@ Use natural, concise UI wording for contractor/estimating software.`;
 
     const systemPrompt = `You are a professional translator. Translate the user's text from language code "${from}" to language code "${to}". Return ONLY the translated text. Do not add any commentary, explanations, or extra text. Preserve meaning, tone, and technical terms.`;
 
-    const translatedText = await callGrok(apiKey, systemPrompt, text, 4000);
-    if (!translatedText) {
-      return NextResponse.json({ error: 'Could not generate translation.' }, { status: 500 });
+    const result = await callGrok(apiKey, systemPrompt, text, 4000);
+    if (!result.text) {
+      return NextResponse.json(
+        { error: translationFromEmptyContent(result.finish) },
+        { status: 500 }
+      );
     }
 
-    return NextResponse.json({ translatedText });
-  } catch (e: any) {
-    console.error('Grok translate error:', e);
+    return NextResponse.json({ translatedText: result.text });
+  } catch (e: unknown) {
+    const timeout = isAbortError(e);
+    console.error('Grok translate error:', timeout ? 'timeout' : e);
     return NextResponse.json(
-      { error: 'Translation failed. Grok service may be unavailable.' },
-      { status: 500 }
+      {
+        error: timeout
+          ? 'Translation timed out. Please try again.'
+          : 'Translation failed. Please try again.',
+      },
+      { status: timeout ? 504 : 500 }
     );
   }
 }
