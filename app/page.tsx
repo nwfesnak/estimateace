@@ -12243,9 +12243,9 @@ export default function Home() {
               {/* Leads: AI Receptionist (paid+on) and/or Email summaries (company toggle) */}
               {(showReceptionistLeadsOnDashboard() || showEmailLeadsOnDashboard()) && (
               <Card className="mb-8 border-emerald-200 shadow-sm">
-                <CardContent className="p-6 space-y-6">
+                <CardContent className="p-4 sm:p-6 space-y-6">
                   <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
+                    <div className="min-w-0">
                       <h3 className="font-semibold text-lg flex items-center gap-2 text-[#1e293b]">
                         🎯 Leads &amp; inbox
                       </h3>
@@ -12285,16 +12285,18 @@ export default function Home() {
                     </div>
                   </div>
 
+                  {/* grid-cols-1 = minmax(0,1fr): long emails / truncated lines can't widen the
+                      column past the card (it was clipped off-center on phones). */}
                   <div
-                    className={`grid gap-4 ${
+                    className={`grid min-w-0 grid-cols-1 gap-4 ${
                       showReceptionistLeadsOnDashboard() && showEmailLeadsOnDashboard()
                         ? 'md:grid-cols-2'
-                        : 'grid-cols-1'
+                        : ''
                     }`}
                   >
                     {/* AI Receptionist leads — paid add-on + On toggle only */}
                     {showReceptionistLeadsOnDashboard() && (
-                    <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 min-h-[180px]">
+                    <div className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50/80 p-4 min-h-[180px]">
                       <div className="flex items-center justify-between gap-2 mb-3">
                         <h4 className="font-semibold text-sm text-slate-800">📞 AI Receptionist</h4>
                         {receptionistMessages.filter((m) => m.status === 'new' && !m.spam).length > 0 && (
@@ -12448,7 +12450,7 @@ export default function Home() {
 
                     {/* Email summaries — monitored inbox + hourly summary list */}
                     {showEmailLeadsOnDashboard() && (
-                    <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 min-h-[180px]">
+                    <div className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50/80 p-4 min-h-[180px]">
                       <div className="flex items-start justify-between gap-2 mb-2">
                         <div className="min-w-0">
                           <h4 className="font-semibold text-sm text-slate-800">✉️ Email summaries</h4>

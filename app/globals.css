@@ -635,3 +635,12 @@ html.native-app body {
 html.native-app [data-web-only] {
   display: none !important;
 }
+
+/* iOS app: keep main content clear of left/right safe areas (landscape / rounded corners)
+ * while preserving the normal 1rem phone gutter. */
+@media (max-width: 767px) {
+  html.native-app .app-shell-main {
+    padding-left: max(1rem, env(safe-area-inset-left, 0px));
+    padding-right: max(1rem, env(safe-area-inset-right, 0px));
+  }
+}
