@@ -95,6 +95,15 @@ import {
   resolveJobSettingsFromDoc,
   type JobSettingsSnapshot,
 } from '@/lib/job-settings-snapshot';
+import {
+  buildAppointmentNotifyMessages,
+  collectEstimateEmails,
+  collectEstimatePhones,
+  customerNameFromEstimate,
+  formatAppointmentWhen,
+  ownerTimeZone,
+  type AppointmentNotifyStatus,
+} from '@/lib/appointment-notify';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { getLineItemUnitOptions, LINE_ITEM_UNITS } from '@/lib/quote-units';
 import {
@@ -1798,12 +1807,38 @@ export default function Home() {
   const [schedulingAppointment, setSchedulingAppointment] = useState(false);
   const [testingReminder, setTestingReminder] = useState(false);
   const [editingAppointmentId, setEditingAppointmentId] = useState<string | null>(null);
+  const [isScheduleConfirmOpen, setIsScheduleConfirmOpen] = useState(false);
+  const [notifyEmailChecked, setNotifyEmailChecked] = useState(true);
+  const [notifySmsChecked, setNotifySmsChecked] = useState(true);
+  const [notifyPreview, setNotifyPreview] = useState<{
+    formattedWhen: string;
+    timeZone: string;
+    customerName: string;
+    jobLabel: string;
+    location: string;
+    emails: string[];
+    phones: string[];
+    canEmail: boolean;
+    canSms: boolean;
+    resendConfigured: boolean;
+    twilioConfigured: boolean;
+    phoneDetails: Array<{ phone: string; eligible: boolean; reason?: string }>;
+    optedOutPhones: string[];
+    subject: string;
+    emailText: string;
+    smsText: string;
+    kind: 'scheduled' | 'updated';
+    emailNote?: string;
+    smsNote?: string;
+  } | null>(null);
+  const [notifyPreviewLoading, setNotifyPreviewLoading] = useState(false);
   const [appointments, setAppointments] = useState<Array<{
     id: string;
     estimateId: string;
     jobName: string;
     invoiceNumber: string;
     datetime: string;
+    notify?: AppointmentNotifyStatus;
   }>>([]);
   const [appointmentsMonth, setAppointmentsMonth] = useState(() => new Date().getMonth());
   const [appointmentsYear, setAppointmentsYear] = useState(() => new Date().getFullYear());
@@ -9311,6 +9346,8 @@ export default function Home() {
     setEditingAppointmentId(null);
     setSelectedEstimateForCalendar(null);
     setSelectedDateTime('');
+    setIsScheduleConfirmOpen(false);
+    setNotifyPreview(null);
   };
 
   const openCalendarModal = async () => {
@@ -9386,51 +9423,246 @@ export default function Home() {
     }
   };
 
-  const scheduleAppointment = async () => {
+  const ownerCalendarTimeZone = () => ownerTimeZone();
+
+  const buildLocalNotifyPreview = (isUpdate: boolean, appointmentDate: Date) => {
+    const est = selectedEstimateForCalendar || {};
+    const emails = collectEstimateEmails(est);
+    const phones = collectEstimatePhones(est);
+    const timeZone = ownerCalendarTimeZone();
+    const messages = buildAppointmentNotifyMessages({
+      jobName: est.jobName,
+      invoiceNumber: est.invoiceNumber || est.id,
+      customerName: customerNameFromEstimate(est),
+      address: est.address,
+      city: est.city,
+      state: est.state,
+      zipCode: est.zipCode,
+      appointmentDateTime: appointmentDate.toISOString(),
+      timeZone,
+      companyName: profile.company || 'EstimateAce',
+      companyPhone: profile.phone || '',
+      kind: isUpdate ? 'updated' : 'scheduled',
+    });
+    return {
+      formattedWhen: messages.formattedWhen,
+      timeZone,
+      customerName: messages.customerName,
+      jobLabel: messages.jobLabel,
+      location: messages.location,
+      emails,
+      phones,
+      canEmail: emails.length > 0,
+      canSms: phones.length > 0,
+      resendConfigured: true,
+      twilioConfigured: phones.length > 0,
+      phoneDetails: phones.map((phone) => ({ phone, eligible: true })),
+      optedOutPhones: [] as string[],
+      subject: messages.subject,
+      emailText: messages.emailText,
+      smsText: messages.smsText,
+      kind: messages.kind,
+      emailNote: emails.length === 0 ? 'No email on file for this estimate.' : '',
+      smsNote: phones.length === 0 ? 'No phone number on file for this estimate.' : '',
+    };
+  };
+
+  const openScheduleConfirm = async () => {
+    if (currentCrew && !hasCrewTab('calendar')) {
+      showMessage(CREW_TAB_DENIED_MESSAGE);
+      return;
+    }
     const isEdit = !!editingAppointmentId;
     const isStillEstimate = selectedEstimateForCalendar &&
       (selectedEstimateForCalendar.documentType === 'estimate' ||
         String(selectedEstimateForCalendar.invoiceNumber || '').toUpperCase().startsWith('EST'));
     if (!selectedEstimateForCalendar || !isStillEstimate) {
-      return showMessage('Pick an estimate from the list, then tap Save appointment.');
+      return showMessage('Pick an estimate from the list, then continue to confirm the schedule.');
     }
     if (!selectedDateTime) {
-      return showMessage('Pick a date and time, then tap Save appointment.');
+      return showMessage('Pick a date and time, then continue to confirm the schedule.');
+    }
+    const appointmentDate = new Date(selectedDateTime);
+    if (Number.isNaN(appointmentDate.getTime())) {
+      return showMessage('Pick a valid date and time, then continue to confirm the schedule.');
+    }
+    const local = buildLocalNotifyPreview(isEdit, appointmentDate);
+    setNotifyPreview(local);
+    setNotifyEmailChecked(local.canEmail);
+    setNotifySmsChecked(local.canSms);
+    setIsScheduleConfirmOpen(true);
+    setNotifyPreviewLoading(true);
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (supabase) {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`;
+      }
+      const response = await fetch('/api/appointment-notify', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          preview: true,
+          isUpdate: isEdit,
+          estimateId: selectedEstimateForCalendar.id,
+          jobName: selectedEstimateForCalendar.jobName,
+          invoiceNumber: selectedEstimateForCalendar.invoiceNumber || selectedEstimateForCalendar.id,
+          customerName: customerNameFromEstimate(selectedEstimateForCalendar),
+          address: selectedEstimateForCalendar.address,
+          city: selectedEstimateForCalendar.city,
+          state: selectedEstimateForCalendar.state,
+          zipCode: selectedEstimateForCalendar.zipCode,
+          appointmentDateTime: appointmentDate.toISOString(),
+          timeZone: local.timeZone,
+          emails: local.emails,
+          phones: local.phones,
+          companyName: profile.company || 'EstimateAce',
+          companyPhone: profile.phone || '',
+          companyEmail: profile.email || '',
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.ok && data) {
+        const canEmail = data.canEmail === true;
+        const canSms = data.canSms === true;
+        const emailNote =
+          local.emails.length === 0
+            ? 'No email on file for this estimate.'
+            : data.resendConfigured === false
+              ? 'Email is not available right now.'
+              : '';
+        const opted = Array.isArray(data.optedOutPhones) ? data.optedOutPhones : [];
+        const smsNote =
+          local.phones.length === 0
+            ? 'No phone number on file for this estimate.'
+            : data.twilioConfigured === false
+              ? 'Text messaging is not available right now.'
+              : opted.length
+                ? 'This number has opted out of SMS (STOP).'
+                : (Array.isArray(data.phoneDetails)
+                    ? data.phoneDetails.find((d: any) => !d.eligible)?.reason || ''
+                    : '');
+        setNotifyPreview({
+          ...local,
+          formattedWhen: data.formattedWhen || local.formattedWhen,
+          timeZone: data.timeZone || local.timeZone,
+          customerName: data.customerName || local.customerName,
+          jobLabel: data.jobLabel || local.jobLabel,
+          location: data.location || local.location,
+          canEmail,
+          canSms,
+          resendConfigured: data.resendConfigured !== false,
+          twilioConfigured: data.twilioConfigured === true,
+          phoneDetails: Array.isArray(data.phoneDetails) ? data.phoneDetails : local.phoneDetails,
+          optedOutPhones: opted,
+          subject: data.subject || local.subject,
+          emailText: data.emailText || local.emailText,
+          smsText: data.smsText || local.smsText,
+          kind: data.kind === 'updated' ? 'updated' : 'scheduled',
+          emailNote,
+          smsNote,
+        });
+        setNotifyEmailChecked(canEmail);
+        setNotifySmsChecked(canSms);
+      }
+    } catch {
+      // Local preview is enough to confirm; send-time checks still apply.
+    } finally {
+      setNotifyPreviewLoading(false);
+    }
+  };
+
+  const confirmScheduleAppointment = async (mode: 'notify' | 'only') => {
+    if (currentCrew && !hasCrewTab('calendar')) {
+      showMessage(CREW_TAB_DENIED_MESSAGE);
+      return;
+    }
+    const isEdit = !!editingAppointmentId;
+    const isStillEstimate = selectedEstimateForCalendar &&
+      (selectedEstimateForCalendar.documentType === 'estimate' ||
+        String(selectedEstimateForCalendar.invoiceNumber || '').toUpperCase().startsWith('EST'));
+    if (!selectedEstimateForCalendar || !isStillEstimate) {
+      return showMessage('Pick an estimate from the list, then continue to confirm the schedule.');
+    }
+    if (!selectedDateTime) {
+      return showMessage('Pick a date and time, then continue to confirm the schedule.');
     }
     if (schedulingAppointment) return;
 
     const appointmentDate = new Date(selectedDateTime);
-    const appointmentTime = appointmentDate.toLocaleString();
-    const clientEmails = (selectedEstimateForCalendar.emails || []).map((e: string) => e?.trim()).filter((e: string) => e && e.includes('@'));
-    const clientPhones = (selectedEstimateForCalendar.phones || []).map((p: string) => p?.trim()).filter(Boolean);
+    if (Number.isNaN(appointmentDate.getTime())) {
+      return showMessage('Pick a valid date and time.');
+    }
+    const timeZone = notifyPreview?.timeZone || ownerCalendarTimeZone();
+    const whenLabel = formatAppointmentWhen(appointmentDate.toISOString(), timeZone) || appointmentDate.toLocaleString();
+    const clientEmails = collectEstimateEmails(selectedEstimateForCalendar);
+    const clientPhones = collectEstimatePhones(selectedEstimateForCalendar);
+    const willEmail = mode === 'notify' && notifyEmailChecked && (notifyPreview ? notifyPreview.canEmail : clientEmails.length > 0);
+    const willSms = mode === 'notify' && notifySmsChecked && (notifyPreview ? notifyPreview.canSms : clientPhones.length > 0);
+    const appointmentId = isEdit ? editingAppointmentId! : `${Date.now()}`;
+    const baseAppointment = {
+      id: appointmentId,
+      estimateId: selectedEstimateForCalendar.id,
+      jobName: selectedEstimateForCalendar.jobName || 'Untitled',
+      invoiceNumber: selectedEstimateForCalendar.invoiceNumber || selectedEstimateForCalendar.id,
+      datetime: appointmentDate.toISOString(),
+    };
 
-    if (isEdit) {
-      persistAppointments(
-        appointments.map(appt =>
-          appt.id === editingAppointmentId
-            ? {
-                ...appt,
-                estimateId: selectedEstimateForCalendar.id,
-                jobName: selectedEstimateForCalendar.jobName || 'Untitled',
-                invoiceNumber: selectedEstimateForCalendar.invoiceNumber || selectedEstimateForCalendar.id,
-                datetime: appointmentDate.toISOString(),
-              }
-            : appt
-        )
-      );
-    } else {
-      const newAppointment = {
-        id: `${Date.now()}`,
-        estimateId: selectedEstimateForCalendar.id,
-        jobName: selectedEstimateForCalendar.jobName || 'Untitled',
-        invoiceNumber: selectedEstimateForCalendar.invoiceNumber || selectedEstimateForCalendar.id,
-        datetime: appointmentDate.toISOString(),
+    if (mode === 'only' || (!willEmail && !willSms)) {
+      const notify: AppointmentNotifyStatus = {
+        at: new Date().toISOString(),
+        kind: isEdit ? 'updated' : 'scheduled',
+        status: 'scheduled_only',
+        appointmentId,
       };
-      persistAppointments([...appointments, newAppointment]);
+      if (isEdit) {
+        persistAppointments(
+          appointments.map((appt) =>
+            appt.id === editingAppointmentId ? { ...baseAppointment, notify } : appt
+          )
+        );
+      } else {
+        persistAppointments([...appointments, { ...baseAppointment, notify }]);
+      }
+      if (supabase) {
+        try {
+          const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`;
+          await fetch('/api/appointment-notify', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              scheduleOnly: true,
+              isUpdate: isEdit,
+              estimateId: selectedEstimateForCalendar.id,
+              appointmentId,
+              appointmentDateTime: appointmentDate.toISOString(),
+              timeZone,
+            }),
+          });
+        } catch {
+          /* recording is best-effort */
+        }
+      }
+      setIsScheduleConfirmOpen(false);
+      setNotifyPreview(null);
+      showMessage(`✅ Appointment saved for ${whenLabel} (no message sent).`);
+      setAppointmentsMonth(appointmentDate.getMonth());
+      setAppointmentsYear(appointmentDate.getFullYear());
+      resetAppointmentForm();
+      setCalendarView('appointments');
+      return;
     }
 
     setSchedulingAppointment(true);
     let notificationSummary = '';
+    let notify: AppointmentNotifyStatus = {
+      at: new Date().toISOString(),
+      kind: isEdit ? 'updated' : 'scheduled',
+      status: 'scheduled_only',
+      appointmentId,
+    };
 
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -9443,33 +9675,39 @@ export default function Home() {
         method: 'POST',
         headers,
         body: JSON.stringify({
+          isUpdate: isEdit,
+          estimateId: selectedEstimateForCalendar.id,
+          appointmentId,
           jobName: selectedEstimateForCalendar.jobName,
           invoiceNumber: selectedEstimateForCalendar.invoiceNumber || selectedEstimateForCalendar.id,
+          customerName: customerNameFromEstimate(selectedEstimateForCalendar),
           address: selectedEstimateForCalendar.address,
           city: selectedEstimateForCalendar.city,
           state: selectedEstimateForCalendar.state,
           zipCode: selectedEstimateForCalendar.zipCode,
           appointmentDateTime: appointmentDate.toISOString(),
-          emails: clientEmails,
-          phones: clientPhones,
+          timeZone,
+          emails: willEmail ? clientEmails : [],
+          phones: willSms ? clientPhones : [],
+          sendEmail: willEmail,
+          sendSms: willSms,
           companyName: profile.company || 'EstimateAce',
           companyPhone: profile.phone || '',
+          companyEmail: profile.email || '',
         }),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
-        notificationSummary = data.error || 'Could not send client notifications.';
+        notificationSummary = data.error || 'Could not send customer notifications.';
       } else {
+        if (data.notify) notify = data.notify;
         const sentParts: string[] = [];
-        if (data.emailsSent?.length) sentParts.push(`📧 ${data.emailsSent.join(', ')}`);
-        if (data.smsSent?.length) sentParts.push(`📱 ${data.smsSent.join(', ')}`);
-
+        if (data.emailsSent?.length) sentParts.push(`email to ${data.emailsSent.join(', ')}`);
+        if (data.smsSent?.length) sentParts.push(`text to ${data.smsSent.join(', ')}`);
         if (sentParts.length > 0) {
-          notificationSummary = `Notifications sent to ${sentParts.join(' and ')}.`;
-        } else if (clientEmails.length === 0 && clientPhones.length === 0) {
-          notificationSummary = 'No client email or phone on file for this estimate.';
+          notificationSummary = `Sent ${sentParts.join(' and ')}.`;
         } else {
           notificationSummary = data.errors?.[0] || 'Notifications could not be sent.';
         }
@@ -9480,13 +9718,19 @@ export default function Home() {
       setSchedulingAppointment(false);
     }
 
-    showMessage(
-      isEdit
-        ? `✅ Appointment saved for ${appointmentTime}\n\n${notificationSummary}`
-        : `✅ Appointment saved for ${appointmentTime}\n\n${notificationSummary}`
-    );
+    if (isEdit) {
+      persistAppointments(
+        appointments.map((appt) =>
+          appt.id === editingAppointmentId ? { ...baseAppointment, notify } : appt
+        )
+      );
+    } else {
+      persistAppointments([...appointments, { ...baseAppointment, notify }]);
+    }
 
-    // Stay in calendar and show the list so the saved time is obvious
+    setIsScheduleConfirmOpen(false);
+    setNotifyPreview(null);
+    showMessage(`✅ Appointment saved for ${whenLabel}\n\n${notificationSummary}`);
     setAppointmentsMonth(appointmentDate.getMonth());
     setAppointmentsYear(appointmentDate.getFullYear());
     resetAppointmentForm();
@@ -20553,6 +20797,8 @@ export default function Home() {
           if (!open) {
             setCalendarView('schedule');
             resetAppointmentForm();
+            setIsScheduleConfirmOpen(false);
+            setNotifyPreview(null);
           }
         }}
       >
@@ -20621,20 +20867,14 @@ export default function Home() {
 
                 <Button
                   type="button"
-                  onClick={() => void scheduleAppointment()}
+                  onClick={() => void openScheduleConfirm()}
                   className="w-full py-6 text-base font-bold bg-[#10b981] hover:bg-[#0d9668] text-white"
                   disabled={schedulingAppointment}
                 >
-                  {schedulingAppointment
-                    ? editingAppointmentId
-                      ? 'Saving…'
-                      : 'Saving appointment…'
-                    : editingAppointmentId
-                      ? `💾 ${t('saveChanges')}`
-                      : '💾 Save appointment'}
+                  {editingAppointmentId ? `Review updated time` : 'Review & schedule'}
                 </Button>
                 <p className="text-[11px] text-gray-500 text-center -mt-2">
-                  Saves the job and time to your calendar
+                  Next you can choose to text and email the customer the date and time
                   {selectedEstimateForCalendar && selectedDateTime
                     ? ` · ${selectedEstimateForCalendar.jobName || selectedEstimateForCalendar.invoiceNumber}`
                     : ''}
@@ -20664,15 +20904,11 @@ export default function Home() {
                 </Button>
                 <Button
                   type="button"
-                  onClick={() => void scheduleAppointment()}
+                  onClick={() => void openScheduleConfirm()}
                   className="bg-[#10b981] hover:bg-[#0d9668] text-white"
                   disabled={schedulingAppointment}
                 >
-                  {schedulingAppointment
-                    ? 'Saving…'
-                    : editingAppointmentId
-                      ? t('saveChanges')
-                      : 'Save appointment'}
+                  {editingAppointmentId ? 'Review updated time' : 'Review & schedule'}
                 </Button>
               </DialogFooter>
             </>
@@ -20715,11 +20951,25 @@ export default function Home() {
                           <div className="font-semibold text-[#1e293b]">{appt.jobName}</div>
                           <div className="text-sm text-gray-600">{appt.invoiceNumber}</div>
                           <div className="text-sm text-[#10b981] mt-1">
-                            {new Date(appt.datetime).toLocaleString(
-                              profile.language === 'es' ? 'es-ES' : profile.language === 'fr' ? 'fr-FR' : 'en-US',
-                              { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }
-                            )}
+                            {formatAppointmentWhen(appt.datetime, ownerTimeZone()) ||
+                              new Date(appt.datetime).toLocaleString(
+                                profile.language === 'es' ? 'es-ES' : profile.language === 'fr' ? 'fr-FR' : 'en-US',
+                                { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }
+                              )}
                           </div>
+                          {appt.notify?.status === 'notified' || appt.notify?.status === 'partial' ? (
+                            <div className="text-[11px] text-gray-500 mt-1">
+                              {appt.notify.emailedAt && appt.notify.textedAt
+                                ? 'Text and email sent to customer'
+                                : appt.notify.textedAt
+                                  ? 'Text sent to customer'
+                                  : appt.notify.emailedAt
+                                    ? 'Email sent to customer'
+                                    : 'Customer notified'}
+                            </div>
+                          ) : appt.notify?.status === 'scheduled_only' ? (
+                            <div className="text-[11px] text-gray-500 mt-1">Scheduled only — no message sent</div>
+                          ) : null}
                         </div>
                         <div className="flex flex-col gap-2 shrink-0">
                           <Button
@@ -20763,6 +21013,183 @@ export default function Home() {
               </DialogFooter>
             </>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Confirm schedule + optional customer text/email */}
+      <Dialog
+        open={isScheduleConfirmOpen}
+        onOpenChange={(open) => {
+          if (schedulingAppointment) return;
+          setIsScheduleConfirmOpen(open);
+          if (!open) setNotifyPreview(null);
+        }}
+      >
+        <DialogContent
+          className="max-w-[calc(100vw-1.5rem)] sm:max-w-md max-h-[90vh] overflow-y-auto p-4 sm:p-6"
+          data-testid="schedule-notify-dialog"
+        >
+          <DialogHeader>
+            <DialogTitle>
+              {editingAppointmentId ? 'Confirm updated appointment' : 'Confirm appointment'}
+            </DialogTitle>
+            <DialogDescription>
+              {editingAppointmentId
+                ? 'Review the updated date and time. You can text and email the customer the new time, or just save it to your calendar.'
+                : 'Review the date and time. You can text and email the customer, or just save it to your calendar.'}
+            </DialogDescription>
+          </DialogHeader>
+          {notifyPreview && (
+            <div className="space-y-4 py-1 text-sm">
+              <div className="rounded-xl border border-emerald-100 bg-emerald-50/70 p-4 space-y-2">
+                <div>
+                  <div className="text-[11px] uppercase tracking-wide text-emerald-800 font-semibold">Customer</div>
+                  <div className="font-medium text-slate-900" data-testid="schedule-notify-customer">
+                    {notifyPreview.customerName ||
+                      notifyPreview.emails[0] ||
+                      notifyPreview.phones[0] ||
+                      'No customer name on file'}
+                  </div>
+                  {(notifyPreview.emails[0] || notifyPreview.phones[0]) && notifyPreview.customerName ? (
+                    <div className="text-xs text-slate-600">
+                      {[notifyPreview.emails[0], notifyPreview.phones[0]].filter(Boolean).join(' · ')}
+                    </div>
+                  ) : null}
+                </div>
+                <div>
+                  <div className="text-[11px] uppercase tracking-wide text-emerald-800 font-semibold">Job</div>
+                  <div className="font-medium text-slate-900" data-testid="schedule-notify-job">
+                    {notifyPreview.jobLabel}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[11px] uppercase tracking-wide text-emerald-800 font-semibold">Date &amp; time</div>
+                  <div className="font-semibold text-slate-900" data-testid="schedule-notify-when">
+                    {notifyPreview.formattedWhen}
+                  </div>
+                  <div className="text-[11px] text-slate-500">
+                    Shown in your timezone ({notifyPreview.timeZone})
+                  </div>
+                </div>
+                {notifyPreview.location ? (
+                  <div>
+                    <div className="text-[11px] uppercase tracking-wide text-emerald-800 font-semibold">Location</div>
+                    <div className="text-slate-800">{notifyPreview.location}</div>
+                  </div>
+                ) : null}
+              </div>
+
+              <fieldset className="space-y-3">
+                <legend className="text-sm font-semibold text-slate-800">Notify the customer</legend>
+                {notifyPreview.phones.length > 0 ? (
+                  <label
+                    className={`flex items-start gap-3 rounded-xl border p-3 ${
+                      notifyPreview.canSms ? 'cursor-pointer bg-white' : 'bg-slate-50 text-slate-500'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      data-testid="notify-text-checkbox"
+                      className="mt-1 h-4 w-4 accent-[#10b981]"
+                      checked={notifySmsChecked && notifyPreview.canSms}
+                      disabled={!notifyPreview.canSms || schedulingAppointment}
+                      onChange={(e) => setNotifySmsChecked(e.target.checked)}
+                    />
+                    <span>
+                      <span className="font-medium text-slate-900">Text customer</span>
+                      <span className="block text-xs text-slate-600">{notifyPreview.phones.join(', ')}</span>
+                      {notifyPreview.smsNote ? (
+                        <span className="block text-xs text-amber-800 mt-1">{notifyPreview.smsNote}</span>
+                      ) : null}
+                    </span>
+                  </label>
+                ) : (
+                  <p className="text-xs text-slate-500">Text customer is unavailable — no phone number on file.</p>
+                )}
+                {notifyPreview.emails.length > 0 ? (
+                  <label
+                    className={`flex items-start gap-3 rounded-xl border p-3 ${
+                      notifyPreview.canEmail ? 'cursor-pointer bg-white' : 'bg-slate-50 text-slate-500'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      data-testid="notify-email-checkbox"
+                      className="mt-1 h-4 w-4 accent-[#10b981]"
+                      checked={notifyEmailChecked && notifyPreview.canEmail}
+                      disabled={!notifyPreview.canEmail || schedulingAppointment}
+                      onChange={(e) => setNotifyEmailChecked(e.target.checked)}
+                    />
+                    <span>
+                      <span className="font-medium text-slate-900">Email customer</span>
+                      <span className="block text-xs text-slate-600">{notifyPreview.emails.join(', ')}</span>
+                      {notifyPreview.emailNote ? (
+                        <span className="block text-xs text-amber-800 mt-1">{notifyPreview.emailNote}</span>
+                      ) : null}
+                    </span>
+                  </label>
+                ) : (
+                  <p className="text-xs text-slate-500">Email customer is unavailable — no email on file.</p>
+                )}
+              </fieldset>
+
+              <div>
+                <div className="text-sm font-semibold text-slate-800 mb-1">Message preview</div>
+                <pre
+                  data-testid="schedule-notify-preview"
+                  className="whitespace-pre-wrap text-xs leading-relaxed bg-slate-50 border rounded-xl p-3 text-slate-700 max-h-40 overflow-y-auto"
+                >
+                  {notifySmsChecked && notifyPreview.canSms
+                    ? notifyPreview.smsText
+                    : notifyPreview.emailText}
+                </pre>
+                {notifyPreviewLoading ? (
+                  <p className="text-[11px] text-slate-500 mt-1">Checking text and email availability…</p>
+                ) : null}
+              </div>
+            </div>
+          )}
+          <DialogFooter className="flex-col-reverse sm:flex-row gap-2 sm:gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              data-testid="schedule-notify-cancel"
+              className="w-full sm:w-auto"
+              disabled={schedulingAppointment}
+              onClick={() => {
+                setIsScheduleConfirmOpen(false);
+                setNotifyPreview(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              data-testid="schedule-only"
+              className="w-full sm:w-auto"
+              disabled={schedulingAppointment}
+              onClick={() => void confirmScheduleAppointment('only')}
+            >
+              Schedule only
+            </Button>
+            <Button
+              type="button"
+              data-testid="schedule-and-notify"
+              className="w-full sm:w-auto bg-[#10b981] hover:bg-[#0d9668] text-white"
+              disabled={
+                schedulingAppointment ||
+                !notifyPreview ||
+                !(
+                  (notifyEmailChecked && notifyPreview.canEmail) ||
+                  (notifySmsChecked && notifyPreview.canSms)
+                )
+              }
+              onClick={() => void confirmScheduleAppointment('notify')}
+            >
+              {schedulingAppointment ? 'Sending…' : 'Schedule & notify'}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
