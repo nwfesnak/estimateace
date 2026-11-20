@@ -22,6 +22,8 @@ export type AppointmentNotifyInput = {
   companyName?: string;
   companyPhone?: string;
   kind?: AppointmentNotifyKind;
+  /** Public confirm-appointment URL included in SMS and email when present. */
+  confirmUrl?: string;
 };
 
 export type AppointmentNotifyMessages = {
@@ -49,6 +51,17 @@ export type AppointmentNotifyStatus = {
   emailedAt?: string;
   textedAt?: string;
   errors?: string[];
+  /** SHA-256 hex of the confirm token. Server-only; strip before sending to the browser. */
+  confirmTokenHash?: string;
+  confirmExpiresAt?: string;
+  confirmedAt?: string | null;
+  ownerNotifiedAt?: string;
+  timeZone?: string;
+  formattedWhen?: string;
+  companyName?: string;
+  jobName?: string;
+  location?: string;
+  customerName?: string;
 };
 
 export function ownerTimeZone(fallback = 'America/New_York'): string {
@@ -181,6 +194,7 @@ export function buildAppointmentNotifyMessages(input: AppointmentNotifyInput): A
   const reference = String(input.invoiceNumber || '').trim() || 'N/A';
   const location = buildLocation(input.address, input.city, input.state, input.zipCode);
   const customerName = String(input.customerName || '').trim();
+  const confirmUrl = String(input.confirmUrl || '').trim();
   const jobLabel = jobName ? (reference && reference !== 'N/A' ? `${jobName} (${reference})` : jobName) : reference;
   const greeting = customerName ? `Hello ${customerName},` : 'Hello,';
   const jobLine = jobName ? `Job: ${jobName}` : '';
@@ -207,6 +221,9 @@ export function buildAppointmentNotifyMessages(input: AppointmentNotifyInput): A
     `Reference: ${reference}`,
     companyPhone ? `Questions? Call ${companyPhone}` : '',
     '',
+    confirmUrl ? 'Please confirm that you can make this appointment:' : '',
+    confirmUrl ? confirmUrl : '',
+    '',
     'If you need to reschedule, please contact us as soon as possible.',
     '',
     `— ${companyName}`,
@@ -228,7 +245,12 @@ export function buildAppointmentNotifyMessages(input: AppointmentNotifyInput): A
       <p style="margin:0;"><strong>Reference:</strong> ${escapeHtml(reference)}</p>
     </div>
     ${companyPhone ? `<p style="margin:0 0 8px;">Questions? Call ${escapeHtml(companyPhone)}</p>` : ''}
-    <p style="margin:0 0 24px;color:#334155;">If you need to reschedule, please contact us as soon as possible.</p>
+    ${
+      confirmUrl
+        ? `<p style="margin:20px 0 8px;"><a href="${escapeHtml(confirmUrl)}" style="display:inline-block;background:#10b981;color:#ffffff;text-decoration:none;font-weight:700;padding:12px 20px;border-radius:10px;">Confirm appointment</a></p>
+    <p style="margin:0 0 16px;color:#334155;">Please confirm that you can make this appointment, or contact us if you need to reschedule.</p>`
+        : `<p style="margin:0 0 24px;color:#334155;">If you need to reschedule, please contact us as soon as possible.</p>`
+    }
     <p style="margin:0;color:#475569;">— ${escapeHtml(companyName)}</p>
   </div>
 </body></html>`;
@@ -240,10 +262,11 @@ export function buildAppointmentNotifyMessages(input: AppointmentNotifyInput): A
       ? ` Call ${companyPhone} with questions.`
       : ` Call ${companyPhone} to reschedule.`
     : '';
+  const confirmSms = confirmUrl ? ` Confirm: ${confirmUrl}.` : '';
   const verb =
     kind === 'updated' ? `has been updated to ${formattedWhen}` : `is scheduled for ${formattedWhen}`;
   const smsText =
-    `${companyName}: Your appointment${jobSms} ${verb}${locSms}. Ref ${reference}.${callSms} Reply STOP to opt out.`.slice(
+    `${companyName}: Your appointment${jobSms} ${verb}${locSms}. Ref ${reference}.${confirmSms}${callSms} Reply STOP to opt out.`.slice(
       0,
       1600
     );

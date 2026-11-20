@@ -104,6 +104,13 @@ import {
   ownerTimeZone,
   type AppointmentNotifyStatus,
 } from '@/lib/appointment-notify';
+import {
+  appointmentConfirmUrl,
+  confirmationBadge,
+  mergeAppointmentNotify,
+  publicNotifyStatus,
+  readNotifyFromEstimate,
+} from '@/lib/appointment-confirm';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { getLineItemUnitOptions, LINE_ITEM_UNITS } from '@/lib/quote-units';
 import {
@@ -4739,7 +4746,7 @@ export default function Home() {
   };
 
   const refreshSavedList = async () => {
-    if (!workspaceUserId || !supabase) return;
+    if (!workspaceUserId || !supabase) return [] as any[];
     const { data, error } = await supabase
       .from('estimates')
       .select('*')
@@ -4747,7 +4754,7 @@ export default function Home() {
       .order('updated_at', { ascending: false });
     if (error) {
       console.error('refreshSavedList error:', error);
-      return;
+      return [] as any[];
     }
     let rows = data || [];
 
@@ -4809,6 +4816,7 @@ export default function Home() {
     );
 
     setSavedEstimatesList(rows);
+    return rows;
   };
 
   const refreshArchivesList = async () => {
@@ -9336,6 +9344,69 @@ export default function Home() {
     }
   };
 
+  const applyConfirmationsFromEstimates = (estimates: any[]) => {
+    const settings = (estimates || []).find((e) => String(e?.id || '').startsWith('SETTINGS-'));
+    const fromSettings = Array.isArray(settings?.profile?._appointments) ? settings.profile._appointments : [];
+    setAppointments((prev) => {
+      let changed = false;
+      const next = prev.map((appt) => {
+        const est = (estimates || []).find((e) => e && e.id === appt.estimateId);
+        const fromEst = readNotifyFromEstimate(est);
+        const settingsAppt = fromSettings.find((a: any) => a && a.id === appt.id);
+        const fromCal = publicNotifyStatus(settingsAppt?.notify);
+        const merged = mergeAppointmentNotify(appt, fromEst || fromCal);
+        const confirmedAt = fromEst?.confirmedAt || fromCal?.confirmedAt || merged?.confirmedAt || appt.notify?.confirmedAt || null;
+        const nextNotify = publicNotifyStatus(merged ? { ...merged, confirmedAt } : appt.notify);
+        if (JSON.stringify(publicNotifyStatus(appt.notify) || null) !== JSON.stringify(nextNotify || null)) {
+          changed = true;
+          return { ...appt, notify: nextNotify };
+        }
+        return appt;
+      });
+      if (!changed) return prev;
+      try {
+        if (user?.id) {
+          localStorage.setItem(`estimateace_appointments_${workspaceUserId}`, JSON.stringify(next));
+        }
+      } catch {
+        /* ignore */
+      }
+      void syncAppointmentsToServer(next, profile);
+      return next;
+    });
+  };
+
+  const appointmentsLatestRef = useRef(appointments);
+  appointmentsLatestRef.current = appointments;
+
+  const refreshAppointmentConfirmations = async () => {
+    if (!workspaceUserId || !supabase) return;
+    const ids = Array.from(
+      new Set(
+        [
+          ...appointmentsLatestRef.current.map((a) => a.estimateId).filter(Boolean),
+          `SETTINGS-${workspaceUserId}`,
+        ].filter(Boolean)
+      )
+    );
+    const { data } = await supabase
+      .from('estimates')
+      .select('id, profile')
+      .eq('user_id', workspaceUserId)
+      .in('id', ids.length ? ids : [`SETTINGS-${workspaceUserId}`]);
+    applyConfirmationsFromEstimates(data || []);
+  };
+
+  useEffect(() => {
+    if (!isCalendarModalOpen || !workspaceUserId || !supabase) return;
+    void refreshAppointmentConfirmations();
+    const id = window.setInterval(() => {
+      void refreshAppointmentConfirmations();
+    }, 30000);
+    return () => window.clearInterval(id);
+    // Refresh while the calendar is open so a customer confirmation shows up as a check mark.
+  }, [isCalendarModalOpen, workspaceUserId]);
+
   const toDatetimeLocalValue = (iso: string) => {
     const d = new Date(iso);
     const pad = (n: number) => String(n).padStart(2, '0');
@@ -9355,7 +9426,8 @@ export default function Home() {
       showMessage(CREW_TAB_DENIED_MESSAGE);
       return;
     }
-    await refreshSavedList();
+    const rows = await refreshSavedList();
+    if (rows && rows.length) applyConfirmationsFromEstimates(rows);
     resetAppointmentForm();
     setCalendarView('schedule');
     setAppointmentsMonth(new Date().getMonth());
@@ -9443,6 +9515,7 @@ export default function Home() {
       companyName: profile.company || 'EstimateAce',
       companyPhone: profile.phone || '',
       kind: isUpdate ? 'updated' : 'scheduled',
+      confirmUrl: appointmentConfirmUrl(),
     });
     return {
       formattedWhen: messages.formattedWhen,
@@ -13546,6 +13619,36 @@ export default function Home() {
                               ✓ {approvalBadgeLabel(est)}
                             </span>
                           )}
+                          {(() => {
+                            const appt = appointments.find(
+                              (a) => a.estimateId === est.id || a.invoiceNumber === est.invoiceNumber
+                            );
+                            const badge = confirmationBadge(
+                              appt?.notify || readNotifyFromEstimate(est),
+                              ownerTimeZone()
+                            );
+                            if (badge.kind === 'confirmed') {
+                              return (
+                                <span
+                                  className="inline-flex items-center rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-semibold px-2 py-0.5"
+                                  data-testid="job-list-appointment-confirmed-badge"
+                                >
+                                  ✓ Confirmed by customer
+                                </span>
+                              );
+                            }
+                            if (badge.kind === 'awaiting') {
+                              return (
+                                <span
+                                  className="inline-flex items-center rounded-full bg-amber-100 text-amber-900 text-[11px] font-medium px-2 py-0.5"
+                                  data-testid="job-list-appointment-awaiting-badge"
+                                >
+                                  Awaiting confirmation
+                                </span>
+                              );
+                            }
+                            return null;
+                          })()}
                         </div>
                         <div className="text-sm text-gray-500 break-words">
                           <button
@@ -13728,6 +13831,38 @@ export default function Home() {
                   <div className="text-sm text-gray-500">Document #</div>
                   <div className="text-4xl font-mono font-bold text-[#10b981]">{invoiceNumber}</div>
                   <div className="text-sm text-gray-500 mt-1">Date: {date}</div>
+                  {(() => {
+                    const appt = appointments.find(
+                      (a) => a.estimateId === invoiceNumber || a.invoiceNumber === invoiceNumber
+                    );
+                    const est = savedEstimatesList.find(
+                      (e: any) => e.id === invoiceNumber || e.invoiceNumber === invoiceNumber
+                    );
+                    const status = appt?.notify || readNotifyFromEstimate(est);
+                    const badge = confirmationBadge(status, ownerTimeZone());
+                    if (badge.kind === 'confirmed') {
+                      return (
+                        <div
+                          className="mt-2 inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-1 text-[12px] font-semibold text-emerald-800"
+                          data-testid="job-appointment-confirmed-badge"
+                        >
+                          <span aria-hidden="true">✓</span>
+                          <span>{badge.text}</span>
+                        </div>
+                      );
+                    }
+                    if (badge.kind === 'awaiting') {
+                      return (
+                        <div
+                          className="mt-2 text-[12px] font-medium text-amber-800"
+                          data-testid="job-appointment-awaiting-badge"
+                        >
+                          Awaiting confirmation
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
                 </div>
               </div>
 
@@ -20970,6 +21105,19 @@ export default function Home() {
                           ) : appt.notify?.status === 'scheduled_only' ? (
                             <div className="text-[11px] text-gray-500 mt-1">Scheduled only — no message sent</div>
                           ) : null}
+                          {confirmationBadge(appt.notify, ownerTimeZone()).kind === 'confirmed' ? (
+                            <div
+                              className="mt-1 inline-flex items-center gap-1 text-[12px] font-semibold text-emerald-700"
+                              data-testid="appointment-confirmed-badge"
+                            >
+                              <span aria-hidden="true">✓</span>
+                              <span>{confirmationBadge(appt.notify, ownerTimeZone()).text}</span>
+                            </div>
+                          ) : confirmationBadge(appt.notify, ownerTimeZone()).kind === 'awaiting' ? (
+                            <div className="mt-1 text-[12px] font-medium text-amber-800" data-testid="appointment-awaiting-badge">
+                              Awaiting confirmation
+                            </div>
+                          ) : null}
                         </div>
                         <div className="flex flex-col gap-2 shrink-0">
                           <Button
@@ -21146,6 +21294,9 @@ export default function Home() {
                 {notifyPreviewLoading ? (
                   <p className="text-[11px] text-slate-500 mt-1">Checking text and email availability…</p>
                 ) : null}
+                <p className="text-[11px] text-slate-500 mt-2">
+                  The sent message includes a unique Confirm link. You&apos;ll see a green check mark on the calendar and the job when the customer confirms.
+                </p>
               </div>
             </div>
           )}

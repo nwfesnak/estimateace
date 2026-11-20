@@ -18,6 +18,11 @@ import {
   type AppointmentNotifyKind,
   type AppointmentNotifyStatus,
 } from '@/lib/appointment-notify';
+import {
+  appointmentConfirmUrl,
+  issueAppointmentConfirm,
+  publicNotifyStatus,
+} from '@/lib/appointment-confirm';
 
 async function verifyUser(request: NextRequest) {
   const authHeader = request.headers.get('authorization');
@@ -147,6 +152,9 @@ export async function POST(request: NextRequest) {
     if (!body.appointmentDateTime) {
       return NextResponse.json({ error: 'appointmentDateTime is required' }, { status: 400 });
     }
+    if (Number.isNaN(new Date(body.appointmentDateTime).getTime())) {
+      return NextResponse.json({ error: 'appointmentDateTime is invalid' }, { status: 400 });
+    }
 
     if (emails.length > 10 || phones.length > 5) {
       return NextResponse.json(
@@ -155,7 +163,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const messages = buildAppointmentNotifyMessages({
+    const confirmPreviewUrl = appointmentConfirmUrl();
+    const messageInput = {
       jobName: body.jobName,
       invoiceNumber: body.invoiceNumber,
       customerName,
@@ -168,7 +177,9 @@ export async function POST(request: NextRequest) {
       companyName: body.companyName || 'EstimateAce',
       companyPhone: body.companyPhone || '',
       kind,
-    });
+      confirmUrl: confirmPreviewUrl,
+    };
+    let messages = buildAppointmentNotifyMessages(messageInput);
 
     const sms = await smsChannelStatus(phones);
     const resendConfigured = isResendConfigured();
@@ -208,9 +219,16 @@ export async function POST(request: NextRequest) {
         kind,
         status: 'scheduled_only',
         appointmentId,
-      } as AppointmentNotifyStatus;
+        timeZone: messages.timeZone,
+        formattedWhen: messages.formattedWhen,
+        confirmedAt: null,
+      };
       await recordNotifyOnEstimate(ownerId, estimateId, status);
-      return NextResponse.json({ notified: false, scheduleOnly: true, notify: status });
+      return NextResponse.json({
+        notified: false,
+        scheduleOnly: true,
+        notify: publicNotifyStatus(status),
+      });
     }
 
     {
@@ -220,6 +238,13 @@ export async function POST(request: NextRequest) {
       });
       if (denied) return denied;
     }
+
+    const issued =
+      estimateId && !estimateId.startsWith('SETTINGS-') && !estimateId.startsWith('REC-')
+        ? issueAppointmentConfirm(estimateId, String(body.appointmentDateTime))
+        : issueAppointmentConfirm(appointmentId || messages.reference || 'appt', String(body.appointmentDateTime));
+    const confirmUrl = appointmentConfirmUrl(issued.token);
+    messages = buildAppointmentNotifyMessages({ ...messageInput, confirmUrl });
 
     const result = {
       emailsSent: [] as string[],
@@ -276,15 +301,31 @@ export async function POST(request: NextRequest) {
       at: now,
       kind,
       status: notified && result.errors.length === 0 ? 'notified' : notified ? 'partial' : 'scheduled_only',
+      appointmentId,
       emails: result.emailsSent,
       phones: result.smsSent,
       emailedAt,
       textedAt,
       errors: result.errors.length ? result.errors : undefined,
+      timeZone: messages.timeZone,
+      formattedWhen: messages.formattedWhen,
+      companyName: messages.companyName,
+      jobName: String(body.jobName || '').trim() || undefined,
+      location: messages.location || undefined,
+      customerName: messages.customerName || undefined,
+      confirmedAt: null,
+      ...(notified
+        ? { confirmTokenHash: issued.hash, confirmExpiresAt: issued.expiresAt }
+        : {}),
     };
     await recordNotifyOnEstimate(ownerId, estimateId, status);
 
-    return NextResponse.json({ ...result, notified, notify: status, formattedWhen: messages.formattedWhen });
+    return NextResponse.json({
+      ...result,
+      notified,
+      notify: publicNotifyStatus(status),
+      formattedWhen: messages.formattedWhen,
+    });
   } catch (err: unknown) {
     console.error('Appointment notify error:', err);
     return NextResponse.json(
