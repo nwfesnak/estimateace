@@ -17,7 +17,7 @@ export default function PrivacyPage() {
           </Link>
         </p>
         <h1>Privacy Policy</h1>
-        <p className="text-sm text-slate-500">Last updated: November 19, 2026</p>
+        <p className="text-sm text-slate-500">Last updated: November 20, 2026</p>
 
         <p>
           This Privacy Policy explains how EstimateAce (&quot;we&quot;, &quot;us&quot;) collects and
@@ -212,6 +212,14 @@ export default function PrivacyPage() {
           account. We keep only what the law or payment networks require: billing and tax records at
           Stripe, payment dispute records (with your account link removed), and SMS opt-in / opt-out
           consent records for phone numbers. Routine backups roll off within about 30 days.
+        </p>
+        <p>
+          <strong>Inactive promotional trials:</strong> if your account is on the 2-month launch-promotion
+          trial, has never been paid for, and nobody signs in for 30 days, we email you a reminder at 20
+          days, then email you a copy of all the data you entered (with download links for your photos and
+          files, valid for about 30 days) and delete the account as described above. Those export copies
+          are stored privately and removed when the links expire. See{' '}
+          <Link href="/terms#trial-inactivity">Terms section 2B</Link>.
         </p>
         <p>
           If you are a <strong>crew member</strong> on someone else&apos;s EstimateAce account and you

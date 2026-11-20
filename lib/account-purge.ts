@@ -45,6 +45,8 @@ export const ACCOUNT_DATA_KEPT: Readonly<Record<string, string>> = {
   sms_opt_ins: 'SMS consent proof keyed by phone number only (carrier / TCPA compliance), not linked to an account',
   rate_limit_counters: 'short-lived counters; any key containing the user id is deleted by the purge',
   promo_limits: 'global promo settings, no user data',
+  trial_inactivity_log:
+    'audit trail of the inactive-trial reminder / export / deletion (user id + timestamps + email ids, no personal data); must outlive the account',
 };
 
 type DeleteResult = PromiseLike<{ error: { message?: string } | null; count?: number | null }>;

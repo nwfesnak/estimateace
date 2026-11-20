@@ -70,6 +70,10 @@ export async function sendEmailNotification(
     companyName?: string;
     /** Override full From header (advanced) */
     from?: string;
+    /** Resend attachments (content is base64). Keep the total well under 40 MB. */
+    attachments?: Array<{ filename: string; content: string; contentType?: string }>;
+    /** Resend Idempotency-Key: the same key within 24h never sends a second email. */
+    idempotencyKey?: string;
   }
 ): Promise<{ ok: boolean; error?: string; id?: string }> {
   const resendKey = process.env.RESEND_API_KEY;
@@ -109,6 +113,13 @@ export async function sendEmailNotification(
       text,
     };
     if (options?.html) payload.html = options.html;
+    if (options?.attachments?.length) {
+      payload.attachments = options.attachments.map((a) => ({
+        filename: a.filename,
+        content: a.content,
+        ...(a.contentType ? { content_type: a.contentType } : {}),
+      }));
+    }
     if (options?.replyTo) {
       const rt = String(options.replyTo).trim();
       if (rt && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rt) && !/@estimateace\.com$/i.test(rt)) {
@@ -124,6 +135,11 @@ export async function sendEmailNotification(
       headers: {
         Authorization: `Bearer ${resendKey}`,
         'Content-Type': 'application/json',
+        // Same key for the From-address retries below: Resend rejects a reused key with a
+        // different body, so suffix it with the From actually used.
+        ...(options?.idempotencyKey
+          ? { 'Idempotency-Key': `${options.idempotencyKey}:${from}`.slice(0, 256) }
+          : {}),
       },
       body: JSON.stringify(payload),
     });

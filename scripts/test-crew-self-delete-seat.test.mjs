@@ -159,7 +159,7 @@ test('privacy policy discloses the Meta Pixel: data, purpose, off in apps, opt-o
   assert.match(p, /turned off inside the EstimateAce\s+iPhone and Android apps/);
   assert.match(p, /https:\/\/www\.facebook\.com\/adpreferences/);
   assert.match(p, /browser\s+settings/);
-  assert.match(p, /Last updated: November 19, 2026/);
+  assert.match(p, /Last updated: November 20, 2026/);
   // The pixel really is gated off in the native wrapper.
   assert.match(src('app/layout.tsx'), /native-app/);
 });

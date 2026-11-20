@@ -34,6 +34,8 @@ const LIVE_PUBLIC_TABLES = [
   'sms_opt_ins',
   'stripe_disputes',
   'subscriptions',
+  // supabase/trial-inactivity-2026-11.sql (not yet applied)
+  'trial_inactivity_log',
 ];
 
 /** Fake service-role client that records every call in order. */
