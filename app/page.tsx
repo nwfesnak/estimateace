@@ -1195,6 +1195,18 @@ export default function Home() {
   const jobSettingsSnapshottedAtRef = useRef<string>('');
   const jobTaxRateSnapshotRef = useRef<{ rate: number; zip: string; state: string } | null>(null);
   const editorOpenedAsNewRef = useRef(false);
+  const jobRenderingsRef = useRef<JobRendering[]>(jobRenderings);
+  const jobSettingsRef = useRef<JobSettingsSnapshot>(jobSettings);
+  const itemsRef = useRef(items);
+  jobRenderingsRef.current = jobRenderings;
+  jobSettingsRef.current = jobSettings;
+  itemsRef.current = items;
+  const autosavePendingRef = useRef(false);
+  const documentSaveChainRef = useRef(Promise.resolve());
+  const saveToDBRef = useRef<(options?: any) => Promise<{ ok: boolean; error?: string; id?: string }>>(
+    async () => ({ ok: false, error: 'not ready' })
+  );
+  const flushPendingAutosaveRef = useRef<() => Promise<void>>(async () => {});
   /** Latest invoice send time, so a save that starts before React re-renders still keeps the mark. */
   const invoiceSentAtRef = useRef<string | null>(null);
   /** Last "include on customer page" choice from Send (photos / renderings); null = default show. */
@@ -1593,7 +1605,7 @@ export default function Home() {
     laborForJob: LaborLog[] = jobLaborLogs,
     jobSettingsOverride?: JobSettingsSnapshot
   ) => {
-    const snap = jobSettingsOverride ?? jobSettings;
+    const snap = jobSettingsOverride ?? jobSettingsRef.current;
     return {
     ...getSafeProfileSnapshot(fullProfile),
     ...snap,
@@ -1614,7 +1626,7 @@ export default function Home() {
     // Per-job labor entries (hours × rate + memo)
     _laborLogs: laborForJob,
     // AI before→after renderings linked to description lines
-    _jobRenderings: jobRenderings,
+    _jobRenderings: jobRenderingsRef.current,
     // Approved estimate (schedule without invoicing)
     ...(estimateApprovedAt
       ? {
@@ -3472,6 +3484,7 @@ export default function Home() {
       return { ok: false, error: err };
     }
 
+    const runSave = async (): Promise<{ ok: boolean; error?: string; id?: string }> => {
     const docId = ensureDocumentId();
     setSaveStatus('saving');
     setSaveErrorDetail('');
@@ -3484,7 +3497,8 @@ export default function Home() {
     const receiptDetailsToSave = options?.receiptDetails ?? receiptDetails;
     const milesToSave = options?.mileageLogs ?? jobMileageLogs;
     const laborToSave = options?.laborLogs ?? jobLaborLogs;
-    const renderingsToSave = options?.jobRenderings ?? jobRenderings;
+    const renderingsToSave = options?.jobRenderings ?? jobRenderingsRef.current;
+    const itemsToSave = itemsRef.current || items || [];
     if (options && 'invoiceSentAt' in options) {
       invoiceSentAtRef.current = options.invoiceSentAt || null;
     }
@@ -3508,7 +3522,7 @@ export default function Home() {
       emails: Array.isArray(emails) ? emails : [],
       date: date || '',
       invoiceNumber: docId,
-      items: items || [],
+      items: itemsToSave,
       terms: terms || '',
       profile: {
         ...getDocumentProfileSnapshot(
@@ -3657,7 +3671,49 @@ export default function Home() {
       showMessage(`❌ ${err}`);
       return { ok: false, error: err, id: docId };
     }
+    };
+
+    const queued = documentSaveChainRef.current.then(runSave, runSave);
+    documentSaveChainRef.current = queued.then(
+      () => undefined,
+      () => undefined
+    );
+    return queued;
   };
+
+  saveToDBRef.current = saveToDB;
+
+  const flushPendingAutosave = async () => {
+    if (!autosavePendingRef.current && !saveTimeoutRef.current) return;
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
+    }
+    autosavePendingRef.current = false;
+    if (profileRef.current?.autoSaveEnabled === false) return;
+    if (!user?.id || !workspaceUserId || !supabase) return;
+    if (profileHydratingRef.current) return;
+    if (Date.now() < skipAutosaveUntilRef.current) return;
+    if (requires2FA) return;
+    const latestItems = itemsRef.current || [];
+    const hasContent =
+      !!(jobName || '').trim() ||
+      !!(address || '').trim() ||
+      latestItems.some((it: any) => !!(it?.description || '').trim() || Number(it?.price) > 0) ||
+      (jobRenderingsRef.current || []).length > 0;
+    if (freshDocumentRef.current && !hasContent) return;
+    if (hasContent) freshDocumentRef.current = false;
+    const paidToSave = freshDocumentRef.current ? 0 : Number(amountPaid) || 0;
+    const statusToSave = freshDocumentRef.current ? 'pending' : paymentStatus;
+    const methodToSave = freshDocumentRef.current ? '' : paymentMethod;
+    await saveToDBRef.current({
+      quiet: true,
+      amountPaid: paidToSave,
+      paymentStatus: statusToSave,
+      paymentMethod: methodToSave,
+    });
+  };
+  flushPendingAutosaveRef.current = flushPendingAutosave;
 
   /**
    * Normalize mobile photos (iOS HEIC, huge camera files, missing names) so Supabase Storage accepts them.
@@ -4762,6 +4818,8 @@ export default function Home() {
   };
 
   const loadSelectedEstimate = async (est: any) => {
+    // Persist the open job first so a pending auto-save cannot land on the next document id
+    await flushPendingAutosaveRef.current();
     loadedDocNumberRef.current = String(est?.invoiceNumber || est?.invoicenumber || est?.id || '');
     freshDocumentRef.current = false;
     editorOpenedAsNewRef.current = false;
@@ -5329,11 +5387,13 @@ export default function Home() {
 
   const newEstimate = async (typeOverride?: 'estimate' | 'invoice') => {
     const nextType = typeOverride || documentType || 'estimate';
-    // Cancel any pending autosave from the previous document and block new ones briefly
+    // Flush the current job first, then block autosave so the blank form cannot overwrite it
+    await flushPendingAutosaveRef.current();
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
       saveTimeoutRef.current = null;
     }
+    autosavePendingRef.current = false;
     skipAutosaveUntilRef.current = Date.now() + 3000;
     freshDocumentRef.current = true;
     loadedDocNumberRef.current = '';
@@ -6311,7 +6371,8 @@ export default function Home() {
         createdAt: new Date().toISOString(),
         status: 'ready',
       };
-      const next = [entry, ...jobRenderings];
+      const next = [entry, ...jobRenderingsRef.current];
+      jobRenderingsRef.current = next;
       setJobRenderings(next);
       setJobRenderNotes('');
       await saveToDB({ jobRenderings: next, quiet: false });
@@ -6341,7 +6402,8 @@ export default function Home() {
   };
 
   const removeJobRendering = (id: string) => {
-    const next = jobRenderings.filter((r) => r.id !== id);
+    const next = jobRenderingsRef.current.filter((r) => r.id !== id);
+    jobRenderingsRef.current = next;
     setJobRenderings(next);
     setJobRenderRefineDrafts((prev) => {
       const copy = { ...prev };
@@ -6415,7 +6477,7 @@ export default function Home() {
       }
       if (!resultPath) throw new Error('AI did not return an updated image.');
 
-      const next = jobRenderings.map((r) =>
+      const next = jobRenderingsRef.current.map((r) =>
         r.id === renderingId
           ? {
               ...r,
@@ -6425,6 +6487,7 @@ export default function Home() {
             }
           : r
       );
+      jobRenderingsRef.current = next;
       setJobRenderings(next);
       setJobRenderRefineDrafts((prev) => ({ ...prev, [renderingId]: '' }));
       await saveToDB({ jobRenderings: next, quiet: false });
@@ -6664,11 +6727,13 @@ export default function Home() {
       const fail = translateFailureMessage({ ok: res.ok, status: res.status, data });
       if (fail) throw new Error(fail);
       const translated = String(data.translatedText).trim();
-      setItems((prev) =>
-        prev.map((it) =>
+      setItems((prev) => {
+        const next = prev.map((it) =>
           it.id === itemId ? withItemTranslation(it, translated, translateTo, text) : it
-        )
-      );
+        );
+        itemsRef.current = next;
+        return next;
+      });
       showMessage('✅ Translation added (internal use only)');
     } catch (err: unknown) {
       const msg = translateFailureMessage({ err });
@@ -9760,26 +9825,34 @@ export default function Home() {
   const mainScrollRef = useRef<HTMLDivElement>(null);
 
   const debouncedSave = () => {
-    if (!profile.autoSaveEnabled) return;
+    if (profileRef.current?.autoSaveEnabled === false) return;
     if (!user?.id || !workspaceUserId || !supabase) return;
     if (profileHydratingRef.current) return;
     if (Date.now() < skipAutosaveUntilRef.current) return;
     if (requires2FA) return;
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    autosavePendingRef.current = true;
     saveTimeoutRef.current = setTimeout(() => {
+      autosavePendingRef.current = false;
+      saveTimeoutRef.current = null;
       if (profileHydratingRef.current) return;
       if (Date.now() < skipAutosaveUntilRef.current) return;
+      if (profileRef.current?.autoSaveEnabled === false) return;
+      const latestItems = itemsRef.current || [];
       const hasContent =
         !!(jobName || '').trim() ||
         !!(address || '').trim() ||
-        (items || []).some((it: any) => !!(it?.description || '').trim() || Number(it?.price) > 0);
+        latestItems.some((it: any) => !!(it?.description || '').trim() || Number(it?.price) > 0) ||
+        (jobRenderingsRef.current || []).length > 0;
       if (freshDocumentRef.current && !hasContent) return;
       if (hasContent) freshDocumentRef.current = false;
       // Fresh docs always persist deposit as zero until user records a payment
       const paidToSave = freshDocumentRef.current ? 0 : Number(amountPaid) || 0;
       const statusToSave = freshDocumentRef.current ? 'pending' : paymentStatus;
       const methodToSave = freshDocumentRef.current ? '' : paymentMethod;
-      void saveToDB({
+      // Always call the latest saveToDB so a delayed tick cannot write stale
+      // _jobRenderings / jobSettings / item translations over a newer save.
+      void saveToDBRef.current({
         quiet: true,
         amountPaid: paidToSave,
         paymentStatus: statusToSave,
@@ -9788,11 +9861,15 @@ export default function Home() {
     }, 1000);
   };
 
+  const prevEditorViewRef = useRef(view);
   useEffect(() => {
+    const leavingEditor = prevEditorViewRef.current === 'editor' && view !== 'editor';
+    prevEditorViewRef.current = view;
+    if (leavingEditor) {
+      void flushPendingAutosaveRef.current();
+      return;
+    }
     if (view === 'editor') debouncedSave();
-    return () => {
-      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    };
   }, [
     jobName,
     address,
@@ -9804,6 +9881,8 @@ export default function Home() {
     date,
     invoiceNumber,
     items,
+    jobRenderings,
+    jobSettings,
     terms,
     documentType,
     dueDate,
@@ -9822,6 +9901,26 @@ export default function Home() {
     workspaceUserId,
     profile.autoSaveEnabled,
   ]);
+
+  useEffect(() => {
+    const flushIfHidden = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        void flushPendingAutosaveRef.current();
+      }
+    };
+    const flushNow = () => {
+      void flushPendingAutosaveRef.current();
+    };
+    window.addEventListener('pagehide', flushNow);
+    window.addEventListener('beforeunload', flushNow);
+    document.addEventListener('visibilitychange', flushIfHidden);
+    return () => {
+      flushNow();
+      window.removeEventListener('pagehide', flushNow);
+      window.removeEventListener('beforeunload', flushNow);
+      document.removeEventListener('visibilitychange', flushIfHidden);
+    };
+  }, []);
 
   useEffect(() => {
     // Local fallback only — company SETTINGS (loadLatestProfile) wins when available
@@ -14259,6 +14358,7 @@ export default function Home() {
                               ...jobSettings,
                               aiJobRenderingEnabled: e.target.checked,
                             };
+                            jobSettingsRef.current = nextJobSettings;
                             setJobSettings(nextJobSettings);
                             await saveToDB({ jobSettings: nextJobSettings, quiet: true });
                             showMessage('✅ AI Job Renderings enabled for this job.');
@@ -14293,6 +14393,7 @@ export default function Home() {
                               ...jobSettings,
                               aiJobRenderingEnabled: checked,
                             };
+                            jobSettingsRef.current = nextJobSettings;
                             setJobSettings(nextJobSettings);
                             await saveToDB({ jobSettings: nextJobSettings, quiet: true });
                             showMessage(
