@@ -1,3 +1,4 @@
+import { requireWorkspaceOwner } from '@/lib/workspace';
 /**
  * POST /api/photo-estimate — 1-5 job photos (+ optional note / measurements) → an
  * itemized estimate (materials + labor per line) plus optional upsell lines.
@@ -34,6 +35,8 @@ export async function POST(request: NextRequest) {
     if (!user) return NextResponse.json({ error: authError || 'Unauthorized' }, { status: 401 });
     const paywall = await enforceAppAccess(user.id);
     if (paywall) return paywall;
+    const ws = await requireWorkspaceOwner(user.id, undefined, { requireTab: ['estimates', 'invoices', 'newEstimate'] });
+    if (ws.denied) return ws.denied;
 
     const minute = await rateLimit(`photo-estimate:${user.id}`, 60, 4);
     if (!minute.allowed) return tooManyRequests(minute, 'Too many photo estimates in a minute. Try again shortly.');

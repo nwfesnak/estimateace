@@ -6,6 +6,11 @@ import { getCrewAccess, loadCrewRestoreSources, type CrewAccessResult } from '@/
 import { INJECTED_KEYS, redactRows, restoreRow } from '@/lib/crew-redaction';
 import { sanitizeCrewQuery } from '@/lib/crew-query';
 import { isReservedDocumentId } from '@/lib/company-profile-access';
+import {
+  allCrewTabsAllowed,
+  crewCanReadDocumentRow,
+  crewCanWriteDocumentRow,
+} from '@/lib/crew-tab-access';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -92,7 +97,11 @@ function stripInjectedColumns(params: URLSearchParams) {
   params.set('columns', kept.join(','));
 }
 
-async function respond(upstream: Response, access: CrewAccessResult): Promise<NextResponse> {
+async function respond(
+  upstream: Response,
+  access: CrewAccessResult,
+  opts: { table?: string; single?: boolean; filterByTab?: boolean } = {}
+): Promise<NextResponse> {
   const headers = new Headers();
   for (const name of FORWARD_RESPONSE_HEADERS) {
     const v = upstream.headers.get(name);
@@ -103,7 +112,29 @@ async function respond(upstream: Response, access: CrewAccessResult): Promise<Ne
   const isJson = /json/i.test(upstream.headers.get('content-type') || '');
   if (upstream.ok && isJson) {
     try {
-      const body = redactRows(JSON.parse(text), access);
+      let parsed: unknown = JSON.parse(text);
+      if (opts.filterByTab && opts.table === 'estimates') {
+        if (Array.isArray(parsed)) {
+          const filtered = parsed.filter((r) =>
+            crewCanReadDocumentRow(access.tabAccess, (r || {}) as Record<string, unknown>)
+          );
+          if (filtered.length !== parsed.length && headers.has('content-range')) {
+            headers.set(
+              'content-range',
+              filtered.length === 0 ? '*/0' : `0-${filtered.length - 1}/${filtered.length}`
+            );
+          }
+          parsed = filtered;
+        } else if (parsed && typeof parsed === 'object') {
+          if (!crewCanReadDocumentRow(access.tabAccess, parsed as Record<string, unknown>)) {
+            if (opts.single) {
+              return deny(406, 'Not available for your crew access level.', 'PGRST116');
+            }
+            return new NextResponse('null', { status: upstream.status, headers });
+          }
+        }
+      }
+      const body = redactRows(parsed, access);
       return new NextResponse(JSON.stringify(body), { status: upstream.status, headers });
     } catch {
       /* fall through: non-JSON body */
@@ -139,9 +170,9 @@ async function handleRead(request: NextRequest, ctx: Ctx, method: 'GET' | 'HEAD'
   const q = sanitizeCrewQuery(request.nextUrl.searchParams, 'read');
   if (!q.ok) return deny(400, q.error, 'crew_query_rejected');
   const params = q.params;
-  if (table === 'archive-est' && !access.canSeeFinancials) {
-    // Paid / archived work is a financial report: hidden at this access level.
-    const single = /vnd\.pgrst\.object/i.test(request.headers.get('accept') || '');
+  const single = /vnd\.pgrst\.object/i.test(request.headers.get('accept') || '');
+  if (table === 'archive-est' && (!access.canSeeFinancials || !access.tabAccess.reports)) {
+    // Paid / archived work is a financial report: hidden when financials or Reports tab is denied.
     if (single) return deny(406, 'Not available for your crew access level.', 'PGRST116');
     return NextResponse.json([], { headers: { 'content-range': '*/0' } });
   }
@@ -151,7 +182,7 @@ async function handleRead(request: NextRequest, ctx: Ctx, method: 'GET' | 'HEAD'
     headers: serviceHeaders(request),
     cache: 'no-store',
   });
-  return respond(upstream, access);
+  return respond(upstream, access, { table, single, filterByTab: true });
 }
 
 export async function GET(request: NextRequest, ctx: Ctx) {
@@ -177,7 +208,7 @@ export async function POST(request: NextRequest, ctx: Ctx) {
     const r = await resolve(request, ctx);
     if ('error' in r) return r.error;
     const { table, admin, access } = r;
-    if (table === 'archive-est' && !access.canSeeFinancials) {
+    if (table === 'archive-est' && (!access.canSeeFinancials || !access.tabAccess.reports)) {
       return deny(403, 'Archived and paid work is restricted for your crew access level.');
     }
     const raw = await request.json().catch(() => null);
@@ -219,6 +250,18 @@ export async function POST(request: NextRequest, ctx: Ctx) {
       existingById.set(String(e.id), e);
     }
 
+    if (table === 'estimates') {
+      for (const row of rows) {
+        const existing = existingById.get(String(row.id)) || null;
+        if (existing && !crewCanWriteDocumentRow(access.tabAccess, existing, { isNew: false })) {
+          return deny(403, 'You do not have permission to edit this tab.', 'crew_permission_denied');
+        }
+        if (!crewCanWriteDocumentRow(access.tabAccess, row, { isNew: !existing })) {
+          return deny(403, 'You do not have permission to save to this tab.', 'crew_permission_denied');
+        }
+      }
+    }
+
     const needItemIndex = !access.canSeePricing && rows.some((row) => !existingById.has(String(row.id)));
     const sources = await loadCrewRestoreSources(admin, access, needItemIndex);
     const restored = rows.map((row) =>
@@ -247,7 +290,7 @@ export async function PATCH(request: NextRequest, ctx: Ctx) {
     const r = await resolve(request, ctx);
     if ('error' in r) return r.error;
     const { table, admin, access } = r;
-    if (table === 'archive-est' && !access.canSeeFinancials) {
+    if (table === 'archive-est' && (!access.canSeeFinancials || !access.tabAccess.reports)) {
       return deny(403, 'Archived and paid work is restricted for your crew access level.');
     }
     const body = await request.json().catch(() => null);
@@ -268,7 +311,17 @@ export async function PATCH(request: NextRequest, ctx: Ctx) {
     const base = `${restBase()}/${table}`;
 
     const sensitive = Object.keys(patch).some((k) => SENSITIVE_PATCH_KEYS.has(k));
-    if (!sensitive) {
+    const tabRestricted = table === 'estimates' && !allCrewTabsAllowed(access.tabAccess);
+    if (tabRestricted) {
+      const nextDocType = String(patch.documentType ?? patch.documenttype ?? '').trim().toLowerCase();
+      if (nextDocType === 'invoice' && !access.tabAccess.invoices) {
+        return deny(403, 'You do not have permission to edit invoices.', 'crew_permission_denied');
+      }
+      if (nextDocType === 'recurring_plan' && !access.tabAccess.recurring) {
+        return deny(403, 'You do not have permission to edit recurring plans.', 'crew_permission_denied');
+      }
+    }
+    if (!sensitive && !tabRestricted) {
       const upstream = await fetch(`${base}?${params.toString()}`, {
         method: 'PATCH',
         headers: serviceHeaders(request),
@@ -278,7 +331,7 @@ export async function PATCH(request: NextRequest, ctx: Ctx) {
       return respond(upstream, access);
     }
 
-    // Patch touches hidden fields: restore per matching row, then update each by id.
+    // Patch touches hidden fields or tab-restricted table: verify & restore per matching row.
     const sel = new URLSearchParams(params);
     sel.set('select', '*');
     sel.set('limit', '100');
@@ -289,6 +342,13 @@ export async function PATCH(request: NextRequest, ctx: Ctx) {
     const matchRes = await fetch(`${base}?${sel.toString()}`, { headers: readHeaders, cache: 'no-store' });
     if (!matchRes.ok) return respond(matchRes, access);
     const matches = ((await matchRes.json().catch(() => [])) as Record<string, unknown>[]) || [];
+    if (tabRestricted) {
+      for (const row of matches) {
+        if (!crewCanWriteDocumentRow(access.tabAccess, row, { isNew: false })) {
+          return deny(403, 'You do not have permission to edit this tab.', 'crew_permission_denied');
+        }
+      }
+    }
     const sources = await loadCrewRestoreSources(admin, access, false);
     const updated: unknown[] = [];
     for (const row of matches) {

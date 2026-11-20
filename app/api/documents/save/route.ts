@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireWorkspaceOwner } from '@/lib/workspace';
+import { crewPermissionDeniedResponse, requireWorkspaceOwner } from '@/lib/workspace';
+import { crewCanWriteDocumentRow } from '@/lib/crew-tab-access';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import {
@@ -58,7 +59,7 @@ export async function POST(request: NextRequest) {
     {
       const { data: existingRow, error: existingErr } = await admin
         .from('estimates')
-        .select('user_id')
+        .select('*')
         .eq('id', id)
         .maybeSingle();
       if (existingErr) {
@@ -76,6 +77,20 @@ export async function POST(request: NextRequest) {
         );
       }
       ownsExisting = Boolean(existingRow);
+      if (ws.isCrew) {
+        if (existingRow && !crewCanWriteDocumentRow(ws.tabAccess, existingRow as Record<string, unknown>, { isNew: false })) {
+          return crewPermissionDeniedResponse();
+        }
+        if (
+          !crewCanWriteDocumentRow(
+            ws.tabAccess,
+            { id, documentType: body.documentType },
+            { isNew: !ownsExisting }
+          )
+        ) {
+          return crewPermissionDeniedResponse();
+        }
+      }
     }
 
     const rawInput: EstimateSaveInput = {

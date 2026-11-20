@@ -10,6 +10,7 @@ import {
 } from '@/lib/appointment-reminders';
 import { sendEmailNotification, sendSmsNotification } from '@/lib/notifications';
 import { enforceAppAccess, workspaceOwnerId } from '@/lib/billing-access';
+import { requireWorkspaceOwner } from '@/lib/workspace';
 import { guardUserSends } from '@/lib/send-guard';
 
 async function verifyUser(request: NextRequest) {
@@ -47,6 +48,8 @@ export async function POST(request: NextRequest) {
     }
     const paywall = await enforceAppAccess(user.id);
     if (paywall) return paywall;
+    const ws = await requireWorkspaceOwner(user.id, undefined, { requireTab: 'calendar' });
+    if (ws.denied) return ws.denied;
     {
       // One reminder email + text per request; per-account daily caps + confirmed email.
       const denied = await guardUserSends(user, await workspaceOwnerId(user.id), { sms: 1, email: 1 });

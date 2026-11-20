@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireWorkspaceOwner } from '@/lib/workspace';
+import { crewPermissionDeniedResponse, requireWorkspaceOwner } from '@/lib/workspace';
+import { crewCanWriteDocumentRow } from '@/lib/crew-tab-access';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { CARD_PAYMENTS_NOT_SET_UP_CODE, createJobCheckoutSession } from '@/lib/job-payments';
@@ -48,6 +49,12 @@ export async function POST(request: NextRequest) {
     // Seat-aware: inactive crew never act in the owner's workspace.
     const ws = await requireWorkspaceOwner(user.id, admin, { requireFinancials: true });
     if (ws.denied) return ws.denied;
+    if (
+      ws.isCrew &&
+      !crewCanWriteDocumentRow(ws.tabAccess, { id: invoiceId, documentType }, { isNew: false })
+    ) {
+      return crewPermissionDeniedResponse();
+    }
     const ownerUserId = ws.ownerUserId;
 
     const result = await createJobCheckoutSession({

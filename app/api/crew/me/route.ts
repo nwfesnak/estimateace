@@ -3,6 +3,7 @@ import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { hasAppAccess } from '@/lib/billing';
 import { subscriptionRowToSnapshot } from '@/lib/billing-access';
+import { normalizeCrewTabAccess } from '@/lib/crew-tab-access';
 
 /**
  * Resolve whether the logged-in user is crew on someone's workspace.
@@ -23,13 +24,23 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const { data: row, error } = await admin
+    let { data: row, error } = await admin
       .from('crew_members')
       .select(
-        'owner_user_id, email, role, can_see_pricing, can_see_estimates_and_financials, crew_user_id, seat_status, seat_period_end, seat_cancel_at_period_end'
+        'owner_user_id, email, role, can_see_pricing, can_see_estimates_and_financials, tab_access, crew_user_id, seat_status, seat_period_end, seat_cancel_at_period_end'
       )
       .eq('crew_user_id', user.id)
       .maybeSingle();
+
+    if (error && (error.code === '42703' || error.message?.includes('tab_access'))) {
+      ({ data: row, error } = await admin
+        .from('crew_members')
+        .select(
+          'owner_user_id, email, role, can_see_pricing, can_see_estimates_and_financials, crew_user_id, seat_status, seat_period_end, seat_cancel_at_period_end'
+        )
+        .eq('crew_user_id', user.id)
+        .maybeSingle() as any);
+    }
 
     if (error) {
       // Table missing → treat as not crew (owners still work)
@@ -53,6 +64,7 @@ export async function GET(request: NextRequest) {
           role: row2.role === 'full' ? 'full' : 'limited',
           canSeePricing: row2.can_see_pricing === true,
           canSeeEstimatesAndFinancials: row2.can_see_estimates_and_financials === true,
+          tabAccess: normalizeCrewTabAccess((row2 as any).tab_access),
         });
       }
       console.error('crew/me:', error);
@@ -118,6 +130,7 @@ export async function GET(request: NextRequest) {
       role: row.role === 'full' ? 'full' : 'limited',
       canSeePricing: row.can_see_pricing === true,
       canSeeEstimatesAndFinancials: row.can_see_estimates_and_financials === true,
+      tabAccess: normalizeCrewTabAccess((row as any).tab_access),
       seatStatus,
       seatPeriodEnd: (row as any).seat_period_end || null,
       seatCancelAtPeriodEnd: !!(row as any).seat_cancel_at_period_end,

@@ -11,11 +11,13 @@
  */
 
 import { computeDocumentGrandTotal } from '@/lib/document-totals';
+import { allCrewTabsAllowed, crewHasTab, type CrewTabAccess } from '@/lib/crew-tab-access';
 
 export type CrewAccess = {
   ownerId: string;
   canSeePricing: boolean;
   canSeeFinancials: boolean;
+  tabAccess?: CrewTabAccess;
 };
 
 /** Fully-permitted crew read/write directly (RLS); everyone else is proxied. */
@@ -158,11 +160,35 @@ const FINANCIAL_PROFILE_HIDDEN = ['paymentSettings', 'receptionistBilling'];
 /** Profile keys never shown to restricted crew (owner's private contact / security data). */
 const ALWAYS_PROFILE_HIDDEN = ['twoFactorPhone'];
 
+const CALENDAR_PROFILE_HIDDEN = ['_appointments', 'appointmentReminderEnabled'];
+const RECEPTIONIST_PROFILE_HIDDEN = [
+  'aiReceptionist',
+  'aiReceptionistSettings',
+  'aiReceptionistMessages',
+  'aiReceptionistArchivedMessages',
+  'receptionistConfig',
+  'receptionistBilling',
+  'aiReceptionistAddonActive',
+  'aiReceptionistDashboardEnabled',
+];
+const DASHBOARD_PROFILE_HIDDEN = ['emailLeadSummaries', 'emailLeadSummariesEnabled', 'monitoredEmail'];
+
+function hiddenTabProfileKeys(a: CrewAccess): string[] {
+  if (!a.tabAccess) return [];
+  const keys: string[] = [];
+  if (!crewHasTab(a.tabAccess, 'calendar')) keys.push(...CALENDAR_PROFILE_HIDDEN);
+  if (!crewHasTab(a.tabAccess, 'receptionist')) keys.push(...RECEPTIONIST_PROFILE_HIDDEN);
+  if (!crewHasTab(a.tabAccess, 'dashboard')) keys.push(...DASHBOARD_PROFILE_HIDDEN);
+  return keys;
+}
+
 function hiddenProfileKeys(a: CrewAccess): string[] {
+  const fullData = crewHasFullDataAccess(a);
   return [
-    ...ALWAYS_PROFILE_HIDDEN,
+    ...(fullData ? [] : ALWAYS_PROFILE_HIDDEN),
     ...(a.canSeePricing ? [] : PRICING_PROFILE_HIDDEN),
     ...(a.canSeeFinancials ? [] : FINANCIAL_PROFILE_HIDDEN),
+    ...hiddenTabProfileKeys(a),
   ];
 }
 
@@ -182,7 +208,9 @@ function redactProfile(profile: unknown, a: CrewAccess): unknown {
  */
 export function redactRow(row: unknown, a: CrewAccess): unknown {
   if (!isPlainObject(row)) return row;
-  if (crewHasFullDataAccess(a)) return row;
+  const fullData = crewHasFullDataAccess(a);
+  const tabRestricted = Boolean(a.tabAccess && !allCrewTabsAllowed(a.tabAccess));
+  if (fullData && !tabRestricted) return row;
   const out: Record<string, unknown> = { ...row };
 
   if (!a.canSeePricing) {
@@ -243,7 +271,9 @@ export function restoreRow(
 ): Record<string, unknown> {
   const out: Record<string, unknown> = { ...incoming };
   for (const k of INJECTED_KEYS) delete out[k];
-  if (crewHasFullDataAccess(a)) return out;
+  const fullData = crewHasFullDataAccess(a);
+  const tabRestricted = Boolean(a.tabAccess && !allCrewTabsAllowed(a.tabAccess));
+  if (fullData && !tabRestricted) return out;
   const existing = src.existing;
 
   if (!a.canSeePricing) {

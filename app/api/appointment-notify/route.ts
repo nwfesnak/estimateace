@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { TWO_STEP_REQUIRED, twoStepPending } from '@/lib/supabase/auth-user';
 import { createClient } from '@supabase/supabase-js';
 import { enforceAppAccess, workspaceOwnerId } from '@/lib/billing-access';
+import { requireWorkspaceOwner } from '@/lib/workspace';
 import { guardUserSends } from '@/lib/send-guard';
 
 async function verifyUser(request: NextRequest) {
@@ -51,6 +52,8 @@ export async function POST(request: NextRequest) {
     }
     const paywall = await enforceAppAccess(user.id);
     if (paywall) return paywall;
+    const ws = await requireWorkspaceOwner(user.id, undefined, { requireTab: 'calendar' });
+    if (ws.denied) return ws.denied;
 
     const body = await request.json();
     const {
