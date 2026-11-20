@@ -39,6 +39,103 @@ function formatDisplay(address: string, city: string, state: string, zipCode: st
   return [address, city, state, zipCode].filter(Boolean).join(', ');
 }
 
+export type GoogleAddressComponent = {
+  types?: string[];
+  long_name?: string;
+  short_name?: string;
+  longText?: string;
+  shortText?: string;
+};
+
+/** Build "123 Main St #4" including unit/subpremise when present. */
+export function formatStreetAddress(parts: {
+  streetNumber?: string;
+  route?: string;
+  subpremise?: string;
+}): string {
+  const street = [parts.streetNumber, parts.route].filter(Boolean).join(' ').trim();
+  const unit = String(parts.subpremise || '').trim();
+  if (!unit) return street;
+  if (/^(apt\.?|apartment|unit|ste\.?|suite|#)/i.test(unit)) {
+    return `${street} ${unit}`.trim();
+  }
+  return `${street} #${unit}`.trim();
+}
+
+export function componentText(
+  components: GoogleAddressComponent[],
+  type: string,
+  short = false
+): string {
+  const c = (components || []).find((item) => (item.types || []).includes(type));
+  if (!c) return '';
+  if (short) return String(c.shortText || c.short_name || c.longText || c.long_name || '').trim();
+  return String(c.longText || c.long_name || c.shortText || c.short_name || '').trim();
+}
+
+export function structuredAddressFromComponents(
+  components: GoogleAddressComponent[],
+  formattedAddress = ''
+): { address: string; city: string; state: string; zipCode: string; display: string } {
+  const streetNumber = componentText(components, 'street_number');
+  const route = componentText(components, 'route');
+  const subpremise = componentText(components, 'subpremise');
+  const address =
+    formatStreetAddress({ streetNumber, route, subpremise }) ||
+    formattedAddress.split(',')[0]?.trim() ||
+    '';
+  const city =
+    componentText(components, 'locality') ||
+    componentText(components, 'sublocality_level_1') ||
+    componentText(components, 'sublocality') ||
+    componentText(components, 'postal_town') ||
+    componentText(components, 'administrative_area_level_3') ||
+    componentText(components, 'administrative_area_level_2');
+  const state = normalizeState(componentText(components, 'administrative_area_level_1', true));
+  const zip = componentText(components, 'postal_code');
+  const plus4 = componentText(components, 'postal_code_suffix');
+  const zipCode = zip && plus4 && !zip.includes('-') ? `${zip}-${plus4}` : zip;
+  return {
+    address,
+    city,
+    state,
+    zipCode,
+    display: formattedAddress || formatDisplay(address, city, state, zipCode),
+  };
+}
+
+export type AddressSuggestInput = {
+  q: string;
+  sessionToken?: string;
+  lat?: number;
+  lng?: number;
+  biasCity?: string;
+  biasState?: string;
+  biasZip?: string;
+  /** @deprecated leftover job fields — used only as ranking hints, not appended to Google input */
+  city?: string;
+  state?: string;
+  zip?: string;
+};
+
+export function suggestCacheKey(input: AddressSuggestInput): string {
+  const q = input.q.trim().toLowerCase().replace(/\s+/g, ' ');
+  const lat = input.lat != null && Number.isFinite(input.lat) ? input.lat.toFixed(3) : '';
+  const lng = input.lng != null && Number.isFinite(input.lng) ? input.lng.toFixed(3) : '';
+  const city = String(input.biasCity || '').trim().toLowerCase();
+  const state = String(input.biasState || '').trim().toLowerCase();
+  const zip = String(input.biasZip || '').trim();
+  return [q, lat, lng, city, state, zip].join('|');
+}
+
+/** When Google already returned matches, skip slower public geocoders. */
+export function shouldSkipPublicGeocoders(
+  googleConfigured: boolean,
+  googleCount: number
+): boolean {
+  return googleConfigured && googleCount > 0;
+}
+
 function normalizeSuggestion(raw: Partial<AddressSuggestion>): AddressSuggestion | null {
   const address = String(raw.address || '').trim();
   if (!address) return null;
@@ -177,19 +274,158 @@ export function isGooglePlacesConfigured(): boolean {
   return !!GOOGLE_KEY;
 }
 
-async function fetchGoogleAutocomplete(q: string): Promise<ProviderResult> {
+const PLACES_NEW_AUTOCOMPLETE = 'https://places.googleapis.com/v1/places:autocomplete';
+const PLACES_NEW_DETAILS = 'https://places.googleapis.com/v1/places';
+const BIAS_RADIUS_METERS = 50_000;
+const GOOGLE_TIMEOUT_MS = 2500;
+
+/** null = not probed yet; true/false remembered for this process so a disabled New API is not retried every keystroke. */
+let placesNewAvailable: boolean | null = null;
+
+export function getPlacesAutocompleteApiMode(): 'new' | 'legacy' | 'unknown' | 'unset' {
+  if (!GOOGLE_KEY) return 'unset';
+  if (placesNewAvailable === true) return 'new';
+  if (placesNewAvailable === false) return 'legacy';
+  return 'unknown';
+}
+
+export function resetPlacesApiModeForTests() {
+  placesNewAvailable = null;
+}
+
+function isFiniteCoord(n: unknown): n is number {
+  return typeof n === 'number' && Number.isFinite(n);
+}
+
+function withTimeout(ms: number): AbortSignal {
+  return AbortSignal.timeout(ms);
+}
+
+function looksLikeNewApiDisabled(status: number, body: any): boolean {
+  const text = JSON.stringify(body || {});
+  if (status === 404 || status === 403 || status === 400) {
+    if (/SERVICE_DISABLED|PERMISSION_DENIED|API_KEY_INVALID|Places API \(New\)|PLACE_AUTOCOMPLETE|METHOD_NOT_FOUND|not been used|disabled/i.test(text)) {
+      return true;
+    }
+  }
+  const statusText = String(body?.error?.status || body?.status || '');
+  return /PERMISSION_DENIED|SERVICE_DISABLED|REQUEST_DENIED/i.test(statusText) &&
+    /places\.googleapis|Places API|API key/i.test(text);
+}
+
+function locationBiasFromInput(input: AddressSuggestInput): { latitude: number; longitude: number } | null {
+  if (isFiniteCoord(input.lat) && isFiniteCoord(input.lng)) {
+    return { latitude: input.lat, longitude: input.lng };
+  }
+  return null;
+}
+
+async function fetchGoogleAutocompleteNew(input: AddressSuggestInput): Promise<ProviderResult | 'disabled'> {
+  if (!GOOGLE_KEY) return { suggestions: [], error: 'GOOGLE_PLACES_API_KEY not set on server' };
+  if (placesNewAvailable === false) return 'disabled';
+
+  const body: Record<string, unknown> = {
+    input: input.q,
+    includedRegionCodes: ['us'],
+    languageCode: 'en',
+    includeQueryPredictions: false,
+  };
+  if (input.sessionToken) body.sessionToken = input.sessionToken;
+  const bias = locationBiasFromInput(input);
+  if (bias) {
+    body.locationBias = {
+      circle: { center: bias, radius: BIAS_RADIUS_METERS },
+    };
+  }
+  // Prefer street-level results including units, without being so strict that valid homes are dropped.
+  body.includedPrimaryTypes = ['street_address', 'subpremise', 'premise', 'route'];
+
+  const headers = {
+    'Content-Type': 'application/json',
+    'X-Goog-Api-Key': GOOGLE_KEY,
+    'X-Goog-FieldMask':
+      'suggestions.placePrediction.placeId,suggestions.placePrediction.text,suggestions.placePrediction.structuredFormat',
+  };
+  let res = await fetch(PLACES_NEW_AUTOCOMPLETE, {
+    method: 'POST',
+    ...FETCH_OPTIONS,
+    signal: withTimeout(GOOGLE_TIMEOUT_MS),
+    headers,
+    body: JSON.stringify(body),
+  });
+  let data = await res.json().catch(() => ({}));
+  // Some keys reject includedPrimaryTypes combinations; retry once without type filter.
+  if (!res.ok && res.status === 400 && body.includedPrimaryTypes) {
+    delete body.includedPrimaryTypes;
+    res = await fetch(PLACES_NEW_AUTOCOMPLETE, {
+      method: 'POST',
+      ...FETCH_OPTIONS,
+      signal: withTimeout(GOOGLE_TIMEOUT_MS),
+      headers,
+      body: JSON.stringify(body),
+    });
+    data = await res.json().catch(() => ({}));
+  }
+  if (!res.ok) {
+    if (looksLikeNewApiDisabled(res.status, data)) {
+      placesNewAvailable = false;
+      return 'disabled';
+    }
+    const message = String(data?.error?.message || data?.error_message || `Google New HTTP ${res.status}`);
+    console.error('Places API (New) autocomplete:', message);
+    return { suggestions: [], error: message };
+  }
+
+  placesNewAvailable = true;
+  const suggestions = (data.suggestions || [])
+    .map((row: any) => {
+      const pred = row?.placePrediction;
+      if (!pred) return null;
+      const text = String(pred.text?.text || pred.text || '').trim();
+      const main = String(
+        pred.structuredFormat?.mainText?.text ||
+          pred.structuredFormat?.mainText ||
+          text.split(',')[0] ||
+          ''
+      ).trim();
+      const placeId = String(pred.placeId || pred.place || '').replace(/^places\//, '');
+      return normalizeSuggestion({
+        address: main || text,
+        city: '',
+        state: '',
+        zipCode: '',
+        display: text || main,
+        place_id: placeId || undefined,
+        source: 'google',
+      });
+    })
+    .filter((item: AddressSuggestion | null): item is AddressSuggestion => !!item)
+    .slice(0, 8);
+
+  return { suggestions };
+}
+
+async function fetchGoogleAutocompleteLegacy(input: AddressSuggestInput): Promise<ProviderResult> {
   if (!GOOGLE_KEY) {
     return { suggestions: [], error: 'GOOGLE_PLACES_API_KEY not set on server' };
   }
 
-  const url =
-    `https://maps.googleapis.com/maps/api/place/autocomplete/json` +
-    `?input=${encodeURIComponent(q)}` +
-    `&types=address` +
-    `&components=country:us` +
-    `&key=${GOOGLE_KEY}`;
+  const params = new URLSearchParams({
+    input: input.q,
+    types: 'address',
+    components: 'country:us',
+    key: GOOGLE_KEY,
+  });
+  if (input.sessionToken) params.set('sessiontoken', input.sessionToken);
+  const bias = locationBiasFromInput(input);
+  if (bias) {
+    params.set('location', `${bias.latitude},${bias.longitude}`);
+    params.set('radius', String(BIAS_RADIUS_METERS));
+    params.set('origin', `${bias.latitude},${bias.longitude}`);
+  }
 
-  const res = await fetch(url, FETCH_OPTIONS);
+  const url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?${params.toString()}`;
+  const res = await fetch(url, { ...FETCH_OPTIONS, signal: withTimeout(GOOGLE_TIMEOUT_MS) });
   if (!res.ok) {
     return { suggestions: [], error: `Google HTTP ${res.status}` };
   }
@@ -220,6 +456,26 @@ async function fetchGoogleAutocomplete(q: string): Promise<ProviderResult> {
   ).filter((item: AddressSuggestion | null): item is AddressSuggestion => !!item);
 
   return { suggestions };
+}
+
+async function fetchGoogleAutocomplete(input: AddressSuggestInput | string): Promise<ProviderResult> {
+  const q = typeof input === 'string' ? { q: input } : input;
+  if (!GOOGLE_KEY) {
+    return { suggestions: [], error: 'GOOGLE_PLACES_API_KEY not set on server' };
+  }
+  if (!q.q?.trim()) return { suggestions: [] };
+
+  if (placesNewAvailable !== false) {
+    try {
+      const neu = await fetchGoogleAutocompleteNew(q);
+      if (neu !== 'disabled') return neu;
+    } catch (err) {
+      console.error('Places API (New) autocomplete failed, falling back to legacy:', err);
+      placesNewAvailable = false;
+    }
+  }
+
+  return fetchGoogleAutocompleteLegacy(q);
 }
 
 async function fetchNominatim(q: string): Promise<AddressSuggestion[]> {
@@ -366,18 +622,54 @@ async function fetchPhoton(q: string): Promise<AddressSuggestion[]> {
     .filter((item: AddressSuggestion | null): item is AddressSuggestion => !!item?.address);
 }
 
-export async function fetchGooglePlaceDetails(placeId: string) {
+export async function fetchGooglePlaceDetails(placeId: string, sessionToken?: string) {
   if (!GOOGLE_KEY) {
     throw new Error('Google Places API key not configured');
   }
+  const id = String(placeId || '').trim().replace(/^places\//, '');
+  if (!id) throw new Error('Missing place id');
 
-  const url =
-    `https://maps.googleapis.com/maps/api/place/details/json` +
-    `?place_id=${placeId}` +
-    `&fields=address_components,formatted_address` +
-    `&key=${GOOGLE_KEY}`;
+  if (placesNewAvailable !== false) {
+    try {
+      const params = new URLSearchParams();
+      if (sessionToken) params.set('sessionToken', sessionToken);
+      const qs = params.toString();
+      const url = `${PLACES_NEW_DETAILS}/${encodeURIComponent(id)}${qs ? `?${qs}` : ''}`;
+      const res = await fetch(url, {
+        ...FETCH_OPTIONS,
+        signal: withTimeout(GOOGLE_TIMEOUT_MS),
+        headers: {
+          'X-Goog-Api-Key': GOOGLE_KEY,
+          'X-Goog-FieldMask': 'formattedAddress,addressComponents',
+        },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && (data.addressComponents || data.formattedAddress)) {
+        placesNewAvailable = true;
+        return structuredAddressFromComponents(
+          data.addressComponents || [],
+          String(data.formattedAddress || '')
+        );
+      }
+      if (looksLikeNewApiDisabled(res.status, data)) {
+        placesNewAvailable = false;
+      } else if (!res.ok) {
+        // Fall through to legacy unless New is clearly disabled.
+        console.error('Places API (New) details:', data?.error?.message || res.status);
+      }
+    } catch (err) {
+      console.error('Places API (New) details failed, falling back to legacy:', err);
+    }
+  }
 
-  const res = await fetch(url, FETCH_OPTIONS);
+  const params = new URLSearchParams({
+    place_id: id,
+    fields: 'address_components,formatted_address',
+    key: GOOGLE_KEY,
+  });
+  if (sessionToken) params.set('sessiontoken', sessionToken);
+  const url = `https://maps.googleapis.com/maps/api/place/details/json?${params.toString()}`;
+  const res = await fetch(url, { ...FETCH_OPTIONS, signal: withTimeout(GOOGLE_TIMEOUT_MS) });
   if (!res.ok) throw new Error(`Google details error: ${res.status}`);
 
   const data = await res.json();
@@ -385,61 +677,69 @@ export async function fetchGooglePlaceDetails(placeId: string) {
     throw new Error(data.error_message || data.status);
   }
 
-  const components = data.result?.address_components || [];
-  const getComponent = (type: string) =>
-    components.find((c: { types: string[]; short_name?: string; long_name?: string }) =>
-      c.types.includes(type)
-    );
-
-  const streetNumber = getComponent('street_number')?.long_name || '';
-  const route = getComponent('route')?.long_name || '';
-  const address = [streetNumber, route].filter(Boolean).join(' ').trim();
-
-  const city =
-    getComponent('locality')?.long_name ||
-    getComponent('sublocality')?.long_name ||
-    getComponent('administrative_area_level_2')?.long_name ||
-    '';
-
-  const state = getComponent('administrative_area_level_1')?.short_name || '';
-  const zipCode = getComponent('postal_code')?.long_name || '';
-
-  return {
-    address: address || data.result?.formatted_address?.split(',')[0] || '',
-    city,
-    state,
-    zipCode,
-    display: data.result?.formatted_address || '',
-  };
+  return structuredAddressFromComponents(
+    data.result?.address_components || [],
+    String(data.result?.formatted_address || '')
+  );
 }
 
-export async function fetchAddressSuggestions(input: {
-  q: string;
-  city?: string;
-  state?: string;
-  zip?: string;
-}): Promise<AddressSuggestion[]> {
-  const geocodeQuery = buildGeocodeQuery(input.q, input.city, input.state, input.zip);
-  if (!geocodeQuery || geocodeQuery.length < 2) return [];
+export type AddressSuggestProviders = {
+  google?: (input: AddressSuggestInput) => Promise<ProviderResult>;
+  nominatim?: (q: string) => Promise<AddressSuggestion[]>;
+  census?: (q: string) => Promise<AddressSuggestion[]>;
+  photon?: (q: string) => Promise<AddressSuggestion[]>;
+};
 
-  const cached = getCached(geocodeQuery);
+export async function fetchAddressSuggestions(
+  input: AddressSuggestInput,
+  providers?: AddressSuggestProviders
+): Promise<AddressSuggestion[]> {
+  const q = String(input.q || '').trim();
+  if (!q || q.length < 2) return [];
+
+  const cacheKey = suggestCacheKey(input);
+  const cached = getCached(cacheKey);
   if (cached) return cached;
 
-  const [googleResult, nominatim, census, photon] = await Promise.all([
-    fetchGoogleAutocomplete(geocodeQuery),
-    fetchNominatim(geocodeQuery).catch(() => [] as AddressSuggestion[]),
-    fetchCensusGeocoder(geocodeQuery).catch(() => [] as AddressSuggestion[]),
-    fetchPhoton(geocodeQuery).catch(() => [] as AddressSuggestion[]),
+  const googleFn = providers?.google || fetchGoogleAutocomplete;
+  const nominatimFn = providers?.nominatim || fetchNominatim;
+  const censusFn = providers?.census || fetchCensusGeocoder;
+  const photonFn = providers?.photon || fetchPhoton;
+
+  const rankWith = (list: AddressSuggestion[]) => {
+    const biasCity = input.biasCity || input.city;
+    const biasState = input.biasState || input.state;
+    let ranked = rankAddressSuggestions(list, q, biasCity, biasState).slice(0, 8);
+    if (!ranked.length && list.length) ranked = list.slice(0, 8);
+    return ranked;
+  };
+
+  // Fast path: Google Places only. Do not wait on Nominatim / Census / Photon
+  // (those were adding 500–800ms to every first keystroke in production).
+  if (isGooglePlacesConfigured() || providers?.google) {
+    const googleResult = await googleFn(input).catch((err: unknown) => {
+      console.error('Google autocomplete failed:', err);
+      return { suggestions: [] as AddressSuggestion[], error: 'Google failed' };
+    });
+    if (shouldSkipPublicGeocoders(isGooglePlacesConfigured() || !!providers?.google, googleResult.suggestions.length)) {
+      const ranked = rankWith(googleResult.suggestions);
+      setCached(cacheKey, ranked);
+      return ranked;
+    }
+  }
+
+  // Fallback when Google is unset, errors, or returns nothing.
+  // Public geocoders can use a composed query with the *bias* locality (company area),
+  // never leftover job city/state fields.
+  const fallbackQuery = buildGeocodeQuery(q, input.biasCity, input.biasState, input.biasZip);
+  const [nominatim, census, photon] = await Promise.all([
+    nominatimFn(fallbackQuery).catch(() => [] as AddressSuggestion[]),
+    censusFn(fallbackQuery).catch(() => [] as AddressSuggestion[]),
+    photonFn(fallbackQuery).catch(() => [] as AddressSuggestion[]),
   ]);
 
-  let combined: AddressSuggestion[] = [
-    ...googleResult.suggestions,
-    ...nominatim,
-    ...census,
-    ...photon,
-  ];
-
-  const queryHasStreetNumber = /^\d+/.test(input.q.trim());
+  let combined: AddressSuggestion[] = [...nominatim, ...census, ...photon];
+  const queryHasStreetNumber = /^\d+/.test(q);
   if (queryHasStreetNumber) {
     combined = combined.filter(
       suggestion =>
@@ -447,12 +747,8 @@ export async function fetchAddressSuggestions(input: {
     );
   }
 
-  let ranked = rankAddressSuggestions(combined, input.q, input.city, input.state).slice(0, 8);
-  if (!ranked.length && combined.length) {
-    ranked = combined.slice(0, 8);
-  }
-
-  setCached(geocodeQuery, ranked);
+  const ranked = rankWith(combined);
+  setCached(cacheKey, ranked);
   return ranked;
 }
 
@@ -460,7 +756,7 @@ export async function fetchAddressSuggestions(input: {
 export async function probeAddressAutocomplete() {
   const testQuery = '2334 Senior Drive Charlotte NC';
   const [google, nominatim, census] = await Promise.all([
-    fetchGoogleAutocomplete(testQuery),
+    fetchGoogleAutocomplete({ q: testQuery }),
     fetchNominatim(testQuery).catch((err: unknown) => {
       console.error('Nominatim probe failed:', err);
       return [] as AddressSuggestion[];
@@ -474,6 +770,7 @@ export async function probeAddressAutocomplete() {
 
   return {
     googlePlacesConfigured: isGooglePlacesConfigured(),
+    googleApi: getPlacesAutocompleteApiMode(),
     providers: {
       google: {
         count: google.suggestions.length,

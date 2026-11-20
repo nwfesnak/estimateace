@@ -1,19 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent } from '@/components/ui/card';
-
-type AddressSuggestion = {
-  address: string;
-  city: string;
-  state: string;
-  zipCode: string;
-  display: string;
-  place_id?: string;
-};
+import { useAddressAutocomplete } from '@/hooks/useAddressAutocomplete';
+import { type AddressSuggestion } from '@/lib/address-autocomplete';
 
 export type RecurringPlanRow = {
   id: string;
@@ -45,6 +38,8 @@ type Props = {
   companyPhone?: string;
   companySlogan?: string;
   logoUrl?: string;
+  /** Owner business locality — used only to bias address suggestions. */
+  addressBias?: { city?: string; state?: string; zip?: string };
 };
 
 const emptyForm = {
@@ -109,6 +104,7 @@ export function RecurringServicesPanel({
   companyPhone,
   companySlogan,
   logoUrl,
+  addressBias,
 }: Props) {
   const [plans, setPlans] = useState<RecurringPlanRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -118,10 +114,7 @@ export function RecurringServicesPanel({
   const [editingPlanId, setEditingPlanId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [addressSuggestions, setAddressSuggestions] = useState<AddressSuggestion[]>([]);
   const [showAddressSuggestions, setShowAddressSuggestions] = useState(false);
-  const [loadingAddressSuggestions, setLoadingAddressSuggestions] = useState(false);
-  const addressSuggestAbortRef = useRef<AbortController | null>(null);
 
   const authHeaders = useCallback(async () => {
     const token = await getAccessToken();
@@ -154,81 +147,30 @@ export function RecurringServicesPanel({
     void loadPlans();
   }, [loadPlans]);
 
-  // Service address autocomplete (same Places API as estimate/invoice editor)
-  useEffect(() => {
-    if (!showForm) return;
-    const q = form.address.trim();
-    if (!q || q.length < 2) {
-      setAddressSuggestions([]);
-      setLoadingAddressSuggestions(false);
-      return;
-    }
-
-    const timer = setTimeout(async () => {
-      addressSuggestAbortRef.current?.abort();
-      const controller = new AbortController();
-      addressSuggestAbortRef.current = controller;
-      setLoadingAddressSuggestions(true);
-      try {
-        const params = new URLSearchParams({ q });
-        if (form.city.trim()) params.set('city', form.city.trim());
-        if (form.state.trim()) params.set('state', form.state.trim());
-        if (form.zipCode.trim()) params.set('zip', form.zipCode.trim());
-        const res = await fetch(`/api/address-autocomplete?${params.toString()}`, {
-          signal: controller.signal,
-          cache: 'no-store',
-        });
-        if (!res.ok) {
-          if (!controller.signal.aborted) setAddressSuggestions([]);
-          return;
-        }
-        const data = await res.json().catch(() => []);
-        if (!controller.signal.aborted) {
-          setAddressSuggestions(Array.isArray(data) ? data.slice(0, 8) : []);
-        }
-      } catch (e: any) {
-        if (e?.name === 'AbortError') return;
-        if (!controller.signal.aborted) setAddressSuggestions([]);
-      } finally {
-        if (!controller.signal.aborted) setLoadingAddressSuggestions(false);
-      }
-    }, 300);
-
-    return () => {
-      clearTimeout(timer);
-      addressSuggestAbortRef.current?.abort();
-    };
-  }, [form.address, form.city, form.state, form.zipCode, showForm]);
+  const {
+    suggestions: addressSuggestions,
+    loading: loadingAddressSuggestions,
+    activeIndex: addressActiveIndex,
+    setActiveIndex: setAddressActiveIndex,
+    onKeyDown: onAddressSuggestKeyDown,
+    selectSuggestion: selectAddressSuggestion,
+    ensureBrowserLocation,
+  } = useAddressAutocomplete({
+    query: form.address,
+    enabled: showForm && showAddressSuggestions,
+    bias: addressBias,
+  });
 
   const applyAddressSuggestion = async (sugg: AddressSuggestion) => {
     setShowAddressSuggestions(false);
-    setAddressSuggestions([]);
-    if (sugg.place_id) {
-      try {
-        const res = await fetch(
-          `/api/address-autocomplete?place_id=${encodeURIComponent(sugg.place_id)}`
-        );
-        if (res.ok) {
-          const details = await res.json();
-          setForm((f) => ({
-            ...f,
-            address: details.address || sugg.address || sugg.display || '',
-            city: details.city || sugg.city || f.city,
-            state: details.state || sugg.state || f.state,
-            zipCode: details.zipCode || sugg.zipCode || f.zipCode,
-          }));
-          return;
-        }
-      } catch {
-        /* fall through */
-      }
-    }
+    setAddressActiveIndex(-1);
+    const details = await selectAddressSuggestion(sugg);
     setForm((f) => ({
       ...f,
-      address: sugg.address || sugg.display || '',
-      city: sugg.city || f.city,
-      state: sugg.state || f.state,
-      zipCode: sugg.zipCode || f.zipCode,
+      address: details.address || '',
+      city: details.city || f.city,
+      state: details.state || f.state,
+      zipCode: details.zipCode || f.zipCode,
     }));
   };
 
@@ -236,7 +178,6 @@ export function RecurringServicesPanel({
     setShowForm(false);
     setEditingPlanId(null);
     setForm(emptyForm);
-    setAddressSuggestions([]);
     setShowAddressSuggestions(false);
   };
 
@@ -783,13 +724,31 @@ export function RecurringServicesPanel({
                   setForm((f) => ({ ...f, address: e.target.value }));
                   setShowAddressSuggestions(true);
                 }}
-                onFocus={() => setShowAddressSuggestions(true)}
+                onFocus={() => {
+                  setShowAddressSuggestions(true);
+                  ensureBrowserLocation();
+                }}
                 onBlur={() => setTimeout(() => setShowAddressSuggestions(false), 200)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') setShowAddressSuggestions(false);
+                  onAddressSuggestKeyDown(e, (sugg) => {
+                    void applyAddressSuggestion(sugg);
+                  });
+                }}
                 placeholder="Street address — include city & state for best results"
                 autoComplete="street-address"
+                role="combobox"
+                aria-autocomplete="list"
+                aria-expanded={showAddressSuggestions}
+                aria-activedescendant={
+                  addressActiveIndex >= 0 ? `recurring-address-sugg-${addressActiveIndex}` : undefined
+                }
               />
               {showAddressSuggestions && (
-                <div className="absolute z-[60] mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-auto text-sm">
+                <div
+                  className="absolute z-[60] mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-auto text-sm"
+                  role="listbox"
+                >
                   {loadingAddressSuggestions && (
                     <div className="px-3 py-2 text-xs text-gray-500">Searching addresses…</div>
                   )}
@@ -802,8 +761,14 @@ export function RecurringServicesPanel({
                     )}
                   {addressSuggestions.map((sugg, idx) => (
                     <div
+                      id={`recurring-address-sugg-${idx}`}
                       key={`${sugg.place_id || sugg.display || sugg.address}-${idx}`}
-                      className="px-3 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0"
+                      role="option"
+                      aria-selected={idx === addressActiveIndex}
+                      className={`px-3 py-2 cursor-pointer border-b border-gray-100 last:border-b-0 ${
+                        idx === addressActiveIndex ? 'bg-emerald-50' : 'hover:bg-gray-100'
+                      }`}
+                      onMouseEnter={() => setAddressActiveIndex(idx)}
                       onMouseDown={(e) => {
                         e.preventDefault();
                         void applyAddressSuggestion(sugg);
