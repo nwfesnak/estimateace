@@ -120,6 +120,7 @@ import { rankAddressSuggestions } from '@/lib/address-autocomplete';
 import { randomUploadId, safeUploadName } from '@/lib/upload-names';
 import { TurnstileWidget } from '@/components/TurnstileWidget';
 import { translateFailureMessage } from '@/lib/xai-chat';
+import { CREW_COMPANY_PROFILE_WRITE_DENIED } from '@/lib/company-profile-access';
 import {
   isItemTranslationStale,
   itemHasTranslation,
@@ -2856,7 +2857,7 @@ export default function Home() {
       showMessage('✅ Payment received — confirming subscription…');
       setProfileTab('billing');
       setBillingPanel('overview');
-      setView('profileView');
+      openAccountOrProfile();
       void (async () => {
         try {
           if (!supabase) return;
@@ -2903,7 +2904,7 @@ export default function Home() {
     } else if (billingParam === 'receptionist_cancel') {
       showMessage('AI Receptionist checkout canceled — no charge was made.');
       setProfileTab('billing');
-      setView('profileView');
+      openAccountOrProfile();
     } else if (billingParam === 'crew_seat_success') {
       const crew = params.get('crew') || 'crew member';
       showMessage(
@@ -4098,6 +4099,10 @@ export default function Home() {
   const handleCertificateUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !user || !supabase) return;
+    if (currentCrew) {
+      showMessage(CREW_COMPANY_PROFILE_WRITE_DENIED);
+      return;
+    }
     const filePath = `${workspaceUserId}/certificate/${Date.now()}-${randomUploadId()}-${safeUploadName(file.name)}`;
     const { error } = await supabase.storage.from('media').upload(filePath, file, { upsert: false });
     if (!error) {
@@ -4128,6 +4133,10 @@ export default function Home() {
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !user || !supabase) return;
+    if (currentCrew) {
+      showMessage(CREW_COMPANY_PROFILE_WRITE_DENIED);
+      return;
+    }
     const filePath = `${workspaceUserId}/logo/${Date.now()}-${randomUploadId()}-${safeUploadName(file.name)}`;
     const { error } = await supabase.storage.from('media').upload(filePath, file, { upsert: false });
     if (!error) {
@@ -5356,6 +5365,25 @@ export default function Home() {
   };
 
   const goToDashboard = () => setView('dashboard');
+
+  useEffect(() => {
+    if (currentCrew && view === 'profileView' && profileTab !== 'billing') {
+      setProfileTab('billing');
+      setBillingPanel('overview');
+    }
+  }, [currentCrew, view, profileTab]);
+
+  /** Owners open Company Profile. Crew only get their own Account card — never company settings. */
+  const openAccountOrProfile = (tab?: 'info' | 'billing' | 'payments' | 'tutorials') => {
+    if (currentCrew) {
+      setProfileTab('billing');
+      setBillingPanel('overview');
+      setView('profileView');
+      return;
+    }
+    if (tab) setProfileTab(tab);
+    setView('profileView');
+  };
 
   const openQuickLinesModal = () => setIsQuickLinesModalOpen(true);
 
@@ -8575,6 +8603,10 @@ export default function Home() {
       showMessage('Please log in to save AI Receptionist.');
       return;
     }
+    if (currentCrew) {
+      showMessage(CREW_COMPANY_PROFILE_WRITE_DENIED);
+      return;
+    }
     setReceptionistSaving(true);
     try {
       try {
@@ -8793,6 +8825,10 @@ export default function Home() {
   };
 
   const saveProfileSettings = async (nextProfile: typeof profile, options?: { quiet?: boolean }) => {
+    if (currentCrew) {
+      if (!options?.quiet) showMessage(CREW_COMPANY_PROFILE_WRITE_DENIED);
+      return;
+    }
     const run = async () => {
     setProfileSettingsCache({
       depositPercentage: nextProfile.depositPercentage,
@@ -8912,6 +8948,7 @@ export default function Home() {
   /** Auto-save company profile shortly after edits; does not clear fields when blank elsewhere. */
   useEffect(() => {
     if (!user || !supabase) return;
+    if (currentCrew) return;
     if (profileHydratingRef.current) {
       lastSavedCompanyFingerprintRef.current = companyProfileFingerprint;
       return;
@@ -14963,8 +15000,11 @@ export default function Home() {
           {view === 'profileView' && (
             <div>
               <Button variant="outline" onClick={goToDashboard} className="mb-6">← Back to {t('dashboard')}</Button>
-              <h2 className="text-3xl font-semibold mb-8">{t('companyProfile')}</h2>
+              <h2 className="text-3xl font-semibold mb-8" data-testid={currentCrew ? 'crew-account-heading' : 'company-profile-heading'}>
+                {currentCrew ? 'Account' : t('companyProfile')}
+              </h2>
 
+              {!currentCrew && (
               <div className="flex border-b mb-8 overflow-x-auto">
                 <button 
                   onClick={() => setProfileTab('info')}
@@ -14998,6 +15038,7 @@ export default function Home() {
                   🎥 Video Tutorials
                 </button>
               </div>
+              )}
 
               {profileTab === 'billing' && (
                 <BillingAccountCard
@@ -15319,7 +15360,7 @@ export default function Home() {
                 </Card>
               )}
 
-              {profileTab === 'billing' && billingPanel === 'manage' && (
+              {!currentCrew && profileTab === 'billing' && billingPanel === 'manage' && (
                 <div className="space-y-6 mb-8">
                   <Button
                     variant="outline"
@@ -15785,7 +15826,7 @@ export default function Home() {
                 </div>
               )}
 
-              {profileTab === 'info' && (
+              {!currentCrew && profileTab === 'info' && (
                 <Card className="mb-8">
                   <CardContent className="p-8 space-y-8">
                     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -16829,7 +16870,7 @@ export default function Home() {
                 </Card>
               )}
 
-              {profileTab === 'payments' && (
+              {!currentCrew && profileTab === 'payments' && (
                 <Card className="mb-8 w-full max-w-full min-w-0 overflow-hidden">
                   <CardContent className="p-4 sm:p-6 md:p-8 w-full max-w-full min-w-0 box-border overflow-hidden">
                     <h3 className="text-lg sm:text-xl font-semibold mb-4 sm:mb-6 flex items-center gap-2 min-w-0">
@@ -16921,7 +16962,7 @@ export default function Home() {
                 </Card>
               )}
 
-              {profileTab === 'tutorials' && (
+              {!currentCrew && profileTab === 'tutorials' && (
                 <Card className="mb-8">
                   <CardContent className="p-6 sm:p-8 space-y-6">
                     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -18085,9 +18126,12 @@ export default function Home() {
               }}
               onBack={() => {
                 void syncReceptionistBillingToProfile({ quiet: true });
-                setProfileTab('billing');
+                if (currentCrew) {
+                  goToDashboard();
+                  return;
+                }
                 setBillingPanel('overview');
-                setView('profileView');
+                openAccountOrProfile('billing');
               }}
               getAccessToken={async () => {
                 if (!supabase) return null;
@@ -18148,7 +18192,9 @@ export default function Home() {
             <div>
               <div className="flex flex-wrap gap-2 mb-6">
                 <Button variant="outline" onClick={goToDashboard}>← Back to {t('dashboard')}</Button>
-                <Button variant="outline" onClick={() => setView('profileView')}>← {t('companyProfile')}</Button>
+                {!currentCrew && (
+                  <Button variant="outline" onClick={() => openAccountOrProfile()}>← {t('companyProfile')}</Button>
+                )}
               </div>
               <h2 className="text-3xl font-semibold mb-2">{t('archivedDocuments')}</h2>
               <p className="text-sm text-gray-500 mb-6">{t('retrieveArchiveHelp')}</p>
@@ -18815,17 +18861,12 @@ export default function Home() {
           </button>
           <button
             type="button"
-            onClick={() => {
-              if (currentCrew) {
-                showMessage('Profile editing is restricted for crew accounts.');
-                return;
-              }
-              setView('profileView');
-            }}
+            onClick={() => openAccountOrProfile(currentCrew ? 'billing' : undefined)}
             className="flex flex-col items-center flex-1 py-1 text-gray-500"
+            data-testid={currentCrew ? 'nav-account' : 'nav-profile'}
           >
             <span className="text-3xl mb-0.5">👤</span>
-            <span>{t('profile')}</span>
+            <span>{currentCrew ? 'Account' : t('profile')}</span>
           </button>
         </nav>
       </div>
@@ -19871,18 +19912,19 @@ export default function Home() {
                   Reload trade defaults
                 </Button>
               )}
+              {!currentCrew && (
               <Button
                 type="button"
                 size="sm"
                 variant="outline"
                 onClick={() => {
                   setIsQuickLinesModalOpen(false);
-                  setView('profileView');
-                  setProfileTab('info');
+                  openAccountOrProfile('info');
                 }}
               >
                 Change trade on Profile
               </Button>
+              )}
             </div>
           </div>
           <div className="max-h-96 overflow-auto py-2 flex-1 min-h-0">
