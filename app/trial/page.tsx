@@ -12,6 +12,7 @@ import {
   turnstileEnabled,
 } from '@/lib/turnstile';
 import { NATIVE_SIGNUP_TEXT, useIsNativeApp } from '@/lib/native-app';
+import { TRIAL_INACTIVITY_NOTICE } from '@/lib/trial-inactivity';
 
 const APP_HOME = '/';
 const DEFAULT_TRIAL_DAYS = 14;
@@ -397,6 +398,23 @@ function TrialForm() {
             </p>
           </div>
 
+          {offer === '2mo' && (
+            <div
+              className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-snug text-amber-950"
+              data-testid="trial-inactivity-notice"
+            >
+              <p className="font-semibold">Keep your trial active: sign in at least once every 30 days</p>
+              <p className="mt-1">{TRIAL_INACTIVITY_NOTICE}</p>
+              <p className="mt-1 text-xs text-amber-900">
+                Details in our{' '}
+                <Link href="/terms#trial-inactivity" className="underline">
+                  Terms (section 2B)
+                </Link>
+                .
+              </p>
+            </div>
+          )}
+
           {cappedOffer && offerFull && (
             <div className="rounded-2xl border border-red-200 bg-red-50 text-red-900 text-sm p-4 leading-snug space-y-2">
               <p>
@@ -551,7 +569,11 @@ function TrialForm() {
                   I understand this is a <strong>{trialLabel} free trial</strong> ({trialDays} days),
                   a card is required to start, and my card will be charged{' '}
                   <strong>{planPrice}</strong> ({planLabel.toLowerCase()}) when the trial ends unless I
-                  cancel before then. I agree to the{' '}
+                  cancel before then.
+                  {offer === '2mo'
+                    ? ' I understand that if I don\u2019t sign in for 30 days during this launch-promotion trial, my data will be emailed to me and the trial account deleted (after a reminder at 20 days).'
+                    : ''}{' '}
+                  I agree to the{' '}
                 </>
               ) : (
                 <>

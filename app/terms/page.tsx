@@ -17,7 +17,7 @@ export default function TermsPage() {
           </Link>
         </p>
         <h1>Terms of Service</h1>
-        <p className="text-sm text-slate-500">Last updated: November 19, 2026</p>
+        <p className="text-sm text-slate-500">Last updated: November 20, 2026</p>
 
         <p>
           These Terms govern your use of EstimateAce (&quot;Service&quot;), a software platform for
@@ -58,6 +58,36 @@ export default function TermsPage() {
           app. Subscription fees are charged through our payment processor, Stripe. We may change
           prices with advance notice; changes apply from your next billing period.
         </p>
+
+        <h2 id="trial-inactivity">2B. Inactive trial accounts (2-month launch promotion)</h2>
+        <p>
+          The 2-month (60-day) free trial is part of our 6-month launch promotion. To keep promotional
+          trial accounts tidy and your data safe, the following applies to accounts on that trial that
+          have <strong>not paid for a subscription</strong>:
+        </p>
+        <ul>
+          <li>
+            If you don&apos;t sign in for <strong>20 days</strong>, we email you a reminder that the
+            account will be deleted unless you sign in within the next <strong>10 days</strong>.
+          </li>
+          <li>
+            If you still haven&apos;t signed in <strong>30 days</strong> after your last sign-in (and at
+            least 10 days after the reminder), we first email you a <strong>copy of all the data you
+            entered</strong>: customers, estimates, invoices, jobs, line items and prices, notes, leads,
+            receipts and settings (CSV and JSON files), plus download links for your photos and files that
+            stay valid for about 30 days. Only after that email has been sent, we cancel the trial (you are
+            not charged) and permanently delete the account as described in our{' '}
+            <Link href="/privacy">Privacy Policy</Link> (section 6).
+          </li>
+          <li>
+            Signing in at any time, on the website or in the app, resets the clock and cancels any
+            pending reminder.
+          </li>
+          <li>
+            This never applies to paid subscriptions, to accounts that have paid us anything, or to crew
+            members on a paying account.
+          </li>
+        </ul>
 
         <h2 id="cancellation">2A. Cancellation &amp; refunds</h2>
         <p>
