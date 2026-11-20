@@ -1,3 +1,4 @@
+import { requireWorkspaceOwner } from '@/lib/workspace';
 /**
  * Template-first AI quote API.
  * AI classifies + extracts facts only. Fixed templates set price.
@@ -109,6 +110,8 @@ export async function POST(request: NextRequest) {
     }
     const paywall = await enforceAppAccess(user.id);
     if (paywall) return paywall;
+    const ws = await requireWorkspaceOwner(user.id, undefined, { requireTab: ['estimates', 'invoices', 'newEstimate'] });
+    if (ws.denied) return ws.denied;
 
     const rateCheck = checkRateLimit(user.id);
     if (!rateCheck.allowed) {

@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import { BLOCKLIST_TABLE } from '@/lib/receptionist-blocklist';
 import { normalizeBlockPhone } from '@/lib/receptionist-spam';
+import { requireWorkspaceOwner } from '@/lib/workspace';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,6 +24,8 @@ function userClient(request: NextRequest) {
 export async function GET(request: NextRequest) {
   const { user, error } = await getUserFromRequest(request);
   if (!user) return NextResponse.json({ error: error || 'Unauthorized' }, { status: 401 });
+  const ws = await requireWorkspaceOwner(user.id, undefined, { requireTab: 'receptionist' });
+  if (ws.denied) return ws.denied;
   const { data, error: dbError } = await userClient(request)
     .from(BLOCKLIST_TABLE)
     .select('phone_e164, reason, created_at')
@@ -37,6 +40,8 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const { user, error } = await getUserFromRequest(request);
   if (!user) return NextResponse.json({ error: error || 'Unauthorized' }, { status: 401 });
+  const ws = await requireWorkspaceOwner(user.id, undefined, { requireTab: 'receptionist' });
+  if (ws.denied) return ws.denied;
   const body = await request.json().catch(() => ({}));
   const phone = normalizeBlockPhone(String(body?.phone || ''));
   if (!phone || phone.replace(/\D/g, '').length < 7) {
@@ -61,6 +66,8 @@ export async function POST(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   const { user, error } = await getUserFromRequest(request);
   if (!user) return NextResponse.json({ error: error || 'Unauthorized' }, { status: 401 });
+  const ws = await requireWorkspaceOwner(user.id, undefined, { requireTab: 'receptionist' });
+  if (ws.denied) return ws.denied;
   const body = await request.json().catch(() => ({}));
   const phone = normalizeBlockPhone(String(body?.phone || ''));
   if (!phone) return NextResponse.json({ error: 'phone is required' }, { status: 400 });

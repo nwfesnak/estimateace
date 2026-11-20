@@ -3,6 +3,7 @@ import { TWO_STEP_REQUIRED, twoStepPending } from '@/lib/supabase/auth-user';
 import { createClient } from '@supabase/supabase-js';
 import { settingsDocId, type StoredAppointment } from '@/lib/appointment-reminders';
 import { enforceAppAccess } from '@/lib/billing-access';
+import { requireWorkspaceOwner } from '@/lib/workspace';
 
 async function verifyUser(request: NextRequest) {
   const authHeader = request.headers.get('authorization');
@@ -39,6 +40,8 @@ export async function POST(request: NextRequest) {
     }
     const paywall = await enforceAppAccess(user.id);
     if (paywall) return paywall;
+    const ws = await requireWorkspaceOwner(user.id, undefined, { requireTab: 'calendar' });
+    if (ws.denied) return ws.denied;
 
     const body = await request.json();
     const appointments = Array.isArray(body.appointments) ? body.appointments as StoredAppointment[] : [];

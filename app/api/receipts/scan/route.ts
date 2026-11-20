@@ -1,3 +1,4 @@
+import { requireWorkspaceOwner } from '@/lib/workspace';
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import { analyzeReceiptImage } from '@/lib/analyze-receipt-image';
@@ -16,6 +17,8 @@ export async function POST(request: NextRequest) {
     }
     const paywall = await enforceAppAccess(user.id);
     if (paywall) return paywall;
+    const ws = await requireWorkspaceOwner(user.id, undefined, { requireTab: ['estimates', 'invoices', 'newEstimate', 'reports'] });
+    if (ws.denied) return ws.denied;
 
     const burst = await rateLimit(`ai:receipt-scan:min:${user.id}`, 60, 10);
     if (!burst.allowed) return tooManyRequests(burst, 'Too many receipt scans. Wait a minute and try again.');

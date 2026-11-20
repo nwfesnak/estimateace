@@ -1,3 +1,4 @@
+import { requireWorkspaceOwner } from '@/lib/workspace';
 import { NextRequest, NextResponse } from 'next/server';
 import { TWO_STEP_REQUIRED, twoStepPending } from '@/lib/supabase/auth-user';
 import { createClient } from '@supabase/supabase-js';
@@ -59,6 +60,8 @@ export async function POST(request: NextRequest) {
     }
     const paywall = await enforceAppAccess(user.id);
     if (paywall) return paywall;
+    const ws = await requireWorkspaceOwner(user.id, undefined, { requireTab: ['estimates', 'invoices', 'newEstimate'] });
+    if (ws.denied) return ws.denied;
 
     const rate = checkRateLimit(user.id);
     if (!rate.allowed) {

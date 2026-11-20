@@ -1,3 +1,4 @@
+import { crewPermissionDeniedResponse, requireWorkspaceOwner } from '@/lib/workspace';
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
@@ -31,6 +32,9 @@ export async function POST(request: NextRequest) {
     }
     const paywall = await enforceAppAccess(user.id);
     if (paywall) return paywall;
+    const ws = await requireWorkspaceOwner(user.id, undefined, { requireTab: 'receptionist' });
+    if (ws.denied) return ws.denied;
+    if (ws.isCrew) return crewPermissionDeniedResponse();
 
     const admin = getSupabaseAdmin();
     if (!admin) {

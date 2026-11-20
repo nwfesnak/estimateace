@@ -10,9 +10,10 @@ import {
   type CrewAccess,
   type RestoreSources,
 } from '@/lib/crew-redaction';
-import { resolveWorkspace } from '@/lib/workspace';
+import { crewTabAccessFromWorkspace, resolveWorkspace } from '@/lib/workspace';
+import type { CrewTabAccess } from '@/lib/crew-tab-access';
 
-export type CrewAccessResult = CrewAccess & { role: 'full' | 'limited' };
+export type CrewAccessResult = CrewAccess & { role: 'full' | 'limited'; tabAccess: CrewTabAccess };
 
 /**
  * Returns the crew member's owner + permission flags, or null when the user is not
@@ -30,6 +31,7 @@ export async function getCrewAccess(
     role: row.role === 'full' ? 'full' : 'limited',
     canSeePricing: row.can_see_pricing === true,
     canSeeFinancials: row.can_see_estimates_and_financials === true,
+    tabAccess: crewTabAccessFromWorkspace(ws),
   };
 }
 
