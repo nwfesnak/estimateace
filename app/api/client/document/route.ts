@@ -129,14 +129,21 @@ export async function GET(request: NextRequest) {
       if (sp && typeof sp === 'object') settingsProfile = sp;
       if (sp && typeof sp === 'object') {
         const { mergeFilledPaymentSettings } = await import('@/lib/client-payment-options');
+        const { resolveJobSettingsFromDoc } = await import('@/lib/job-settings-snapshot');
+        const snap = resolveJobSettingsFromDoc(profile, sp);
         profile = {
           ...profile,
-          paymentSettings: mergeFilledPaymentSettings(
-            profile.paymentSettings,
-            sp.paymentSettings
-          ),
-          chargeCCFee: sp.chargeCCFee !== undefined ? sp.chargeCCFee : profile.chargeCCFee,
-          ccFeePercentage: sp.ccFeePercentage ?? profile.ccFeePercentage,
+          paymentSettings:
+            typeof profile._jobSettingsSnapshottedAt === 'string'
+              ? snap.paymentSettings
+              : mergeFilledPaymentSettings(profile.paymentSettings, sp.paymentSettings),
+          chargeCCFee: snap.chargeCCFee,
+          ccFeePercentage: snap.ccFeePercentage,
+          taxesEnabled: snap.taxesEnabled,
+          termsDisplayMode: snap.termsDisplayMode,
+          depositPercentage: snap.depositPercentage,
+          showDepositOnApproval: snap.showDepositOnApproval,
+          depositMinimumAmount: snap.depositMinimumAmount,
           company: profile.company || sp.company,
           phone: profile.phone || sp.phone,
           email: profile.email || sp.email,

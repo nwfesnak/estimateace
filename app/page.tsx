@@ -75,6 +75,13 @@ import { getSupabaseClient, getSupabaseConfigHelpMessage, setCrewDataProxy } fro
 import { extractMediaStoragePath, isMediaPdfRef, resolveMediaDisplayUrl } from '@/lib/media-url';
 import { buildAccountExportZip } from '@/lib/account-export';
 import { mergeFilledPaymentSettings } from '@/lib/client-payment-options';
+import {
+  DEFAULT_JOB_SETTINGS_SNAPSHOT,
+  buildNewJobSettingsSnapshot,
+  resolveDocTaxesEnabled,
+  resolveJobSettingsFromDoc,
+  type JobSettingsSnapshot,
+} from '@/lib/job-settings-snapshot';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { getLineItemUnitOptions, LINE_ITEM_UNITS } from '@/lib/quote-units';
 import {
@@ -1168,6 +1175,11 @@ export default function Home() {
   const skipAutosaveUntilRef = useRef(0);
   /** True until the user has real content on a brand-new document (avoids blank EST clutter + deposit bleed). */
   const freshDocumentRef = useRef(false);
+  const [jobSettings, setJobSettings] = useState<JobSettingsSnapshot>(() => ({
+    ...DEFAULT_JOB_SETTINGS_SNAPSHOT,
+  }));
+  const jobSettingsSnapshottedAtRef = useRef<string>('');
+  const jobTaxRateSnapshotRef = useRef<{ rate: number; zip: string; state: string } | null>(null);
   /** Latest invoice send time, so a save that starts before React re-renders still keeps the mark. */
   const invoiceSentAtRef = useRef<string | null>(null);
   /** Last "include on customer page" choice from Send (photos / renderings); null = default show. */
@@ -1227,7 +1239,7 @@ export default function Home() {
   const hasActiveDiscount = () =>
     appliedDiscountDescription.trim().length > 0 && appliedDiscountValue > 0;
 
-  const getShowDiscountOnEstimate = (): boolean => {
+  const getGlobalShowDiscountOnEstimate = (): boolean => {
     const cached = getProfileSettingsCache();
     if ('showDiscountOnEstimate' in cached) {
       return cached.showDiscountOnEstimate === true;
@@ -1235,10 +1247,12 @@ export default function Home() {
     return profile.showDiscountOnEstimate === true;
   };
 
+  const getShowDiscountOnEstimate = (): boolean => jobSettings.showDiscountOnEstimate === true;
+
   const shouldShowClientDiscount = () =>
     hasActiveDiscount() && getShowDiscountOnEstimate();
 
-  const getTaxesEnabled = (): boolean => {
+  const getGlobalTaxesEnabled = (): boolean => {
     const cached = getProfileSettingsCache();
     if ('taxesEnabled' in cached) {
       return cached.taxesEnabled !== false;
@@ -1246,14 +1260,19 @@ export default function Home() {
     return profile.taxesEnabled !== false;
   };
 
-  /** Company Info toggle — default on when unset */
-  const getAiJobRenderingEnabled = (): boolean => {
+  const getTaxesEnabled = (): boolean => jobSettings.taxesEnabled !== false;
+
+  /** Company Info default toggle — default on when unset */
+  const getGlobalAiJobRenderingEnabled = (): boolean => {
     const cached = getProfileSettingsCache();
     if ('aiJobRenderingEnabled' in cached) {
       return cached.aiJobRenderingEnabled !== false;
     }
     return (profile as any).aiJobRenderingEnabled !== false;
   };
+
+  /** Per-job AI Job Renderings toggle (from this job's saved snapshot) */
+  const getAiJobRenderingEnabled = (): boolean => jobSettings.aiJobRenderingEnabled !== false;
 
   /** Included — email summaries on dashboard (default on) */
   const getEmailLeadSummariesEnabled = (): boolean => {
@@ -1321,7 +1340,12 @@ export default function Home() {
 
   const taxZip = (zipCode || profile.zipCode || '').trim();
   const taxState = (state || profile.state || '').trim();
-  const baseTaxRate = getTaxRateFromZip(taxZip, taxState);
+  const baseTaxRate =
+    jobTaxRateSnapshotRef.current &&
+    taxZip === jobTaxRateSnapshotRef.current.zip &&
+    taxState === jobTaxRateSnapshotRef.current.state
+      ? jobTaxRateSnapshotRef.current.rate
+      : getTaxRateFromZip(taxZip, taxState);
 
   const estimateTotals = computeEstimateTotals({
     items,
@@ -1343,8 +1367,8 @@ export default function Home() {
     optionalAddOnTotal,
   } = estimateTotals;
 
-  // Credit card processing fee derived values (must be after profile state)
-  const ccFeePercent = profile.chargeCCFee ? (profile.ccFeePercentage || 3) : 0;
+  // Credit card processing fee derived values (from this job's snapshotted payment settings)
+  const ccFeePercent = jobSettings.chargeCCFee ? (jobSettings.ccFeePercentage || 3) : 0;
   const ccFeeAmount = grandTotal * (ccFeePercent / 100);
   const totalWithCCFee = grandTotal + ccFeeAmount;
 
@@ -1545,10 +1569,16 @@ export default function Home() {
     fullProfile = profile,
     breakdown = estimateBreakdownSettings,
     mileageForJob: MileageLog[] = jobMileageLogs,
-    laborForJob: LaborLog[] = jobLaborLogs
-  ) => ({
+    laborForJob: LaborLog[] = jobLaborLogs,
+    jobSettingsOverride?: JobSettingsSnapshot
+  ) => {
+    const snap = jobSettingsOverride ?? jobSettings;
+    return {
     ...getSafeProfileSnapshot(fullProfile),
+    ...snap,
     ...breakdown,
+    _jobSettingsSnapshottedAt:
+      jobSettingsSnapshottedAtRef.current || new Date().toISOString(),
     showPriceBreakdownByLine:
       breakdown.showMaterialBreakdownOnEstimate ||
       breakdown.showLaborBreakdownOnEstimate,
@@ -1574,7 +1604,8 @@ export default function Home() {
     ...(invoiceSentAt ? { _invoiceSentAt: invoiceSentAt } : {}),
     // What the customer approve page may show (set from the Send dialog toggles)
     ...(clientMediaShareRef.current ? { _clientMedia: clientMediaShareRef.current } : {}),
-  });
+  };
+  };
 
   // Payment modal states
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
@@ -2281,7 +2312,7 @@ export default function Home() {
         ) : (
           <div className="text-right text-lg text-gray-500">Financial details restricted</div>
         )}
-        {canSeeDocumentMath && profile.chargeCCFee && ccFeePercent > 0 && (
+        {canSeeDocumentMath && jobSettings.chargeCCFee && ccFeePercent > 0 && (
           <div className="text-right mt-1 text-sm text-gray-600">
             Stripe credit card fee ({ccFeePercent}%): ${ccFeeAmount.toFixed(2)}
             <br />
@@ -3384,6 +3415,8 @@ export default function Home() {
     receiptDetails?: any[];
     /** AI job renderings (avoids stale state after generate) */
     jobRenderings?: JobRendering[];
+    /** Per-job settings snapshot override (avoids stale state on toggle) */
+    jobSettings?: JobSettingsSnapshot;
     /** Per-job mileage log (avoids stale state after Add trip) */
     mileageLogs?: MileageLog[];
     /** Override labor logs so save after add/delete isn't stale */
@@ -3452,7 +3485,13 @@ export default function Home() {
       items: items || [],
       terms: terms || '',
       profile: {
-        ...getDocumentProfileSnapshot(profileToSave, breakdownToSave, milesToSave, laborToSave),
+        ...getDocumentProfileSnapshot(
+          profileToSave,
+          breakdownToSave,
+          milesToSave,
+          laborToSave,
+          options?.jobSettings
+        ),
         _jobRenderings: renderingsToSave,
         ...(sentAtToSave ? { _invoiceSentAt: sentAtToSave } : {}),
       },
@@ -4699,6 +4738,18 @@ export default function Home() {
   const loadSelectedEstimate = async (est: any) => {
     loadedDocNumberRef.current = String(est?.invoiceNumber || est?.invoicenumber || est?.id || '');
     freshDocumentRef.current = false;
+    {
+      const savedRate = Number(est?.taxRate ?? est?.taxrate);
+      if (Number.isFinite(savedRate) && (est?.taxRate != null || est?.taxrate != null)) {
+        jobTaxRateSnapshotRef.current = {
+          rate: savedRate,
+          zip: String(est?.zipCode ?? est?.zipcode ?? '').trim(),
+          state: String(est?.state ?? '').trim(),
+        };
+      } else {
+        jobTaxRateSnapshotRef.current = null;
+      }
+    }
     setJobName(est.jobName || '');
     setAddress(est.address || '');
     setCity(est.city || '');
@@ -4730,6 +4781,14 @@ export default function Home() {
       ...loadedProfileWithoutBreakdown
     } = loadedProfile;
     setEstimateBreakdownSettings(getBreakdownSettingsFromDoc(loadedProfile));
+    {
+      const globalMerged = { ...profile, ...(serverProfile || {}), ...cached };
+      setJobSettings(resolveJobSettingsFromDoc(loadedProfile, globalMerged));
+      jobSettingsSnapshottedAtRef.current =
+        typeof loadedProfile._jobSettingsSnapshottedAt === 'string'
+          ? loadedProfile._jobSettingsSnapshottedAt
+          : new Date().toISOString();
+    }
     // IMPORTANT: always force preferred user language. Never use stale language from document snapshot (est.profile).
     const preferredLang = getPreferredLanguage();
     setProfile({
@@ -4887,6 +4946,10 @@ export default function Home() {
         cm && typeof cm === 'object'
           ? { photos: cm.photos !== false, renderings: cm.renderings !== false }
           : null;
+      if (clientMediaShareRef.current) {
+        setSendIncludeSitePhotos(clientMediaShareRef.current.photos);
+        setSendIncludeJobRenderings(clientMediaShareRef.current.renderings);
+      }
     }
     setPhotosFolderOpen(false);
     setVideoUrls(est.videoUrls || []);
@@ -4974,6 +5037,19 @@ export default function Home() {
       setProfile(() => {
         const base = blankProfile();
         const displaySettings = getGlobalDisplaySettings(base, serverProfile);
+        if (!loadedDocNumberRef.current || freshDocumentRef.current) {
+          setJobSettings(
+            buildNewJobSettingsSnapshot({
+              ...base,
+              ...(serverProfile || {}),
+              ...cached,
+              ...displaySettings,
+            })
+          );
+          if (!jobSettingsSnapshottedAtRef.current) {
+            jobSettingsSnapshottedAtRef.current = new Date().toISOString();
+          }
+        }
         const {
           showMaterialBreakdownOnEstimate: _sm,
           showLaborBreakdownOnEstimate: _sl,
@@ -5231,6 +5307,9 @@ export default function Home() {
     }
     skipAutosaveUntilRef.current = Date.now() + 3000;
     freshDocumentRef.current = true;
+    loadedDocNumberRef.current = '';
+    jobTaxRateSnapshotRef.current = null;
+    jobSettingsSnapshottedAtRef.current = new Date().toISOString();
     profileHydratingRef.current = true;
 
     setDocumentType(nextType);
@@ -5276,6 +5355,15 @@ export default function Home() {
     const prefix = nextType === 'invoice' ? 'INV' : 'EST';
     setInvoiceNumber(newDocumentNumber(prefix, savedCount, workspaceUserId));
     const loadedProfile = await loadLatestProfile();
+    {
+      const cachedForNew = getProfileSettingsCache();
+      setJobSettings(
+        buildNewJobSettingsSnapshot({
+          ...(loadedProfile || profile),
+          ...cachedForNew,
+        })
+      );
+    }
     // Force payment reset again after async profile load (guards against stale state races)
     setAmountPaid(0);
     setPaymentStatus('pending');
@@ -7686,10 +7774,13 @@ export default function Home() {
   };
 
   const openSendPreview = () => {
-    // Default attachment choices when entering send preview
-    setSendIncludeSitePhotos(photoUrls.length > 0);
+    // Honor saved per-job share choices if present; otherwise default on when media exists
+    const savedShare = clientMediaShareRef.current;
+    setSendIncludeSitePhotos(photoUrls.length > 0 && (savedShare ? savedShare.photos : true));
     setSendIncludeVideos(videoUrls.length > 0);
-    setSendIncludeJobRenderings(jobRenderings.length > 0);
+    setSendIncludeJobRenderings(
+      jobRenderings.length > 0 && (savedShare ? savedShare.renderings : true)
+    );
     setView('sendPreview');
     // Immediate jump (useEffect also runs after paint for mobile)
     requestAnimationFrame(() => {
@@ -8809,8 +8900,10 @@ export default function Home() {
         : 3,
     });
     await upsertUserSettingsProfile(nextProfile);
-    // Keep open estimate's embedded profile in sync, but SETTINGS row is source of truth
-    await saveToDB({ profile: nextProfile });
+    // Changing global defaults in Profile must never mutate previously saved jobs.
+    if (freshDocumentRef.current && !loadedDocNumberRef.current) {
+      setJobSettings(buildNewJobSettingsSnapshot(nextProfile));
+    }
     await syncAppointmentsToServer(appointments, nextProfile);
     if (!options?.quiet) {
       // callers that want toast still pass nothing; auto-save uses quiet
@@ -9707,40 +9800,30 @@ export default function Home() {
 
   // Payment functions
   const getDepositDueAmount = () => {
-    let deposit = grandTotal * (profile.depositPercentage || 0) / 100;
-    if (profile.chargeCCFee) {
-      deposit = deposit * (1 + (profile.ccFeePercentage || 3) / 100);
+    let deposit = grandTotal * (jobSettings.depositPercentage || 0) / 100;
+    if (jobSettings.chargeCCFee) {
+      deposit = deposit * (1 + (jobSettings.ccFeePercentage || 3) / 100);
     }
     return deposit;
   };
 
-  const isDepositOnApprovalEnabled = () => profile.showDepositOnApproval !== false;
-  const isThirdPartyEscrowProfileEnabled = () => !!profile.thirdPartyEscrowEnabled;
+  const isDepositOnApprovalEnabled = () => jobSettings.showDepositOnApproval !== false;
+  const isThirdPartyEscrowProfileEnabled = () => !!jobSettings.thirdPartyEscrowEnabled;
 
-  const getDepositMinimumAmount = (): number => {
-    const cached = getProfileSettingsCache();
-    if ('depositMinimumAmount' in cached) {
-      return Math.max(0, Number(cached.depositMinimumAmount) || 0);
-    }
-    return Math.max(0, Number(profile.depositMinimumAmount) || 0);
-  };
+  const getDepositMinimumAmount = (): number =>
+    Math.max(0, Number(jobSettings.depositMinimumAmount) || 0);
 
-  /** Deposit prompt only when enabled AND estimate total meets the profile minimum (if set). */
+  /** Deposit prompt only when enabled AND estimate total meets the job snapshot minimum (if set). */
   const shouldShowDepositOnEstimate = (estimateTotal: number = grandTotal) => {
     if (!isDepositOnApprovalEnabled()) return false;
-    if (!(Number(profile.depositPercentage) > 0)) return false;
+    if (!(Number(jobSettings.depositPercentage) > 0)) return false;
     const minimum = getDepositMinimumAmount();
     if (minimum <= 0) return true;
     return estimateTotal + 0.009 >= minimum;
   };
 
-  const getEscrowMinimumAmount = (): number => {
-    const cached = getProfileSettingsCache();
-    if ('escrowMinimumAmount' in cached) {
-      return Math.max(0, Number(cached.escrowMinimumAmount) || 0);
-    }
-    return Math.max(0, Number(profile.escrowMinimumAmount) || 0);
-  };
+  const getEscrowMinimumAmount = (): number =>
+    Math.max(0, Number(jobSettings.escrowMinimumAmount) || 0);
 
   const shouldShowEscrowOnEstimate = (estimateTotal: number = grandTotal) => {
     if (!isThirdPartyEscrowProfileEnabled()) return false;
@@ -9758,9 +9841,9 @@ export default function Home() {
 
   const openDepositPayment = () => openPaymentModal('deposit', getDepositDueAmount());
 
-  const getVenmoSettings = () => mergePaymentSettings(profile.paymentSettings).venmo;
-  const getZelleSettings = () => mergePaymentSettings(profile.paymentSettings).zelle;
-  const getPayPalSettings = () => mergePaymentSettings(profile.paymentSettings).paypal;
+  const getVenmoSettings = () => mergePaymentSettings(jobSettings.paymentSettings).venmo;
+  const getZelleSettings = () => mergePaymentSettings(jobSettings.paymentSettings).zelle;
+  const getPayPalSettings = () => mergePaymentSettings(jobSettings.paymentSettings).paypal;
 
   const isVenmoPaymentReady = () => hasVenmoSetup(getVenmoSettings());
 
@@ -10007,13 +10090,16 @@ export default function Home() {
     }
   };
 
-  const getTermsDisplayMode = (): 'link' | 'printed' => {
+  const getGlobalTermsDisplayMode = (): 'link' | 'printed' => {
     const cached = getProfileSettingsCache();
     if (cached.termsDisplayMode === 'printed' || cached.termsDisplayMode === 'link') {
       return cached.termsDisplayMode;
     }
     return profile.termsDisplayMode === 'printed' ? 'printed' : 'link';
   };
+
+  const getTermsDisplayMode = (): 'link' | 'printed' =>
+    jobSettings.termsDisplayMode === 'printed' ? 'printed' : 'link';
 
   /** Terms on client-facing docs: hyperlink OR full text printed below the estimate */
   const renderPaySectionDisclosures = (options?: { className?: string }) => {
@@ -10114,10 +10200,10 @@ export default function Home() {
           {shouldShowDepositOnEstimate() && (
             <div className="text-xl text-gray-800">
               Upon approval, deposit due: <span className="font-semibold">${depositBase.toFixed(2)}</span>
-              <span className="text-sm text-gray-500 ml-2">({profile.depositPercentage || 0}% of total)</span>
+              <span className="text-sm text-gray-500 ml-2">({jobSettings.depositPercentage || 0}% of total)</span>
             </div>
           )}
-          {shouldShowDepositOnEstimate() && profile.chargeCCFee && (
+          {shouldShowDepositOnEstimate() && jobSettings.chargeCCFee && (
             <div className="mt-2 text-sm text-gray-600">
               Credit card payments include an additional {ccFeePercent}% processing fee
             </div>
@@ -10137,10 +10223,10 @@ export default function Home() {
         {shouldShowDepositOnEstimate() && (
           <div className="mt-4 text-xl">
             Deposit due: <span className="font-semibold">${depositBase.toFixed(2)}</span>
-            <span className="text-sm text-gray-500 ml-2">({profile.depositPercentage || 0}% of total)</span>
+            <span className="text-sm text-gray-500 ml-2">({jobSettings.depositPercentage || 0}% of total)</span>
           </div>
         )}
-        {shouldShowDepositOnEstimate() && profile.chargeCCFee && (
+        {shouldShowDepositOnEstimate() && jobSettings.chargeCCFee && (
           <div className="mt-2 text-sm text-gray-600">
             Credit card payments include an additional {ccFeePercent}% processing fee
           </div>
@@ -10158,9 +10244,9 @@ export default function Home() {
                 className="w-full text-xl py-7 bg-[#10b981] hover:bg-[#0ea16b] text-white font-semibold rounded-2xl shadow-lg"
               >
                 Pay Deposit Now (${depositDue.toFixed(2)})
-                {profile.chargeCCFee && (
+                {jobSettings.chargeCCFee && (
                   <span className="text-sm block mt-1 font-normal opacity-90">
-                    (includes {profile.ccFeePercentage || 3}% CC fee if paying by card)
+                    (includes {jobSettings.ccFeePercentage || 3}% CC fee if paying by card)
                   </span>
                 )}
                 <span className="text-sm block mt-1 font-normal opacity-90">
@@ -10201,7 +10287,7 @@ export default function Home() {
 
   /** Profile-enabled payment methods for clients, click-to-pay first */
   const getClientPaymentOptions = () => {
-    const settings = mergePaymentSettings(profile.paymentSettings);
+    const settings = mergePaymentSettings(jobSettings.paymentSettings);
     type Opt = {
       method: string;
       settings: { enabled?: boolean; connected?: boolean; handle?: string; qrUrl?: string };
@@ -10339,7 +10425,7 @@ export default function Home() {
     }
   };
 
-  const getMailCheckSettings = () => mergePaymentSettings(profile.paymentSettings).mailcheck;
+  const getMailCheckSettings = () => mergePaymentSettings(jobSettings.paymentSettings).mailcheck;
 
   const hasMailCheckSetup = (settings?: { enabled?: boolean; handle?: string } | null) =>
     !!settings?.enabled && !!(settings.handle || '').trim();
@@ -11289,11 +11375,11 @@ export default function Home() {
         return;
       }
       const clientEmail = (emails || []).map((e) => String(e || '').trim()).find(Boolean) || '';
-      // Pass processing fee only when Profile → Charge credit card processing fee is on
-      const chargeFees = profile.chargeCCFee === true;
+      // Use this job's snapshotted CC fee settings
+      const chargeFees = jobSettings.chargeCCFee === true;
       const feePercent = chargeFees
-        ? Number(profile.ccFeePercentage) > 0
-          ? Number(profile.ccFeePercentage)
+        ? Number(jobSettings.ccFeePercentage) > 0
+          ? Number(jobSettings.ccFeePercentage)
           : 2.9
         : 0;
       const res = await fetch('/api/payments/job-checkout', {
@@ -11548,7 +11634,7 @@ export default function Home() {
         items,
         laborAmount: laborAmountDoc,
         isTaxExempt: !!(doc.isTaxExempt ?? doc.istaxexempt),
-        taxesEnabled: getTaxesEnabled(),
+        taxesEnabled: resolveDocTaxesEnabled(doc, getGlobalTaxesEnabled()),
         taxRate: Number(doc.taxRate ?? doc.taxrate) || 7,
         discountDescription: docDiscountData.discountDescription,
         discountValue: docDiscountData.discountValue,
@@ -13838,7 +13924,7 @@ export default function Home() {
                         </div>
                       )}
 
-                      {profile.chargeCCFee && (
+                      {jobSettings.chargeCCFee && (
                         <div className="flex justify-end text-sm mt-2 text-gray-600">
                           + Stripe credit card fee ({ccFeePercent}%): <span className="font-medium ml-1">${ccFeeAmount.toFixed(2)}</span>
                           <span className="ml-3 text-[#f59e0b] font-semibold">Stripe card total: ${totalWithCCFee.toFixed(2)}</span>
@@ -13985,12 +14071,76 @@ export default function Home() {
               </Card>
 
               {/* AI Job Renderings — photo linked to a description line → completed look */}
+              {!getAiJobRenderingEnabled() &&
+                (jobRenderings.length > 0 || getGlobalAiJobRenderingEnabled()) && (
+                  <Card className="mb-8 border-violet-200 bg-violet-50/40">
+                    <CardContent className="p-4 flex items-center justify-between gap-4">
+                      <div>
+                        <p className="font-semibold text-sm text-gray-800">
+                          ✨ {t('jobRenderSection')} ({jobRenderings.length}) — Off for this job
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          Turn on to show or generate AI renderings for this job only.
+                        </p>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                        <input
+                          type="checkbox"
+                          data-testid="job-rendering-toggle"
+                          checked={false}
+                          onChange={async (e) => {
+                            const nextJobSettings = {
+                              ...jobSettings,
+                              aiJobRenderingEnabled: e.target.checked,
+                            };
+                            setJobSettings(nextJobSettings);
+                            await saveToDB({ jobSettings: nextJobSettings, quiet: true });
+                            showMessage('✅ AI Job Renderings enabled for this job.');
+                          }}
+                          className="sr-only peer"
+                        />
+                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-violet-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-600"></div>
+                      </label>
+                    </CardContent>
+                  </Card>
+                )}
               {getAiJobRenderingEnabled() && (
               <Card className="mb-8 border-violet-200">
                 <CardContent className="p-6">
-                  <h3 className="text-xl font-semibold mb-2">
-                    ✨ {t('jobRenderSection')} ({jobRenderings.length})
-                  </h3>
+                  <div className="flex items-start justify-between gap-4 mb-2">
+                    <h3 className="text-xl font-semibold">
+                      ✨ {t('jobRenderSection')} ({jobRenderings.length})
+                    </h3>
+                    <label
+                      className="inline-flex items-center gap-2 text-xs font-medium text-gray-600 cursor-pointer shrink-0"
+                      title="Toggle AI Job Renderings for this job only (does not change Company Profile defaults or other jobs)"
+                    >
+                      <span>On this job</span>
+                      <span className="relative inline-flex items-center">
+                        <input
+                          type="checkbox"
+                          data-testid="job-rendering-toggle"
+                          checked={true}
+                          onChange={async (e) => {
+                            const checked = e.target.checked;
+                            const nextJobSettings = {
+                              ...jobSettings,
+                              aiJobRenderingEnabled: checked,
+                            };
+                            setJobSettings(nextJobSettings);
+                            await saveToDB({ jobSettings: nextJobSettings, quiet: true });
+                            showMessage(
+                              checked
+                                ? '✅ AI Job Renderings enabled for this job.'
+                                : '✅ AI Job Renderings turned off for this job only (existing jobs untouched).'
+                            );
+                          }}
+                          className="sr-only peer"
+                        />
+                        <div className="w-10 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-violet-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-violet-600"></div>
+                      </span>
+                    </label>
+                  </div>
                   <p className="text-sm text-gray-500 mb-5">
                     {t('jobRenderHint')}
                   </p>
@@ -16060,7 +16210,7 @@ export default function Home() {
                             type="radio"
                             name="termsDisplayMode"
                             className="mt-1 accent-[#10b981]"
-                            checked={getTermsDisplayMode() === 'link'}
+                            checked={getGlobalTermsDisplayMode() === 'link'}
                             onChange={async () => {
                               const nextProfile = { ...profile, termsDisplayMode: 'link' as const };
                               setProfile(nextProfile);
@@ -16080,7 +16230,7 @@ export default function Home() {
                             type="radio"
                             name="termsDisplayMode"
                             className="mt-1 accent-[#10b981]"
-                            checked={getTermsDisplayMode() === 'printed'}
+                            checked={getGlobalTermsDisplayMode() === 'printed'}
                             onChange={async () => {
                               const nextProfile = { ...profile, termsDisplayMode: 'printed' as const };
                               setProfile(nextProfile);
@@ -16357,7 +16507,7 @@ export default function Home() {
                         <label className="relative inline-flex items-center cursor-pointer">
                           <input
                             type="checkbox"
-                            checked={getTaxesEnabled()}
+                            checked={getGlobalTaxesEnabled()}
                             onChange={async (e) => {
                               const checked = e.target.checked;
                               const nextProfile = { ...profile, taxesEnabled: checked };
@@ -16388,13 +16538,12 @@ export default function Home() {
                         <label className="relative inline-flex items-center cursor-pointer">
                           <input
                             type="checkbox"
-                            checked={getAiJobRenderingEnabled()}
+                            checked={getGlobalAiJobRenderingEnabled()}
                             onChange={async (e) => {
                               const checked = e.target.checked;
                               const nextProfile = { ...profile, aiJobRenderingEnabled: checked };
                               setProfile(nextProfile);
                               await saveProfileSettings(nextProfile);
-                              if (!checked) setSendIncludeJobRenderings(false);
                               showMessage(
                                 checked
                                   ? '✅ AI Job Renderings enabled.'
@@ -16588,7 +16737,7 @@ export default function Home() {
                         <label className="relative inline-flex items-center cursor-pointer">
                           <input
                             type="checkbox"
-                            checked={getShowDiscountOnEstimate()}
+                            checked={getGlobalShowDiscountOnEstimate()}
                             onChange={(e) => {
                               const checked = e.target.checked;
                               void saveBreakdownProfileSettings({ showDiscountOnEstimate: checked });
@@ -18596,17 +18745,17 @@ export default function Home() {
                           <span className="font-bold text-2xl">${grandTotal.toFixed(2)}</span>
                         </>
                       )}
-                      {profile.chargeCCFee && (
+                      {jobSettings.chargeCCFee && (
                         <span className="block text-sm mt-1 text-amber-700">
-                          + {profile.ccFeePercentage || 3}% CC processing fee applied at checkout
+                          + {jobSettings.ccFeePercentage || 3}% CC processing fee applied at checkout
                         </span>
                       )}
                     </p>
                     {(() => {
                       let remainder = Math.max(0, grandTotal - Number(amountPaid));
                       if (remainder < 0.01) remainder = Math.max(0, grandTotal);
-                      if (profile.chargeCCFee) {
-                        remainder = remainder * (1 + (profile.ccFeePercentage || 3) / 100);
+                      if (jobSettings.chargeCCFee) {
+                        remainder = remainder * (1 + (jobSettings.ccFeePercentage || 3) / 100);
                       }
                       return (
                         <div className="mt-6 space-y-3">
@@ -18615,7 +18764,7 @@ export default function Home() {
                             className="w-full py-8 text-2xl font-bold bg-[#f59e0b] hover:bg-orange-600 text-white rounded-3xl shadow-lg"
                           >
                             Pay Now — ${remainder.toFixed(2)}
-                            {profile.chargeCCFee && (
+                            {jobSettings.chargeCCFee && (
                               <span className="text-sm block mt-1 font-normal opacity-90">
                                 (includes CC fee if paying by card)
                               </span>
@@ -19174,12 +19323,12 @@ export default function Home() {
                       discountValue: appliedDiscountValue,
                       discountType: appliedDiscountType,
                       taxAmount,
-                      depositPercent: Number(profile.depositPercentage) || 0,
-                      showDepositOnApproval: profile.showDepositOnApproval !== false,
-                      depositMinimumAmount: Math.max(0, Number(profile.depositMinimumAmount) || 0),
+                      depositPercent: Number(jobSettings.depositPercentage) || 0,
+                      showDepositOnApproval: jobSettings.showDepositOnApproval !== false,
+                      depositMinimumAmount: Math.max(0, Number(jobSettings.depositMinimumAmount) || 0),
                       termsDisplayMode: getTermsDisplayMode(),
-                      chargeCCFee: profile.chargeCCFee === true,
-                      ccFeePercentage: Number(profile.ccFeePercentage) || 0,
+                      chargeCCFee: jobSettings.chargeCCFee === true,
+                      ccFeePercentage: Number(jobSettings.ccFeePercentage) || 0,
                       breakdownSettings: {
                         showMaterialBreakdownOnEstimate:
                           !!estimateBreakdownSettings.showMaterialBreakdownOnEstimate,
@@ -20335,11 +20484,11 @@ export default function Home() {
           <div className="py-2 space-y-5">
             <div className="text-center rounded-2xl bg-emerald-50 border border-emerald-100 p-5">
               {(() => {
-                // Fee only when Profile → Charge credit card processing fee is on
-                const chargeFees = profile.chargeCCFee === true;
+                // Fee from this job's snapshotted CC fee settings
+                const chargeFees = jobSettings.chargeCCFee === true;
                 const rate = chargeFees
-                  ? Number(profile.ccFeePercentage) > 0
-                    ? Number(profile.ccFeePercentage)
+                  ? Number(jobSettings.ccFeePercentage) > 0
+                    ? Number(jobSettings.ccFeePercentage)
                     : STRIPE_CARD_PERCENT
                   : 0;
                 const fee = computeStripeCardFee(paymentAmount, {

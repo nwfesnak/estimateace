@@ -8,6 +8,7 @@
  * dropped. The browser only ever receives short-lived signed URLs — never storage paths.
  */
 import { ownedMediaPath } from '@/lib/storage-paths';
+import { resolveAiJobRenderingEnabled } from '@/lib/job-settings-snapshot';
 
 export const CLIENT_MEDIA_LIMITS = {
   maxPhotos: 12,
@@ -61,9 +62,7 @@ export function planClientMedia(
     ? profile._clientMedia
     : {}) as Record<string, unknown>;
   const showPhotos = share.photos !== false;
-  const renderingsEnabled =
-    settingsProfile?.aiJobRenderingEnabled !== false &&
-    profile.aiJobRenderingEnabled !== false;
+  const renderingsEnabled = resolveAiJobRenderingEnabled(profile, settingsProfile);
   const showRenderings = share.renderings !== false && renderingsEnabled;
 
   const photos: string[] = [];

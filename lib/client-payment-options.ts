@@ -45,7 +45,7 @@ const DEFAULTS: Record<string, PaymentMethodSettings> = {
   mailcheck: { enabled: false, connected: false, handle: '' },
 };
 
-function mergeSettings(
+export function mergePaymentSettings(
   settings?: Record<string, PaymentMethodSettings> | null
 ): Record<string, PaymentMethodSettings> {
   const out: Record<string, PaymentMethodSettings> = {};
@@ -235,7 +235,7 @@ export function buildClientPaymentOptions(input: {
    */
   stripeReady?: boolean;
 }): ClientPayOption[] {
-  const settings = mergeSettings(input.paymentSettings);
+  const settings = mergePaymentSettings(input.paymentSettings);
   const stripeReady = input.stripeReady !== false;
   const baseAmount = Math.max(0, Number(input.amount) || 0);
   const chargeFees = input.chargeFees === true;

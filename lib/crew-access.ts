@@ -136,7 +136,14 @@ export async function overlayStoredDocumentForCrewSend(
     body.discountType = d.discountType === 'percent' ? 'percent' : 'dollar';
     if (d.discountDescription) body.discountDescription = String(d.discountDescription);
     body.taxAmount = Number(stored.taxAmount ?? stored.taxamount) || 0;
-    body.depositMinimumAmount = Math.max(0, Number(settings.depositMinimumAmount) || 0);
+    const storedProfileObj = (stored.profile && typeof stored.profile === 'object' ? stored.profile : {}) as {
+      depositMinimumAmount?: unknown;
+    };
+    const jobDepMin = storedProfileObj.depositMinimumAmount;
+    body.depositMinimumAmount = Math.max(
+      0,
+      Number(jobDepMin !== undefined ? jobDepMin : settings.depositMinimumAmount) || 0
+    );
   }
   if (!access.canSeeFinancials) {
     body.amountPaid = Number(stored.amountPaid ?? stored.amountpaid) || 0;
