@@ -121,6 +121,9 @@ export function restoreMoneyDeep<T>(incoming: T, source: unknown): T {
   return out as T;
 }
 
+// Internal translation fields on items JSONB are not money keys — maskMoneyDeep
+// leaves translation, translationLang, translatedAt, and translationSource intact
+// so restricted crew still see the owner's line-item translations.
 function parseItems(items: unknown): { list: unknown[]; wasString: boolean } {
   if (typeof items === 'string') {
     try {

@@ -180,6 +180,48 @@ test('items stored as a JSON string keep their shape', () => {
 test('money key detection', () => {
   for (const k of ['price', 'total', 'unitPrice', 'laborRate', 'discountAmount', 'cost', 'amount'])
     assert.ok(R.isMoneyKey(k), k);
-  for (const k of ['taxRate', 'qty', 'hours', 'description', 'depositPercentage', 'ccFeePercentage'])
+  for (const k of [
+    'taxRate',
+    'qty',
+    'hours',
+    'description',
+    'depositPercentage',
+    'ccFeePercentage',
+    'translation',
+    'translationLang',
+    'translatedAt',
+    'translationSource',
+  ])
     assert.ok(!R.isMoneyKey(k), k);
+});
+
+test('restricted crew redaction keeps line-item translation fields', () => {
+  const row = {
+    ...stored,
+    items: stored.items.map((it, i) =>
+      i === 0
+        ? {
+            ...it,
+            translation: 'Tablones',
+            translationLang: 'es',
+            translatedAt: '2026-11-20T16:00:00.000Z',
+            translationSource: 'Boards',
+          }
+        : it
+    ),
+  };
+  const r = R.redactRow(row, none);
+  assert.equal(r.items[0].price, 0);
+  assert.equal(r.items[0].description, 'Boards');
+  assert.equal(r.items[0].translation, 'Tablones');
+  assert.equal(r.items[0].translationLang, 'es');
+  assert.equal(r.items[0].translatedAt, '2026-11-20T16:00:00.000Z');
+  assert.equal(r.items[0].translationSource, 'Boards');
+  const restored = R.restoreRow(r, none, {
+    existing: row,
+    ownerSettingsProfile: row.profile,
+    itemIndex: new Map(),
+  });
+  assert.equal(restored.items[0].translation, 'Tablones');
+  assert.equal(restored.items[0].price, 12.5);
 });

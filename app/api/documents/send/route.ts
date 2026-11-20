@@ -8,6 +8,7 @@ import { guardUserSends } from '@/lib/send-guard';
 import { createClientActionToken } from '@/lib/client-action-token';
 import { getAppUrl } from '@/lib/stripe-server';
 import { isClientSelectedOption, isOptionalLine } from '@/lib/optional-line-items';
+import { stripItemTranslations } from '@/lib/item-translations';
 import { enforceAppAccess } from '@/lib/billing-access';
 
 type LineItem = {
@@ -81,7 +82,7 @@ export async function POST(request: NextRequest) {
     const grandTotal = Number(body.grandTotal) || 0;
     const amountPaid = Number(body.amountPaid) || 0;
     const balanceDue = Math.max(0, grandTotal - amountPaid);
-    const items: LineItem[] = Array.isArray(body.items) ? body.items : [];
+    const items: LineItem[] = stripItemTranslations(Array.isArray(body.items) ? body.items : []);
     const subtotalBeforeDiscount = Math.max(
       0,
       Number(body.subtotalBeforeDiscount) ||
