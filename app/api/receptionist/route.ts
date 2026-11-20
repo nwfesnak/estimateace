@@ -4,6 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import { getXaiApiKey, getXaiChatModel } from '@/lib/xai-config';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { enforceAppAccess, workspaceOwnerId } from '@/lib/billing-access';
+import { crewPermissionDeniedResponse, requireWorkspaceOwner } from '@/lib/workspace';
 import { reserveAiQuota } from '@/lib/rate-limit';
 import { normalizeReceptionistInput, RECEPTIONIST_MAX_TOKENS } from '@/lib/receptionist-input';
 import { normalizeForwardNumberInput } from '@/lib/phone-forward';
@@ -52,26 +53,29 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: authError || 'Unauthorized' }, { status: 401 });
     }
     const admin = getSupabaseAdmin();
+    const ws = await requireWorkspaceOwner(user.id, admin, { requireTab: 'receptionist' });
+    if (ws.denied) return ws.denied;
+    const targetUserId = ws.ownerUserId;
     let businessName = '';
     if (admin) {
       const { data } = await admin
         .from('estimates')
         .select('profile')
-        .eq('id', `SETTINGS-${user.id}`)
+        .eq('id', `SETTINGS-${targetUserId}`)
         .maybeSingle();
       const profile = (data?.profile || {}) as any;
       businessName = String(profile.company || '');
     }
-    const config = await loadReceptionistConfig(user.id, businessName);
-    let billing = await loadReceptionistBilling(user.id);
+    const config = await loadReceptionistConfig(targetUserId, businessName);
+    let billing = await loadReceptionistBilling(targetUserId);
     // Entitlement only from server-only storage (Stripe webhook / Stripe sync).
     let addonActive = receptionistAddonHasAccess(billing);
 
     // After Stripe pay, webhook can lag — sync from Stripe so UI shows Subscribed.
     // An existing phone number is not a subscription. Unpaid accounts must still be able to pay.
-    if (!addonActive) {
+    if (!addonActive && !ws.isCrew) {
       try {
-        const synced = await syncReceptionistAddonForUser(user.id);
+        const synced = await syncReceptionistAddonForUser(targetUserId);
         billing = synced.billing || billing;
         addonActive = synced.active;
       } catch (e) {
@@ -108,6 +112,9 @@ export async function PATCH(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: authError || 'Unauthorized' }, { status: 401 });
     }
+    const ws = await requireWorkspaceOwner(user.id, undefined, { requireTab: 'receptionist' });
+    if (ws.denied) return ws.denied;
+    if (ws.isCrew) return crewPermissionDeniedResponse();
     const body = await request.json().catch(() => ({}));
     // Owner/cell handoff number: US or Canada only (international / premium numbers
     // would be dialed on the platform's Twilio account).
@@ -210,6 +217,8 @@ export async function POST(request: NextRequest) {
     // seat), then the per-account daily AI quota (shared "ai" counter).
     const paywall = await enforceAppAccess(user.id);
     if (paywall) return paywall;
+    const ws = await requireWorkspaceOwner(user.id, undefined, { requireTab: 'receptionist' });
+    if (ws.denied) return ws.denied;
     {
       const quota = await reserveAiQuota(await workspaceOwnerId(user.id), 'ai');
       if (quota) return quota;

@@ -3,6 +3,7 @@ import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import { loadReceptionistConfig } from '@/lib/receptionist-store';
 import { RECEPTIONIST_CAPS } from '@/lib/receptionist-caps';
 import { currentUsagePeriod, loadReceptionistUsage } from '@/lib/receptionist-usage';
+import { requireWorkspaceOwner } from '@/lib/workspace';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,11 +20,14 @@ export async function GET(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: authError || 'Unauthorized' }, { status: 401 });
     }
+    const ws = await requireWorkspaceOwner(user.id, undefined, { requireTab: 'receptionist' });
+    if (ws.denied) return ws.denied;
+    const targetUserId = ws.ownerUserId;
     const [config, period] = await Promise.all([
-      loadReceptionistConfig(user.id),
-      currentUsagePeriod(user.id),
+      loadReceptionistConfig(targetUserId),
+      currentUsagePeriod(targetUserId),
     ]);
-    const usage = await loadReceptionistUsage(user.id, period);
+    const usage = await loadReceptionistUsage(targetUserId, period);
     const caps = RECEPTIONIST_CAPS;
     return NextResponse.json(
       {

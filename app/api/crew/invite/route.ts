@@ -5,6 +5,7 @@ import { CREW_SEAT_PENDING, crewSeatHasAccess, setCrewLoginEnabled } from '@/lib
 import { enforceAppAccess } from '@/lib/billing-access';
 import { rateLimit, tooManyRequests } from '@/lib/rate-limit';
 import { findAuthUserByEmail, sendCrewSetupLink } from '@/lib/crew-setup-link';
+import { normalizeCrewTabAccess } from '@/lib/crew-tab-access';
 
 /**
  * Owner invites a crew member: creates a Supabase Auth login WITHOUT a password and
@@ -57,6 +58,7 @@ export async function POST(request: NextRequest) {
     const role = body.role === 'full' ? 'full' : 'limited';
     const canSeePricing = Boolean(body.canSeePricing);
     const canSeeEstimatesAndFinancials = Boolean(body.canSeeEstimatesAndFinancials);
+    const tabAccess = normalizeCrewTabAccess(body.tabAccess);
 
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return NextResponse.json({ error: 'Valid email is required.' }, { status: 400 });
@@ -68,13 +70,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { data: existingLink } = await admin
+    let { data: existingLink, error: exLinkErr } = await admin
       .from('crew_members')
       .select(
-        'id, owner_user_id, crew_user_id, role, can_see_pricing, can_see_estimates_and_financials, email'
+        'id, owner_user_id, crew_user_id, role, can_see_pricing, can_see_estimates_and_financials, tab_access, email'
       )
       .eq('email', email)
       .maybeSingle();
+    if (exLinkErr && (exLinkErr.code === '42703' || exLinkErr.message?.includes('tab_access'))) {
+      ({ data: existingLink } = await admin
+        .from('crew_members')
+        .select(
+          'id, owner_user_id, crew_user_id, role, can_see_pricing, can_see_estimates_and_financials, email'
+        )
+        .eq('email', email)
+        .maybeSingle() as any);
+    }
     if (existingLink) {
       if (existingLink.owner_user_id === user.id) {
         // Already on this owner's crew (often after failed Stripe checkout / UI desync).
@@ -119,6 +130,7 @@ export async function POST(request: NextRequest) {
             canSeePricing: existingLink.can_see_pricing === true,
             canSeeEstimatesAndFinancials:
               existingLink.can_see_estimates_and_financials === true,
+            tabAccess: normalizeCrewTabAccess((existingLink as any).tab_access),
             id: existingLink.id,
           },
           message:
@@ -186,24 +198,29 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Could not create crew user.' }, { status: 500 });
     }
 
-    const { data: row, error: insertError } = await admin
+    const baseRow = {
+      owner_user_id: user.id,
+      crew_user_id: crewUserId,
+      email,
+      role,
+      can_see_pricing: canSeePricing,
+      can_see_estimates_and_financials: canSeeEstimatesAndFinancials,
+      // Login stays disabled until the $14.99 seat is paid (seat webhook activates it).
+      seat_status: CREW_SEAT_PENDING,
+      updated_at: new Date().toISOString(),
+    };
+    let { data: row, error: insertError } = await admin
       .from('crew_members')
-      .upsert(
-        {
-          owner_user_id: user.id,
-          crew_user_id: crewUserId,
-          email,
-          role,
-          can_see_pricing: canSeePricing,
-          can_see_estimates_and_financials: canSeeEstimatesAndFinancials,
-          // Login stays disabled until the $14.99 seat is paid (seat webhook activates it).
-          seat_status: CREW_SEAT_PENDING,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: 'crew_user_id' }
-      )
+      .upsert({ ...baseRow, tab_access: tabAccess }, { onConflict: 'crew_user_id' })
       .select()
       .single();
+    if (insertError && (insertError.code === '42703' || insertError.message?.includes('tab_access'))) {
+      ({ data: row, error: insertError } = await admin
+        .from('crew_members')
+        .upsert(baseRow, { onConflict: 'crew_user_id' })
+        .select()
+        .single());
+    }
 
     if (insertError) {
       console.error('crew_members insert:', insertError);
@@ -233,6 +250,7 @@ export async function POST(request: NextRequest) {
         role,
         canSeePricing,
         canSeeEstimatesAndFinancials,
+        tabAccess: normalizeCrewTabAccess((row as any)?.tab_access ?? tabAccess),
         id: row?.id,
       },
     });

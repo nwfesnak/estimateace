@@ -72,6 +72,19 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { getSupabaseClient, getSupabaseConfigHelpMessage, setCrewDataProxy } from '@/lib/supabase/client';
+import {
+  CREW_TABS,
+  CREW_TAB_DENIED_MESSAGE,
+  DEFAULT_CREW_TAB_ACCESS,
+  allCrewTabsAllowed,
+  countAllowedCrewTabs,
+  createUniformCrewTabAccess,
+  crewHasTab as checkCrewHasTab,
+  firstAllowedCrewTab,
+  normalizeCrewTabAccess,
+  type CrewTabAccess,
+  type CrewTabKey,
+} from '@/lib/crew-tab-access';
 import { extractMediaStoragePath, isMediaPdfRef, resolveMediaDisplayUrl } from '@/lib/media-url';
 import { buildAccountExportZip } from '@/lib/account-export';
 import { mergeFilledPaymentSettings } from '@/lib/client-payment-options';
@@ -1110,6 +1123,7 @@ export default function Home() {
       role: 'full' | 'limited';
       canSeePricing: boolean;
       canSeeEstimatesAndFinancials: boolean;
+      tabAccess?: CrewTabAccess;
       seatStatus?: string;
       seatPeriodEnd?: string | null;
       needsSeatPayment?: boolean;
@@ -1180,6 +1194,7 @@ export default function Home() {
   }));
   const jobSettingsSnapshottedAtRef = useRef<string>('');
   const jobTaxRateSnapshotRef = useRef<{ rate: number; zip: string; state: string } | null>(null);
+  const editorOpenedAsNewRef = useRef(false);
   /** Latest invoice send time, so a save that starts before React re-renders still keeps the mark. */
   const invoiceSentAtRef = useRef<string | null>(null);
   /** Last "include on customer page" choice from Send (photos / renderings); null = default show. */
@@ -1201,6 +1216,8 @@ export default function Home() {
     (currentCrew?.ownerUserId as string) || user?.id || '';
   const canSeePricing = !currentCrew || currentCrew.canSeePricing !== false;
   const canSeeFinancials = !currentCrew || currentCrew.canSeeEstimatesAndFinancials !== false;
+  const hasCrewTab = (tab: CrewTabKey): boolean =>
+    !currentCrew || checkCrewHasTab(currentCrew.tabAccess, tab);
   /**
    * Document math (subtotals / tax / totals in the editor) needs unit prices. Crew without
    * "See pricing" get prices redacted server-side, so only show totals when both are allowed.
@@ -1334,6 +1351,10 @@ export default function Home() {
   const showEmailLeadsOnDashboard = (): boolean => getEmailLeadSummariesEnabled();
 
   const openAiReceptionistSetup = () => {
+    if (currentCrew && !hasCrewTab('receptionist')) {
+      showMessage(CREW_TAB_DENIED_MESSAGE);
+      return;
+    }
     void loadReceptionistFromSettings();
     setView('receptionistView');
   };
@@ -2579,10 +2600,12 @@ export default function Home() {
         const json = await res.json().catch(() => ({}));
         if (cancelled) return;
         if (res.ok && json.isCrew && json.ownerUserId) {
+          const tabAccess = normalizeCrewTabAccess(json.tabAccess);
           // Restricted crew read/write the owner's documents through /api/crew/data
-          // (server applies their access level); fully-permitted crew stay direct.
+          // (server applies their access level and tab permissions); unrestricted crew stay direct.
           setCrewDataProxy(
-            !(json.canSeePricing === true && json.canSeeEstimatesAndFinancials === true)
+            !(json.canSeePricing === true && json.canSeeEstimatesAndFinancials === true) ||
+              !allCrewTabsAllowed(tabAccess)
           );
           setCurrentCrew({
             email: json.email || user.email,
@@ -2590,6 +2613,7 @@ export default function Home() {
             role: json.role === 'full' ? 'full' : 'limited',
             canSeePricing: json.canSeePricing === true,
             canSeeEstimatesAndFinancials: json.canSeeEstimatesAndFinancials === true,
+            tabAccess,
           });
         } else if (json.seatExpired) {
           // Crew seat unpaid/ended or owner's plan lapsed: don't fall through into a
@@ -2876,8 +2900,10 @@ export default function Home() {
         } catch {
           showMessage('Payment received. Open Phone line and tap Refresh subscription if needed.');
         }
-        void loadReceptionistFromSettings();
-        setView('receptionistView');
+        if (!currentCrew || hasCrewTab('receptionist')) {
+          void loadReceptionistFromSettings();
+          setView('receptionistView');
+        }
       })();
       // Clean query params so refresh doesn't re-fire
       try {
@@ -4738,6 +4764,7 @@ export default function Home() {
   const loadSelectedEstimate = async (est: any) => {
     loadedDocNumberRef.current = String(est?.invoiceNumber || est?.invoicenumber || est?.id || '');
     freshDocumentRef.current = false;
+    editorOpenedAsNewRef.current = false;
     {
       const savedRate = Number(est?.taxRate ?? est?.taxrate);
       if (Number.isFinite(savedRate) && (est?.taxRate != null || est?.taxrate != null)) {
@@ -4910,6 +4937,7 @@ export default function Home() {
         ...t,
         canSeePricing: t.canSeePricing ?? false,
         canSeeEstimatesAndFinancials: t.canSeeEstimatesAndFinancials ?? false,
+        tabAccess: normalizeCrewTabAccess(t.tabAccess),
       })),
     });
     // Ensure latest company profile info (name, logo, etc.) is used even on old documents
@@ -5228,6 +5256,7 @@ export default function Home() {
             ...t,
             canSeePricing: t.canSeePricing ?? false,
             canSeeEstimatesAndFinancials: t.canSeeEstimatesAndFinancials ?? false,
+            tabAccess: normalizeCrewTabAccess(t.tabAccess),
           })),
         };
       });
@@ -5382,9 +5411,62 @@ export default function Home() {
     }, 500);
   };
 
+  const isEditorDocAllowedForCrew = () => {
+    if (!currentCrew) return true;
+    if (documentType === 'invoice') return hasCrewTab('invoices');
+    if (freshDocumentRef.current || editorOpenedAsNewRef.current) {
+      return hasCrewTab('newEstimate') || (!freshDocumentRef.current && hasCrewTab('estimates'));
+    }
+    return hasCrewTab('estimates');
+  };
+
+  const navigateToAllowedCrewLanding = () => {
+    const first = firstAllowedCrewTab(currentCrew?.tabAccess);
+    if (first === 'dashboard') {
+      setView('dashboard');
+      return;
+    }
+    if (first === 'estimates') {
+      setView('estimatesList');
+      return;
+    }
+    if (first === 'invoices') {
+      setView('invoicesList');
+      return;
+    }
+    if (first === 'newEstimate') {
+      void openNewDocument('estimate');
+      return;
+    }
+    if (first === 'reports') {
+      void refreshArchivesList();
+      setView('reportsView');
+      return;
+    }
+    if (first === 'recurring') {
+      setView('recurringView');
+      return;
+    }
+    if (first === 'receptionist') {
+      void loadReceptionistFromSettings();
+      setView('receptionistView');
+      return;
+    }
+    setProfileTab('billing');
+    setBillingPanel('overview');
+    setView('profileView');
+  };
+
   /** Open an estimate or invoice from dashboard / lists (clickable links). */
   const openDocumentFromList = async (est: any) => {
     if (!est) return;
+    const isInv =
+      String(est.documentType || est.documenttype || '').toLowerCase() === 'invoice' ||
+      String(est.invoiceNumber || est.invoicenumber || '').toUpperCase().startsWith('INV');
+    if (currentCrew && !hasCrewTab(isInv ? 'invoices' : 'estimates')) {
+      showMessage(CREW_TAB_DENIED_MESSAGE);
+      return;
+    }
     await loadSelectedEstimate(est);
     setSelectedIds([]);
     setView('editor');
@@ -5392,6 +5474,17 @@ export default function Home() {
   };
 
   const openNewDocument = async (type: 'estimate' | 'invoice') => {
+    if (currentCrew) {
+      if (type === 'estimate' && !hasCrewTab('newEstimate')) {
+        showMessage(CREW_TAB_DENIED_MESSAGE);
+        return;
+      }
+      if (type === 'invoice' && !hasCrewTab('invoices')) {
+        showMessage(CREW_TAB_DENIED_MESSAGE);
+        return;
+      }
+    }
+    editorOpenedAsNewRef.current = type === 'estimate';
     await newEstimate(type);
     if (user?.id) {
       await refreshSavedList();
@@ -5401,11 +5494,24 @@ export default function Home() {
   };
 
   const openExistingDocument = async (est: any) => {
+    const isInv =
+      String(est?.documentType || est?.documenttype || '').toLowerCase() === 'invoice' ||
+      String(est?.invoiceNumber || est?.invoicenumber || '').toUpperCase().startsWith('INV');
+    if (currentCrew && !hasCrewTab(isInv ? 'invoices' : 'estimates')) {
+      showMessage(CREW_TAB_DENIED_MESSAGE);
+      return;
+    }
     await loadSelectedEstimate(est);
     setView('editor');
   };
 
-  const goToDashboard = () => setView('dashboard');
+  const goToDashboard = () => {
+    if (currentCrew && !hasCrewTab('dashboard')) {
+      navigateToAllowedCrewLanding();
+      return;
+    }
+    setView('dashboard');
+  };
 
   useEffect(() => {
     if (currentCrew && view === 'profileView' && profileTab !== 'billing') {
@@ -5413,6 +5519,25 @@ export default function Home() {
       setBillingPanel('overview');
     }
   }, [currentCrew, view, profileTab]);
+
+  useEffect(() => {
+    if (!currentCrew) return;
+    if (isCalendarModalOpen && !hasCrewTab('calendar')) {
+      setIsCalendarModalOpen(false);
+    }
+    if (view === 'profileView') return;
+    if (
+      (view === 'dashboard' && !hasCrewTab('dashboard')) ||
+      (view === 'estimatesList' && !hasCrewTab('estimates')) ||
+      (view === 'invoicesList' && !hasCrewTab('invoices')) ||
+      ((view === 'reportsView' || view === 'archivesView') && !hasCrewTab('reports')) ||
+      (view === 'recurringView' && !hasCrewTab('recurring')) ||
+      (view === 'receptionistView' && !hasCrewTab('receptionist')) ||
+      ((view === 'editor' || view === 'sendPreview') && !isEditorDocAllowedForCrew())
+    ) {
+      navigateToAllowedCrewLanding();
+    }
+  }, [currentCrew, crewResolved, view, documentType, isCalendarModalOpen]);
 
   /** Owners open Company Profile. Crew only get their own Account card — never company settings. */
   const openAccountOrProfile = (tab?: 'info' | 'billing' | 'payments' | 'tutorials') => {
@@ -6783,6 +6908,10 @@ export default function Home() {
   };
 
   const convertToInvoice = async () => {
+    if (currentCrew && !hasCrewTab('invoices')) {
+      showMessage(CREW_TAB_DENIED_MESSAGE);
+      return;
+    }
     const previousId = invoiceNumber;
     const prevUpper = previousId.toUpperCase();
     const nextNumber = prevUpper.startsWith('EST')
@@ -6890,6 +7019,10 @@ export default function Home() {
    * Uses the same reliable save path as Save (client upsert → lowercase → /api/documents/save).
    */
   const convertInvoiceToEstimate = async (sourceRow?: any) => {
+    if (currentCrew && !hasCrewTab('estimates')) {
+      showMessage(CREW_TAB_DENIED_MESSAGE);
+      return;
+    }
     if (!user || !supabase || !workspaceUserId) {
       showMessage('Not logged in — cannot convert. Log in again.');
       return;
@@ -7585,6 +7718,10 @@ export default function Home() {
   };
 
   const openArchivesView = async () => {
+    if (currentCrew && !hasCrewTab('reports')) {
+      showMessage(CREW_TAB_DENIED_MESSAGE);
+      return;
+    }
     await refreshArchivesList();
     setView('archivesView');
   };
@@ -8366,6 +8503,7 @@ export default function Home() {
         role: (c.role === 'full' ? 'full' : 'limited') as 'full' | 'limited',
         canSeePricing: !!c.canSeePricing,
         canSeeEstimatesAndFinancials: !!c.canSeeEstimatesAndFinancials,
+        tabAccess: normalizeCrewTabAccess(c.tabAccess),
         seatStatus: c.seatStatus as string | undefined,
         seatPeriodEnd: c.seatPeriodEnd as string | null | undefined,
         needsSeatPayment: !!c.needsSeatPayment,
@@ -8467,6 +8605,7 @@ export default function Home() {
           role: 'limited',
           canSeePricing: false,
           canSeeEstimatesAndFinancials: false,
+          tabAccess: DEFAULT_CREW_TAB_ACCESS,
         }),
       });
       const json = await res.json().catch(() => ({}));
@@ -8550,6 +8689,7 @@ export default function Home() {
       role?: 'full' | 'limited';
       canSeePricing?: boolean;
       canSeeEstimatesAndFinancials?: boolean;
+      tabAccess?: Partial<CrewTabAccess>;
     }
   ) => {
     if (!supabase || currentCrew) return;
@@ -8557,7 +8697,7 @@ export default function Home() {
       const { data: sessionData } = await supabase.auth.getSession();
       const token = sessionData.session?.access_token;
       if (!token) return;
-      await fetch('/api/crew/update', {
+      const res = await fetch('/api/crew/update', {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -8565,6 +8705,10 @@ export default function Home() {
         },
         body: JSON.stringify({ email, ...patch }),
       });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        if (json?.error) showMessage(json.error);
+      }
     } catch {
       /* profile save still has flags for display */
     }
@@ -9105,6 +9249,10 @@ export default function Home() {
   };
 
   const openCalendarModal = async () => {
+    if (currentCrew && !hasCrewTab('calendar')) {
+      showMessage(CREW_TAB_DENIED_MESSAGE);
+      return;
+    }
     await refreshSavedList();
     resetAppointmentForm();
     setCalendarView('schedule');
@@ -11499,6 +11647,10 @@ export default function Home() {
 
   /** Navigate to Reports → Paid invoices (replaces old Profile paid tab). */
   const openPaidInvoicesReport = () => {
+    if (currentCrew && !hasCrewTab('reports')) {
+      showMessage(CREW_TAB_DENIED_MESSAGE);
+      return;
+    }
     void refreshArchivesList();
     setReportsSubTab('paid');
     setView('reportsView');
@@ -12346,7 +12498,7 @@ export default function Home() {
               </div>
 
               {/* Leads: AI Receptionist (paid+on) and/or Email summaries (company toggle) */}
-              {(showReceptionistLeadsOnDashboard() || showEmailLeadsOnDashboard()) && (
+              {((showReceptionistLeadsOnDashboard() && hasCrewTab('receptionist')) || showEmailLeadsOnDashboard()) && (
               <Card className="mb-8 border-emerald-200 shadow-sm">
                 <CardContent className="p-4 sm:p-6 space-y-6">
                   <div className="flex flex-wrap items-start justify-between gap-3">
@@ -12356,7 +12508,9 @@ export default function Home() {
                       </h3>
                       <p className="text-sm text-gray-500 mt-1">
                         {[
-                          showReceptionistLeadsOnDashboard() ? 'AI Receptionist leads' : null,
+                          showReceptionistLeadsOnDashboard() && hasCrewTab('receptionist')
+                            ? 'AI Receptionist leads'
+                            : null,
                           showEmailLeadsOnDashboard() ? 'email summaries' : null,
                         ]
                           .filter(Boolean)
@@ -12365,7 +12519,7 @@ export default function Home() {
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      {showReceptionistLeadsOnDashboard() && (
+                      {showReceptionistLeadsOnDashboard() && hasCrewTab('receptionist') && (
                         <Button
                           type="button"
                           size="sm"
@@ -12381,7 +12535,9 @@ export default function Home() {
                         size="sm"
                         variant="outline"
                         onClick={() => {
-                          void loadReceptionistFromSettings({ skipBillingSync: true });
+                          if (hasCrewTab('receptionist')) {
+                            void loadReceptionistFromSettings({ skipBillingSync: true });
+                          }
                           if (showEmailLeadsOnDashboard()) void refreshEmailLeadSummaries();
                         }}
                       >
@@ -12394,13 +12550,13 @@ export default function Home() {
                       column past the card (it was clipped off-center on phones). */}
                   <div
                     className={`grid min-w-0 grid-cols-1 gap-4 ${
-                      showReceptionistLeadsOnDashboard() && showEmailLeadsOnDashboard()
+                      showReceptionistLeadsOnDashboard() && hasCrewTab('receptionist') && showEmailLeadsOnDashboard()
                         ? 'md:grid-cols-2'
                         : ''
                     }`}
                   >
                     {/* AI Receptionist leads — paid add-on + On toggle only */}
-                    {showReceptionistLeadsOnDashboard() && (
+                    {showReceptionistLeadsOnDashboard() && hasCrewTab('receptionist') && (
                     <div className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50/80 p-4 min-h-[180px]">
                       <div className="flex items-center justify-between gap-2 mb-3">
                         <h4 className="font-semibold text-sm text-slate-800">📞 AI Receptionist</h4>
@@ -12703,6 +12859,7 @@ export default function Home() {
               </Card>
               )}
 
+              {hasCrewTab('estimates') && (
               <Card className="mb-8">
                 <CardContent className="p-6">
                   <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
@@ -12782,7 +12939,9 @@ export default function Home() {
                   )}
                 </CardContent>
               </Card>
+              )}
 
+              {hasCrewTab('invoices') && (
               <Card className="mb-8">
                 <CardContent className="p-6">
                   <h3 className="font-semibold mb-1 flex items-center gap-2">
@@ -12892,6 +13051,7 @@ export default function Home() {
                   )}
                 </CardContent>
               </Card>
+              )}
 
               {canSeeFinancials && (
                 <Card>
@@ -13161,6 +13321,7 @@ export default function Home() {
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                       <Button size="sm" onClick={() => void openDocumentFromList(est)}>{t('open')}</Button>
+                      {hasCrewTab('estimates') && (
                       <Button
                         size="sm"
                         variant="outline"
@@ -13169,6 +13330,7 @@ export default function Home() {
                       >
                         {t('convertToEstimate')}
                       </Button>
+                      )}
                       <Button size="sm" variant="outline" onClick={() => archiveEstimate(est.id)}>{t('archive')}</Button>
                       <Button size="sm" variant="destructive" onClick={() => deleteSelectedEstimate(est.id)}>{t('delete')}</Button>
                     </div>
@@ -13184,6 +13346,7 @@ export default function Home() {
                 <Button variant="outline" onClick={goToDashboard}>
                   ← Back to {t('dashboard')}
                 </Button>
+                {hasCrewTab('recurring') && (
                 <Button
                   type="button"
                   className="bg-teal-700 hover:bg-teal-800 text-white"
@@ -13191,6 +13354,7 @@ export default function Home() {
                 >
                   🔁 Recurring charges
                 </Button>
+                )}
               </div>
 
               <div className="flex justify-between items-start mb-8">
@@ -13970,7 +14134,7 @@ export default function Home() {
                   >
                     📧 Send Invoice
                   </Button>
-                  {paymentStatus !== 'paid' && (
+                  {paymentStatus !== 'paid' && hasCrewTab('estimates') && (
                     <Button
                       type="button"
                       onClick={() => void convertInvoiceToEstimate()}
@@ -14009,7 +14173,9 @@ export default function Home() {
                         {t('unmarkEstimateApproved')}
                       </Button>
                     )}
-                    <Button onClick={convertToInvoice} className="bg-[#f59e0b]">{t('convertToInvoice')}</Button>
+                    {hasCrewTab('invoices') && (
+                      <Button onClick={convertToInvoice} className="bg-[#f59e0b]">{t('convertToInvoice')}</Button>
+                    )}
                     <span className="text-xs text-gray-500 self-center">
                       {saveStatus === 'saving' && 'Saving…'}
                       {saveStatus === 'saved' && lastSaved && `Saved ${lastSaved}`}
@@ -15747,128 +15913,211 @@ export default function Home() {
                         {(profile.teammates || []).length === 0 ? (
                           <p className="text-sm text-gray-500">No crew members yet.</p>
                         ) : (
-                          (profile.teammates || []).map((crew, index) => (
+                          (profile.teammates || []).map((crew, index) => {
+                            const crewTabs = normalizeCrewTabAccess((crew as any).tabAccess);
+                            const allowedCount = countAllowedCrewTabs(crewTabs);
+                            const setCrewTabs = (nextTabAccess: CrewTabAccess) => {
+                              const updated = [...profile.teammates];
+                              updated[index] = {
+                                ...updated[index],
+                                tabAccess: nextTabAccess,
+                              };
+                              setProfile((prev) => ({ ...prev, teammates: updated }));
+                              void updateCrewPermissions(crew.email, { tabAccess: nextTabAccess });
+                              setTimeout(() => saveToDB(), 100);
+                            };
+                            return (
                             <div
                               key={`${crew.email}-${index}`}
-                              className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border p-4 rounded-lg"
+                              data-testid={`crew-member-card-${crew.email}`}
+                              className="flex flex-col gap-3 border p-4 rounded-lg bg-white"
                             >
-                              <div className="min-w-0">
-                                <div className="font-medium break-all">{crew.email}</div>
-                                <div className="text-xs text-gray-500 mt-0.5">
-                                  Seat:{' '}
-                                  <span className="capitalize font-medium">
-                                    {(crew as any).seatStatus || 'unknown'}
-                                  </span>
-                                  {(crew as any).needsSeatPayment ? (
-                                    <span className="text-amber-700 font-semibold">
-                                      {' '}
-                                      · {nativeApp ? 'Payment needed' : 'Payment needed ($14.99/mo)'}
+                              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="font-medium break-all">{crew.email}</div>
+                                  <div className="text-xs text-gray-500 mt-0.5">
+                                    Seat:{' '}
+                                    <span className="capitalize font-medium">
+                                      {(crew as any).seatStatus || 'unknown'}
                                     </span>
-                                  ) : null}
+                                    {(crew as any).needsSeatPayment ? (
+                                      <span className="text-amber-700 font-semibold">
+                                        {' '}
+                                        · {nativeApp ? 'Payment needed' : 'Payment needed ($14.99/mo)'}
+                                      </span>
+                                    ) : null}
+                                  </div>
                                 </div>
-                              </div>
-                              <div className="flex flex-wrap items-center gap-4">
-                                {(crew as any).needsSeatPayment && !nativeApp && (
-                                  <Button
-                                    size="sm"
-                                    className="bg-amber-500 hover:bg-amber-600 text-white"
-                                    disabled={crewInviteBusy}
-                                    onClick={() =>
-                                      void startCrewSeatCheckout({
-                                        email: crew.email,
-                                        userId: crew.userId,
-                                        memberId: (crew as any).memberId,
-                                      })
-                                    }
-                                  >
-                                    Pay $14.99 seat
-                                  </Button>
-                                )}
-                                <div className="flex items-center gap-2 text-sm">
-                                  <span>Full</span>
-                                  <label className="relative inline-flex items-center cursor-pointer">
+                                <div className="flex flex-wrap items-center gap-4">
+                                  {(crew as any).needsSeatPayment && !nativeApp && (
+                                    <Button
+                                      size="sm"
+                                      className="bg-amber-500 hover:bg-amber-600 text-white"
+                                      disabled={crewInviteBusy}
+                                      onClick={() =>
+                                        void startCrewSeatCheckout({
+                                          email: crew.email,
+                                          userId: crew.userId,
+                                          memberId: (crew as any).memberId,
+                                        })
+                                      }
+                                    >
+                                      Pay $14.99 seat
+                                    </Button>
+                                  )}
+                                  <div className="flex items-center gap-2 text-sm">
+                                    <span>Full</span>
+                                    <label className="relative inline-flex items-center cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        checked={crew.role === 'full'}
+                                        onChange={() => {
+                                          const nextRole =
+                                            crew.role === 'full' ? 'limited' : 'full';
+                                          const updated = [...profile.teammates];
+                                          updated[index] = {
+                                            ...updated[index],
+                                            role: nextRole,
+                                          };
+                                          setProfile((prev) => ({ ...prev, teammates: updated }));
+                                          void updateCrewPermissions(crew.email, { role: nextRole });
+                                          setTimeout(() => saveToDB(), 100);
+                                        }}
+                                        className="sr-only peer"
+                                      />
+                                      <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]" />
+                                    </label>
+                                    <span>Limited</span>
+                                  </div>
+                                  <label className="flex items-center gap-1 cursor-pointer text-xs">
                                     <input
                                       type="checkbox"
-                                      checked={crew.role === 'full'}
+                                      checked={crew.canSeePricing ?? false}
                                       onChange={() => {
-                                        const nextRole =
-                                          crew.role === 'full' ? 'limited' : 'full';
+                                        const next = !(crew.canSeePricing ?? false);
                                         const updated = [...profile.teammates];
                                         updated[index] = {
                                           ...updated[index],
-                                          role: nextRole,
+                                          canSeePricing: next,
                                         };
                                         setProfile((prev) => ({ ...prev, teammates: updated }));
-                                        void updateCrewPermissions(crew.email, { role: nextRole });
+                                        void updateCrewPermissions(crew.email, { canSeePricing: next });
                                         setTimeout(() => saveToDB(), 100);
                                       }}
-                                      className="sr-only peer"
+                                      className="w-3 h-3 accent-[#10b981]"
                                     />
-                                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]" />
+                                    See pricing
                                   </label>
-                                  <span>Limited</span>
+                                  <label className="flex items-center gap-1 cursor-pointer text-xs">
+                                    <input
+                                      type="checkbox"
+                                      checked={crew.canSeeEstimatesAndFinancials ?? false}
+                                      onChange={() => {
+                                        const next = !(crew.canSeeEstimatesAndFinancials ?? false);
+                                        const updated = [...profile.teammates];
+                                        updated[index] = {
+                                          ...updated[index],
+                                          canSeeEstimatesAndFinancials: next,
+                                        };
+                                        setProfile((prev) => ({ ...prev, teammates: updated }));
+                                        void updateCrewPermissions(crew.email, {
+                                          canSeeEstimatesAndFinancials: next,
+                                        });
+                                        setTimeout(() => saveToDB(), 100);
+                                      }}
+                                      className="w-3 h-3 accent-[#10b981]"
+                                    />
+                                    See estimates &amp; financials
+                                  </label>
+                                  <Button
+                                    variant="destructive"
+                                    size="sm"
+                                    onClick={() => {
+                                      if (!confirm(`Remove crew member ${crew.email}? They will no longer be able to log in.`))
+                                        return;
+                                      void removeCrewMember(
+                                        crew.email,
+                                        (crew as any).userId as string | undefined
+                                      );
+                                      const updated = profile.teammates.filter((_, i) => i !== index);
+                                      setProfile((prev) => ({ ...prev, teammates: updated }));
+                                      setTimeout(() => saveToDB(), 100);
+                                      showMessage('Crew member removed');
+                                    }}
+                                  >
+                                    Delete
+                                  </Button>
                                 </div>
-                                <label className="flex items-center gap-1 cursor-pointer text-xs">
-                                  <input
-                                    type="checkbox"
-                                    checked={crew.canSeePricing ?? false}
-                                    onChange={() => {
-                                      const next = !(crew.canSeePricing ?? false);
-                                      const updated = [...profile.teammates];
-                                      updated[index] = {
-                                        ...updated[index],
-                                        canSeePricing: next,
-                                      };
-                                      setProfile((prev) => ({ ...prev, teammates: updated }));
-                                      void updateCrewPermissions(crew.email, { canSeePricing: next });
-                                      setTimeout(() => saveToDB(), 100);
-                                    }}
-                                    className="w-3 h-3 accent-[#10b981]"
-                                  />
-                                  See pricing
-                                </label>
-                                <label className="flex items-center gap-1 cursor-pointer text-xs">
-                                  <input
-                                    type="checkbox"
-                                    checked={crew.canSeeEstimatesAndFinancials ?? false}
-                                    onChange={() => {
-                                      const next = !(crew.canSeeEstimatesAndFinancials ?? false);
-                                      const updated = [...profile.teammates];
-                                      updated[index] = {
-                                        ...updated[index],
-                                        canSeeEstimatesAndFinancials: next,
-                                      };
-                                      setProfile((prev) => ({ ...prev, teammates: updated }));
-                                      void updateCrewPermissions(crew.email, {
-                                        canSeeEstimatesAndFinancials: next,
-                                      });
-                                      setTimeout(() => saveToDB(), 100);
-                                    }}
-                                    className="w-3 h-3 accent-[#10b981]"
-                                  />
-                                  See estimates &amp; financials
-                                </label>
-                                <Button
-                                  variant="destructive"
-                                  size="sm"
-                                  onClick={() => {
-                                    if (!confirm(`Remove crew member ${crew.email}? They will no longer be able to log in.`))
-                                      return;
-                                    void removeCrewMember(
-                                      crew.email,
-                                      (crew as any).userId as string | undefined
+                              </div>
+
+                              <div className="border-t pt-3 space-y-2" data-testid="crew-tab-access-panel">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <div>
+                                    <div className="text-xs font-semibold text-slate-800">
+                                      Tab &amp; section access ({allowedCount}/{CREW_TABS.length} allowed)
+                                    </div>
+                                    <p className="text-[11px] text-gray-500">
+                                      Toggle which tabs this crew login can open. Company Profile stays owner-only; crew always keep Account.
+                                    </p>
+                                  </div>
+                                  <div className="flex items-center gap-1.5">
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-7 px-2 text-xs"
+                                      onClick={() => setCrewTabs(createUniformCrewTabAccess(true))}
+                                    >
+                                      Allow all
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-7 px-2 text-xs"
+                                      onClick={() => setCrewTabs(createUniformCrewTabAccess(false))}
+                                    >
+                                      Deny all
+                                    </Button>
+                                  </div>
+                                </div>
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                                  {CREW_TABS.map((tab) => {
+                                    const allowed = crewTabs[tab.key];
+                                    return (
+                                      <label
+                                        key={tab.key}
+                                        className={`flex items-center justify-between gap-2 rounded-md border px-2.5 py-2 text-xs cursor-pointer transition-colors ${
+                                          allowed
+                                            ? 'border-emerald-200 bg-emerald-50/60 text-slate-900'
+                                            : 'border-slate-200 bg-slate-50 text-slate-500'
+                                        }`}
+                                        title={tab.description}
+                                      >
+                                        <span className="flex items-center gap-1.5 min-w-0">
+                                          <span aria-hidden>{tab.icon}</span>
+                                          <span className="truncate font-medium">{tab.label}</span>
+                                        </span>
+                                        <input
+                                          type="checkbox"
+                                          checked={allowed}
+                                          data-testid={`crew-tab-toggle-${tab.key}`}
+                                          aria-label={`${tab.label} access for ${crew.email}`}
+                                          onChange={() =>
+                                            setCrewTabs({
+                                              ...crewTabs,
+                                              [tab.key]: !allowed,
+                                            })
+                                          }
+                                          className="w-4 h-4 shrink-0 accent-[#10b981]"
+                                        />
+                                      </label>
                                     );
-                                    const updated = profile.teammates.filter((_, i) => i !== index);
-                                    setProfile((prev) => ({ ...prev, teammates: updated }));
-                                    setTimeout(() => saveToDB(), 100);
-                                    showMessage('Crew member removed');
-                                  }}
-                                >
-                                  Delete
-                                </Button>
+                                  })}
+                                </div>
                               </div>
                             </div>
-                          ))
+                          );})
                         )}
                       </div>
                     </CardContent>
@@ -17295,6 +17544,7 @@ export default function Home() {
                                 </div>
                               </div>
                               <div className="flex flex-wrap gap-2 shrink-0">
+                                {hasCrewTab('estimates') && (
                                 <Button
                                   size="sm"
                                   onClick={async () => {
@@ -17304,6 +17554,7 @@ export default function Home() {
                                 >
                                   Open
                                 </Button>
+                                )}
                                 <Button
                                   size="sm"
                                   variant="outline"
@@ -17407,6 +17658,7 @@ export default function Home() {
                                   </div>
                                 </div>
                                 <div className="flex flex-wrap gap-2 shrink-0">
+                                  {hasCrewTab('invoices') && (
                                   <Button
                                     size="sm"
                                     onClick={async () => {
@@ -17416,6 +17668,7 @@ export default function Home() {
                                   >
                                     Open
                                   </Button>
+                                  )}
                                   <Button
                                     size="sm"
                                     variant="outline"
@@ -17482,6 +17735,7 @@ export default function Home() {
                                     </div>
                                   </div>
                                   <div className="flex flex-wrap gap-2 shrink-0">
+                                    {hasCrewTab('invoices') && (
                                     <Button
                                       size="sm"
                                       onClick={async () => {
@@ -17491,6 +17745,8 @@ export default function Home() {
                                     >
                                       Open
                                     </Button>
+                                    )}
+                                    {hasCrewTab('estimates') && (
                                     <Button
                                       size="sm"
                                       variant="outline"
@@ -17499,6 +17755,7 @@ export default function Home() {
                                     >
                                       {t('convertToEstimate')}
                                     </Button>
+                                    )}
                                     <Button
                                       size="sm"
                                       variant="outline"
@@ -17548,6 +17805,7 @@ export default function Home() {
                           >
                             Refresh
                           </Button>
+                          {hasCrewTab('recurring') && (
                           <Button
                             type="button"
                             size="sm"
@@ -17556,6 +17814,7 @@ export default function Home() {
                           >
                             Manage plans
                           </Button>
+                          )}
                         </div>
                       </div>
 
@@ -18326,7 +18585,14 @@ export default function Home() {
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-2 sm:gap-3 shrink-0">
-                      <Button size="sm" onClick={async () => { await loadSelectedEstimate(est); setView('editor'); }}>{t('open')}</Button>
+                      {hasCrewTab(
+                        String(est.documentType || est.documenttype || '').toLowerCase() === 'invoice' ||
+                        String(est.invoiceNumber || est.invoicenumber || '').toUpperCase().startsWith('INV')
+                          ? 'invoices'
+                          : 'estimates'
+                      ) && (
+                        <Button size="sm" onClick={() => void openDocumentFromList(est)}>{t('open')}</Button>
+                      )}
                       {isCanceledRecurring ? (
                         <Button
                           size="sm"
@@ -18936,37 +19202,50 @@ export default function Home() {
           className="app-shell-bottom-nav border-t shadow-inner flex items-center justify-around pt-2 px-1 text-xs no-print"
           aria-label="Main"
         >
-          <button type="button" onClick={goToDashboard} className={`flex flex-col items-center flex-1 py-1 ${view === 'dashboard' ? 'text-[#10b981]' : 'text-gray-500'}`}>
-            <span className="text-3xl mb-0.5">📊</span>
-            <span>{t('dashboard')}</span>
-          </button>
-          <button type="button" onClick={() => setView('estimatesList')} className="flex flex-col items-center flex-1 py-1 text-gray-500">
-            <span className="text-3xl mb-0.5">📋</span>
-            <span>{t('estimates')}</span>
-          </button>
-          <button type="button" onClick={() => setView('invoicesList')} className="flex flex-col items-center flex-1 py-1 text-gray-500">
-            <span className="text-3xl mb-0.5">💰</span>
-            <span>{t('invoices')}</span>
-          </button>
-          <button type="button" onClick={() => openNewDocument('estimate')} className="flex flex-col items-center flex-1 py-1 text-gray-500">
-            <span className="text-3xl mb-0.5">📄</span>
-            <span>{t('newEstimate')}</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setView('reportsView');
-              void refreshArchivesList();
-            }}
-            className="flex flex-col items-center flex-1 py-1 text-gray-500"
-          >
-            <span className="text-3xl mb-0.5">📊</span>
-            <span>{t('reports')}</span>
-          </button>
-          <button type="button" onClick={openCalendarModal} className="flex flex-col items-center flex-1 py-1 text-gray-500">
-            <span className="text-3xl mb-0.5">📅</span>
-            <span>{t('calendar')}</span>
-          </button>
+          {hasCrewTab('dashboard') && (
+            <button type="button" data-testid="nav-dashboard" onClick={goToDashboard} className={`flex flex-col items-center flex-1 py-1 ${view === 'dashboard' ? 'text-[#10b981]' : 'text-gray-500'}`}>
+              <span className="text-3xl mb-0.5">📊</span>
+              <span>{t('dashboard')}</span>
+            </button>
+          )}
+          {hasCrewTab('estimates') && (
+            <button type="button" data-testid="nav-estimates" onClick={() => setView('estimatesList')} className={`flex flex-col items-center flex-1 py-1 ${view === 'estimatesList' ? 'text-[#10b981]' : 'text-gray-500'}`}>
+              <span className="text-3xl mb-0.5">📋</span>
+              <span>{t('estimates')}</span>
+            </button>
+          )}
+          {hasCrewTab('invoices') && (
+            <button type="button" data-testid="nav-invoices" onClick={() => setView('invoicesList')} className={`flex flex-col items-center flex-1 py-1 ${view === 'invoicesList' ? 'text-[#10b981]' : 'text-gray-500'}`}>
+              <span className="text-3xl mb-0.5">💰</span>
+              <span>{t('invoices')}</span>
+            </button>
+          )}
+          {hasCrewTab('newEstimate') && (
+            <button type="button" data-testid="nav-new-estimate" onClick={() => openNewDocument('estimate')} className="flex flex-col items-center flex-1 py-1 text-gray-500">
+              <span className="text-3xl mb-0.5">📄</span>
+              <span>{t('newEstimate')}</span>
+            </button>
+          )}
+          {hasCrewTab('reports') && (
+            <button
+              type="button"
+              data-testid="nav-reports"
+              onClick={() => {
+                setView('reportsView');
+                void refreshArchivesList();
+              }}
+              className={`flex flex-col items-center flex-1 py-1 ${view === 'reportsView' ? 'text-[#10b981]' : 'text-gray-500'}`}
+            >
+              <span className="text-3xl mb-0.5">📊</span>
+              <span>{t('reports')}</span>
+            </button>
+          )}
+          {hasCrewTab('calendar') && (
+            <button type="button" data-testid="nav-calendar" onClick={openCalendarModal} className="flex flex-col items-center flex-1 py-1 text-gray-500">
+              <span className="text-3xl mb-0.5">📅</span>
+              <span>{t('calendar')}</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={() => openAccountOrProfile(currentCrew ? 'billing' : undefined)}
@@ -18986,7 +19265,15 @@ export default function Home() {
         <DialogContent className="max-w-2xl">
           <DialogHeader><DialogTitle>{t('savedDocuments')}</DialogTitle></DialogHeader>
           <div className="max-h-96 overflow-auto">
-            {savedEstimatesList.map(est => (
+            {savedEstimatesList
+              .filter((est) => {
+                if (!currentCrew) return true;
+                const isInv =
+                  String(est.documentType || est.documenttype || '').toLowerCase() === 'invoice' ||
+                  String(est.invoiceNumber || est.invoicenumber || '').toUpperCase().startsWith('INV');
+                return hasCrewTab(isInv ? 'invoices' : 'estimates');
+              })
+              .map(est => (
               <div key={est.id} className="flex justify-between items-center p-4 border-b">
                 <div>
                   <div className="font-semibold">{est.jobName || 'Untitled'} — {est.invoiceNumber}</div>

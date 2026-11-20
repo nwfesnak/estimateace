@@ -1,3 +1,4 @@
+import { crewPermissionDeniedResponse, requireWorkspaceOwner } from '@/lib/workspace';
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import {
@@ -20,6 +21,9 @@ export async function POST(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: authError || 'Unauthorized' }, { status: 401 });
     }
+    const ws = await requireWorkspaceOwner(user.id, undefined, { requireTab: 'receptionist' });
+    if (ws.denied) return ws.denied;
+    if (ws.isCrew) return crewPermissionDeniedResponse();
 
     const body = await request.json().catch(() => ({}));
     const releaseNumber = body.releaseNumber === true;

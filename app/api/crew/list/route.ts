@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { crewSeatHasAccess } from '@/lib/crew-billing';
+import { normalizeCrewTabAccess } from '@/lib/crew-tab-access';
 
 /**
  * Owner: list all crew members from DB (source of truth).
@@ -32,13 +33,23 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Crew accounts cannot list crew.' }, { status: 403 });
     }
 
-    const { data: rows, error } = await admin
+    let { data: rows, error } = await admin
       .from('crew_members')
       .select(
-        'id, email, crew_user_id, role, can_see_pricing, can_see_estimates_and_financials, seat_status, seat_period_end, seat_cancel_at_period_end, stripe_subscription_id, created_at'
+        'id, email, crew_user_id, role, can_see_pricing, can_see_estimates_and_financials, tab_access, seat_status, seat_period_end, seat_cancel_at_period_end, stripe_subscription_id, created_at'
       )
       .eq('owner_user_id', user.id)
       .order('created_at', { ascending: true });
+
+    if (error && (error.code === '42703' || error.message?.includes('tab_access'))) {
+      ({ data: rows, error } = await admin
+        .from('crew_members')
+        .select(
+          'id, email, crew_user_id, role, can_see_pricing, can_see_estimates_and_financials, seat_status, seat_period_end, seat_cancel_at_period_end, stripe_subscription_id, created_at'
+        )
+        .eq('owner_user_id', user.id)
+        .order('created_at', { ascending: true }) as any);
+    }
 
     if (error) {
       if (error.code === '42P01') {
@@ -63,6 +74,7 @@ export async function GET(request: NextRequest) {
             role: r.role === 'full' ? 'full' : 'limited',
             canSeePricing: r.can_see_pricing === true,
             canSeeEstimatesAndFinancials: r.can_see_estimates_and_financials === true,
+            tabAccess: normalizeCrewTabAccess(r.tab_access),
             seatStatus: 'active',
             seatPeriodEnd: null,
             seatCancelAtPeriodEnd: false,
@@ -86,9 +98,6 @@ export async function GET(request: NextRequest) {
     for (const s of seats || []) {
       if (s.crew_email) seatsByEmail.set(String(s.crew_email).toLowerCase(), s);
       if (s.crew_user_id) seatsByUser.set(String(s.crew_user_id), s);
-      if (s.stripe_subscription_id) {
-        /* keep latest by iterating order — seats ordered by created if we sort */
-      }
     }
 
     const crew = (rows || []).map((r: any) => {
@@ -125,6 +134,7 @@ export async function GET(request: NextRequest) {
         role: r.role === 'full' ? 'full' : 'limited',
         canSeePricing: r.can_see_pricing === true,
         canSeeEstimatesAndFinancials: r.can_see_estimates_and_financials === true,
+        tabAccess: normalizeCrewTabAccess(r.tab_access),
         seatStatus,
         seatPeriodEnd: periodEnd,
         seatCancelAtPeriodEnd: cancelAtEnd,

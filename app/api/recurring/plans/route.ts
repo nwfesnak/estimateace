@@ -17,16 +17,13 @@ import {
 import { enforceAppAccess } from '@/lib/billing-access';
 import { getRestrictedCrewAccess } from '@/lib/crew-access';
 import { maskMoneyDeep } from '@/lib/crew-redaction';
-import { resolveWorkspace } from '@/lib/workspace';
+import { requireWorkspaceOwner } from '@/lib/workspace';
 
 /**
  * Seat-aware workspace owner. Inactive crew are already refused by enforceAppAccess;
  * as a second line they resolve to their own (empty) workspace, never the owner's.
  */
-async function resolveOwnerId(userId: string): Promise<string> {
-  const ws = await resolveWorkspace(userId);
-  return ws.ok ? ws.ownerUserId : userId;
-}
+
 
 /** List recurring client service plans (not EstimateAce SaaS). */
 export async function GET(request: NextRequest) {
@@ -36,7 +33,11 @@ export async function GET(request: NextRequest) {
     const paywall = await enforceAppAccess(user.id);
     if (paywall) return paywall;
 
-    const ownerId = await resolveOwnerId(user.id);
+    const ws = await requireWorkspaceOwner(user.id, getSupabaseAdmin(), {
+      requireTab: ['recurring', 'reports'],
+    });
+    if (ws.denied) return ws.denied;
+    const ownerId = ws.ownerUserId;
     let plans = await listRecurringPlans(ownerId);
     // Restricted crew: recurring amounts are pricing / financial data.
     {
@@ -63,7 +64,9 @@ export async function POST(request: NextRequest) {
     const paywall = await enforceAppAccess(user.id);
     if (paywall) return paywall;
 
-    const ownerId = await resolveOwnerId(user.id);
+    const ws = await requireWorkspaceOwner(user.id, getSupabaseAdmin(), { requireTab: 'recurring' });
+    if (ws.denied) return ws.denied;
+    const ownerId = ws.ownerUserId;
     const body = await request.json().catch(() => ({}));
     const interval = (['week', 'month', 'year'].includes(body.interval)
       ? body.interval
@@ -112,7 +115,9 @@ export async function PATCH(request: NextRequest) {
     const paywall = await enforceAppAccess(user.id);
     if (paywall) return paywall;
 
-    const ownerId = await resolveOwnerId(user.id);
+    const ws = await requireWorkspaceOwner(user.id, getSupabaseAdmin(), { requireTab: 'recurring' });
+    if (ws.denied) return ws.denied;
+    const ownerId = ws.ownerUserId;
     const body = await request.json().catch(() => ({}));
     {
       // Restricted crew only see a redacted amount: never let that placeholder save.

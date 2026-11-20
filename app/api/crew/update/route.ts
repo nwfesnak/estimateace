@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/supabase/auth-user';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
+import {
+  mergeCrewTabAccess,
+  normalizeCrewTabAccess,
+  parseCrewTabAccessPatch,
+} from '@/lib/crew-tab-access';
 
-/** Owner updates crew role / permission flags. */
+/** Owner updates crew role / permission flags / per-tab access. */
 export async function POST(request: NextRequest) {
   try {
     const { user, error: authError } = await getUserFromRequest(request);
@@ -39,6 +44,26 @@ export async function POST(request: NextRequest) {
       patch.can_see_estimates_and_financials = body.canSeeEstimatesAndFinancials;
     }
 
+    const tabPatch = parseCrewTabAccessPatch(body.tabAccess);
+    if (tabPatch) {
+      const { data: cur, error: curErr } = await admin
+        .from('crew_members')
+        .select('tab_access')
+        .eq('owner_user_id', user.id)
+        .eq('email', email)
+        .maybeSingle();
+      if (curErr && (curErr.code === '42703' || curErr.message?.includes('tab_access'))) {
+        return NextResponse.json(
+          {
+            error:
+              'Per-tab crew access requires the database migration (supabase/crew-tab-access-2026-11.sql).',
+          },
+          { status: 503 }
+        );
+      }
+      patch.tab_access = mergeCrewTabAccess((cur as any)?.tab_access, tabPatch);
+    }
+
     const { data, error } = await admin
       .from('crew_members')
       .update(patch)
@@ -48,13 +73,25 @@ export async function POST(request: NextRequest) {
       .maybeSingle();
 
     if (error) {
+      if (error.code === '42703' || error.message?.includes('tab_access')) {
+        return NextResponse.json(
+          {
+            error:
+              'Per-tab crew access requires the database migration (supabase/crew-tab-access-2026-11.sql).',
+          },
+          { status: 503 }
+        );
+      }
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
     if (!data) {
       return NextResponse.json({ error: 'Crew member not found.' }, { status: 404 });
     }
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({
+      ok: true,
+      tabAccess: normalizeCrewTabAccess((data as any).tab_access),
+    });
   } catch (e: any) {
     console.error('crew update:', e);
     return NextResponse.json({ error: 'Update failed' }, { status: 500 });
