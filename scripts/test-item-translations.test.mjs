@@ -87,7 +87,8 @@ test('clientSafeLineItem never includes translation keys', () => {
 test('page persists translations on items, loads them, and shows a stale note', () => {
   const page = src('app/page.tsx');
   assert.match(page, /from '@\/lib\/item-translations'/);
-  assert.match(page, /items: items \|\| \[\]/);
+  assert.match(page, /itemsToSave = itemsRef\.current \|\| items \|\| \[\]/);
+  assert.match(page, /items: itemsToSave,/);
   assert.match(page, /normalizeLoadedLineItem/);
   assert.match(page, /return \{ \.\.\.item, qty, price, total \}/);
   assert.match(page, /withItemTranslation\(it, translated, translateTo, text\)/);
