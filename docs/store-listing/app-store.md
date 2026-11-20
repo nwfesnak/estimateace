@@ -6,19 +6,26 @@ Character limits are in brackets. Counts below were checked.
 EstimateAce
 
 **Subtitle** [30]
-Estimates & Invoices for Pros
+Photo & LiDAR Estimates
 
 **Category**
 Primary: Business · Secondary: Productivity
 
 **Promotional text** [170] (can change any time without a new review)
-Snap job photos, get an AI-priced estimate in minutes, send it, and get paid. Built for contractors, remodelers, landscapers and home-service pros.
+Scan a room with your iPhone. Get a priced estimate from photos. LiDAR on Pro iPhones. Edit line items, add concept renderings, and send.
 
 **Keywords** [100] (comma-separated, no spaces after the commas, don't repeat words from the name)
-contractor,estimate,invoice,quote,bid,handyman,roofing,remodel,landscaping,plumber,HVAC,painting,job
+contractor,invoice,quote,bid,handyman,roofing,remodel,landscaping,plumber,HVAC,painting,lidar,scan
 
 **Description** [4000]
 EstimateAce is the estimating and invoicing app for contractors and home-service pros. Walk the job, snap a few photos, and send a professional estimate before you leave the driveway.
+
+PHOTO ESTIMATES AND ROOM SCAN
+• Snap 1–5 job photos, add a note, and AI drafts priced, editable line items — including upsell suggestions you can accept or ignore
+• On LiDAR-equipped iPhones (iPhone 12 Pro or newer Pro models, iOS 16+), scan a room to auto-fill floor and wall area, perimeter, ceiling height, and door and window counts
+• On other iPhones, enter room length, width and height manually
+• Measurements are a starting point for your estimate and are not guaranteed exact. You review and edit every figure before you send the quote
+• Attach before-and-after AI concept renderings, clearly labelled as concept renderings, so customers can see the idea
 
 FAST, ACCURATE ESTIMATES
 • Take job-site photos and video right in the app
