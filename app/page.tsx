@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { BillingAccountCard } from '@/components/BillingAccountCard';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { TouchDoubleTapTextarea } from '@/components/TouchDoubleTapTextarea';
@@ -49,6 +50,8 @@ import {
   hasAppAccess,
   type BillingSnapshot,
 } from '@/lib/billing';
+import { buildBillingAccountView } from '@/lib/billing-account';
+import { signupFieldsFromMetadata } from '@/lib/signup-profile';
 import { isPlatformAdminEmail } from '@/lib/platform-tutorials';
 import {
   approvalBadgeLabel,
@@ -58,7 +61,6 @@ import {
   type EstimateApprovedBy,
 } from '@/lib/estimate-approval';
 import { getTaxRateFromZip } from '@/lib/tax-rates';
-import { signupFieldsFromMetadata } from '@/lib/signup-profile';
 import { invoiceSentLabel, readInvoiceSentAt } from '@/lib/invoice-sent';
 import { firstInvoiceReminderDays, invoiceReminderHint } from '@/lib/invoice-reminders';
 import {
@@ -14952,18 +14954,16 @@ export default function Home() {
                 >
                   Company Info
                 </button>
-                {!currentCrew && (
-                  <button
+                <button
                     onClick={() => {
                       setProfileTab('billing');
                       setBillingPanel('overview');
-                      void refreshBillingStatus();
+                      if (!currentCrew) void refreshBillingStatus();
                     }}
                     className={`flex-1 min-w-[7rem] py-4 text-center font-semibold ${profileTab === 'billing' ? 'border-b-4 border-[#10b981] text-[#10b981]' : 'text-gray-500'}`}
                   >
-                    💳 Billing / Contact Us
+                    {currentCrew ? 'Account' : '💳 Billing / Contact Us'}
                   </button>
-                )}
                 <button 
                   onClick={() => setProfileTab('payments')}
                   className={`flex-1 min-w-[7rem] py-4 text-center font-semibold ${profileTab === 'payments' ? 'border-b-4 border-[#10b981] text-[#10b981]' : 'text-gray-500'}`}
@@ -14981,7 +14981,31 @@ export default function Home() {
                 </button>
               </div>
 
-              {profileTab === 'billing' && billingPanel === 'overview' && (
+              {profileTab === 'billing' && (
+                <BillingAccountCard
+                  view={buildBillingAccountView(
+                    currentCrew
+                      ? {
+                          loginEmail: user?.email || currentCrew.email,
+                          createdAt: user?.created_at || null,
+                          name: signupFieldsFromMetadata(user).name,
+                          phone: signupFieldsFromMetadata(user).phone,
+                          isCrew: true,
+                          ownerCompany: profile.company || null,
+                        }
+                      : {
+                          loginEmail: user?.email,
+                          createdAt: user?.created_at || null,
+                          name: profile.name || signupFieldsFromMetadata(user).name,
+                          company: profile.company || signupFieldsFromMetadata(user).company,
+                          phone: profile.phone || signupFieldsFromMetadata(user).phone,
+                          billing,
+                        }
+                  )}
+                />
+              )}
+
+              {profileTab === 'billing' && billingPanel === 'overview' && !currentCrew && (
                 <Card className="mb-8 border-emerald-200">
                   <CardContent className="p-8 space-y-5">
                     <div>
