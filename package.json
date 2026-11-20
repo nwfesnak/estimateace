@@ -23,7 +23,7 @@
     "mobile:doctor": "cap doctor",
     "mobile:setup": "bash scripts/mobile-mac-setup.sh",
     "test:mobile": "node --test scripts/test-mobile-app.test.mjs scripts/test-mobile-layout.test.mjs",
-    "test:photo-estimate": "node --test scripts/test-photo-estimate.test.mjs",
+    "test:photo-estimate": "node --test scripts/test-photo-estimate.test.mjs scripts/test-photo-estimate-ios.test.mjs",
     "test:client-media": "node --test scripts/test-client-media.test.mjs",
     "test:receptionist": "node --test scripts/test-receptionist-spam.test.mjs scripts/test-receptionist-caps.test.mjs",
     "test:crew": "node --test scripts/test-crew-redaction.test.mjs scripts/test-security-third-scan.test.mjs scripts/test-security-fourth-scan.test.mjs scripts/test-security-fifth-scan.test.mjs",

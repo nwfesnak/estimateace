@@ -16,9 +16,10 @@ import {
 export const PHOTO_ESTIMATE_LIMITS = {
   maxPhotos: 5,
   /** Per photo, as a data URL string (client compresses to ~1600px JPEG first). */
-  maxPhotoChars: 1_500_000,
+  maxPhotoChars: 1_000_000,
   /** All photos together (Vercel request body limit is ~4.5 MB). */
-  maxTotalChars: 4_000_000,
+  /** Keep the whole JSON body under Vercel's 4.5 MB request limit. */
+  maxTotalChars: 3_600_000,
   maxNoteChars: 1500,
   maxLines: 20,
   maxUpsells: 6,
@@ -384,3 +385,14 @@ export const RENDER_FINISH_PRESETS = [
   'Cedar privacy fence, natural stain',
   'Fresh mulch beds, trimmed shrubs, green lawn',
 ];
+
+/** Map a failed response to a message the contractor can act on. */
+export function photoEstimateErrorMessage(status: number, serverError?: string | null): string {
+  if (serverError) return serverError;
+  if (status === 413) return 'The photos are too large to send. Remove a photo or two and try again.';
+  if (status === 504 || status === 524) return 'The AI took too long. Try again with fewer photos.';
+  if (status === 401) return 'Please log in again.';
+  if (status === 429) return 'Too many requests. Wait a minute and try again.';
+  if (status >= 500) return 'The server had a problem building the estimate. Please try again.';
+  return `Photo estimate failed (HTTP ${status}).`;
+}
