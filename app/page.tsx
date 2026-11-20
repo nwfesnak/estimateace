@@ -121,6 +121,14 @@ import { randomUploadId, safeUploadName } from '@/lib/upload-names';
 import { TurnstileWidget } from '@/components/TurnstileWidget';
 import { translateFailureMessage } from '@/lib/xai-chat';
 import {
+  isItemTranslationStale,
+  itemHasTranslation,
+  itemTranslationText,
+  stripItemTranslations,
+  withItemTranslation,
+  withoutItemTranslation,
+} from '@/lib/item-translations';
+import {
   isNativeApp,
   NATIVE_MANAGE_PLAN_TEXT,
   NATIVE_SIGNUP_TEXT,
@@ -1744,7 +1752,6 @@ export default function Home() {
   // === TRANSLATE STATES (added exactly as requested) ===
   const [translateFrom, setTranslateFrom] = useState('en');
   const [translateTo, setTranslateTo] = useState('es');
-  const [itemTranslations, setItemTranslations] = useState<{ [key: number]: string }>({});
   const [translatingItemId, setTranslatingItemId] = useState<number | null>(null);
   const [itemTranslateErrors, setItemTranslateErrors] = useState<{ [key: number]: string }>({});
 
@@ -6462,7 +6469,12 @@ export default function Home() {
       const data = await res.json().catch(() => ({}));
       const fail = translateFailureMessage({ ok: res.ok, status: res.status, data });
       if (fail) throw new Error(fail);
-      setItemTranslations((prev) => ({ ...prev, [itemId]: String(data.translatedText).trim() }));
+      const translated = String(data.translatedText).trim();
+      setItems((prev) =>
+        prev.map((it) =>
+          it.id === itemId ? withItemTranslation(it, translated, translateTo, text) : it
+        )
+      );
       showMessage('✅ Translation added (internal use only)');
     } catch (err: unknown) {
       const msg = translateFailureMessage({ err });
@@ -13580,24 +13592,30 @@ export default function Home() {
                             </p>
                           ) : null}
 
-                          {itemTranslations[item.id] && (
-                            <div className="mt-2 relative">
+                          {itemHasTranslation(item) && (
+                            <div className="mt-2 relative" data-testid="item-translation-box">
                               <div className="text-[10px] font-medium text-emerald-600 flex items-center gap-1 mb-1">
                                 🔄 Translation (Internal team use only — not sent to client)
                               </div>
+                              {isItemTranslationStale(item) ? (
+                                <p className="mb-1 text-[10px] text-amber-700" data-testid="item-translation-stale">
+                                  Description changed since this translation.
+                                </p>
+                              ) : null}
                               <Textarea
-                                value={itemTranslations[item.id]}
+                                value={itemTranslationText(item)}
                                 readOnly
                                 rows={3}
                                 className="resize-y bg-gray-50 text-sm w-full"
                               />
                               <button
                                 type="button"
-                                onClick={() => setItemTranslations(prev => {
-                                  const copy = { ...prev };
-                                  delete copy[item.id];
-                                  return copy;
-                                })}
+                                data-testid="clear-item-translation"
+                                onClick={() =>
+                                  setItems((prev) =>
+                                    prev.map((it) => (it.id === item.id ? withoutItemTranslation(it) : it))
+                                  )
+                                }
                                 className="absolute top-1 right-2 text-xs text-red-500 hover:text-red-700"
                               >
                                 ✕
@@ -19087,7 +19105,7 @@ export default function Home() {
                   }).catch(() => {});
 
                   // Slim payload only — avoid non-serializable / huge fields that break send
-                  const emailItems = (items || []).slice(0, 40).map((it: any) => ({
+                  const emailItems = stripItemTranslations((items || []).slice(0, 40)).map((it: any) => ({
                     id: it?.id,
                     description: String(it?.description || '').slice(0, 500),
                     optional: isOptionalLine(it),

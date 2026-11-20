@@ -11,6 +11,7 @@ import {
   isOptionalLine,
   lineOptionId,
 } from '@/lib/optional-line-items';
+import { ITEM_TRANSLATION_KEYS, stripItemTranslations } from '@/lib/item-translations';
 
 /**
  * Public (token-gated) document summary for client approve / pay page.
@@ -312,14 +313,19 @@ export async function GET(request: NextRequest) {
       taxRate: Number(row.taxRate ?? row.taxrate) || 0,
       isTaxExempt: !!(row.isTaxExempt ?? row.istaxexempt),
       taxesEnabled: profile.taxesEnabled !== false,
-      items: items.slice(0, 40).map((it: any, index: number) => ({
-        id: lineOptionId(it, index),
-        description: String(it.description || 'Line item').slice(0, 200),
-        qty: Number(it.qty) || 0,
-        total: Number(it.total) || Number(it.qty || 0) * Number(it.price || 0),
-        optional: isOptionalLine(it),
-        clientSelected: isClientSelectedOption(it),
-      })),
+      // Whitelist only — never forward internal translation fields to the client page.
+      items: stripItemTranslations(items).slice(0, 40).map((it: any, index: number) => {
+        const mapped = {
+          id: lineOptionId(it, index),
+          description: String(it.description || 'Line item').slice(0, 200),
+          qty: Number(it.qty) || 0,
+          total: Number(it.total) || Number(it.qty || 0) * Number(it.price || 0),
+          optional: isOptionalLine(it),
+          clientSelected: isClientSelectedOption(it),
+        };
+        for (const key of ITEM_TRANSLATION_KEYS) delete (mapped as any)[key];
+        return mapped;
+      }),
     }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (e: any) {
     console.error('client/document:', e);
