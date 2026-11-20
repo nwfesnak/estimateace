@@ -11,6 +11,7 @@ import {
 } from '@/lib/estimate-save';
 import { enforceAppAccess } from '@/lib/billing-access';
 import { restoreDocumentForCrewWrite } from '@/lib/crew-access';
+import { isReservedDocumentId } from '@/lib/company-profile-access';
 
 /**
  * Reliable estimate/invoice save via service role (after JWT auth).
@@ -46,7 +47,7 @@ export async function POST(request: NextRequest) {
     const workspaceUserId = ws.ownerUserId;
 
     // Reserved server-managed rows can never be written through this endpoint.
-    if (/^(SETTINGS-|RECEPTIONIST-SECRETS-|PLATFORM-)/i.test(id)) {
+    if (isReservedDocumentId(id)) {
       return NextResponse.json({ error: 'Reserved document id.' }, { status: 400 });
     }
 

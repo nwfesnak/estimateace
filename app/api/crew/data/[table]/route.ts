@@ -5,6 +5,7 @@ import { enforceAppAccess } from '@/lib/billing-access';
 import { getCrewAccess, loadCrewRestoreSources, type CrewAccessResult } from '@/lib/crew-access';
 import { INJECTED_KEYS, redactRows, restoreRow } from '@/lib/crew-redaction';
 import { sanitizeCrewQuery } from '@/lib/crew-query';
+import { isReservedDocumentId } from '@/lib/company-profile-access';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -24,7 +25,6 @@ export const dynamic = 'force-dynamic';
  */
 
 const TABLES = new Set(['estimates', 'archive-est']);
-const RESERVED_ID = /^(SETTINGS-|RECEPTIONIST-SECRETS-|PLATFORM-)/i;
 const FORWARD_REQUEST_HEADERS = [
   'accept',
   'prefer',
@@ -195,7 +195,7 @@ export async function POST(request: NextRequest, ctx: Ctx) {
       }
       const id = String(row.id ?? '').trim();
       if (!id) return deny(400, 'Document id is required.');
-      if (RESERVED_ID.test(id)) {
+      if (isReservedDocumentId(id)) {
         return deny(403, 'Only the account owner can change workspace settings.');
       }
       ids.push(id);
