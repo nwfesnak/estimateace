@@ -6,16 +6,19 @@
  * Everything is editable here; nothing touches the estimate until "Add to estimate".
  */
 import * as React from 'react';
+import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
   applyLineEdit,
+  photoEstimateErrorMessage,
   PHOTO_ESTIMATE_LIMITS,
   TRADE_PRICING_DEFAULTS,
   toEstimateItem,
   type PricedLine,
   type RoomMeasurements,
 } from '@/lib/photo-estimate';
+import { compressPhotoForUpload, looksLikeImageFile, perPhotoBudget } from '@/lib/photo-compress';
 import { isRoomScanAvailable, manualMeasurements, scanRoom, scanToMeasurements } from '@/lib/room-scan';
 
 type Location = { address?: string; city?: string; state?: string; zipCode?: string };
@@ -47,37 +50,30 @@ type Result = {
 const money = (n: number) => `$${(Number(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const MARKUP_KEY = 'ea.photoEstimate.markupPercent';
 
-/** Shrink a photo to ≤1600px JPEG so 5 photos fit in one request. */
-async function compressPhoto(file: File): Promise<string> {
-  const url = URL.createObjectURL(file);
-  try {
-    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const i = new Image();
-      i.onload = () => resolve(i);
-      i.onerror = () => reject(new Error('Could not read that photo.'));
-      i.src = url;
-    });
-    const max = 1600;
-    const scale = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
-    canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('Could not process that photo.');
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    let quality = 0.82;
-    let out = canvas.toDataURL('image/jpeg', quality);
-    while (out.length > 900_000 && quality > 0.45) {
-      quality -= 0.12;
-      out = canvas.toDataURL('image/jpeg', quality);
-    }
-    return out;
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-}
+const STAGES = ['Uploading photos…', 'AI is reading the photos…', 'Writing line items…', 'Pricing materials and labor…', 'Almost done…'];
+/** Client gives up a little after the server's own AI timeout. */
+const CLIENT_TIMEOUT_MS = 170_000;
 
-const STAGES = ['Shrinking photos…', 'Uploading…', 'Reading the photos…', 'Writing line items…', 'Pricing materials and labor…'];
+/**
+ * Height of the visible area (shrinks when the iOS keyboard opens) so the sheet and its
+ * Build button always stay on screen. Falls back to 100dvh via CSS when unsupported.
+ */
+function useVisibleViewport(active: boolean) {
+  const [vp, setVp] = React.useState<{ height: number; top: number } | null>(null);
+  React.useEffect(() => {
+    if (!active || typeof window === 'undefined' || !window.visualViewport) return;
+    const vv = window.visualViewport;
+    const update = () => setVp({ height: Math.round(vv.height), top: Math.round(vv.offsetTop) });
+    update();
+    vv.addEventListener('resize', update);
+    vv.addEventListener('scroll', update);
+    return () => {
+      vv.removeEventListener('resize', update);
+      vv.removeEventListener('scroll', update);
+    };
+  }, [active]);
+  return vp;
+}
 
 export function PhotoEstimateModal(props: Props) {
   const { open, onClose } = props;
@@ -103,7 +99,27 @@ export function PhotoEstimateModal(props: Props) {
   const [manual, setManual] = React.useState({ lengthFt: '', widthFt: '', ceilingFt: '8', doors: '', windows: '' });
   const [lidar, setLidar] = React.useState(false);
   const [scanning, setScanning] = React.useState(false);
+  const [adding, setAdding] = React.useState(false);
+  const [elapsed, setElapsed] = React.useState(0);
   const fileRef = React.useRef<HTMLInputElement>(null);
+  const scrollRef = React.useRef<HTMLDivElement>(null);
+  const viewport = useVisibleViewport(open);
+
+  // Lock the page behind the sheet (iOS otherwise scrolls the page instead of the sheet).
+  React.useEffect(() => {
+    if (!open) return;
+    const html = document.documentElement;
+    const prev = html.style.overflow;
+    html.style.overflow = 'hidden';
+    return () => {
+      html.style.overflow = prev;
+    };
+  }, [open]);
+
+  // Show errors where the user is looking (the footer), and scroll results to the top.
+  React.useEffect(() => {
+    if (result) scrollRef.current?.scrollTo({ top: 0 });
+  }, [result]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -120,16 +136,29 @@ export function PhotoEstimateModal(props: Props) {
     if (!files?.length) return;
     setError(null);
     const room = PHOTO_ESTIMATE_LIMITS.maxPhotos - photos.length;
-    const picked = Array.from(files).filter((f) => f.type.startsWith('image/')).slice(0, Math.max(0, room));
+    const all = Array.from(files);
+    const picked = all.filter(looksLikeImageFile).slice(0, Math.max(0, room));
     if (!picked.length) {
-      setError(`Up to ${PHOTO_ESTIMATE_LIMITS.maxPhotos} photos.`);
+      setError(room <= 0 ? `Up to ${PHOTO_ESTIMATE_LIMITS.maxPhotos} photos.` : 'Pick a photo (JPEG, PNG, HEIC).');
       return;
     }
+    setAdding(true);
+    const added: string[] = [];
+    let failed = '';
     try {
-      const shrunk = await Promise.all(picked.map(compressPhoto));
-      setPhotos((p) => [...p, ...shrunk].slice(0, PHOTO_ESTIMATE_LIMITS.maxPhotos));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not read that photo.');
+      // One at a time: decoding several 12 MP photos at once can crash the iOS web view.
+      for (const f of picked) {
+        try {
+          added.push(await compressPhotoForUpload(f, perPhotoBudget(PHOTO_ESTIMATE_LIMITS.maxPhotos)));
+        } catch (e) {
+          failed = e instanceof Error ? e.message : 'Could not read that photo.';
+        }
+      }
+      setPhotos((p) => [...p, ...added].slice(0, PHOTO_ESTIMATE_LIMITS.maxPhotos));
+      if (failed) setError(failed);
+      else if (all.length > picked.length) setError(`Only the first ${PHOTO_ESTIMATE_LIMITS.maxPhotos} photos were added.`);
+    } finally {
+      setAdding(false);
     }
   };
 
@@ -167,8 +196,16 @@ export function PhotoEstimateModal(props: Props) {
     setBusy(true);
     setError(null);
     setResult(null);
-    setStage(1);
-    const timer = window.setInterval(() => setStage((s) => Math.min(STAGES.length - 1, s + 1)), 4500);
+    setStage(0);
+    setElapsed(0);
+    const started = Date.now();
+    const timer = window.setInterval(() => {
+      const sec = Math.round((Date.now() - started) / 1000);
+      setElapsed(sec);
+      setStage(sec < 4 ? 0 : sec < 25 ? 1 : sec < 45 ? 2 : sec < 70 ? 3 : 4);
+    }, 1000);
+    const ctrl = new AbortController();
+    const kill = window.setTimeout(() => ctrl.abort(), CLIENT_TIMEOUT_MS);
     try {
       const token = await props.getAccessToken();
       if (!token) throw new Error('Please log in again.');
@@ -179,6 +216,7 @@ export function PhotoEstimateModal(props: Props) {
       }
       const res = await fetch('/api/photo-estimate', {
         method: 'POST',
+        signal: ctrl.signal,
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           photos,
@@ -192,15 +230,28 @@ export function PhotoEstimateModal(props: Props) {
         }),
       });
       const json = await res.json().catch(() => null);
-      if (!res.ok || !json?.ok) throw new Error(json?.error || `Photo estimate failed (HTTP ${res.status}).`);
+      if (!res.ok || !json?.ok) throw new Error(photoEstimateErrorMessage(res.status, json?.error));
+      if (!Array.isArray(json.lines) || json.lines.length === 0) {
+        throw new Error('No line items came back. Add a short note about the job and try again.');
+      }
       setResult(json as Result);
       setLines(json.lines);
       setKeep(json.lines.map(() => true));
       setUpsellPick({});
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Photo estimate failed.');
+      const aborted = e instanceof Error && e.name === 'AbortError';
+      setError(
+        aborted
+          ? 'The AI took too long. Try again with fewer photos.'
+          : e instanceof TypeError
+            ? 'Network problem — check your connection and try again.'
+            : e instanceof Error
+              ? e.message
+              : 'Photo estimate failed.'
+      );
     } finally {
       window.clearInterval(timer);
+      window.clearTimeout(kill);
       setBusy(false);
       setStage(0);
     }
@@ -234,15 +285,38 @@ export function PhotoEstimateModal(props: Props) {
   const subtotal = lines.reduce((s, l, i) => s + (keep[i] ? l.total : 0), 0);
   const upsellTotal = (result?.upsells || []).reduce((s, u, i) => s + (upsellPick[i] === 'line' ? u.total : 0), 0);
 
-  return (
-    <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4" role="dialog" aria-modal="true" aria-label="Photo estimate">
-      <div className="bg-white w-full sm:max-w-3xl max-h-[95vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl shadow-2xl">
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b bg-white px-5 py-3">
+  const errorBox = error ? (
+    <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
+      {error}
+    </p>
+  ) : null;
+
+  const sheet = (
+    <div
+      className="photo-estimate-overlay fixed inset-x-0 top-0 z-[80] flex h-[100dvh] items-end justify-center bg-black/50 sm:items-center sm:p-4"
+      style={viewport ? { height: viewport.height, top: viewport.top } : undefined}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Photo estimate"
+      data-testid="photo-estimate-modal"
+    >
+      <div
+        className="flex w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:max-w-3xl sm:rounded-2xl"
+        style={{ maxHeight: 'calc(100% - max(env(safe-area-inset-top, 0px), 12px))' }}
+      >
+        <div className="flex shrink-0 items-center justify-between border-b bg-white px-4 py-3 sm:px-5">
           <h2 className="text-lg font-semibold">📸 Photo estimate</h2>
-          <button type="button" onClick={onClose} className="text-2xl leading-none text-gray-500 px-2" aria-label="Close">×</button>
+          <button type="button" onClick={onClose} className="-mr-2 px-3 py-1 text-2xl leading-none text-gray-500" aria-label="Close">×</button>
         </div>
 
-        <div className="p-5 space-y-5">
+        <div
+          ref={scrollRef}
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+          style={{ WebkitOverflowScrolling: 'touch' }}
+          data-nested-scroll
+          data-testid="photo-estimate-scroll"
+        >
+        <div className="p-4 sm:p-5 space-y-5">
           {!result && (
             <>
               <div>
@@ -268,9 +342,10 @@ export function PhotoEstimateModal(props: Props) {
                     <button
                       type="button"
                       onClick={() => fileRef.current?.click()}
+                      disabled={adding || busy}
                       className="h-20 w-20 rounded-lg border-2 border-dashed border-emerald-400 text-emerald-700 text-xs font-semibold"
                     >
-                      + Photo
+                      {adding ? 'Adding…' : '+ Photo'}
                     </button>
                   )}
                 </div>
@@ -316,7 +391,7 @@ export function PhotoEstimateModal(props: Props) {
                     </Button>
                   )}
                 </div>
-                <div className="grid grid-cols-5 gap-2 text-xs">
+                <div className="grid grid-cols-3 gap-2 text-xs sm:grid-cols-5">
                   {(
                     [
                       ['lengthFt', 'Length ft'],
@@ -346,18 +421,6 @@ export function PhotoEstimateModal(props: Props) {
                 </div>
               </div>
 
-              {busy && (
-                <div aria-live="polite">
-                  <div className="h-2 w-full rounded-full bg-slate-200">
-                    <div className="h-2 rounded-full bg-emerald-500 transition-all" style={{ width: `${Math.round(((stage + 1) / STAGES.length) * 100)}%` }} />
-                  </div>
-                  <p className="mt-1 text-sm text-slate-600">{STAGES[stage]}</p>
-                </div>
-              )}
-              <Button type="button" onClick={() => void generate()} disabled={!photos.length || busy} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-6 text-base font-semibold">
-                {busy ? 'Building estimate…' : `Build estimate from ${photos.length || ''} photo${photos.length === 1 ? '' : 's'}`}
-              </Button>
-              <p className="text-[11px] text-slate-500">Uses {photos.length || 1} of your daily AI requests.</p>
             </>
           )}
 
@@ -434,21 +497,63 @@ export function PhotoEstimateModal(props: Props) {
                 </div>
               )}
 
-              <div className="flex items-center justify-between border-t pt-3">
-                <div className="text-sm">
-                  Adds <strong>{money(subtotal + upsellTotal)}</strong>
-                </div>
-                <div className="flex gap-2">
-                  <Button type="button" variant="outline" onClick={() => setResult(null)}>Back</Button>
-                  <Button type="button" onClick={apply} className="bg-emerald-600 hover:bg-emerald-700 text-white">Add to estimate</Button>
-                </div>
-              </div>
             </>
           )}
 
-          {error && <p className="text-sm text-red-600" role="alert">{error}</p>}
+        </div>
+        </div>
+
+        {/* Always-visible footer: progress, errors and the main action never scroll away. */}
+        <div
+          className="shrink-0 space-y-2 border-t bg-white px-4 pt-3 sm:px-5"
+          style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom, 0px))' }}
+          data-testid="photo-estimate-footer"
+        >
+          {errorBox}
+          {!result ? (
+            <>
+              {busy && (
+                <div aria-live="polite">
+                  <div className="h-2 w-full rounded-full bg-slate-200">
+                    <div className="h-2 rounded-full bg-emerald-500 transition-all" style={{ width: `${Math.round(((stage + 1) / STAGES.length) * 100)}%` }} />
+                  </div>
+                  <p className="mt-1 text-sm text-slate-600">
+                    {STAGES[stage]} <span className="text-slate-400">{elapsed}s · usually 20–60s</span>
+                  </p>
+                </div>
+              )}
+              <Button
+                type="button"
+                onClick={() => void generate()}
+                disabled={!photos.length || busy || adding}
+                className="w-full bg-emerald-600 py-6 text-base font-semibold text-white hover:bg-emerald-700"
+              >
+                {busy
+                  ? 'Building estimate…'
+                  : adding
+                    ? 'Adding photos…'
+                    : photos.length
+                      ? `Build estimate from ${photos.length} photo${photos.length === 1 ? '' : 's'}`
+                      : 'Add a photo to start'}
+              </Button>
+              <p className="text-center text-[11px] text-slate-500">Uses {photos.length || 1} of your daily AI requests.</p>
+            </>
+          ) : (
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-sm">
+                Adds <strong>{money(subtotal + upsellTotal)}</strong>
+              </div>
+              <div className="flex gap-2">
+                <Button type="button" variant="outline" onClick={() => setResult(null)}>Back</Button>
+                <Button type="button" onClick={apply} className="bg-emerald-600 text-white hover:bg-emerald-700">Add to estimate</Button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
   );
+
+  // Portal to <body>: outside the app's own scroll container, so iOS scrolls the sheet.
+  return typeof document === 'undefined' ? sheet : createPortal(sheet, document.body);
 }

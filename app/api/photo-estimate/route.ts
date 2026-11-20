@@ -21,9 +21,17 @@ import {
   validatePhotos,
 } from '@/lib/photo-estimate';
 
-export const maxDuration = 90;
+/** grok-4.6 vision on up to 5 photos can take 30–90s; leave headroom over the AI timeout. */
+export const maxDuration = 180;
+/** Abort the xAI call before the function itself is killed so the user gets a real message. */
+const AI_TIMEOUT_MS = 150_000;
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+/** grok-4.x reasoning models accept reasoning_effort; other models may reject it. */
+function reasoningEffortFor(model: string): 'low' | null {
+  return /^grok-4\.\d/i.test(model) ? 'low' : null;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -71,14 +79,21 @@ export async function POST(request: NextRequest) {
       photoCount: photos.length,
     });
 
+    const model = getXaiVisionModel();
+    const started = Date.now();
     const res = await fetch('https://api.x.ai/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      signal: AbortSignal.timeout(75_000),
+      signal: AbortSignal.timeout(AI_TIMEOUT_MS),
       body: JSON.stringify({
-        model: getXaiVisionModel(),
+        model,
+        // grok-4.x defaults to "high" reasoning (60–110s for multi-image vision, which hit
+        // our old 75s abort). "low" is the documented setting for latency-sensitive vision.
+        ...(reasoningEffortFor(model) ? { reasoning_effort: reasoningEffortFor(model) } : {}),
+        response_format: { type: 'json_object' },
         temperature: 0.2,
-        max_tokens: 2500,
+        // Reasoning tokens count against this; too low leaves no room for the JSON answer.
+        max_tokens: 8000,
         messages: [
           {
             role: 'user',
@@ -91,11 +106,25 @@ export async function POST(request: NextRequest) {
       }),
     });
     if (!res.ok) {
-      console.error('photo-estimate vision error:', res.status, (await res.text()).slice(0, 300));
+      console.error('photo-estimate vision error:', res.status, model, (await res.text()).slice(0, 300));
       return NextResponse.json({ error: 'Could not analyze the photos. Try again.' }, { status: 502 });
     }
     const data = await res.json();
-    const ai = parseAiJson(String(data?.choices?.[0]?.message?.content || ''));
+    const choice = data?.choices?.[0];
+    const ai = parseAiJson(String(choice?.message?.content || ''));
+    console.info(
+      'photo-estimate:',
+      JSON.stringify({
+        model,
+        photos: photos.length,
+        ms: Date.now() - started,
+        finish: choice?.finish_reason,
+        promptTokens: data?.usage?.prompt_tokens,
+        completionTokens: data?.usage?.completion_tokens,
+        reasoningTokens: data?.usage?.completion_tokens_details?.reasoning_tokens,
+        parsed: Boolean(ai),
+      })
+    );
     if (!ai) {
       return NextResponse.json(
         { error: 'Could not read the photos clearly. Add a short note about the job and try again.' },
@@ -132,7 +161,11 @@ export async function POST(request: NextRequest) {
     const timeout = e instanceof Error && e.name === 'TimeoutError';
     console.error('photo-estimate:', e instanceof Error ? e.message : e);
     return NextResponse.json(
-      { error: timeout ? 'The AI took too long. Try fewer photos.' : 'Could not build the estimate. Please try again.' },
+      {
+        error: timeout
+          ? 'The AI took too long. Try again with fewer photos.'
+          : 'Could not build the estimate. Please try again.',
+      },
       { status: timeout ? 504 : 500 }
     );
   }
