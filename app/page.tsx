@@ -116,7 +116,8 @@ import {
   scaleBreakdownToJobTotal,
   syncLineItemPricingFromJobTotal,
 } from '@/lib/breakdown-pricing';
-import { rankAddressSuggestions } from '@/lib/address-autocomplete';
+import { type AddressSuggestion } from '@/lib/address-autocomplete';
+import { useAddressAutocomplete } from '@/hooks/useAddressAutocomplete';
 import { randomUploadId, safeUploadName } from '@/lib/upload-names';
 import { TurnstileWidget } from '@/components/TurnstileWidget';
 import { translateFailureMessage } from '@/lib/xai-chat';
@@ -1627,9 +1628,6 @@ export default function Home() {
 
   // Address auto-suggest states (geocoding APIs + previous addresses fallback)
   const [showAddressSuggestions, setShowAddressSuggestions] = useState(false);
-  const [addressSuggestions, setAddressSuggestions] = useState<any[]>([]);
-  const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
-  const addressSuggestAbortRef = useRef<AbortController | null>(null);
 
   const [quickLines, setQuickLines] = useState<any[]>([]);
   const [selectedTradeId, setSelectedTradeId] = useState('');
@@ -1657,10 +1655,8 @@ export default function Home() {
     return addrs.slice(0, 20);
   }, [savedEstimatesList, archivesList, invoiceNumber]);
 
-  const buildInternalAddressSuggestions = (q: string) => {
-    const qLower = q.trim().toLowerCase();
-    const candidates: any[] = [];
-
+  const internalAddressCandidates = useMemo(() => {
+    const candidates: AddressSuggestion[] = [];
     if (profile.address?.trim()) {
       candidates.push({
         address: profile.address.trim(),
@@ -1671,84 +1667,41 @@ export default function Home() {
         source: 'profile',
       });
     }
+    previousAddresses.forEach((entry: any) =>
+      candidates.push({ ...entry, source: entry.source || 'history' })
+    );
+    return candidates;
+  }, [previousAddresses, profile.address, profile.city, profile.state, profile.zipCode]);
 
-    previousAddresses.forEach((entry: any) => candidates.push({ ...entry, source: 'history' }));
+  const {
+    suggestions: addressSuggestions,
+    loading: isLoadingSuggestions,
+    activeIndex: addressActiveIndex,
+    setActiveIndex: setAddressActiveIndex,
+    onKeyDown: onAddressSuggestKeyDown,
+    selectSuggestion: selectAddressSuggestion,
+    ensureBrowserLocation,
+  } = useAddressAutocomplete({
+    query: address,
+    enabled: showAddressSuggestions,
+    // Bias toward the owner's business area, not leftover job city/state/zip.
+    bias: {
+      city: profile.city,
+      state: profile.state,
+      zip: profile.zipCode,
+    },
+    extras: internalAddressCandidates,
+  });
 
-    if (!qLower) {
-      return candidates.slice(0, 8);
-    }
-
-    const tokens = qLower.split(/[\s,]+/).filter((token: string) => token.length > 0);
-    return candidates.filter((entry: any) => {
-      const haystack = [
-        entry.address,
-        entry.city,
-        entry.state,
-        entry.zipCode,
-        entry.display,
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
-      return tokens.every((token: string) => haystack.includes(token));
-    });
+  const applyAddressSuggestion = async (sugg: AddressSuggestion) => {
+    setShowAddressSuggestions(false);
+    setAddressActiveIndex(-1);
+    const details = await selectAddressSuggestion(sugg);
+    setAddress(details.address || '');
+    if (details.city) setCity(details.city);
+    if (details.state) setState(details.state);
+    if (details.zipCode) setZipCode(details.zipCode);
   };
-
-  // Debounced address auto-suggest (geocoding APIs + saved addresses)
-  useEffect(() => {
-    const q = address.trim();
-
-    if (!q || q.length < 2) {
-      setAddressSuggestions(buildInternalAddressSuggestions(q).slice(0, 8));
-      return;
-    }
-
-    const timer = setTimeout(async () => {
-      addressSuggestAbortRef.current?.abort();
-      const controller = new AbortController();
-      addressSuggestAbortRef.current = controller;
-
-      setIsLoadingSuggestions(true);
-      try {
-        const params = new URLSearchParams({ q });
-        if (city.trim()) params.set('city', city.trim());
-        if (state.trim()) params.set('state', state.trim());
-        if (zipCode.trim()) params.set('zip', zipCode.trim());
-
-        const res = await fetch(`/api/address-autocomplete?${params.toString()}`, {
-          signal: controller.signal,
-          cache: 'no-store',
-        });
-        let live: any[] = [];
-        if (res.ok) {
-          const data = await res.json();
-          live = Array.isArray(data) ? data : [];
-        }
-
-        const internal = buildInternalAddressSuggestions(q);
-        const combined = rankAddressSuggestions(
-          [...live, ...internal],
-          q,
-          city,
-          state
-        );
-
-        setAddressSuggestions(combined.slice(0, 8));
-      } catch (e: any) {
-        if (e?.name === 'AbortError') return;
-        setAddressSuggestions(buildInternalAddressSuggestions(q).slice(0, 8));
-      } finally {
-        if (!controller.signal.aborted) {
-          setIsLoadingSuggestions(false);
-        }
-      }
-    }, 300);
-
-    return () => {
-      clearTimeout(timer);
-      addressSuggestAbortRef.current?.abort();
-    };
-  }, [address, city, state, zipCode, previousAddresses, profile]);
 
   // === TRANSLATE STATES (added exactly as requested) ===
   const [translateFrom, setTranslateFrom] = useState('en');
@@ -13201,17 +13154,33 @@ export default function Home() {
                       }} 
                       onFocus={() => {
                         setShowAddressSuggestions(true);
+                        ensureBrowserLocation();
                         if (user?.id) {
                           refreshSavedList();
                           refreshArchivesList();
                         }
                       }}
                       onBlur={() => setTimeout(() => setShowAddressSuggestions(false), 200)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') setShowAddressSuggestions(false);
+                        onAddressSuggestKeyDown(e, (sugg) => {
+                          void applyAddressSuggestion(sugg);
+                        });
+                      }}
                       placeholder="Street address — include city & state for best results"
                       autoComplete="street-address"
+                      role="combobox"
+                      aria-autocomplete="list"
+                      aria-expanded={showAddressSuggestions}
+                      aria-activedescendant={
+                        addressActiveIndex >= 0 ? `address-sugg-${addressActiveIndex}` : undefined
+                      }
                     />
                     {showAddressSuggestions && (
-                      <div className="absolute z-[60] mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-auto text-sm">
+                      <div
+                        className="absolute z-[60] mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-auto text-sm"
+                        role="listbox"
+                      >
                         {isLoadingSuggestions && (
                           <div className="px-3 py-2 text-xs text-gray-500">Searching addresses...</div>
                         )}
@@ -13222,32 +13191,17 @@ export default function Home() {
                         )}
                         {addressSuggestions.map((sugg, idx) => (
                           <div 
+                            id={`address-sugg-${idx}`}
                             key={`${sugg.place_id || sugg.display || sugg.address}-${idx}`}
-                            className="px-3 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0"
-                            onMouseDown={async (e) => {
+                            role="option"
+                            aria-selected={idx === addressActiveIndex}
+                            className={`px-3 py-2 cursor-pointer border-b border-gray-100 last:border-b-0 ${
+                              idx === addressActiveIndex ? 'bg-emerald-50' : 'hover:bg-gray-100'
+                            }`}
+                            onMouseEnter={() => setAddressActiveIndex(idx)}
+                            onMouseDown={(e) => {
                               e.preventDefault();
-                              setShowAddressSuggestions(false);
-
-                              if (sugg.place_id) {
-                                try {
-                                  const res = await fetch(`/api/address-autocomplete?place_id=${sugg.place_id}`);
-                                  if (res.ok) {
-                                    const details = await res.json();
-                                    setAddress(details.address || sugg.address || sugg.display || '');
-                                    if (details.city) setCity(details.city);
-                                    if (details.state) setState(details.state);
-                                    if (details.zipCode) setZipCode(details.zipCode);
-                                    return;
-                                  }
-                                } catch (err) {
-                                  console.error('Failed to fetch place details:', err);
-                                }
-                              }
-
-                              setAddress(sugg.address || sugg.display || '');
-                              if (sugg.city) setCity(sugg.city);
-                              if (sugg.state) setState(sugg.state);
-                              if (sugg.zipCode) setZipCode(sugg.zipCode);
+                              void applyAddressSuggestion(sugg);
                             }}
                           >
                             <div className="font-medium leading-snug">
@@ -18081,6 +18035,11 @@ export default function Home() {
               companyPhone={profile.phone || ''}
               companySlogan={profile.slogan || ''}
               logoUrl={logoDisplayUrl || ''}
+              addressBias={{
+                city: profile.city || '',
+                state: profile.state || '',
+                zip: profile.zipCode || '',
+              }}
               getAccessToken={async () => {
                 if (!supabase) return null;
                 const { data } = await supabase.auth.getSession();

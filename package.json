@@ -14,6 +14,7 @@
     "test:cron": "powershell -ExecutionPolicy Bypass -File scripts/test-cron.ps1",
     "test:sms": "node scripts/test-sms.mjs",
     "test:google-places": "node scripts/test-google-places.mjs",
+    "test:address-autocomplete": "node --test scripts/test-address-autocomplete.test.mjs",
     "cap:sync": "cap sync",
     "cap:open": "cap open ios",
     "mobile:sync": "cap sync",

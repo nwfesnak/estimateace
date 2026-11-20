@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   fetchAddressSuggestions,
   fetchGooglePlaceDetails,
-  isGooglePlacesConfigured,
 } from '@/lib/address-autocomplete';
 import { clientIp, rateLimit, tooManyRequests } from '@/lib/rate-limit';
 
@@ -14,22 +13,39 @@ const PER_IP_PER_DAY = 1000;
 const GLOBAL_PER_DAY = () =>
   Number.parseInt(String(process.env.ADDRESS_AUTOCOMPLETE_DAILY_LIMIT_GLOBAL || ''), 10) || 20000;
 
+function parseCoord(raw: string | null, min: number, max: number): number | undefined {
+  if (raw == null || raw === '') return undefined;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < min || n > max) return undefined;
+  return n;
+}
+
 /**
- * Address auto-suggest powered by Google Places (optional), OpenStreetMap Nominatim,
- * US Census geocoder, and Photon — ranked for best match.
+ * Address auto-suggest powered by Google Places (Places API (New) with legacy
+ * Autocomplete fallback), plus public geocoders only when Google has no results.
  *
- * - ?q=query&city=&state=&zip= for autocomplete suggestions
- * - ?place_id=xxx for Google structured details (when GOOGLE_PLACES_API_KEY is set)
+ * - ?q=&session_token=&lat=&lng=&bias_city=&bias_state=&bias_zip= for suggestions
+ * - ?place_id=&session_token= for structured details (street, city, state, zip, unit)
  */
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const q = searchParams.get('q')?.trim() || '';
-  const city = searchParams.get('city')?.trim() || '';
-  const state = searchParams.get('state')?.trim() || '';
-  const zip = searchParams.get('zip')?.trim() || '';
+  const sessionToken = searchParams.get('session_token')?.trim() || '';
+  const biasCity = searchParams.get('bias_city')?.trim() || '';
+  const biasState = searchParams.get('bias_state')?.trim() || '';
+  const biasZip = searchParams.get('bias_zip')?.trim() || '';
+  const lat = parseCoord(searchParams.get('lat'), -90, 90);
+  const lng = parseCoord(searchParams.get('lng'), -180, 180);
   const placeId = searchParams.get('place_id');
 
-  if (q.length > 200 || city.length > 100 || state.length > 50 || zip.length > 20 || String(placeId || '').length > 300) {
+  if (
+    q.length > 200 ||
+    biasCity.length > 100 ||
+    biasState.length > 50 ||
+    biasZip.length > 20 ||
+    sessionToken.length > 80 ||
+    String(placeId || '').length > 300
+  ) {
     return NextResponse.json({ error: 'Query too long' }, { status: 400 });
   }
   if (!placeId && (!q || q.length < 2)) return NextResponse.json([]);
@@ -44,13 +60,19 @@ export async function GET(request: NextRequest) {
 
   try {
     if (placeId) {
-      const details = await fetchGooglePlaceDetails(placeId);
+      const details = await fetchGooglePlaceDetails(String(placeId), sessionToken || undefined);
       return NextResponse.json(details);
     }
 
-    if (!q || q.length < 2) return NextResponse.json([]);
-
-    const suggestions = await fetchAddressSuggestions({ q, city, state, zip });
+    const suggestions = await fetchAddressSuggestions({
+      q,
+      sessionToken: sessionToken || undefined,
+      lat,
+      lng,
+      biasCity: biasCity || undefined,
+      biasState: biasState || undefined,
+      biasZip: biasZip || undefined,
+    });
     return NextResponse.json(suggestions);
   } catch (error: unknown) {
     console.error('Address autocomplete error:', error);
