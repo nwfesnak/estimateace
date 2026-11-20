@@ -60,13 +60,16 @@ export async function POST(request: NextRequest) {
       const sp = (settingsRow?.profile || {}) as any;
       if (sp && typeof sp === 'object') {
         if (sp.email) ownerEmails.push(String(sp.email));
-        if (sp.chargeCCFee !== undefined) {
-          profile = {
-            ...profile,
-            chargeCCFee: sp.chargeCCFee,
-            ccFeePercentage: sp.ccFeePercentage ?? profile.ccFeePercentage,
-          };
-        }
+        const { resolveJobSettingsFromDoc } = await import('@/lib/job-settings-snapshot');
+        const snap = resolveJobSettingsFromDoc(profile, sp);
+        profile = {
+          ...profile,
+          chargeCCFee: snap.chargeCCFee,
+          ccFeePercentage: snap.ccFeePercentage,
+          depositPercentage: snap.depositPercentage,
+          showDepositOnApproval: snap.showDepositOnApproval,
+          depositMinimumAmount: snap.depositMinimumAmount,
+        };
       }
       if (admin) {
         const { data: authUser } = await admin.auth.admin.getUserById(uid);

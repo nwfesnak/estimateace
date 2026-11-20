@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyClientActionToken } from '@/lib/client-action-token';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { withEstimateApproval } from '@/lib/estimate-approval';
+import { settingsDocId } from '@/lib/appointment-reminders';
+import { resolveDocTaxesEnabled } from '@/lib/job-settings-snapshot';
 import {
   applyClientOptionSelection,
   isOptionalLine,
@@ -109,7 +111,18 @@ export async function POST(request: NextRequest) {
         amount: Number(row.discountAmount ?? storedDiscount.discountAmount) || 0,
       },
       taxRate: Number(row.taxRate ?? row.taxrate) || 0,
-      taxesEnabled: prevProfile.taxesEnabled !== false,
+      taxesEnabled: await (async () => {
+        if (typeof prevProfile.taxesEnabled === 'boolean') return prevProfile.taxesEnabled;
+        const { data: sr } = await admin
+          .from('estimates')
+          .select('profile')
+          .eq('id', settingsDocId(uid))
+          .maybeSingle();
+        const sp = (sr?.profile && typeof sr.profile === 'object' ? sr.profile : {}) as {
+          taxesEnabled?: unknown;
+        };
+        return resolveDocTaxesEnabled(row, sp.taxesEnabled !== false);
+      })(),
       isTaxExempt: !!(row.isTaxExempt ?? row.istaxexempt),
     });
 
