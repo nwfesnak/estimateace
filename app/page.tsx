@@ -19725,31 +19725,31 @@ export default function Home() {
 
         {/* Bottom Navigation — outside scroll column; safe-area via .app-shell-bottom-nav */}
         <nav
-          className="app-shell-bottom-nav border-t shadow-inner flex items-center justify-around pt-2 px-1 text-xs no-print"
+          className="app-shell-bottom-nav border-t shadow-inner flex items-center justify-around pt-2 px-1 no-print"
           aria-label="Main"
         >
           {hasCrewTab('dashboard') && (
-            <button type="button" data-testid="nav-dashboard" onClick={goToDashboard} className={`flex flex-col items-center flex-1 py-1 ${view === 'dashboard' ? 'text-[#10b981]' : 'text-gray-500'}`}>
-              <span className="text-3xl mb-0.5">📊</span>
-              <span>{t('dashboard')}</span>
+            <button type="button" data-testid="nav-dashboard" onClick={goToDashboard} className={`app-shell-bottom-nav-item flex flex-col items-center justify-center flex-1 min-w-0 py-1 ${view === 'dashboard' ? 'text-[#10b981]' : 'text-gray-500'}`}>
+              <span className="app-shell-bottom-nav-icon text-3xl mb-0.5" aria-hidden="true">📊</span>
+              <span className="app-shell-bottom-nav-label">{t('dashboard')}</span>
             </button>
           )}
           {hasCrewTab('estimates') && (
-            <button type="button" data-testid="nav-estimates" onClick={() => setView('estimatesList')} className={`flex flex-col items-center flex-1 py-1 ${view === 'estimatesList' ? 'text-[#10b981]' : 'text-gray-500'}`}>
-              <span className="text-3xl mb-0.5">📋</span>
-              <span>{t('estimates')}</span>
+            <button type="button" data-testid="nav-estimates" onClick={() => setView('estimatesList')} className={`app-shell-bottom-nav-item flex flex-col items-center justify-center flex-1 min-w-0 py-1 ${view === 'estimatesList' ? 'text-[#10b981]' : 'text-gray-500'}`}>
+              <span className="app-shell-bottom-nav-icon text-3xl mb-0.5" aria-hidden="true">📋</span>
+              <span className="app-shell-bottom-nav-label">{t('estimates')}</span>
             </button>
           )}
           {hasCrewTab('invoices') && (
-            <button type="button" data-testid="nav-invoices" onClick={() => setView('invoicesList')} className={`flex flex-col items-center flex-1 py-1 ${view === 'invoicesList' ? 'text-[#10b981]' : 'text-gray-500'}`}>
-              <span className="text-3xl mb-0.5">💰</span>
-              <span>{t('invoices')}</span>
+            <button type="button" data-testid="nav-invoices" onClick={() => setView('invoicesList')} className={`app-shell-bottom-nav-item flex flex-col items-center justify-center flex-1 min-w-0 py-1 ${view === 'invoicesList' ? 'text-[#10b981]' : 'text-gray-500'}`}>
+              <span className="app-shell-bottom-nav-icon text-3xl mb-0.5" aria-hidden="true">💰</span>
+              <span className="app-shell-bottom-nav-label">{t('invoices')}</span>
             </button>
           )}
           {hasCrewTab('newEstimate') && (
-            <button type="button" data-testid="nav-new-estimate" onClick={() => openNewDocument('estimate')} className="flex flex-col items-center flex-1 py-1 text-gray-500">
-              <span className="text-3xl mb-0.5">📄</span>
-              <span>{t('newEstimate')}</span>
+            <button type="button" data-testid="nav-new-estimate" onClick={() => openNewDocument('estimate')} className="app-shell-bottom-nav-item flex flex-col items-center justify-center flex-1 min-w-0 py-1 text-gray-500">
+              <span className="app-shell-bottom-nav-icon text-3xl mb-0.5" aria-hidden="true">📄</span>
+              <span className="app-shell-bottom-nav-label">{t('newEstimate')}</span>
             </button>
           )}
           {hasCrewTab('reports') && (
@@ -19760,26 +19760,26 @@ export default function Home() {
                 setView('reportsView');
                 void refreshArchivesList();
               }}
-              className={`flex flex-col items-center flex-1 py-1 ${view === 'reportsView' ? 'text-[#10b981]' : 'text-gray-500'}`}
+              className={`app-shell-bottom-nav-item flex flex-col items-center justify-center flex-1 min-w-0 py-1 ${view === 'reportsView' ? 'text-[#10b981]' : 'text-gray-500'}`}
             >
-              <span className="text-3xl mb-0.5">📊</span>
-              <span>{t('reports')}</span>
+              <span className="app-shell-bottom-nav-icon text-3xl mb-0.5" aria-hidden="true">📊</span>
+              <span className="app-shell-bottom-nav-label">{t('reports')}</span>
             </button>
           )}
           {hasCrewTab('calendar') && (
-            <button type="button" data-testid="nav-calendar" onClick={openCalendarModal} className="flex flex-col items-center flex-1 py-1 text-gray-500">
-              <span className="text-3xl mb-0.5">📅</span>
-              <span>{t('calendar')}</span>
+            <button type="button" data-testid="nav-calendar" onClick={openCalendarModal} className="app-shell-bottom-nav-item flex flex-col items-center justify-center flex-1 min-w-0 py-1 text-gray-500">
+              <span className="app-shell-bottom-nav-icon text-3xl mb-0.5" aria-hidden="true">📅</span>
+              <span className="app-shell-bottom-nav-label">{t('calendar')}</span>
             </button>
           )}
           <button
             type="button"
             onClick={() => openAccountOrProfile(currentCrew ? 'billing' : undefined)}
-            className="flex flex-col items-center flex-1 py-1 text-gray-500"
+            className="app-shell-bottom-nav-item flex flex-col items-center justify-center flex-1 min-w-0 py-1 text-gray-500"
             data-testid={currentCrew ? 'nav-account' : 'nav-profile'}
           >
-            <span className="text-3xl mb-0.5">👤</span>
-            <span>{currentCrew ? 'Account' : t('profile')}</span>
+            <span className="app-shell-bottom-nav-icon text-3xl mb-0.5" aria-hidden="true">👤</span>
+            <span className="app-shell-bottom-nav-label">{currentCrew ? 'Account' : t('profile')}</span>
           </button>
         </nav>
       </div>
