@@ -1,10 +1,10 @@
 # Notes for App Review (Apple) and App access (Google)
 
 ## Demo account (create before submitting; must stay working during review)
-- Email: `appreview@estimateace.com`   ← create this account on the **web** (estimateace.com)
-- Password: (choose a strong one and paste it into App Store Connect / Play Console only. Don't save it in this file.)
-- Give it an **active plan** (comped / promo) and 3–4 sample jobs with photos, one estimate, one invoice and one AI Receptionist message, so the reviewer sees real screens.
-- Don't connect a real Stripe payout account or a real phone line to it.
+- Email: `appreview@estimateace.com`
+- Password: stored only in `/workspace/store-review-demo-login.txt` on the build machine (never commit it, and never paste it into this repo). Paste it into App Store Connect / Play Console Notes.
+- The account is a **comped, never-expiring active plan** (no Stripe subscription, excluded from trial inactivity cleanup) with sample clients, an estimate, and an invoice. Do not connect a real Stripe payout account or a real phone line.
+- Login is allowlisted server-side so Cloudflare Turnstile is not required for this email (`POST /api/auth/reviewer-login`). Regular users still complete the captcha.
 
 ## Text to paste into "Notes" (Apple) / "Instructions" (Google)
 

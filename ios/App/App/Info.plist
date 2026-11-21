@@ -74,6 +74,8 @@
 	<string>EstimateAce lets you choose job photos and receipts from your library to attach to estimates and invoices.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>EstimateAce saves job photos and documents to your photo library when you choose Save.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>EstimateAce uses your approximate location only to suggest nearby job-site and customer addresses as you type. Location is not used for tracking or ads.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 </dict>

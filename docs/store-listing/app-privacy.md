@@ -21,9 +21,10 @@ These answers match what the app does today. Re-check them if you add analytics,
 | User Content → Customer Support | App activity → Other user-generated content | Messages sent with "Message EstimateAce" |
 | User Content → Other User Content | App activity → Other user-generated content | Estimates, invoices, notes, receipts |
 | Identifiers → User ID | Personal info → User IDs | Account ID |
+| Location → Coarse Location | Location → Approximate location | Used only to bias address autocomplete when you type a job-site or customer address (optional; you can refuse the system prompt and still type the address). Not used for tracking or ads. |
 | Purchases → Purchase History | Financial info → Purchase history | Invoice and payment status for the contractor's own customers (card numbers are handled by Stripe and never stored by EstimateAce) |
 
-**Not collected:** precise or coarse location (addresses are typed, and no GPS is used), contacts / address book, health, browsing history, search history, device ID for ads, crash/performance analytics (none in the app today), payment card numbers (Stripe holds them).
+**Not collected:** precise location (the app requests approximate location only, with `enableHighAccuracy: false`), contacts / address book, health, browsing history, search history, device ID for ads, crash/performance analytics (none in the app today), payment card numbers (Stripe holds them).
 
 ## Apple-specific
 - "Data Used to Track You": **None**.

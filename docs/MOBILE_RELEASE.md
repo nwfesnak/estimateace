@@ -16,6 +16,22 @@ This is the step-by-step guide for turning EstimateAce into the iPhone and Andro
   - New users see: *"Create your account on the web at estimateace.com, then log in here."*
   - The website is unchanged. Contractors' **customer** payments (pay links for real-world jobs) are allowed and keep working.
 - **No tracking.** The Facebook/Meta pixel is switched off inside the app, so you don't need Apple's "Allow tracking?" popup.
+
+### Native features (guideline 4.2)
+
+The store app is more than a remote WebView. Native pieces that ship in this project:
+
+- **LiDAR room scan** — custom Capacitor plugin (`RoomScanPlugin.swift` / Apple RoomPlan) on LiDAR-equipped Pro iPhones (iOS 16+). Other devices enter length × width × height.
+- **Camera, microphone, and photo library** — job-site photos, walkthrough video, and receipt capture via the WebView (`getUserMedia` / file picker), with Info.plist and AndroidManifest usage strings.
+- **Approximate location** — optional, used only to bias address autocomplete.
+- **Offline / no-network screen** — bundled `mobile/www/offline.html` (`server.errorPath`) with a Try again button and auto-retry when the connection returns.
+- **System-browser handoff** — Stripe, maps, and other hosts open in Safari / Chrome Custom Tabs (`@capacitor/browser` and `allowNavigation`).
+- **Splash screen and status bar** — `@capacitor/splash-screen` and `@capacitor/status-bar`.
+- **In-app account deletion** — Profile → Billing → Delete account (Apple 5.1.1(v)), plus https://app.estimateace.com/delete-account (Google).
+- **No purchase CTAs** — plan, add-on, and crew-seat checkout buttons and prices are hidden in the native app; those APIs return 403 for the app user-agent.
+
+There are no push-notification or haptics plugins in this release.
+
 - **Account deletion** is inside the app (Apple 5.1.1(v)): Profile → Billing → Manage billing → Delete account. There's also a public page for Google Play: **https://app.estimateace.com/delete-account**.
 
 | Item | Value |
@@ -28,6 +44,7 @@ This is the step-by-step guide for turning EstimateAce into the iPhone and Andro
 | Terms URL | https://app.estimateace.com/terms |
 | Account deletion URL | https://app.estimateace.com/delete-account |
 | Support email | support@estimateace.com |
+| Current store version | iOS 1.0.1 (build 2) · Android versionName 1.0.1 / versionCode 2 |
 
 ---
 
@@ -150,14 +167,16 @@ If the build fails in `RoomScanPlugin.swift`, copy the error. RoomPlan APIs are 
 **Android**: you need an **upload key** (one time; keep it safe forever).
 1. Create the key:
    ```bash
-   cd android
-   keytool -genkeypair -v -keystore estimateace-upload.jks -alias upload -keyalg RSA -keysize 2048 -validity 10000
+   # A generated upload keystore also lives at /workspace/android-upload-keystore.jks
+   # with the password in /workspace/android-keystore.txt (never commit either file).
+   keytool -genkeypair -v -keystore /workspace/android-upload-keystore.jks \
+     -alias estimateace-upload -keyalg RSA -keysize 2048 -validity 10950
    ```
-2. Create `android/keystore.properties`. It's gitignored, so **never commit it**:
+2. Create `android/keystore.properties` (gitignored — **never commit it**). Point `storeFile` at the `.jks` path:
    ```properties
-   storeFile=../estimateace-upload.jks
+   storeFile=/workspace/android-upload-keystore.jks
    storePassword=YOUR_STORE_PASSWORD
-   keyAlias=upload
+   keyAlias=estimateace-upload
    keyPassword=YOUR_KEY_PASSWORD
    ```
 3. Back up the `.jks` file and both passwords in your password manager. Google Play App Signing holds the real app-signing key; if this upload key is lost, Google can reset it, but that's slow.
@@ -165,10 +184,10 @@ If the build fails in `RoomScanPlugin.swift`, copy the error. RoomPlan APIs are 
 ## 5. Version numbers (every release)
 
 - **iOS**: Xcode → App target → General.
-  - **Version** (for example `1.0.0`): what users see.
+  - **Version** (currently `1.0.1`): what users see.
   - **Build**: a number that must go up on every upload (1, 2, 3…).
 - **Android**: in `android/app/build.gradle`:
-  - `versionName "1.0.0"`: what users see.
+  - `versionName "1.0.1"`: what users see.
   - `versionCode 1`: must go up on every upload.
 
 ## 6. Build and upload
