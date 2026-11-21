@@ -172,6 +172,7 @@ import {
   NATIVE_SIGNUP_TEXT,
   useIsNativeApp,
 } from '@/lib/native-app';
+import { isReviewerDemoEmail } from '@/lib/reviewer-demo';
 import {
   captchaOption,
   friendlyCaptchaError,
@@ -3223,6 +3224,51 @@ export default function Home() {
       const msg = 'Enter your email and password.';
       setLoginError(msg);
       showMessage(msg);
+      return;
+    }
+
+    // Store reviewers use a server-side allowlisted login that skips Turnstile
+    // (Apple / Google review devices often fail the captcha).
+    if (isReviewerDemoEmail(trimmedEmail)) {
+      setLoginLoading(true);
+      try {
+        const res = await fetch('/api/auth/reviewer-login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: trimmedEmail, password: trimmedPassword }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || !json.access_token || !json.refresh_token) {
+          const msg = String(json.error || 'Invalid email or password.');
+          setLoginError(msg);
+          showMessage(msg);
+          return;
+        }
+        const { data, error } = await supabase.auth.setSession({
+          access_token: json.access_token,
+          refresh_token: json.refresh_token,
+        });
+        if (error) {
+          setLoginError(error.message);
+          showMessage(error.message);
+          return;
+        }
+        const authUser = data.session?.user ?? null;
+        if (authUser) {
+          setLoginError('');
+          await completeLoginWithOptional2FA(authUser);
+          return;
+        }
+        const msg = 'Login response was empty. Click "Clear saved login" below, then try again.';
+        setLoginError(msg);
+        showMessage(msg);
+      } catch {
+        const msg = 'Network error — could not reach the login server. Check your connection and try again.';
+        setLoginError(msg);
+        showMessage(msg);
+      } finally {
+        setLoginLoading(false);
+      }
       return;
     }
 

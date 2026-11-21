@@ -56,6 +56,7 @@ test('purchase endpoints refuse store-app requests, allow the web', async () => 
     'app/api/billing/portal/route.ts',
     'app/api/crew/seat-checkout/route.ts',
     'app/api/receptionist/checkout/route.ts',
+    'app/api/billing/start-trial/route.ts',
   ]) {
     const s = src(f);
     const post = s.indexOf('export async function POST');
@@ -85,6 +86,7 @@ test('iOS project: permission strings, arm64, privacy manifest bundled', () => {
     'NSMicrophoneUsageDescription',
     'NSPhotoLibraryUsageDescription',
     'NSPhotoLibraryAddUsageDescription',
+    'NSLocationWhenInUseUsageDescription',
   ]) {
     assert.match(plist, new RegExp(`<key>${k}</key>\\s*<string>EstimateAce [^<]{20,}</string>`), k);
   }
@@ -92,6 +94,8 @@ test('iOS project: permission strings, arm64, privacy manifest bundled', () => {
   assert.ok(!/armv7/.test(plist));
   const priv = src('ios/App/App/PrivacyInfo.xcprivacy');
   assert.match(priv, /<key>NSPrivacyTracking<\/key>\s*<false\/>/);
+  assert.match(priv, /NSPrivacyCollectedDataTypeCoarseLocation/);
+  assert.match(priv, /NSPrivacyAccessedAPICategoryUserDefaults/);
   const pbx = src('ios/App/App.xcodeproj/project.pbxproj');
   assert.match(pbx, /PrivacyInfo\.xcprivacy in Resources/);
   const icon = readFileSync(path.join(root, 'ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png'));
@@ -102,7 +106,8 @@ test('iOS project: permission strings, arm64, privacy manifest bundled', () => {
 test('Android project: package id, camera/mic permissions, signing from untracked file', () => {
   const manifest = src('android/app/src/main/AndroidManifest.xml');
   assert.match(manifest, /android\.permission\.CAMERA/);
-  assert.match(manifest, /android\.permission\.RECORD_AUDIO/);
+  assert.match(manifest, /android.permission.RECORD_AUDIO/);
+  assert.match(manifest, /android.permission.ACCESS_COARSE_LOCATION/);
   assert.match(manifest, /android\.hardware\.camera" android:required="false"/);
   const gradle = src('android/app/build.gradle');
   assert.match(gradle, /applicationId "com\.estimateace\.app"/);
@@ -169,6 +174,7 @@ test('npm scripts and release docs exist', () => {
     'docs/store-listing/google-play.md',
     'docs/store-listing/app-privacy.md',
     'docs/store-listing/review-notes.md',
+    'docs/store-listing/privacy-answers.md',
   ]) {
     assert.ok(existsSync(path.join(root, f)), f);
   }

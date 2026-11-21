@@ -16,6 +16,7 @@ import {
 import { claimPromoSpot } from '@/lib/promo-spots';
 import { EMAIL_NOT_CONFIRMED_MESSAGE, isEmailConfirmed } from '@/lib/send-guard';
 import { rateLimit, serverError, tooManyRequests } from '@/lib/rate-limit';
+import { refuseInAppPurchase } from '@/lib/native-app-server';
 import { signupFieldsFromMetadata } from '@/lib/signup-profile';
 
 /**
@@ -31,6 +32,9 @@ import { signupFieldsFromMetadata } from '@/lib/signup-profile';
  */
 export async function POST(request: NextRequest) {
   try {
+    const nativeBlocked = refuseInAppPurchase(request);
+    if (nativeBlocked) return nativeBlocked;
+
     const { user, error } = await getUserFromRequest(request);
     if (!user) {
       return NextResponse.json({ error: error || 'Unauthorized' }, { status: 401 });
