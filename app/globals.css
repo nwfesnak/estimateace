@@ -165,6 +165,61 @@
   padding-left: env(safe-area-inset-left, 0px);
   padding-right: env(safe-area-inset-right, 0px);
   background-color: #fff;
+  gap: 0.15rem;
+  min-width: 0;
+  /* Scale labels so 7 items stay spaced on 320–440px phones (overrides text-xs).
+     Tight enough that 9-letter English labels (Dashboard, Estimates) fit one line
+     at 320px; multi-word labels like “New Estimate” still wrap at spaces. */
+  font-size: clamp(0.5rem, 2.45vw, 0.75rem);
+  letter-spacing: -0.02em;
+}
+
+.app-shell-bottom-nav-item {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding-left: 1px;
+  padding-right: 1px;
+  /* Comfortable tap target even when the label wraps to two lines. */
+  min-height: 2.75rem;
+  container-type: inline-size;
+}
+
+.app-shell-bottom-nav-icon {
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.app-shell-bottom-nav-label {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  text-align: center;
+  line-height: 1.15;
+  padding-inline: 0;
+  overflow: hidden;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
+  /* Shrink just enough that a 9-letter English label fits one line in the item. */
+  font-size: min(1em, 17.5cqw);
+  letter-spacing: -0.03em;
+}
+
+@media (max-width: 439.98px) {
+  .app-shell-bottom-nav-icon {
+    font-size: 1.5rem;
+  }
+}
+
+@media (max-width: 359.98px) {
+  .app-shell-bottom-nav {
+    gap: 0.2rem;
+  }
+  .app-shell-bottom-nav-icon {
+    font-size: 1.35rem;
+  }
 }
 
 /* Nested lead lists etc. — don't steal parent scroll at edges */
