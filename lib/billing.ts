@@ -117,6 +117,11 @@ export const TRIAL_OFFERS = {
   '6mo': () => 180,
 } as const;
 
+/** Promo and trial offers cover the membership plan only — not paid add-ons. */
+export const PROMO_COVERS_MEMBERSHIP_ONLY =
+  'Free promo covers the EstimateAce membership only. AI Receptionist and additional crew seats are billed separately at regular price.';
+
+
 export type TrialOffer = keyof typeof TRIAL_OFFERS;
 
 export function normalizePromo(promo?: string | null): TrialOffer | null {
