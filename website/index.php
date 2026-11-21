@@ -260,6 +260,7 @@ $app_url = 'https://app.estimateace.com';
     <p>Join contractors who quote faster, look sharper, and get paid without the paperwork headache.</p>
     <a class="btn btn-primary btn-lg" href="<?= $app_url ?>">Start Free Trial</a>
     <p class="hero-note" style="margin-top:0.75rem;">Card required · not charged until your free trial ends</p>
+    <p class="hero-note" style="margin-top:0.5rem;">Free promo covers the EstimateAce membership only. AI Receptionist and additional crew seats are billed separately at regular price.</p>
   </div>
 </section>
 

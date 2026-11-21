@@ -100,7 +100,8 @@ export async function POST(request: NextRequest) {
       line_items: lineItems,
       success_url: `${appUrl}/?billing=receptionist_success&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${appUrl}/?billing=receptionist_cancel`,
-      allow_promotion_codes: true,
+      // Membership promo codes must not apply to paid add-ons.
+      allow_promotion_codes: false,
       subscription_data: {
         metadata: {
           purpose: RECEPTIONIST_ADDON_PURPOSE,

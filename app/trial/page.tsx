@@ -13,6 +13,7 @@ import {
 } from '@/lib/turnstile';
 import { NATIVE_SIGNUP_TEXT, useIsNativeApp } from '@/lib/native-app';
 import { TRIAL_INACTIVITY_NOTICE } from '@/lib/trial-inactivity';
+import { PROMO_COVERS_MEMBERSHIP_ONLY } from '@/lib/billing';
 
 const APP_HOME = '/';
 const DEFAULT_TRIAL_DAYS = 14;
@@ -123,9 +124,10 @@ function TrialForm() {
 
   const billingNote = useMemo(
     () =>
-      cardRequired
+      (cardRequired
         ? `A credit card is required to start. Your ${trialLabel} free trial lasts ${trialDays} days and you won't be charged until it ends. After the trial, your card is charged ${planPrice} (${planLabel.toLowerCase()}) unless you cancel. Cancel anytime before the trial ends in Profile → Billing → Manage billing and you won't be charged.`
-        : `No credit card is needed to start. This ${trialLabel} free trial (${trialDays} days) is limited to the first ${spots?.limit ?? CAPPED_OFFER_LIMIT} signups. When it ends, you'll need to subscribe at ${planPrice} (${planLabel.toLowerCase()}) to keep access. You won't be charged unless you subscribe. Cancel anytime in Profile → Billing → Manage billing.`,
+        : `No credit card is needed to start. This ${trialLabel} free trial (${trialDays} days) is limited to the first ${spots?.limit ?? CAPPED_OFFER_LIMIT} signups. When it ends, you'll need to subscribe at ${planPrice} (${planLabel.toLowerCase()}) to keep access. You won't be charged unless you subscribe. Cancel anytime in Profile → Billing → Manage billing.`) +
+      ` ${PROMO_COVERS_MEMBERSHIP_ONLY}`,
     [cardRequired, planPrice, planLabel, trialDays, trialLabel, spots?.limit]
   );
 
@@ -394,7 +396,8 @@ function TrialForm() {
                 ? ' A credit card is required to start, but you will not be charged until the trial ends. Cancel anytime before then and you pay nothing. '
                 : ' No credit card is required to start. After the trial you will need to subscribe to the plan you choose below to keep access. '}
               Then use the same email and password to log in at app.estimateace.com.
-              {cappedOffer ? ` This offer is limited to the first ${spots?.limit ?? CAPPED_OFFER_LIMIT} signups.` : ''}
+              {cappedOffer ? ` This offer is limited to the first ${spots?.limit ?? CAPPED_OFFER_LIMIT} signups.` : ''}{' '}
+              {PROMO_COVERS_MEMBERSHIP_ONLY}
             </p>
           </div>
 
@@ -573,13 +576,14 @@ function TrialForm() {
                   {offer === '2mo'
                     ? ' I understand that if I don\u2019t sign in for 30 days during this launch-promotion trial, my data will be emailed to me and the trial account deleted (after a reminder at 20 days).'
                     : ''}{' '}
-                  I agree to the{' '}
+                  {PROMO_COVERS_MEMBERSHIP_ONLY} I agree to the{' '}
                 </>
               ) : (
                 <>
                   I understand this is a <strong>{trialLabel} free trial</strong> ({trialDays} days), and
                   after that I will need to subscribe at <strong>{planPrice}</strong> (
-                  {planLabel.toLowerCase()}) to keep using EstimateAce. I agree to the{' '}
+                  {planLabel.toLowerCase()}) to keep using EstimateAce. {PROMO_COVERS_MEMBERSHIP_ONLY}{' '}
+                  I agree to the{' '}
                 </>
               )}
               <Link href="/terms" className="text-emerald-700 underline">

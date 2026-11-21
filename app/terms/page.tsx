@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { PROMO_COVERS_MEMBERSHIP_ONLY } from '@/lib/billing';
 
 export const metadata = {
   title: 'Terms of Service | EstimateAce',
@@ -55,7 +56,7 @@ export default function TermsPage() {
         <p>
           Subscriptions renew automatically at the end of each billing period until canceled. Optional add-ons
           (such as crew seats and AI Receptionist) are billed separately at the prices shown in the
-          app. Subscription fees are charged through our payment processor, Stripe. We may change
+          app. {PROMO_COVERS_MEMBERSHIP_ONLY} Subscription fees are charged through our payment processor, Stripe. We may change
           prices with advance notice; changes apply from your next billing period.
         </p>
 
@@ -84,8 +85,9 @@ export default function TermsPage() {
             pending reminder.
           </li>
           <li>
-            This never applies to paid subscriptions, to accounts that have paid us anything, or to crew
-            members on a paying account.
+            This never applies to paid subscriptions, to accounts that have paid us anything (including
+            paid add-ons such as AI Receptionist or additional crew seats), or to crew
+            members on a paying account. {PROMO_COVERS_MEMBERSHIP_ONLY}
           </li>
         </ul>
 

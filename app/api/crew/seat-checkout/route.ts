@@ -100,7 +100,8 @@ export async function POST(request: NextRequest) {
       line_items: lineItems,
       success_url: `${appUrl}/?billing=crew_seat_success&crew=${encodeURIComponent(crewEmail)}`,
       cancel_url: `${appUrl}/?billing=crew_seat_cancel&crew=${encodeURIComponent(crewEmail)}`,
-      allow_promotion_codes: true,
+      // Membership promo codes must not apply to paid add-ons.
+      allow_promotion_codes: false,
       subscription_data: {
         metadata: {
           purpose: CREW_SEAT_PURPOSE,
