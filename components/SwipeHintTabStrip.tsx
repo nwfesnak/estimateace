@@ -1,7 +1,12 @@
 'use client';
 
 import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { getTabStripOverflow, tabStripScrollAmount } from '@/lib/swipe-hint-tabs';
+import {
+  getTabStripOverflow,
+  tabStripScrollAmount,
+  TAB_STRIP_ARROW_PX,
+  TAB_STRIP_EDGE_PAD_PX,
+} from '@/lib/swipe-hint-tabs';
 
 type SwipeHintTabStripProps = {
   children: ReactNode;
@@ -92,7 +97,11 @@ export function SwipeHintTabStrip({
         className="flex overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
         style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x' }}
       >
-        <div ref={innerRef} className="flex min-w-full">
+        <div
+          ref={innerRef}
+          className="flex min-w-full gap-3"
+          style={{ paddingLeft: TAB_STRIP_EDGE_PAD_PX, paddingRight: TAB_STRIP_EDGE_PAD_PX }}
+        >
           {children}
         </div>
       </div>
@@ -108,7 +117,8 @@ export function SwipeHintTabStrip({
             type="button"
             data-testid="swipe-hint-left"
             aria-label="Show previous tabs"
-            className="absolute left-0 top-1/2 z-10 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-slate-200 bg-white/95 text-slate-700 shadow-sm"
+            className="absolute left-0 top-1/2 z-10 flex -translate-y-1/2 items-center justify-center rounded-full border border-slate-200 bg-white/95 text-slate-700 shadow-sm"
+            style={{ width: TAB_STRIP_ARROW_PX, height: TAB_STRIP_ARROW_PX }}
             onClick={() => scrollByDir(-1)}
           >
             <Chevron dir="left" />
@@ -127,7 +137,8 @@ export function SwipeHintTabStrip({
             type="button"
             data-testid="swipe-hint-right"
             aria-label="Show more tabs"
-            className="absolute right-0 top-1/2 z-10 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-slate-200 bg-white/95 text-slate-700 shadow-sm"
+            className="absolute right-0 top-1/2 z-10 flex -translate-y-1/2 items-center justify-center rounded-full border border-slate-200 bg-white/95 text-slate-700 shadow-sm"
+            style={{ width: TAB_STRIP_ARROW_PX, height: TAB_STRIP_ARROW_PX }}
             onClick={() => scrollByDir(1)}
           >
             <Chevron dir="right" />

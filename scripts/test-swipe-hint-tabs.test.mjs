@@ -108,3 +108,25 @@ test('Company Profile and crew account tab rows use the swipe-hint strip', () =>
   assert.match(panel, /canScrollRight && \(/);
   assert.match(panel, /canScrollLeft && \(/);
 });
+
+test('tab labels have padding and a gap, and stay on one line clear of the arrows', () => {
+  assert.ok(T.TAB_STRIP_EDGE_PAD_PX >= T.TAB_STRIP_ARROW_PX);
+  assert.equal(T.TAB_STRIP_ARROW_PX, 44);
+  assert.ok(T.TAB_STRIP_EDGE_PAD_PX >= 44);
+
+  const panel = src('components/SwipeHintTabStrip.tsx');
+  assert.match(panel, /TAB_STRIP_EDGE_PAD_PX/);
+  assert.match(panel, /TAB_STRIP_ARROW_PX/);
+  assert.match(panel, /paddingLeft: TAB_STRIP_EDGE_PAD_PX/);
+  assert.match(panel, /paddingRight: TAB_STRIP_EDGE_PAD_PX/);
+  assert.match(panel, /gap-3/);
+
+  const page = src('app/page.tsx');
+  const labelClass = /flex-1 shrink-0 min-w-\[[78]rem\] whitespace-nowrap px-4 py-4 text-center font-semibold/g;
+  const hits = page.match(labelClass) || [];
+  assert.equal(
+    hits.length,
+    6,
+    `expected 6 padded nowrap tabs (4 owner + 2 crew), got ${hits.length}`
+  );
+});

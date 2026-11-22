@@ -1,3 +1,12 @@
+/** Chevron button size (px). Matches the 44px / h-11 w-11 tap target. */
+export const TAB_STRIP_ARROW_PX = 44;
+
+/**
+ * Horizontal inset on each end of the scroll row, at least the arrow width,
+ * so the chevron and fade never cover or crowd tab labels.
+ */
+export const TAB_STRIP_EDGE_PAD_PX = 48;
+
 /** Overflow state for a horizontally scrolling tab strip. */
 export function getTabStripOverflow(
   metrics: { scrollLeft: number; scrollWidth: number; clientWidth: number },
