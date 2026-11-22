@@ -41,7 +41,8 @@
     "test:appointment-notify": "node --test scripts/test-appointment-notify.test.mjs",
     "test:reviewer-demo": "node --test scripts/test-reviewer-demo.test.mjs",
     "test:company-vendors": "node --test scripts/test-company-vendors.test.mjs",
-    "test:platform-tutorials": "node --test scripts/test-platform-tutorials.test.mjs"
+    "test:platform-tutorials": "node --test scripts/test-platform-tutorials.test.mjs",
+    "test:swipe-hint-tabs": "node --test scripts/test-swipe-hint-tabs.test.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.6.2",

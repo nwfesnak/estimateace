@@ -143,6 +143,8 @@ test('Video Tutorials UI is on Company Profile, visible to crew, and opens links
   assert.match(page, /from '@\/components\/VideoTutorialsPanel'/);
   assert.match(page, /<VideoTutorialsPanel onMessage=\{showMessage\} \/>/);
   assert.match(page, /profileTab === 'tutorials'/);
+  assert.match(page, /from '@\/components\/SwipeHintTabStrip'/);
+  assert.match(page, /data-testid="company-profile-tabs"/);
   assert.match(page, /data-testid="crew-video-tutorials-tab"/);
   assert.match(page, /tab === 'tutorials' \? 'tutorials' : 'billing'/);
   assert.match(panel, /Tutorials coming soon/);
