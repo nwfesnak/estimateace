@@ -6,6 +6,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { openExternalUrl } from '@/lib/native-app';
+import { fetchWithSession } from '@/lib/session-auth';
 import type { PlatformTutorial } from '@/lib/platform-tutorials';
 
 type VideoTutorialsPanelProps = {
@@ -26,7 +27,7 @@ export function VideoTutorialsPanel({ onMessage }: VideoTutorialsPanelProps) {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/tutorials', { credentials: 'include' });
+      const res = await fetchWithSession('/api/tutorials', { credentials: 'include' });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
         onMessage?.(json.error || 'Could not load tutorials.');
@@ -45,7 +46,7 @@ export function VideoTutorialsPanel({ onMessage }: VideoTutorialsPanelProps) {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/tutorials', { credentials: 'include' });
+        const res = await fetchWithSession('/api/tutorials', { credentials: 'include' });
         const json = await res.json().catch(() => ({}));
         if (cancelled) return;
         if (!res.ok) {
@@ -75,7 +76,7 @@ export function VideoTutorialsPanel({ onMessage }: VideoTutorialsPanelProps) {
     }
     setSaving(true);
     try {
-      const res = await fetch('/api/tutorials', {
+      const res = await fetchWithSession('/api/tutorials', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -104,7 +105,7 @@ export function VideoTutorialsPanel({ onMessage }: VideoTutorialsPanelProps) {
     if (!canManage || !editingId) return;
     setSaving(true);
     try {
-      const res = await fetch('/api/tutorials', {
+      const res = await fetchWithSession('/api/tutorials', {
         method: 'PATCH',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -135,7 +136,7 @@ export function VideoTutorialsPanel({ onMessage }: VideoTutorialsPanelProps) {
     if (!confirm(`Remove tutorial “${video.title}”? Users will no longer see it.`)) return;
     setSaving(true);
     try {
-      const res = await fetch('/api/tutorials', {
+      const res = await fetchWithSession('/api/tutorials', {
         method: 'DELETE',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -166,7 +167,7 @@ export function VideoTutorialsPanel({ onMessage }: VideoTutorialsPanelProps) {
     ordered.splice(next, 0, item);
     setSaving(true);
     try {
-      const res = await fetch('/api/tutorials', {
+      const res = await fetchWithSession('/api/tutorials', {
         method: 'PATCH',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
