@@ -18,6 +18,7 @@ const UID = '3f6c2a1e-1111-4222-8333-944455556666';
  * added to ACCOUNT_DATA_TABLES or ACCOUNT_DATA_KEPT (with a reason) or this fails.
  */
 const LIVE_PUBLIC_TABLES = [
+  'app_tutorials',
   'archive-est',
   'company_vendors',
   'crew_members',
