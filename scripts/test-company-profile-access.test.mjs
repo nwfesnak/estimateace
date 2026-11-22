@@ -33,7 +33,7 @@ test('page: crew nav opens Account only, never Company Profile tabs or editors',
   assert.match(page, /data-testid=\{currentCrew \? 'crew-account-heading' : 'company-profile-heading'\}/);
   assert.match(page, /currentCrew \? 'Account' : t\('companyProfile'\)/);
   // Company Profile tab bar and editors are owner-only
-  assert.match(page, /\{!currentCrew && \(\s*<div className="flex border-b mb-8 overflow-x-auto">/s);
+  assert.match(page, /<SwipeHintTabStrip className="border-b mb-8" data-testid="company-profile-tabs">/);
   assert.match(page, /\{!currentCrew && profileTab === 'info' && \(/);
   assert.match(page, /\{!currentCrew && profileTab === 'payments' && \(/);
   // Video Tutorials are visible to owners and crew; company editors stay owner-only
