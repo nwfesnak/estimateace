@@ -155,6 +155,61 @@ test('Video Tutorials UI is on Company Profile, visible to crew, and opens links
   assert.match(panel, /min-\[400px\]:flex-row/);
 });
 
+test('tutorial API calls send the Supabase session Bearer token', async () => {
+  const panel = src('components/VideoTutorialsPanel.tsx');
+  assert.match(panel, /from '@\/lib\/session-auth'/);
+  assert.match(panel, /fetchWithSession/);
+  // Bare cookie-only fetch is what caused production 401s.
+  assert.equal((panel.match(/fetchWithSession\(\s*['"]\/api\/tutorials['"]/g) || []).length, 6);
+  assert.doesNotMatch(panel, /(?<!fetchWithSession\()fetch\(\s*['"]\/api\/tutorials['"]/);
+
+  const session = {
+    access_token: 'tok_session_abc',
+  };
+  const mocks = {
+    '@/lib/supabase/client': {
+      getSupabaseClient: () => ({
+        auth: {
+          getSession: async () => ({ data: { session } }),
+        },
+      }),
+    },
+  };
+  const auth = loadTsModule('lib/session-auth.ts', mocks);
+  const headers = auth.authorizationHeaders('tok_abc', { 'Content-Type': 'application/json' });
+  assert.equal(headers.get('Authorization'), 'Bearer tok_abc');
+  assert.equal(headers.get('Content-Type'), 'application/json');
+  assert.equal(auth.authorizationHeaders(null).get('Authorization'), null);
+  assert.equal(auth.authorizationHeaders('').get('Authorization'), null);
+
+  assert.equal(await auth.getSessionAccessToken(), 'tok_session_abc');
+
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url, init });
+    return new Response(JSON.stringify({ ok: true }), { status: 200 });
+  };
+  try {
+    await auth.fetchWithSession('/api/tutorials', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'Demo', url: 'https://example.com/v' }),
+    });
+    await auth.fetchWithSession('/api/tutorials');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].url, '/api/tutorials');
+  assert.equal(calls[0].init.method, 'POST');
+  assert.equal(calls[0].init.credentials, 'include');
+  assert.equal(calls[0].init.headers.get('Authorization'), 'Bearer tok_session_abc');
+  assert.equal(calls[0].init.headers.get('Content-Type'), 'application/json');
+  assert.equal(calls[1].init.credentials, 'include');
+  assert.equal(calls[1].init.headers.get('Authorization'), 'Bearer tok_session_abc');
+});
+
 test('account purge documents app_tutorials as kept platform data', () => {
   const purge = src('lib/account-purge.ts');
   const delTest = src('scripts/test-account-deletion.test.mjs');
