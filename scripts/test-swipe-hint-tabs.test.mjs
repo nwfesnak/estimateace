@@ -122,11 +122,39 @@ test('tab labels have padding and a gap, and stay on one line clear of the arrow
   assert.match(panel, /gap-3/);
 
   const page = src('app/page.tsx');
-  const labelClass = /flex-1 shrink-0 min-w-\[[78]rem\] whitespace-nowrap px-4 py-4 text-center font-semibold/g;
+  const labelClass = /flex-none w-auto whitespace-nowrap px-4 py-4 text-center font-semibold/g;
   const hits = page.match(labelClass) || [];
   assert.equal(
     hits.length,
     6,
-    `expected 6 padded nowrap tabs (4 owner + 2 crew), got ${hits.length}`
+    `expected 6 content-sized nowrap tabs (4 owner + 2 crew), got ${hits.length}`
+  );
+  // flex-1 + min-w let "Billing / Contact Us" shrink below its text and smash into the next tab.
+  const strip = page.split('data-testid="company-profile-tabs"')[1]?.split('</SwipeHintTabStrip>')[0] || '';
+  const crew = page.split('data-testid="crew-account-tabs"')[1]?.split('</SwipeHintTabStrip>')[0] || '';
+  for (const chunk of [strip, crew]) {
+    assert.doesNotMatch(chunk, /flex-1/);
+    assert.doesNotMatch(chunk, /min-w-\[[78]rem\]/);
+    assert.match(chunk, /flex-none w-auto/);
+  }
+});
+
+test('a nowrap tab that is narrower than its text is detected as overflowing', () => {
+  assert.equal(T.tabLabelOverflows({ scrollWidth: 204, clientWidth: 112 }), true);
+  assert.equal(T.tabLabelOverflows({ scrollWidth: 142, clientWidth: 142 }), false);
+  assert.equal(T.tabLabelOverflows({ scrollWidth: 142, clientWidth: 143 }), false);
+  assert.equal(
+    T.tabBoxesOverlap([
+      { x: 64, width: 112 },
+      { x: 170, width: 112 },
+    ]),
+    true
+  );
+  assert.equal(
+    T.tabBoxesOverlap([
+      { x: 64, width: 142 },
+      { x: 218, width: 204 },
+    ]),
+    false
   );
 });

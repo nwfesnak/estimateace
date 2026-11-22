@@ -27,3 +27,24 @@ export function tabStripScrollAmount(clientWidth: number): number {
   const width = Number(clientWidth) || 0;
   return Math.max(Math.round(width * 0.7), 120);
 }
+
+/** True when a tab's text overflows its box (e.g. a nowrap label in a too-narrow flex item). */
+export function tabLabelOverflows(
+  el: { scrollWidth: number; clientWidth: number },
+  slop = 1
+): boolean {
+  return (Number(el.scrollWidth) || 0) > (Number(el.clientWidth) || 0) + slop;
+}
+
+/** True when any tab bounding box overlaps a neighbor. */
+export function tabBoxesOverlap(
+  boxes: Array<{ x: number; width: number }>,
+  slop = 1
+): boolean {
+  const sorted = [...boxes].sort((a, b) => a.x - b.x);
+  for (let i = 1; i < sorted.length; i++) {
+    const prevRight = sorted[i - 1].x + sorted[i - 1].width;
+    if (sorted[i].x < prevRight - slop) return true;
+  }
+  return false;
+}
