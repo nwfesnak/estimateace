@@ -15800,7 +15800,7 @@ export default function Home() {
                     setProfileTab('billing');
                     setBillingPanel('overview');
                   }}
-                  className={`flex-1 shrink-0 min-w-[7rem] whitespace-nowrap px-4 py-4 text-center font-semibold ${profileTab === 'billing' ? 'border-b-4 border-[#10b981] text-[#10b981]' : 'text-gray-500'}`}
+                  className={`flex-none w-auto whitespace-nowrap px-4 py-4 text-center font-semibold ${profileTab === 'billing' ? 'border-b-4 border-[#10b981] text-[#10b981]' : 'text-gray-500'}`}
                 >
                   Account
                 </button>
@@ -15808,7 +15808,7 @@ export default function Home() {
                   type="button"
                   data-testid="crew-video-tutorials-tab"
                   onClick={() => setProfileTab('tutorials')}
-                  className={`flex-1 shrink-0 min-w-[8rem] whitespace-nowrap px-4 py-4 text-center font-semibold ${profileTab === 'tutorials' ? 'border-b-4 border-[#10b981] text-[#10b981]' : 'text-gray-500'}`}
+                  className={`flex-none w-auto whitespace-nowrap px-4 py-4 text-center font-semibold ${profileTab === 'tutorials' ? 'border-b-4 border-[#10b981] text-[#10b981]' : 'text-gray-500'}`}
                 >
                   🎥 Video Tutorials
                 </button>
@@ -15820,7 +15820,7 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={() => setProfileTab('info')}
-                  className={`flex-1 shrink-0 min-w-[7rem] whitespace-nowrap px-4 py-4 text-center font-semibold ${profileTab === 'info' ? 'border-b-4 border-[#10b981] text-[#10b981]' : 'text-gray-500'}`}
+                  className={`flex-none w-auto whitespace-nowrap px-4 py-4 text-center font-semibold ${profileTab === 'info' ? 'border-b-4 border-[#10b981] text-[#10b981]' : 'text-gray-500'}`}
                 >
                   Company Info
                 </button>
@@ -15831,14 +15831,14 @@ export default function Home() {
                     setBillingPanel('overview');
                     if (!currentCrew) void refreshBillingStatus();
                   }}
-                  className={`flex-1 shrink-0 min-w-[7rem] whitespace-nowrap px-4 py-4 text-center font-semibold ${profileTab === 'billing' ? 'border-b-4 border-[#10b981] text-[#10b981]' : 'text-gray-500'}`}
+                  className={`flex-none w-auto whitespace-nowrap px-4 py-4 text-center font-semibold ${profileTab === 'billing' ? 'border-b-4 border-[#10b981] text-[#10b981]' : 'text-gray-500'}`}
                 >
                   {currentCrew ? 'Account' : '💳 Billing / Contact Us'}
                 </button>
                 <button
                   type="button"
                   onClick={() => setProfileTab('payments')}
-                  className={`flex-1 shrink-0 min-w-[7rem] whitespace-nowrap px-4 py-4 text-center font-semibold ${profileTab === 'payments' ? 'border-b-4 border-[#10b981] text-[#10b981]' : 'text-gray-500'}`}
+                  className={`flex-none w-auto whitespace-nowrap px-4 py-4 text-center font-semibold ${profileTab === 'payments' ? 'border-b-4 border-[#10b981] text-[#10b981]' : 'text-gray-500'}`}
                 >
                   Client Payments
                 </button>
@@ -15846,7 +15846,7 @@ export default function Home() {
                   type="button"
                   data-testid="video-tutorials-tab"
                   onClick={() => setProfileTab('tutorials')}
-                  className={`flex-1 shrink-0 min-w-[8rem] whitespace-nowrap px-4 py-4 text-center font-semibold ${profileTab === 'tutorials' ? 'border-b-4 border-[#10b981] text-[#10b981]' : 'text-gray-500'}`}
+                  className={`flex-none w-auto whitespace-nowrap px-4 py-4 text-center font-semibold ${profileTab === 'tutorials' ? 'border-b-4 border-[#10b981] text-[#10b981]' : 'text-gray-500'}`}
                 >
                   🎥 Video Tutorials
                 </button>
