@@ -26,6 +26,20 @@ import {
   type LaborLog,
 } from '@/lib/labor-logs';
 import {
+  canWriteCompanyVendors,
+  draftFromSnapshot,
+  emptyVendorDraft,
+  laborMemoFromVendor,
+  applyVendorRate,
+  normalizeCompanyVendor,
+  normalizeCompanyVendors,
+  shouldSaveNewVendor,
+  vendorSnapshotFromDraft,
+  type CompanyVendor,
+  type LaborVendorDraft,
+} from '@/lib/company-vendors';
+import { LaborVendorPicker, saveNewVendorIfRequested } from '@/components/LaborVendorPicker';
+import {
   TRADE_QUICK_LINES,
   getTradeById,
   tradeQuickLinesToSaved,
@@ -1053,6 +1067,9 @@ export default function Home() {
   const [laborDraftHours, setLaborDraftHours] = useState(0);
   const [laborDraftRate, setLaborDraftRate] = useState(0);
   const [laborDraftMemo, setLaborDraftMemo] = useState('');
+  const [companyVendors, setCompanyVendors] = useState<CompanyVendor[]>([]);
+  const [laborVendorDraft, setLaborVendorDraft] = useState<LaborVendorDraft>(emptyVendorDraft);
+  const [saveThisVendor, setSaveThisVendor] = useState(false);
   const [laborEditingId, setLaborEditingId] = useState<string | null>(null);
   const [laborSaving, setLaborSaving] = useState(false);
   /** Legacy fields kept in sync for older saves / reports */
@@ -3151,6 +3168,27 @@ export default function Home() {
   }, [workspaceUserId]);
 
   useEffect(() => {
+    if (!isLaborModalOpen || !supabase || !workspaceUserId) return;
+    let cancelled = false;
+    void (async () => {
+      const { data, error } = await supabase
+        .from('company_vendors')
+        .select('*')
+        .eq('company_id', workspaceUserId)
+        .order('name');
+      if (cancelled) return;
+      if (error) {
+        setCompanyVendors([]);
+        return;
+      }
+      setCompanyVendors(normalizeCompanyVendors(data));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isLaborModalOpen, supabase, workspaceUserId]);
+
+  useEffect(() => {
     if (!workspaceUserId || appointments.length === 0) return;
     void syncAppointmentsToServer(appointments, profile);
   }, [workspaceUserId, appointments.length, profile.appointmentReminderEnabled, profile.email, profile.phone]);
@@ -4052,7 +4090,42 @@ export default function Home() {
     setLaborDraftHours(0);
     setLaborDraftRate(keepRate != null ? keepRate : laborDraftRate);
     setLaborDraftMemo('');
+    setLaborVendorDraft(emptyVendorDraft());
+    setSaveThisVendor(false);
     setLaborEditingId(null);
+  };
+
+  const persistCompanyVendor = async (
+    row: Record<string, unknown>,
+    mode: 'insert' | 'update',
+    id?: string
+  ): Promise<CompanyVendor | null> => {
+    if (!supabase || !workspaceUserId || !canWriteCompanyVendors(Boolean(currentCrew))) return null;
+    if (mode === 'insert') {
+      const { data, error } = await supabase.from('company_vendors').insert(row).select('*').maybeSingle();
+      if (error || !data) return null;
+      return normalizeCompanyVendor(data);
+    }
+    if (!id) return null;
+    const { data, error } = await supabase
+      .from('company_vendors')
+      .update(row)
+      .eq('id', id)
+      .eq('company_id', workspaceUserId)
+      .select('*')
+      .maybeSingle();
+    if (error || !data) return null;
+    return normalizeCompanyVendor(data);
+  };
+
+  const deleteCompanyVendor = async (id: string): Promise<boolean> => {
+    if (!supabase || !workspaceUserId || !canWriteCompanyVendors(Boolean(currentCrew))) return false;
+    const { error } = await supabase
+      .from('company_vendors')
+      .delete()
+      .eq('id', id)
+      .eq('company_id', workspaceUserId);
+    return !error;
   };
 
   const startEditLaborEntry = (entry: LaborLog) => {
@@ -4060,12 +4133,14 @@ export default function Home() {
     setLaborDraftHours(Number(entry.hours) || 0);
     setLaborDraftRate(Number(entry.rate) || 0);
     setLaborDraftMemo(String(entry.memo || ''));
+    setLaborVendorDraft(draftFromSnapshot(entry));
+    setSaveThisVendor(false);
   };
 
   const saveLaborEntry = async () => {
     const hours = Math.max(0, Number(laborDraftHours) || 0);
     const rate = Math.max(0, Number(laborDraftRate) || 0);
-    const memo = String(laborDraftMemo || '').trim();
+    const memo = laborMemoFromVendor(laborVendorDraft, laborDraftMemo);
     const total = Math.round(hours * rate * 100) / 100;
     if (hours <= 0 || rate <= 0) {
       showMessage('Enter hours and hourly rate before saving labor.');
@@ -4073,6 +4148,29 @@ export default function Home() {
     }
 
     const editingId = laborEditingId;
+    let vendorSnap = vendorSnapshotFromDraft(laborVendorDraft);
+    const savedVendor = await saveNewVendorIfRequested({
+      canManage: canWriteCompanyVendors(Boolean(currentCrew)),
+      saveVendor: saveThisVendor,
+      draft: laborVendorDraft,
+      companyId: workspaceUserId,
+      rate,
+      persistVendor: persistCompanyVendor,
+    });
+    if (savedVendor) {
+      vendorSnap = { ...vendorSnap, vendorId: savedVendor.id, vendorName: savedVendor.name };
+      setCompanyVendors((prev) => normalizeCompanyVendors([...prev.filter((v) => v.id !== savedVendor.id), savedVendor]));
+    } else if (
+      shouldSaveNewVendor({
+        canManage: canWriteCompanyVendors(Boolean(currentCrew)),
+        saveVendor: saveThisVendor,
+        name: laborVendorDraft.name,
+        selectedId: laborVendorDraft.vendorId,
+      })
+    ) {
+      showMessage('Labor will be saved on this job, but the vendor could not be added to your saved list.');
+    }
+
     let next: LaborLog[];
     if (editingId) {
       next = jobLaborLogs.map((l) =>
@@ -4083,6 +4181,11 @@ export default function Home() {
               rate,
               memo,
               total,
+              vendorId: vendorSnap.vendorId,
+              vendorName: vendorSnap.vendorName,
+              trade: vendorSnap.trade,
+              phone: vendorSnap.phone,
+              email: vendorSnap.email,
             }
           : l
       );
@@ -4094,6 +4197,7 @@ export default function Home() {
         memo,
         total,
         createdAt: new Date().toISOString(),
+        ...vendorSnap,
       };
       next = [...jobLaborLogs, entry];
     }
@@ -20318,7 +20422,7 @@ export default function Home() {
           <DialogHeader>
             <DialogTitle>💼 Labor on this job</DialogTitle>
             <DialogDescription>
-              Enter hours, hourly rate, and a memo (who you paid). Save each entry — a new blank line starts for the next worker.
+              Pick a saved vendor or enter someone new, then add hours and rate. Save each entry — a new blank line starts for the next worker.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-5 py-2">
@@ -20341,11 +20445,24 @@ export default function Home() {
                       <div className="font-semibold text-slate-900">
                         {entry.hours} hrs × ${Number(entry.rate).toFixed(2)} = ${Number(entry.total).toFixed(2)}
                       </div>
-                      {entry.memo ? (
+                      {entry.vendorName ? (
+                        <div className="text-xs text-gray-600 mt-0.5 break-words">
+                          Vendor: {entry.vendorName}
+                          {entry.trade ? ` · ${entry.trade}` : ''}
+                        </div>
+                      ) : null}
+                      {entry.phone || entry.email ? (
+                        <div className="text-xs text-gray-500 break-words">
+                          {[entry.phone, entry.email].filter(Boolean).join(' · ')}
+                        </div>
+                      ) : null}
+                      {entry.memo && entry.memo !== entry.vendorName ? (
                         <div className="text-xs text-gray-600 mt-0.5 break-words">Memo: {entry.memo}</div>
-                      ) : (
+                      ) : !entry.vendorName && !entry.memo ? (
                         <div className="text-xs text-gray-400 mt-0.5">No memo</div>
-                      )}
+                      ) : !entry.vendorName ? (
+                        <div className="text-xs text-gray-600 mt-0.5 break-words">Memo: {entry.memo}</div>
+                      ) : null}
                     </div>
                     <div className="flex flex-col gap-1.5 shrink-0">
                       <Button
@@ -20374,10 +20491,27 @@ export default function Home() {
               </div>
             )}
 
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 min-[400px]:p-4 space-y-3">
               <p className="text-sm font-semibold text-slate-800">
                 {laborEditingId ? 'Edit labor entry' : 'Add labor entry'}
               </p>
+              <LaborVendorPicker
+                vendors={companyVendors}
+                draft={laborVendorDraft}
+                saveVendor={saveThisVendor}
+                canManage={canWriteCompanyVendors(Boolean(currentCrew))}
+                disabled={laborSaving}
+                onDraftChange={setLaborVendorDraft}
+                onSaveVendorChange={setSaveThisVendor}
+                onPickVendor={(vendor) => {
+                  if (vendor) setLaborDraftRate(applyVendorRate(vendor, laborDraftRate));
+                }}
+                onVendorsChange={setCompanyVendors}
+                persistVendor={persistCompanyVendor}
+                deleteVendor={deleteCompanyVendor}
+                currentRate={laborDraftRate}
+                onMessage={showMessage}
+              />
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-semibold mb-1">Hours</label>
@@ -20385,6 +20519,7 @@ export default function Home() {
                     type="number"
                     min={0}
                     step="0.25"
+                    className="h-11 text-base"
                     value={laborDraftHours || ''}
                     onChange={(e) => setLaborDraftHours(parseFloat(e.target.value) || 0)}
                     placeholder="0"
@@ -20396,6 +20531,7 @@ export default function Home() {
                     type="number"
                     min={0}
                     step="0.01"
+                    className="h-11 text-base"
                     value={laborDraftRate || ''}
                     onChange={(e) => setLaborDraftRate(parseFloat(e.target.value) || 0)}
                     placeholder="0.00"
@@ -20403,12 +20539,13 @@ export default function Home() {
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-semibold mb-1">Memo (who you paid)</label>
+                <label className="block text-sm font-semibold mb-1">Memo (optional note)</label>
                 <Input
                   type="text"
+                  className="h-11 text-base"
                   value={laborDraftMemo}
                   onChange={(e) => setLaborDraftMemo(e.target.value)}
-                  placeholder="e.g. Paid John for framing"
+                  placeholder="Optional — defaults to the vendor name"
                 />
               </div>
               <div className="text-right text-base font-semibold">

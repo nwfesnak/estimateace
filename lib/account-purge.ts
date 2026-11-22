@@ -33,6 +33,7 @@ export const ACCOUNT_DATA_TABLES: ReadonlyArray<{ table: string; column: string;
   { table: 'crew_members', column: 'crew_user_id', what: 'their own crew membership in someone else\'s workspace' },
   { table: 'login_otp', column: 'user_id', what: 'login codes' },
   { table: 'promo_redemptions', column: 'user_id', what: 'promo claims' },
+  { table: 'company_vendors', column: 'company_id', what: 'saved labor vendors' },
 ];
 
 /**

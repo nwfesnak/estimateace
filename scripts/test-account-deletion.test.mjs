@@ -19,6 +19,7 @@ const UID = '3f6c2a1e-1111-4222-8333-944455556666';
  */
 const LIVE_PUBLIC_TABLES = [
   'archive-est',
+  'company_vendors',
   'crew_members',
   'crew_seat_subscriptions',
   'estimates',

@@ -11,6 +11,13 @@ export type LaborLog = {
   memo: string;
   total: number;
   createdAt: string;
+  /** Saved company vendor id when this line was filled from the picker. */
+  vendorId?: string;
+  /** Snapshot of vendor details stored on this line (one-time or saved). */
+  vendorName?: string;
+  trade?: string;
+  phone?: string;
+  email?: string;
 };
 
 const roundMoney = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
@@ -25,14 +32,25 @@ export function normalizeLaborLogs(raw: unknown): LaborLog[] {
       const total =
         Number(row.total) > 0 ? roundMoney(Number(row.total)) : roundMoney(hours * rate);
       if (hours <= 0 && total <= 0) return null;
-      return {
+      const vendorName = String(row.vendorName || row.vendor_name || '').trim();
+      const vendorId = String(row.vendorId || row.vendor_id || '').trim();
+      const trade = String(row.trade || '').trim();
+      const phone = String(row.phone || '').trim();
+      const email = String(row.email || '').trim();
+      const log: LaborLog = {
         id: String(row.id || `labor-${i}-${Date.now()}`),
         hours,
         rate,
-        memo: String(row.memo || row.note || row.paidTo || '').trim(),
+        memo: String(row.memo || row.note || row.paidTo || vendorName || '').trim(),
         total,
         createdAt: String(row.createdAt || new Date().toISOString()),
-      } as LaborLog;
+      };
+      if (vendorId) log.vendorId = vendorId;
+      if (vendorName) log.vendorName = vendorName;
+      if (trade) log.trade = trade;
+      if (phone) log.phone = phone;
+      if (email) log.email = email;
+      return log;
     })
     .filter(Boolean) as LaborLog[];
 }
