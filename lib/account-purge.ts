@@ -48,6 +48,8 @@ export const ACCOUNT_DATA_KEPT: Readonly<Record<string, string>> = {
   promo_limits: 'global promo settings, no user data',
   trial_inactivity_log:
     'audit trail of the inactive-trial reminder / export / deletion (user id + timestamps + email ids, no personal data); must outlive the account',
+  app_tutorials:
+    'platform-wide video tutorial catalog managed by EstimateAce admins, not tied to a user account',
 };
 
 type DeleteResult = PromiseLike<{ error: { message?: string } | null; count?: number | null }>;
