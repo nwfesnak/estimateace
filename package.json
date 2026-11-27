@@ -34,7 +34,7 @@
     "test:translate": "node --test scripts/test-translate.test.mjs",
     "test:item-translations": "node --test scripts/test-item-translations.test.mjs",
     "test:company-profile": "node --test scripts/test-company-profile-access.test.mjs",
-    "test:receptionist": "node --test scripts/test-receptionist-spam.test.mjs scripts/test-receptionist-caps.test.mjs",
+    "test:receptionist": "node --test scripts/test-receptionist-spam.test.mjs scripts/test-receptionist-caps.test.mjs scripts/test-receptionist-addon-access.test.mjs",
     "test:crew": "node --test scripts/test-crew-redaction.test.mjs scripts/test-security-third-scan.test.mjs scripts/test-security-fourth-scan.test.mjs scripts/test-security-fifth-scan.test.mjs scripts/test-crew-security-gaps.test.mjs",
     "test:account-deletion": "node --test scripts/test-account-deletion.test.mjs scripts/test-crew-self-delete-seat.test.mjs",
     "test:job-settings": "node --test scripts/test-job-settings-snapshot.test.mjs",

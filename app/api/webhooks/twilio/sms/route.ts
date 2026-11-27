@@ -4,6 +4,7 @@ import { appendReceptionistLead } from '@/lib/receptionist-leads';
 import { escapeXml } from '@/lib/receptionist-twiml';
 import { isCallerBlocked } from '@/lib/receptionist-blocklist';
 import { readTwilioParams, verifyTwilioWebhook } from '@/lib/twilio-webhook-auth';
+import { loadReceptionistBilling, receptionistAddonHasAccess } from '@/lib/receptionist-billing';
 
 export const dynamic = 'force-dynamic';
 
@@ -52,6 +53,16 @@ export async function POST(request: NextRequest) {
         fromNumber: from,
         ...(params.MessageSid ? { id: `sms-${String(params.MessageSid).slice(0, 64)}` } : {}),
       });
+
+      // Unpaid / lapsed add-on: still keep the inbound lead, but do not auto-reply
+      // (no outbound SMS on an unpaid line).
+      const billing = await loadReceptionistBilling(tenant.userId);
+      if (!receptionistAddonHasAccess(billing)) {
+        console.info('twilio sms: add-on inactive, lead saved, no auto-reply', {
+          contractorId: tenant.userId,
+        });
+        return emptyTwiml();
+      }
     }
 
     const reply = tenant

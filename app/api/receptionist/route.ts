@@ -16,7 +16,9 @@ import { loadReceptionistConfig, saveReceptionistConfig } from '@/lib/receptioni
 import {
   loadReceptionistBilling,
   receptionistAddonHasAccess,
+  receptionistAddonPaymentRequiredPayload,
   RECEPTIONIST_ADDON_AMOUNT_DISPLAY,
+  resolveReceptionistAddonAccess,
   syncReceptionistAddonForUser,
 } from '@/lib/receptionist-billing';
 
@@ -178,6 +180,26 @@ export async function PATCH(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    if (next.enabled) {
+      const { entitled } = await resolveReceptionistAddonAccess(user.id);
+      if (!entitled) {
+        next.enabled = false;
+        if (next.twilio?.phoneNumber) next.status = 'disabled';
+        // Turning OFF (and other field updates) may still be saved; never persist enabled:true.
+        await saveReceptionistConfig(user.id, next);
+        return NextResponse.json(
+          {
+            ...receptionistAddonPaymentRequiredPayload(),
+            config: toPublicReceptionistConfig(next),
+            phoneNumber: next.twilio?.phoneNumber || null,
+            status: next.status,
+          },
+          { status: 402 }
+        );
+      }
+    }
+
     if (next.enabled && next.twilio?.phoneNumber) next.status = 'active';
     if (!next.enabled && next.twilio?.phoneNumber) next.status = 'disabled';
 
@@ -214,11 +236,15 @@ export async function POST(request: NextRequest) {
     }
 
     // Same gates as the other AI routes: active subscription / trial (or an active crew
-    // seat), then the per-account daily AI quota (shared "ai" counter).
+    // seat), then the $49.99/mo receptionist add-on, then the per-account daily AI quota.
     const paywall = await enforceAppAccess(user.id);
     if (paywall) return paywall;
     const ws = await requireWorkspaceOwner(user.id, undefined, { requireTab: 'receptionist' });
     if (ws.denied) return ws.denied;
+    const { entitled } = await resolveReceptionistAddonAccess(ws.ownerUserId);
+    if (!entitled) {
+      return NextResponse.json(receptionistAddonPaymentRequiredPayload(), { status: 402 });
+    }
     {
       const quota = await reserveAiQuota(await workspaceOwnerId(user.id), 'ai');
       if (quota) return quota;

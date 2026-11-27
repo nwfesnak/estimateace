@@ -42,6 +42,26 @@ export function isReceptionistAddonSubscription(sub: Stripe.Subscription): boole
   });
 }
 
+export function receptionistAddonPaymentRequiredPayload(): {
+  error: string;
+  needsPayment: true;
+  amountDisplay: string;
+} {
+  return {
+    error: `AI Receptionist is a paid add-on (${RECEPTIONIST_ADDON_AMOUNT_DISPLAY}/mo). Confirm payment first, then enable your phone line.`,
+    needsPayment: true,
+    amountDisplay: RECEPTIONIST_ADDON_AMOUNT_DISPLAY,
+  };
+}
+
+/**
+ * Entitlement for the $49.99/mo AI Receptionist add-on.
+ *  - active / trialing: access
+ *  - past_due: no access (payment failed; no grace)
+ *  - canceled or cancelAtPeriodEnd: access only while the already-paid
+ *    currentPeriodEnd is still in the future. Immediate cancel sets
+ *    currentPeriodEnd to Stripe ended_at, so access ends immediately.
+ */
 export function receptionistAddonHasAccess(billing: ReceptionistBilling | null | undefined): boolean {
   if (!billing) return false;
   const status = String(billing.status || '').toLowerCase();
@@ -49,9 +69,32 @@ export function receptionistAddonHasAccess(billing: ReceptionistBilling | null |
     ? new Date(billing.currentPeriodEnd).getTime()
     : 0;
   const now = Date.now();
-  if (status === 'active' || status === 'trialing' || status === 'past_due') return true;
+  if (status === 'past_due' || status === 'unpaid' || status === 'incomplete' || status === 'incomplete_expired' || status === 'paused') {
+    return false;
+  }
+  if (status === 'active' || status === 'trialing') return true;
   if ((status === 'canceled' || billing.cancelAtPeriodEnd) && periodEnd > now) return true;
   return false;
+}
+
+/** Clear live-answering flags on the SETTINGS profile when add-on access is lost. */
+export function receptionistEnabledFlagsOff(prev: Record<string, any> | null | undefined): {
+  receptionistConfig?: any;
+  aiReceptionist?: any;
+} {
+  const profile = prev && typeof prev === 'object' ? prev : {};
+  const patch: { receptionistConfig?: any; aiReceptionist?: any } = {};
+  if (profile.receptionistConfig && typeof profile.receptionistConfig === 'object') {
+    patch.receptionistConfig = {
+      ...profile.receptionistConfig,
+      enabled: false,
+      status: profile.receptionistConfig.twilio?.phoneNumber ? 'disabled' : 'none',
+    };
+  }
+  if (profile.aiReceptionist && typeof profile.aiReceptionist === 'object') {
+    patch.aiReceptionist = { ...profile.aiReceptionist, enabled: false };
+  }
+  return patch;
 }
 
 /**
@@ -115,14 +158,9 @@ export async function upsertReceptionistAddonFromStripe(
       ...prev,
       receptionistBilling: billing,
       aiReceptionistAddonActive: active,
-      // If subscription lapsed, turn off live answering flag (keep number config)
-      ...(active
-        ? {}
-        : {
-            receptionistConfig: prev.receptionistConfig
-              ? { ...prev.receptionistConfig, enabled: false, status: prev.receptionistConfig.twilio?.phoneNumber ? 'disabled' : 'none' }
-              : prev.receptionistConfig,
-          }),
+      // If subscription lapsed / payment failed, turn off both answering flags
+      // (classic toggle + line config) so the UI shows OFF. Keep the number.
+      ...(active ? {} : receptionistEnabledFlagsOff(prev)),
     },
     updated_at: new Date().toISOString(),
   });
@@ -223,6 +261,25 @@ export async function syncReceptionistAddonForUser(userId: string): Promise<{
     billing,
     error: result.error,
   };
+}
+
+/** Load entitlement, and if inactive, confirm with Stripe (webhook lag). */
+export async function resolveReceptionistAddonAccess(userId: string): Promise<{
+  entitled: boolean;
+  billing: ReceptionistBilling;
+}> {
+  let billing = await loadReceptionistBilling(userId);
+  let entitled = receptionistAddonHasAccess(billing);
+  if (!entitled) {
+    try {
+      const synced = await syncReceptionistAddonForUser(userId);
+      billing = synced.billing || billing;
+      entitled = synced.active;
+    } catch (e) {
+      console.warn('receptionist addon sync failed', e);
+    }
+  }
+  return { entitled, billing };
 }
 
 /** Sync from a completed Checkout Session id (success_url ?session_id=) */
