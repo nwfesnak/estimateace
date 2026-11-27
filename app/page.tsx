@@ -1171,6 +1171,7 @@ export default function Home() {
     smsOptIn: false,
     smsOptInAt: '' as string,
     showDiscountOnEstimate: true,
+    showClientEstimateDisplay: true,
     taxesEnabled: true,
     /** When false, hide AI Job Renderings in the editor and send flow */
     aiJobRenderingEnabled: true,
@@ -1334,7 +1335,17 @@ export default function Home() {
     return profile.showDiscountOnEstimate === true;
   };
 
+  const getGlobalShowClientEstimateDisplay = (): boolean => {
+    const cached = getProfileSettingsCache();
+    if ('showClientEstimateDisplay' in cached) {
+      return cached.showClientEstimateDisplay !== false;
+    }
+    return profile.showClientEstimateDisplay !== false;
+  };
+
   const getShowDiscountOnEstimate = (): boolean => jobSettings.showDiscountOnEstimate === true;
+
+  const getShowClientEstimateDisplay = (): boolean => jobSettings.showClientEstimateDisplay !== false;
 
   const shouldShowClientDiscount = () =>
     hasActiveDiscount() && getShowDiscountOnEstimate();
@@ -1598,6 +1609,7 @@ export default function Home() {
     smsOptIn: !!full.smsOptIn,
     smsOptInAt: String(full.smsOptInAt || ''),
     showDiscountOnEstimate: full.showDiscountOnEstimate === true,
+    showClientEstimateDisplay: full.showClientEstimateDisplay !== false,
     taxesEnabled: full.taxesEnabled !== false,
     aiJobRenderingEnabled: full.aiJobRenderingEnabled !== false,
     emailLeadSummariesEnabled: full.emailLeadSummariesEnabled !== false,
@@ -2348,13 +2360,22 @@ export default function Home() {
       }
       return prev.showDiscountOnEstimate === true;
     };
+    const resolveClientDisplay = () => {
+      if ('showClientEstimateDisplay' in cached) return cached.showClientEstimateDisplay !== false;
+      if (serverProfile && 'showClientEstimateDisplay' in serverProfile) {
+        return serverProfile.showClientEstimateDisplay !== false;
+      }
+      return prev.showClientEstimateDisplay !== false;
+    };
 
     return {
       showDiscountOnEstimate: resolveDiscount(),
+      showClientEstimateDisplay: resolveClientDisplay(),
     };
   };
 
   const renderClientItemBreakdown = (item: any, className: string) => {
+    if (!getShowClientEstimateDisplay()) return null;
     if (!hasAnyBreakdownToggleOn() || !hasClientVisibleBreakdown(item)) return null;
 
     const preview = getVisibleBreakdownParts(item);
@@ -2396,7 +2417,7 @@ export default function Home() {
                 Subtotal: ${taxableSubtotal.toFixed(2)}
               </div>
             )}
-            {hasActiveDiscount() && (
+            {shouldShowClientDiscount() && (
               <div className={`text-right font-semibold text-gray-700 ${textClass}`}>
                 Subtotal before discount: ${subtotalBeforeDiscount.toFixed(2)}
               </div>
@@ -3030,6 +3051,7 @@ export default function Home() {
       const serverProfile = await fetchServerProfileSettings();
       const hasSavedPrefs =
         'showDiscountOnEstimate' in cached ||
+        'showClientEstimateDisplay' in cached ||
         'taxesEnabled' in cached ||
         'aiJobRenderingEnabled' in cached ||
         'emailLeadSummariesEnabled' in cached ||
@@ -5134,6 +5156,7 @@ export default function Home() {
       showCostBreakdownOnEstimate: _sc,
       showPriceBreakdownByLine: _sp,
       showDiscountOnEstimate: _sd,
+      showClientEstimateDisplay: _sced,
       chargeCCFee: _jobFee,
       ccFeePercentage: _jobFeePct,
       paymentSettings: _jobPay,
@@ -5416,6 +5439,7 @@ export default function Home() {
           showCostBreakdownOnEstimate: _sc,
           showPriceBreakdownByLine: _sp,
           showDiscountOnEstimate: _sd,
+          showClientEstimateDisplay: _sced,
           chargeCCFee: _jobFee,
           ccFeePercentage: _jobFeePct,
           paymentSettings: _jobPay,
@@ -9369,6 +9393,7 @@ export default function Home() {
       smsOptIn: !!nextProfile.smsOptIn,
       smsOptInAt: String(nextProfile.smsOptInAt || ''),
       showDiscountOnEstimate: nextProfile.showDiscountOnEstimate === true,
+      showClientEstimateDisplay: nextProfile.showClientEstimateDisplay !== false,
       taxesEnabled: nextProfile.taxesEnabled !== false,
       aiJobRenderingEnabled: nextProfile.aiJobRenderingEnabled !== false,
       emailLeadSummariesEnabled: (nextProfile as any).emailLeadSummariesEnabled !== false,
@@ -9414,21 +9439,36 @@ export default function Home() {
 
   const saveBreakdownProfileSettings = async (updates: Partial<typeof profile>) => {
     const nextProfile = { ...profile, ...updates };
+    const cachePatch: Record<string, boolean> = {};
     if ('showDiscountOnEstimate' in updates) {
+      cachePatch.showDiscountOnEstimate = updates.showDiscountOnEstimate === true;
+    }
+    if ('showClientEstimateDisplay' in updates) {
+      cachePatch.showClientEstimateDisplay = updates.showClientEstimateDisplay !== false;
+    }
+    if (Object.keys(cachePatch).length) {
       setProfileSettingsCache({
         ...getProfileSettingsCache(),
-        showDiscountOnEstimate: updates.showDiscountOnEstimate === true,
+        ...cachePatch,
       });
     }
     setProfile(nextProfile);
     await saveProfileSettings(nextProfile);
-    showMessage(
-      'showDiscountOnEstimate' in updates
-        ? updates.showDiscountOnEstimate
+    if ('showClientEstimateDisplay' in updates && !('showDiscountOnEstimate' in updates)) {
+      showMessage(
+        updates.showClientEstimateDisplay
+          ? '✅ Material, labor, and cost breakdowns will show on client estimates when those editor buttons are on.'
+          : '✅ Material, labor, and cost breakdowns hidden on client estimates (editor buttons still work for you).'
+      );
+    } else if ('showDiscountOnEstimate' in updates) {
+      showMessage(
+        updates.showDiscountOnEstimate
           ? '✅ Discount line will show on client estimates.'
           : '✅ Discount line hidden on client estimates (discount still applies to total).'
-        : '✅ Profile display settings saved.'
-    );
+      );
+    } else {
+      showMessage('✅ Profile display settings saved.');
+    }
   };
 
   const saveProfile = async () => {
@@ -17726,20 +17766,37 @@ export default function Home() {
                       </div>
                     </div>
 
-                    <div className="border rounded-xl p-4 space-y-4 bg-gray-50">
-                      <div>
-                        <p className="font-semibold">Client Estimate Display</p>
-                        <p className="text-sm text-gray-500">
-                          Material, labor, and cost breakdown buttons are on the estimate editor (above Add Line Item).
-                        </p>
+                    <div className="border rounded-xl p-4 space-y-4 bg-gray-50" data-testid="client-estimate-display-card">
+                      <div className="flex items-center justify-between gap-4">
+                        <div>
+                          <p className="font-semibold">Client Estimate Display</p>
+                          <p className="text-sm text-gray-500">
+                            Show material, labor, and cost breakdowns on the customer estimate, PDF, and email.
+                            Use the breakdown buttons on the estimate editor (above Add Line Item) to choose which parts appear.
+                          </p>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                          <input
+                            type="checkbox"
+                            checked={getGlobalShowClientEstimateDisplay()}
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              void saveBreakdownProfileSettings({ showClientEstimateDisplay: checked });
+                            }}
+                            className="sr-only peer"
+                          />
+                          <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#10b981] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#10b981]"></div>
+                        </label>
                       </div>
+                    </div>
 
-                      <div className="flex items-center justify-between">
+                    <div className="border rounded-xl p-4 space-y-4 bg-gray-50" data-testid="show-discount-on-estimate-card">
+                      <div className="flex items-center justify-between gap-4">
                         <div>
                           <p className="font-semibold">Show Discount on Estimate</p>
-                          <p className="text-sm text-gray-500">Show discount line to clients when a discount name and amount are entered</p>
+                          <p className="text-sm text-gray-500">Show discount line to clients when a discount name and amount are entered. Hidden discounts still apply to the total.</p>
                         </div>
-                        <label className="relative inline-flex items-center cursor-pointer">
+                        <label className="relative inline-flex items-center cursor-pointer shrink-0">
                           <input
                             type="checkbox"
                             checked={getGlobalShowDiscountOnEstimate()}
@@ -20266,6 +20323,8 @@ export default function Home() {
                       discountDescription: appliedDiscountDescription.trim() || 'Discount',
                       discountValue: appliedDiscountValue,
                       discountType: appliedDiscountType,
+                      showDiscountOnEstimate: getShowDiscountOnEstimate(),
+                      showClientEstimateDisplay: getShowClientEstimateDisplay(),
                       taxAmount,
                       depositPercent: Number(jobSettings.depositPercentage) || 0,
                       showDepositOnApproval: jobSettings.showDepositOnApproval !== false,

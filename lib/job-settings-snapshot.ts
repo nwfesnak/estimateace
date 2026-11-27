@@ -18,6 +18,8 @@ export type JobSettingsSnapshot = {
   aiJobRenderingEnabled: boolean;
   taxesEnabled: boolean;
   showDiscountOnEstimate: boolean;
+  /** Master switch for material/labor/cost breakdowns on customer/PDF/email. Default true. */
+  showClientEstimateDisplay: boolean;
   termsDisplayMode: 'link' | 'printed';
   chargeCCFee: boolean;
   ccFeePercentage: number;
@@ -34,6 +36,7 @@ export const DEFAULT_JOB_SETTINGS_SNAPSHOT: JobSettingsSnapshot = {
   aiJobRenderingEnabled: true,
   taxesEnabled: true,
   showDiscountOnEstimate: false,
+  showClientEstimateDisplay: true,
   termsDisplayMode: 'link',
   chargeCCFee: false,
   ccFeePercentage: 3,
@@ -163,6 +166,7 @@ export function resolveJobSettingsFromDoc(
     aiJobRenderingEnabled: resolveAiJobRenderingEnabled(docProfile, globalProfile),
     taxesEnabled: resolveBoolean(docProfile, globalProfile, 'taxesEnabled', true),
     showDiscountOnEstimate: resolveBoolean(docProfile, globalProfile, 'showDiscountOnEstimate', false),
+    showClientEstimateDisplay: resolveBoolean(docProfile, globalProfile, 'showClientEstimateDisplay', true),
     termsDisplayMode: termsRaw,
     chargeCCFee: resolveBoolean(docProfile, globalProfile, 'chargeCCFee', false),
     ccFeePercentage,

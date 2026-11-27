@@ -19,6 +19,12 @@ import {
   lineOptionId,
 } from '@/lib/optional-line-items';
 import { ITEM_TRANSLATION_KEYS, stripItemTranslations } from '@/lib/item-translations';
+import {
+  itemBreakdownForCustomerHtml,
+  presentClientEstimate,
+  resolveShowClientEstimateDisplay,
+  resolveShowDiscountOnEstimate,
+} from '@/lib/client-estimate-display';
 
 /**
  * Public (token-gated) document summary for client approve / pay page.
@@ -180,6 +186,12 @@ export async function GET(request: NextRequest) {
     }
     const subtotalBeforeDiscount = itemsTotal;
     const subtotalAfterDiscount = Math.max(0, itemsTotal - discountAmount);
+    const presentation = presentClientEstimate({
+      showClientEstimateDisplay: resolveShowClientEstimateDisplay(profile, settingsProfile),
+      showDiscountOnEstimate: resolveShowDiscountOnEstimate(profile, settingsProfile),
+      discountAmount,
+      breakdownSettings: profile,
+    });
 
     // Same formula as Stripe checkout / mark-paid (shared helper)
     const { computeDocumentGrandTotal } = await import('@/lib/document-totals');
@@ -329,6 +341,8 @@ export async function GET(request: NextRequest) {
       discountDescription: discountDescription || (discountAmount > 0 ? 'Discount' : ''),
       discountType,
       discountValue,
+      showDiscountOnEstimate: resolveShowDiscountOnEstimate(profile, settingsProfile),
+      showClientEstimateDisplay: resolveShowClientEstimateDisplay(profile, settingsProfile),
       taxAmount,
       grandTotal: due.grandTotal,
       amountPaid: due.amountPaid,
@@ -367,6 +381,7 @@ export async function GET(request: NextRequest) {
           total: Number(it.total) || Number(it.qty || 0) * Number(it.price || 0),
           optional: isOptionalLine(it),
           clientSelected: isClientSelectedOption(it),
+          breakdownHtml: itemBreakdownForCustomerHtml(it, presentation),
         };
         for (const key of ITEM_TRANSLATION_KEYS) delete (mapped as any)[key];
         return mapped;
