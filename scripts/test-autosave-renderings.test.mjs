@@ -56,8 +56,10 @@ test('auto-save debounce is 1s, uses saveToDBRef, and watches renderings, jobSet
   assert.match(debounce, /autosavePendingRef\.current = true;/);
   assert.match(debounce, /,\s*1000\s*\)/);
   assert.match(debounce, /void saveToDBRef\.current\(/);
-  assert.match(debounce, /jobRenderingsRef\.current/);
-  assert.match(debounce, /itemsRef\.current/);
+  assert.match(debounce, /hasMeaningfulEstimateInput\(getEstimateContentInputRef\.current\(\)/);
+  // Latest items / renderings are read through getEstimateContentInput (and still written from refs in saveToDB).
+  assert.match(page, /_jobRenderings: overrides\?\.jobRenderings \?\? jobRenderingsRef\.current/);
+  assert.match(page, /items: overrides\?\.items \?\? itemsRef\.current \?\? items/);
 
   // Dependency list includes translations (items), renderings, and the job settings snapshot
   const depsStart = debounce.indexOf('if (view === \'editor\') debouncedSave();');
@@ -70,7 +72,7 @@ test('auto-save debounce is 1s, uses saveToDBRef, and watches renderings, jobSet
 
 test('pending auto-save is flushed when leaving the editor, switching jobs, or hiding the page', () => {
   assert.match(page, /const leavingEditor = prevEditorViewRef\.current === 'editor' && view !== 'editor'/);
-  assert.match(page, /if \(leavingEditor\) \{\s*void flushPendingAutosaveRef\.current\(\);/s);
+  assert.match(page, /if \(leavingEditor\) \{[\s\S]*?await flushPendingAutosaveRef\.current\(\);[\s\S]*?await discardBlankSessionDraftRef\.current\(\);/);
 
   const load = sliceAfter(page, 'const loadSelectedEstimate = async', 600);
   assert.match(load, /await flushPendingAutosaveRef\.current\(\);/);
@@ -86,11 +88,12 @@ test('pending auto-save is flushed when leaving the editor, switching jobs, or h
     'must flush the previous job before blocking autosave for a new blank form'
   );
 
-  const hide = sliceAfter(page, 'const flushIfHidden = () => {', 900);
+  const hide = sliceAfter(page, 'const flushAndDiscard = ', 1600);
   assert.match(hide, /addEventListener\('pagehide'/);
   assert.match(hide, /addEventListener\('beforeunload'/);
   assert.match(hide, /addEventListener\('visibilitychange'/);
   assert.match(hide, /flushPendingAutosaveRef\.current\(\)/);
+  assert.match(hide, /discardBlankSessionDraftRef\.current/);
 });
 
 test('translations from PR #50 ride auto-save: items are updated, watched, and flushed with the latest ref', () => {
