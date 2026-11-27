@@ -166,7 +166,7 @@ test('v2 wiring: editor/print/preview galleries, Send switch counts, customer se
   const page = src('app/page.tsx');
   assert.match(page, /siteSectionLinePhotoGroups\(items, photoUrls, options\?\.includeLinePhotos !== false\)/);
   assert.match(page, /sendIncludeSitePhotos && siteSectionPhotoCount\(photoUrls, items\) > 0/);
-  assert.match(page, /forceExpanded: true, includeLinePhotos: sendIncludeSitePhotos/);
+  assert.match(page, /sendIncludeSitePhotos && siteSectionPhotoCount\(photoUrls, items\) > 0 && \(\s*<div className="mt-12">\s*\{\/\* Print always expands/);
   assert.match(page, /setSendIncludeSitePhotos\(sitePhotoSectionTotal > 0/);
   assert.doesNotMatch(page, /setPhotoUrls\([^)]*line-photo/);
   const quick = page.slice(page.indexOf('const saveAsQuickLine = '), page.indexOf('const applyQuickLine = '));
@@ -176,4 +176,52 @@ test('v2 wiring: editor/print/preview galleries, Send switch counts, customer se
   const c = src('components/ClientJobMedia.tsx');
   assert.match(c, /siteLinePhotos/);
   assert.match(c, /Site photos \(\{photos\.length \+ linePhotoTotal\}\)/);
+});
+
+// ---- v3: estimate email + print view follow the Site Photos switch ----
+const E = await jiti.import(path.join(root, 'lib/email-line-photos.ts'));
+const esc = (x) => String(x).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+test('email: line photo URLs are https-only, capped at 5 per line, keyed by line id', () => {
+  const out = E.sanitizeEmailLinePhotoUrls({
+    11: ['https://s/1', 'http://insecure/2', 'javascript:alert(1)', 'https://s/1', 'https://s/3', 'https://s/4', 'https://s/5', 'https://s/6', 'https://s/7'],
+    12: ['nope'],
+  });
+  assert.deepEqual(out, { 11: ['https://s/1', 'https://s/3', 'https://s/4', 'https://s/5', 'https://s/6'] });
+  assert.deepEqual(E.sanitizeEmailLinePhotoUrls(null), {});
+  assert.deepEqual(E.sanitizeEmailLinePhotoUrls(['https://x']), {});
+});
+
+test('email: line photos always under their line; join the Site photos block only when the switch is on', () => {
+  const groups = [{ caption: 'Line 1: Deck <b>', urls: ['https://s/1', 'http://bad'] }];
+  assert.deepEqual(E.sanitizeEmailSiteLinePhotos(groups, false), [], 'switch off -> not in Site photos block');
+  const on = E.sanitizeEmailSiteLinePhotos(groups, true);
+  assert.deepEqual(on, [{ caption: 'Line 1: Deck <b>', urls: ['https://s/1'] }]);
+  const block = E.emailSitePhotosBlockHtml(['https://s/site'], on, esc);
+  assert.match(block, /Site photos/);
+  assert.match(block, /alt="Site photo"/);
+  assert.match(block, /Line 1: Deck &lt;b&gt;/);
+  assert.ok(block.indexOf('https://s/site') < block.indexOf('https://s/1'), 'site photos first');
+  assert.equal(E.emailSitePhotosBlockHtml([], [], esc), '');
+  assert.match(E.emailSitePhotosBlockHtml([], on, esc), /Site photos/, 'line-only job still gets the block when on');
+  const thumbs = E.emailLinePhotoThumbsHtml(['https://s/1?a=1&b="x"'], esc);
+  assert.match(thumbs, /width="64"/);
+  assert.match(thumbs, /&amp;b=&quot;x&quot;/);
+  assert.equal(E.emailLinePhotoThumbsHtml([], esc), '');
+});
+
+test('v3 wiring: send route + editor payload + print view follows the switch', () => {
+  const route = src('app/api/documents/send/route.ts');
+  assert.match(route, /sanitizeEmailLinePhotoUrls\(body\.linePhotoUrls\)/);
+  assert.match(route, /sanitizeEmailSiteLinePhotos\(body\.siteLinePhotos, body\.includeSitePhotos !== false\)/);
+  assert.match(route, /emailLinePhotoThumbsHtml\(linePhotoUrls\[String\(it\.id\)\], escapeHtml\)/);
+  assert.match(route, /mediaHtml \+= emailSitePhotosBlockHtml\(sitePhotoUrls, siteLinePhotos, escapeHtml\)/);
+  const page = src('app/page.tsx');
+  assert.match(page, /const includePhotos = sendIncludeSitePhotos && sitePhotoSectionTotal > 0;/);
+  assert.match(page, /const emailSiteLinePhotos = includePhotos\s*\?/);
+  assert.match(page, /linePhotoUrls: emailLinePhotoUrls,\s*siteLinePhotos: emailSiteLinePhotos,/);
+  // print view: whole Site Photos section (site + line photos) gated by the switch
+  const printDoc = page.slice(page.indexOf('id="print-document"'), page.indexOf('id="preview-document"'));
+  assert.match(printDoc, /sendIncludeSitePhotos && siteSectionPhotoCount\(photoUrls, items\) > 0/);
+  assert.doesNotMatch(printDoc, /\{photoUrls\.length > 0 && \(/);
 });

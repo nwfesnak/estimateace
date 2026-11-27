@@ -15934,14 +15934,15 @@ export default function Home() {
 
                 {renderApprovedPaymentSection({ interactive: false })}
 
-                {siteSectionPhotoCount(photoUrls, items) > 0 && (
+                {/* Print view follows the Send "Site Photos" switch (site + line photos) */}
+                {sendIncludeSitePhotos && siteSectionPhotoCount(photoUrls, items) > 0 && (
                   <div className="mt-12">
                     {/* Print always expands; on screen, folder when > 6 */}
                     <div className="print:hidden">
-                      {renderPhotoGallery({ heading: 'Site Photos', includeLinePhotos: sendIncludeSitePhotos })}
+                      {renderPhotoGallery({ heading: 'Site Photos' })}
                     </div>
                     <div className="hidden print:block">
-                      {renderPhotoGallery({ heading: 'Site Photos', forceExpanded: true, includeLinePhotos: sendIncludeSitePhotos })}
+                      {renderPhotoGallery({ heading: 'Site Photos', forceExpanded: true })}
                     </div>
                   </div>
                 )}
@@ -20134,7 +20135,7 @@ export default function Home() {
                   }
 
                   // Resolve client-facing media only for toggled-on items
-                  const includePhotos = sendIncludeSitePhotos && photoUrls.length > 0;
+                  const includePhotos = sendIncludeSitePhotos && sitePhotoSectionTotal > 0;
                   const includeVideos = sendIncludeVideos && videoUrls.length > 0;
                   const includeRenders =
                     getAiJobRenderingEnabled() &&
@@ -20143,6 +20144,26 @@ export default function Home() {
 
                   const sitePhotoUrls = includePhotos
                     ? await createEmailMediaUrls(photoUrls.slice(0, 24))
+                    : [];
+                  // Line photos: signed like site photos; always under their lines, and in the
+                  // Site photos block only when the switch is on.
+                  const linePhotoUrlByRef: Record<string, string> = {};
+                  for (const ref of allLinePhotoRefs((items || []).slice(0, 40))) {
+                    const [signed] = await createEmailMediaUrls([ref]);
+                    if (signed) linePhotoUrlByRef[ref] = signed;
+                  }
+                  const emailLinePhotoUrls: Record<string, string[]> = {};
+                  for (const it of (items || []).slice(0, 40)) {
+                    const urls = getLinePhotos(it).map((r) => linePhotoUrlByRef[r]).filter(Boolean);
+                    if (urls.length && it?.id != null) emailLinePhotoUrls[String(it.id)] = urls;
+                  }
+                  const emailSiteLinePhotos = includePhotos
+                    ? siteSectionLinePhotoGroups((items || []).slice(0, 40), photoUrls, true)
+                        .map((g) => ({
+                          caption: g.caption,
+                          urls: g.refs.map((r) => linePhotoUrlByRef[r]).filter(Boolean),
+                        }))
+                        .filter((g) => g.urls.length > 0)
                     : [];
                   const clientVideoUrls = includeVideos
                     ? await createEmailMediaUrls(videoUrls.slice(0, 12))
@@ -20264,6 +20285,8 @@ export default function Home() {
                       includeVideos: includeVideos,
                       includeJobRenderings: includeRenders,
                       sitePhotoUrls,
+                      linePhotoUrls: emailLinePhotoUrls,
+                      siteLinePhotos: emailSiteLinePhotos,
                       videoUrls: clientVideoUrls,
                       jobRenderings: clientRenderings,
                     }),
@@ -20294,6 +20317,11 @@ export default function Home() {
                   }
                   const mediaBits: string[] = [];
                   if (includePhotos) mediaBits.push(`${sitePhotoUrls.length} site photos`);
+                  if (Object.keys(emailLinePhotoUrls).length) {
+                    mediaBits.push(
+                      `${Object.values(emailLinePhotoUrls).reduce((n, u) => n + u.length, 0)} line item photos`
+                    );
+                  }
                   if (includeRenders) mediaBits.push(`${clientRenderings.length} AI renderings`);
                   if (includeVideos) mediaBits.push(`${clientVideoUrls.length} videos`);
                   if (mediaBits.length) {
