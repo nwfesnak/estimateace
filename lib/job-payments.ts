@@ -1,3 +1,4 @@
+import { guardStripeAccountIdPatch, type ConnectIdChangeReason } from '@/lib/connect-account-id-guard';
 import type Stripe from 'stripe';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { getStripe, getAppUrl, getStripeMode } from '@/lib/stripe-server';
@@ -34,14 +35,36 @@ export async function getPaymentAccount(userId: string): Promise<PaymentAccountR
 
 export async function upsertPaymentAccount(
   userId: string,
-  patch: Partial<PaymentAccountRow>
+  patch: Partial<PaymentAccountRow>,
+  reason: ConnectIdChangeReason = 'other'
 ): Promise<{ ok: boolean; error?: string }> {
   const admin = getSupabaseAdmin();
   if (!admin) return { ok: false, error: 'Missing SUPABASE_SERVICE_ROLE_KEY' };
+  let safePatch: Record<string, unknown> = { ...patch };
+  if (Object.prototype.hasOwnProperty.call(patch, 'stripe_account_id')) {
+    // Never wipe or swap a linked Connect account id without a trace.
+    const existing = await getPaymentAccount(userId);
+    const decision = guardStripeAccountIdPatch(existing?.stripe_account_id, safePatch, reason);
+    safePatch = decision.patch;
+    if (decision.action === 'blocked_clear') {
+      console.error('payment_accounts: refused to clear stripe_account_id (only an explicit deauthorize may)', {
+        userId,
+        keptAccountId: decision.previousId,
+        reason,
+      });
+    } else if (decision.action === 'clear' || decision.action === 'replace') {
+      console.warn('payment_accounts: stripe_account_id changed', {
+        userId,
+        from: decision.previousId,
+        to: decision.nextId,
+        reason,
+      });
+    }
+  }
   const { error } = await admin.from('payment_accounts').upsert(
     {
       user_id: userId,
-      ...patch,
+      ...safePatch,
       updated_at: new Date().toISOString(),
     },
     { onConflict: 'user_id' }
@@ -69,14 +92,42 @@ function accountTypeFrom(acct: Stripe.Account | null | undefined, fallback = 'ex
   return accountTypeFromStripe(acct, fallback);
 }
 
-/** Clear a stored connected account id that no longer exists in Stripe. */
-async function clearStalePaymentAccount(userId: string): Promise<void> {
+/**
+ * Stripe could not find the stored connected account (deleted, revoked, or a test/live key
+ * mismatch). Keep the id so it can be investigated and relinked; only mark it not ready.
+ */
+async function markConnectAccountUnreachable(userId: string, accountId: string | null, where: string): Promise<void> {
+  console.error('Connect account not reachable in Stripe; keeping stored id, marking not ready', {
+    userId,
+    accountId,
+    where,
+  });
   await upsertPaymentAccount(userId, {
-    stripe_account_id: null,
     charges_enabled: false,
     payouts_enabled: false,
     details_submitted: false,
   });
+}
+
+/** Explicit disconnect only: the contractor removed EstimateAce from their Stripe account. */
+export async function clearPaymentAccountOnDeauthorize(accountId: string): Promise<{ ok: boolean; matched: boolean; error?: string }> {
+  const admin = getSupabaseAdmin();
+  if (!admin) return { ok: false, matched: false, error: 'Missing SUPABASE_SERVICE_ROLE_KEY' };
+  const { data, error } = await admin
+    .from('payment_accounts')
+    .select('user_id')
+    .eq('stripe_account_id', accountId);
+  if (error) return { ok: false, matched: false, error: error.message };
+  const rows = (data || []) as { user_id: string }[];
+  for (const r of rows) {
+    const res = await upsertPaymentAccount(
+      r.user_id,
+      { stripe_account_id: null, charges_enabled: false, payouts_enabled: false, details_submitted: false },
+      'deauthorized'
+    );
+    if (!res.ok) return { ok: false, matched: true, error: res.error };
+  }
+  return { ok: true, matched: rows.length > 0 };
 }
 
 /** Refresh Connect account flags from Stripe */
@@ -107,9 +158,8 @@ export async function syncConnectAccountStatus(userId: string): Promise<{
     return { ok: true, account: updated };
   } catch (e: any) {
     if (isNoSuchAccountError(e)) {
-      // Stale id (deleted account, or created with the other test/live key). Start fresh next time.
-      console.warn('Connect account missing in Stripe, clearing stored id for user', userId);
-      await clearStalePaymentAccount(userId);
+      // Deleted account, revoked access, or the other test/live key. Keep the id (no silent unlink).
+      await markConnectAccountUnreachable(userId, existing.stripe_account_id, 'status_sync');
       return { ok: true, account: await getPaymentAccount(userId) };
     }
     return { ok: false, account: existing, error: e?.message || 'Could not sync Stripe account' };
@@ -180,7 +230,7 @@ export async function createConnectDashboardLink(ownerUserId: string): Promise<{
     return { ok: true, url: link.url };
   } catch (e: unknown) {
     if (isNoSuchAccountError(e)) {
-      await clearStalePaymentAccount(ownerUserId);
+      await markConnectAccountUnreachable(ownerUserId, account.stripe_account_id, 'dashboard_link');
       return { ok: false, error: 'Your Stripe account was not found. Tap Connect Stripe to set it up again.' };
     }
     return {
@@ -202,6 +252,7 @@ export async function createConnectOnboardingLink(
 
   const appUrl = getAppUrl(requestUrl);
   let accountId = (await getPaymentAccount(userId))?.stripe_account_id || null;
+  let staleAccountId: string | null = null;
 
   // Reuse the existing account (abandoned onboarding resumes with a fresh link),
   // but recreate it if Stripe no longer knows it (deleted, or test/live key mismatch).
@@ -210,8 +261,9 @@ export async function createConnectOnboardingLink(
       await stripe.accounts.retrieve(accountId);
     } catch (e: unknown) {
       if (isNoSuchAccountError(e)) {
-        console.warn('Stored Connect account missing in Stripe; creating a new one for user', userId);
-        await clearStalePaymentAccount(userId);
+        // Owner explicitly tapped Connect Stripe: a new account will replace this one (logged in upsert).
+        console.warn('Stored Connect account missing in Stripe; creating a new one', { userId, staleAccountId: accountId });
+        staleAccountId = accountId;
         accountId = null;
       } else {
         console.error('Connect account retrieve:', e);
@@ -232,16 +284,21 @@ export async function createConnectOnboardingLink(
         metadata: {
           supabase_user_id: userId,
           purpose: 'job_payments',
+          ...(staleAccountId ? { replaced_account_id: staleAccountId } : {}),
         },
       }, { apiVersion: CONNECT_ACCOUNT_CREATE_API_VERSION });
       accountId = account.id;
-      await upsertPaymentAccount(userId, {
-        stripe_account_id: accountId,
-        charges_enabled: false,
-        payouts_enabled: false,
-        details_submitted: false,
-        account_type: 'express',
-      });
+      await upsertPaymentAccount(
+        userId,
+        {
+          stripe_account_id: accountId,
+          charges_enabled: false,
+          payouts_enabled: false,
+          details_submitted: false,
+          account_type: 'express',
+        },
+        'onboarding_replace'
+      );
     } catch (e: any) {
       console.error('Connect account create:', e);
       return {
