@@ -256,7 +256,7 @@ export async function sendSmsNotification(
     try {
       const { getSmsOptIn } = await import('@/lib/sms-opt-in-store');
       const consent = await getSmsOptIn(to);
-      if (consent && consent.optedIn === false) {
+      if (consent?.optedOut) {
         return { ok: false, error: 'Recipient opted out of SMS (STOP).', to };
       }
     } catch (e) {
