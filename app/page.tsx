@@ -102,6 +102,16 @@ import {
   type CrewTabKey,
 } from '@/lib/crew-tab-access';
 import { extractMediaStoragePath, isMediaPdfRef, resolveMediaDisplayUrl } from '@/lib/media-url';
+import {
+  LINE_PHOTO_LIMIT,
+  allLinePhotoRefs,
+  getLinePhotos,
+  newLinePhotoPath,
+  withLinePhotoMoved,
+  withLinePhotoRemoved,
+  withLinePhotosAdded,
+} from '@/lib/line-item-photos';
+import { LineItemPhotoThumbs, LineItemPhotosEditor } from '@/components/LineItemPhotos';
 import { buildAccountExportZip } from '@/lib/account-export';
 import { mergeFilledPaymentSettings } from '@/lib/client-payment-options';
 import {
@@ -1031,6 +1041,30 @@ export default function Home() {
       cancelled = true;
     };
   }, [photoUrls, videoUrls, receiptUrls, supabase]);
+
+  // Resolve per-line photo paths (items[n].photos) to signed URLs; Site Photos are separate.
+  const linePhotoRefsKey = allLinePhotoRefs(items).join('|');
+  useEffect(() => {
+    const refs = linePhotoRefsKey ? linePhotoRefsKey.split('|') : [];
+    const missing = refs.filter((r) => !linePhotoDisplayUrls[r]);
+    if (missing.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      const urls = await Promise.all(missing.map((p) => resolveMediaDisplayUrl(p, getMediaUrl)));
+      if (cancelled) return;
+      setLinePhotoDisplayUrls((prev) => {
+        const next = { ...prev };
+        missing.forEach((ref, i) => {
+          if (urls[i]) next[ref] = urls[i];
+        });
+        return next;
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linePhotoRefsKey, supabase]);
 
   // Resolve before/after paths for AI job renderings
   useEffect(() => {
@@ -1976,7 +2010,12 @@ export default function Home() {
   const [isDeviceCameraOpen, setIsDeviceCameraOpen] = useState(false);
   const [deviceCameraMode, setDeviceCameraMode] = useState<DeviceCameraMode>('photo');
   /** Device camera photo saves as job photo or receipt */
-  const [deviceCameraPhotoTarget, setDeviceCameraPhotoTarget] = useState<'photo' | 'receipt'>('photo');
+  const [deviceCameraPhotoTarget, setDeviceCameraPhotoTarget] = useState<'photo' | 'receipt' | 'line'>('photo');
+  /** Line photos: which line the in-app camera is shooting for (deviceCameraPhotoTarget === 'line'). */
+  const linePhotoCameraItemIdRef = useRef<number | null>(null);
+  /** Line photos: storage ref → signed display URL (resolved lazily, cached for the session). */
+  const [linePhotoDisplayUrls, setLinePhotoDisplayUrls] = useState<Record<string, string>>({});
+  const [linePhotoBusyId, setLinePhotoBusyId] = useState<number | null>(null);
   /** When more than 6 photos, collapse into a click-to-open folder */
   const PHOTO_FOLDER_THRESHOLD = 6;
   const [photosFolderOpen, setPhotosFolderOpen] = useState(false);
@@ -4423,6 +4462,99 @@ export default function Home() {
     removeMedia('video', index);
   };
 
+  /** Replace one line in items (sync ref so the next save never writes stale lines). */
+  const commitLineItemChange = (
+    itemId: number,
+    change: (item: Record<string, unknown>) => Record<string, unknown>
+  ) => {
+    const next = (itemsRef.current || []).map((it: { id: number }) =>
+      it.id === itemId ? change(it as unknown as Record<string, unknown>) : it
+    );
+    itemsRef.current = next;
+    setItems(next);
+    return next;
+  };
+
+  /** Upload up to the remaining slots (max 5 per line) into the private media bucket and link them to the line. */
+  const uploadLinePhotos = async (itemId: number, files: File[]): Promise<number> => {
+    if (!files.length) return 0;
+    if (!user || !supabase || !workspaceUserId) {
+      showMessage('Please log in before adding photos.');
+      return 0;
+    }
+    const line = (itemsRef.current || []).find((it: { id: number }) => it.id === itemId);
+    if (!line) return 0;
+    const slots = Math.max(0, LINE_PHOTO_LIMIT - getLinePhotos(line).length);
+    if (slots === 0) {
+      showMessage(`This line already has ${LINE_PHOTO_LIMIT} photos. Remove one to add another.`);
+      return 0;
+    }
+    const batch = files.slice(0, slots);
+    if (files.length > slots) {
+      showMessage(`Only ${slots} more photo${slots === 1 ? '' : 's'} fit on this line (max ${LINE_PHOTO_LIMIT}).`);
+    }
+    setLinePhotoBusyId(itemId);
+    const newPaths: string[] = [];
+    const newUrls: Record<string, string> = {};
+    try {
+      for (const original of batch) {
+        const prepared = await prepareFileForMediaUpload(original, 'photo');
+        if (!prepared) {
+          showMessage('Could not read that photo. Try another one or use Take photo.');
+          continue;
+        }
+        const filePath = newLinePhotoPath(workspaceUserId, prepared.ext, randomUploadId());
+        const { error } = await supabase.storage.from('media').upload(filePath, prepared.blob, {
+          upsert: false,
+          contentType: prepared.contentType,
+          cacheControl: '3600',
+        });
+        if (error) {
+          console.error('Line photo upload failed:', error);
+          showMessage(`Failed to upload line photo: ${(error as { message?: string }).message || 'Upload failed'}`);
+          continue;
+        }
+        newPaths.push(filePath);
+        try {
+          newUrls[filePath] = URL.createObjectURL(prepared.blob);
+        } catch {
+          /* resolved from storage instead */
+        }
+      }
+    } finally {
+      setLinePhotoBusyId(null);
+    }
+    if (newPaths.length === 0) return 0;
+    if (Object.keys(newUrls).length) setLinePhotoDisplayUrls((prev) => ({ ...prev, ...newUrls }));
+    commitLineItemChange(itemId, (it) => withLinePhotosAdded(it, newPaths));
+    await saveToDB({ quiet: true });
+    showMessage(`✅ ${newPaths.length} photo${newPaths.length === 1 ? '' : 's'} added to this line.`);
+    return newPaths.length;
+  };
+
+  const removeLinePhoto = (itemId: number, index: number) => {
+    commitLineItemChange(itemId, (it) => withLinePhotoRemoved(it, index));
+    void saveToDB({ quiet: true });
+    showMessage('Photo removed from this line.');
+  };
+
+  const moveLinePhoto = (itemId: number, index: number, dir: -1 | 1) => {
+    commitLineItemChange(itemId, (it) => withLinePhotoMoved(it, index, dir));
+    void saveToDB({ quiet: true });
+  };
+
+  /** Same in-app camera as Site Photos; each shot is linked to this line. */
+  const openLinePhotoCamera = (itemId: number) => {
+    if (!user || !supabase) {
+      showMessage('Please log in before taking photos.');
+      return;
+    }
+    linePhotoCameraItemIdRef.current = itemId;
+    setDeviceCameraPhotoTarget('line');
+    setDeviceCameraMode('photo');
+    setIsDeviceCameraOpen(true);
+  };
+
   const openPhotoPicker = () => {
     if (!user || !supabase) {
       showMessage('Please log in before adding photos.');
@@ -4529,6 +4661,18 @@ export default function Home() {
   const handleDeviceCameraPhoto = async (file: File) => {
     const dt = new DataTransfer();
     dt.items.add(file);
+    if (deviceCameraPhotoTarget === 'line') {
+      const itemId = linePhotoCameraItemIdRef.current;
+      if (itemId == null) return;
+      await uploadLinePhotos(itemId, [file]);
+      const line = (itemsRef.current || []).find((it: { id: number }) => it.id === itemId);
+      if (line && getLinePhotos(line).length >= LINE_PHOTO_LIMIT) {
+        setIsDeviceCameraOpen(false);
+        setDeviceCameraPhotoTarget('photo');
+        linePhotoCameraItemIdRef.current = null;
+      }
+      return;
+    }
     const asReceipt = deviceCameraPhotoTarget === 'receipt';
     const saved = await handleMediaUpload(dt.files, asReceipt ? 'receipt' : 'photo');
     if (saved.count > 0) {
@@ -4571,6 +4715,11 @@ export default function Home() {
 
   const handleDeviceCameraClose = (count: number) => {
     setIsDeviceCameraOpen(false);
+    if (deviceCameraPhotoTarget === 'line') {
+      linePhotoCameraItemIdRef.current = null;
+      setDeviceCameraPhotoTarget('photo');
+      return;
+    }
     if (count > 0) {
       const kind =
         deviceCameraMode === 'video'
@@ -14199,6 +14348,18 @@ export default function Home() {
                             </p>
                           ) : null}
 
+                          <LineItemPhotosEditor
+                            photos={getLinePhotos(item)}
+                            displayUrls={linePhotoDisplayUrls}
+                            lineNumber={idx + 1}
+                            busy={linePhotoBusyId === item.id}
+                            disabled={linePhotoBusyId != null && linePhotoBusyId !== item.id}
+                            onCamera={() => openLinePhotoCamera(item.id)}
+                            onFiles={(files) => void uploadLinePhotos(item.id, Array.from(files || []))}
+                            onRemove={(i) => removeLinePhoto(item.id, i)}
+                            onMove={(i, dir) => moveLinePhoto(item.id, i, dir)}
+                          />
+
                           <Button
                             size="sm"
                             variant="ghost"
@@ -15668,6 +15829,10 @@ export default function Home() {
                           <span className="text-xs text-gray-500">Line {i + 1}: </span>{item.description}
                           {optionalLineNote(item)}
                           {renderClientItemBreakdown(item, 'mt-1 text-xs text-gray-600 leading-snug pl-2')}
+                          <LineItemPhotoThumbs
+                            urls={getLinePhotos(item).map((ref) => linePhotoDisplayUrls[ref] || '')}
+                            lineNumber={i + 1}
+                          />
                         </td>
                         <td className="py-3 text-right">{item.qty}</td>
                         <td className="py-3 text-right">{item.unit || '—'}</td>
@@ -19394,6 +19559,10 @@ export default function Home() {
                           <span className="text-xs text-gray-500">Line {i + 1}: </span>{item.description}
                           {optionalLineNote(item)}
                           {renderClientItemBreakdown(item, 'mt-1 text-xs text-gray-600 leading-snug pl-2')}
+                          <LineItemPhotoThumbs
+                            urls={getLinePhotos(item).map((ref) => linePhotoDisplayUrls[ref] || '')}
+                            lineNumber={i + 1}
+                          />
                         </td>
                         <td className="py-3 text-right border-l border-gray-400 px-3">{item.qty}</td>
                         <td className="py-3 text-right border-l border-gray-400 px-3">{item.unit || '—'}</td>

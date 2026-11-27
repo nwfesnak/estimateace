@@ -4,7 +4,8 @@ import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { isMediaPdfRef } from '@/lib/media-url';
 import { ownedMediaPath } from '@/lib/storage-paths';
 import { readEstimateApproval } from '@/lib/estimate-approval';
-import { planClientMedia, signClientMedia, type ClientMediaPayload } from '@/lib/client-media';
+import { CLIENT_MEDIA_LIMITS, planClientMedia, signClientMedia, type ClientMediaPayload } from '@/lib/client-media';
+import { planClientLinePhotos, signClientLinePhotos } from '@/lib/line-item-photos';
 import {
   includedItemsSubtotal,
   isClientSelectedOption,
@@ -267,6 +268,34 @@ export async function GET(request: NextRequest) {
       });
     } catch (e: unknown) {
       console.warn('client/document media:', (e as Error)?.message || e);
+    }
+
+    // Per-line photos (items[n].photos): same owner-folder check + short-lived signed URLs,
+    // keyed by the same line id the items list below uses.
+    try {
+      const ttl = CLIENT_MEDIA_LIMITS.signedUrlTtlSec;
+      const linePhotos = await signClientLinePhotos(
+        planClientLinePhotos(
+          String(row.user_id || '').trim() === uid ? stripItemTranslations(items) : [],
+          uid,
+          40
+        ),
+        async (paths, ttlSec) => {
+          const { data, error } = await admin.storage.from('media').createSignedUrls(paths, ttlSec);
+          if (error) throw error;
+          return data as Array<{ path: string | null; signedUrl: string | null; error?: unknown }>;
+        },
+        ttl
+      );
+      if (Object.keys(linePhotos).length > 0) {
+        media = {
+          ...media,
+          linePhotos,
+          expiresAt: media.expiresAt || new Date(Date.now() + ttl * 1000).toISOString(),
+        };
+      }
+    } catch (e: unknown) {
+      console.warn('client/document line photos:', (e as Error)?.message || e);
     }
 
     return NextResponse.json({

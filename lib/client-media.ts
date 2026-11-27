@@ -99,6 +99,8 @@ export type ClientMediaPayload = {
   photos: Array<{ url: string }>;
   renderings: Array<{ beforeUrl: string | null; afterUrl: string; label: string }>;
   expiresAt: string | null;
+  /** Per-line photos keyed by the client item id (see lib/line-item-photos.ts). */
+  linePhotos?: Record<string, Array<{ url: string }>>;
 };
 
 type SignFn = (

@@ -7,6 +7,8 @@ export type ClientJobMediaData = {
   photos?: Array<{ url: string }>;
   renderings?: Array<{ beforeUrl: string | null; afterUrl: string; label: string }>;
   expiresAt?: string | null;
+  /** Per-line photos keyed by the line id from the document's items list. */
+  linePhotos?: Record<string, Array<{ url: string }>>;
 };
 
 type Props = {
@@ -127,5 +129,73 @@ export function ClientJobMedia({ media, onExpired }: Props) {
         </div>
       )}
     </div>
+  );
+}
+
+/** Customer approve page: up to 5 photos shown under one line's description. */
+export function ClientLinePhotoStrip({
+  photos,
+  lineLabel,
+  onExpired,
+}: {
+  photos?: Array<{ url: string }> | null;
+  lineLabel: string;
+  onExpired?: () => void;
+}) {
+  const [zoom, setZoom] = React.useState<string | null>(null);
+  const expiredRef = React.useRef(false);
+  const list = (photos || []).filter((p) => p?.url).slice(0, 5);
+  React.useEffect(() => {
+    expiredRef.current = false;
+  }, [photos]);
+  if (list.length === 0) return null;
+  return (
+    <>
+      <div className="mt-2 flex flex-wrap gap-2" data-testid="client-line-photos">
+        {list.map((p, i) => (
+          <button
+            key={`${p.url}-${i}`}
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setZoom(p.url);
+            }}
+            className="h-16 w-16 sm:h-20 sm:w-20 overflow-hidden rounded-md border bg-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            aria-label={`View larger: ${lineLabel} photo ${i + 1}`}
+          >
+            <img
+              src={p.url}
+              alt={`${lineLabel} photo ${i + 1}`}
+              loading="lazy"
+              decoding="async"
+              referrerPolicy="no-referrer"
+              onError={() => {
+                if (expiredRef.current) return;
+                expiredRef.current = true;
+                onExpired?.();
+              }}
+              className="h-full w-full object-cover"
+            />
+          </button>
+        ))}
+      </div>
+      {zoom && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={`${lineLabel} photo`}
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/85 p-3"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setZoom(null);
+          }}
+        >
+          <img src={zoom} alt={`${lineLabel} photo`} referrerPolicy="no-referrer" className="max-h-[85vh] max-w-full rounded-lg object-contain" />
+          <p className="mt-2 text-center text-xs text-white/90">Tap anywhere to close</p>
+        </div>
+      )}
+    </>
   );
 }

@@ -26,6 +26,7 @@
     "test:mobile": "node --test scripts/test-mobile-app.test.mjs scripts/test-mobile-layout.test.mjs",
     "test:photo-estimate": "node --test scripts/test-photo-estimate.test.mjs scripts/test-photo-estimate-ios.test.mjs",
     "test:client-media": "node --test scripts/test-client-media.test.mjs",
+    "test:line-photos": "node --test scripts/test-line-item-photos.test.mjs",
     "test:trial-inactivity": "node --test scripts/test-trial-inactivity.test.mjs",
     "test:promo-membership": "node --test scripts/test-promo-membership-only.test.mjs",
     "test:billing-account": "node --test scripts/test-billing-account.test.mjs",
