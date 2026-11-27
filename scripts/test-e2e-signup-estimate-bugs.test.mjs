@@ -153,15 +153,19 @@ test('approval is recognized from profile timestamps', () => {
   );
 });
 
-test('auth email templates are branded and keep ConfirmationURL', () => {
+test('auth email templates are branded and use app-domain TokenHash links', () => {
   const confirmation = readFileSync(join(root, 'supabase/email-templates/confirmation.html'), 'utf8');
   const recovery = readFileSync(join(root, 'supabase/email-templates/recovery.html'), 'utf8');
   for (const html of [confirmation, recovery]) {
     assert.match(html, /EstimateAce/);
-    assert.match(html, /\{\{ \.ConfirmationURL \}\}/);
-    assert.doesNotMatch(html, /Supabase Auth|powered by supabase/i);
+    assert.match(html, /\{\{ \.TokenHash \}\}/);
+    assert.match(html, /\{\{ \.SiteURL \}\}/);
+    assert.doesNotMatch(html, /\{\{ \.ConfirmationURL \}\}/);
+    assert.doesNotMatch(html, /Supabase Auth|powered by supabase|supabase\.co/i);
     assert.doesNotMatch(html, /mail\.app\.supabase\.io/);
   }
   assert.match(confirmation, /Confirm my email/);
+  assert.match(confirmation, /\/auth\/confirm\?token_hash=/);
   assert.match(recovery, /Reset password/);
+  assert.match(recovery, /\/reset-password\?token_hash=/);
 });

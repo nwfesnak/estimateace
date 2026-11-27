@@ -9,7 +9,15 @@ Paste the HTML here into Authentication → Email Templates after SMTP is on:
 | Confirm signup | `confirmation.html` | Confirm your EstimateAce account |
 | Reset password | `recovery.html` | Reset your EstimateAce password |
 
-Keep the `{{ .ConfirmationURL }}` (and optional `{{ .Email }}`) placeholders — Supabase fills them in.
+Do not use `{{ .ConfirmationURL }}` in these templates. That placeholder expands to a
+`*.supabase.co` verify URL, and mailboxes (Outlook especially) treat a password or
+confirm button that leaves estimateace.com as phishing. Use app-domain links instead:
+
+- Confirm signup: `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email`
+- Reset password: `{{ .SiteURL }}/reset-password?token_hash={{ .TokenHash }}&type=recovery`
+
+`{{ .Email }}` and `{{ .TokenHash }}` are filled in by Supabase. Site URL in
+Authentication → URL configuration must be `https://app.estimateace.com`.
 
 ## Custom SMTP (Resend)
 

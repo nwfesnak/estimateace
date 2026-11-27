@@ -30,10 +30,10 @@
               <td style="padding:8px 32px 24px 32px;font-size:15px;line-height:1.6;color:#334155;">
                 <p style="margin:0 0 16px 0;">We received a request to reset the password for <strong>{{ .Email }}</strong>. Click the button below to choose a new password.</p>
                 <p style="margin:0 0 24px 0;text-align:center;">
-                  <a href="{{ .ConfirmationURL }}" style="display:inline-block;background:#0f172a;color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;padding:14px 28px;border-radius:14px;">Reset password</a>
+                  <a href="{{ .SiteURL }}/reset-password?token_hash={{ .TokenHash }}&amp;type=recovery" style="display:inline-block;background:#0f172a;color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;padding:14px 28px;border-radius:14px;">Reset password</a>
                 </p>
                 <p style="margin:0 0 8px 0;font-size:13px;color:#64748b;">If the button doesn’t work, copy and paste this link into your browser:</p>
-                <p style="margin:0;font-size:12px;line-height:1.5;word-break:break-all;color:#0f766e;">{{ .ConfirmationURL }}</p>
+                <p style="margin:0;font-size:12px;line-height:1.5;word-break:break-all;color:#0f766e;">{{ .SiteURL }}/reset-password?token_hash={{ .TokenHash }}&amp;type=recovery</p>
               </td>
             </tr>
             <tr>

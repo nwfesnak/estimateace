@@ -6,9 +6,10 @@ import { getSupabaseClient, getSupabaseConfigHelpMessage } from '@/lib/supabase/
 
 /**
  * Supabase password-recovery landing page.
- * The reset email links here (redirectTo=/reset-password). Supabase signs the user in
- * with a short-lived recovery session from the URL; we then ask for a new password and
- * save it with auth.updateUser before sending them into the app.
+ * The reset email links here (redirectTo=/reset-password). Prefer app-domain links
+ * with ?token_hash=&type=recovery (verifyOtp). Legacy Supabase action_link / PKCE
+ * ?code= URLs still work. We then ask for a new password and save it with
+ * auth.updateUser before sending them into the app.
  */
 type Phase = 'checking' | 'ready' | 'invalid' | 'saving' | 'done';
 
@@ -53,9 +54,23 @@ export default function ResetPasswordPage() {
       }
     });
 
-    // PKCE-style links (?code=...) need an explicit exchange.
-    const code = new URLSearchParams(search).get('code');
-    const exchange = code
+    // App-domain recovery links (?token_hash=&type=recovery) from crew invites and
+    // custom email templates. PKCE-style links (?code=...) need an explicit exchange.
+    const params = new URLSearchParams(search);
+    const tokenHash = params.get('token_hash');
+    const otpType = (params.get('type') || 'recovery') as
+      | 'recovery'
+      | 'email'
+      | 'signup'
+      | 'invite'
+      | 'magiclink'
+      | 'email_change';
+    const code = params.get('code');
+    const exchange = tokenHash
+      ? supabase.auth.verifyOtp({ token_hash: tokenHash, type: otpType }).then(({ error: exErr }) => {
+          if (exErr) setError(exErr.message);
+        })
+      : code
       ? supabase.auth.exchangeCodeForSession(code).then(({ error: exErr }) => {
           if (exErr) setError(exErr.message);
         })
