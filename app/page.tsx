@@ -1433,7 +1433,9 @@ export default function Home() {
       const periodEnd = billing.currentPeriodEnd
         ? new Date(billing.currentPeriodEnd).getTime()
         : 0;
-      if (status === 'active' || status === 'trialing' || status === 'past_due') return true;
+      // Keep in sync with receptionistAddonHasAccess: past_due is not entitled.
+      if (status === 'past_due' || status === 'unpaid') return false;
+      if (status === 'active' || status === 'trialing') return true;
       if ((status === 'canceled' || billing.cancelAtPeriodEnd) && periodEnd > Date.now()) return true;
     }
     if ('aiReceptionistAddonActive' in cached) {
@@ -9481,38 +9483,80 @@ export default function Home() {
     }
     setReceptionistSaving(true);
     try {
+      if (!supabase) {
+        // Cannot verify add-on payment without the server; never persist enabled:true locally only.
+        const localSettings = { ...settings, enabled: false };
+        if (settings.enabled) {
+          setReceptionistSettings((prev) => ({ ...prev, enabled: false }));
+        }
+        try {
+          localStorage.setItem(
+            `estimateace_receptionist_${workspaceUserId}`,
+            JSON.stringify({ settings: localSettings, messages, archived })
+          );
+        } catch {
+          /* ignore */
+        }
+        showMessage(
+          settings.enabled
+            ? 'Subscribe to the AI Receptionist add-on to turn answering on.'
+            : '✅ Receptionist saved on this device.'
+        );
+        return;
+      }
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        showMessage('Please log in again.');
+        return;
+      }
+      const res = await fetch('/api/receptionist/settings', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          settings,
+          messages: messages.slice(0, 200),
+          archived: archived.slice(0, 500),
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      const savedSettings = (json.settings && typeof json.settings === 'object'
+        ? { ...settings, ...json.settings }
+        : settings) as ReceptionistSettings;
+      const persistSettings =
+        res.status === 402 || savedSettings.enabled === false
+          ? { ...savedSettings, enabled: Boolean(savedSettings.enabled) && res.ok }
+          : savedSettings;
+      if (res.status === 402 && json.needsPayment) {
+        setReceptionistSettings((prev) => ({ ...prev, enabled: false }));
+        try {
+          localStorage.setItem(
+            `estimateace_receptionist_${workspaceUserId}`,
+            JSON.stringify({ settings: { ...persistSettings, enabled: false }, messages, archived })
+          );
+        } catch {
+          /* ignore */
+        }
+        showMessage(json.error || 'Subscribe to the AI Receptionist add-on first.');
+        return;
+      }
+      if (!res.ok) {
+        console.error('saveReceptionistData:', json);
+        showMessage(json.error || 'Could not save AI Receptionist.');
+        return;
+      }
+      if (settings.enabled && persistSettings.enabled === false) {
+        setReceptionistSettings((prev) => ({ ...prev, enabled: false }));
+      }
       try {
         localStorage.setItem(
           `estimateace_receptionist_${workspaceUserId}`,
-          JSON.stringify({ settings, messages, archived })
+          JSON.stringify({ settings: persistSettings, messages, archived })
         );
       } catch {
         /* ignore */
-      }
-      if (!supabase) {
-        showMessage('✅ Receptionist saved on this device.');
-        return;
-      }
-      const existing = (await fetchServerProfileSettings()) || {};
-      const { error } = await supabase.from('estimates').upsert({
-        id: `SETTINGS-${workspaceUserId}`,
-        user_id: workspaceUserId,
-        jobName: '__settings__',
-        documentType: 'settings',
-        items: [],
-        invoiceNumber: `SETTINGS-${workspaceUserId}`,
-        profile: {
-          ...existing,
-          aiReceptionist: settings,
-          aiReceptionistMessages: messages.slice(0, 200),
-          aiReceptionistArchivedMessages: archived.slice(0, 500),
-        },
-        updated_at: new Date().toISOString(),
-      });
-      if (error) {
-        console.error('saveReceptionistData:', error);
-        showMessage('Saved locally; cloud failed: ' + error.message);
-        return;
       }
       showMessage('✅ AI Receptionist saved');
     } finally {

@@ -141,11 +141,11 @@ export function AIReceptionist({
   }, [refreshLine]);
 
   const autoEnabledRef = React.useRef(false);
-  // One-time: if AI line exists but toggle was left Off (default), turn On so calls get AI not "please hold"
+  // One-time: if the paid add-on is active, a line exists, and the toggle was left Off
+  // (default), turn On so calls get AI not "please hold". Never auto-enable when unpaid.
   React.useEffect(() => {
     if (autoEnabledRef.current) return;
-    if (!linePhone || settings.enabled) return;
-    if (!addonActive && lineStatus !== 'active') return;
+    if (!addonActive || !linePhone || settings.enabled) return;
     autoEnabledRef.current = true;
     const next = { ...settings, enabled: true };
     onChangeSettings(next);
@@ -689,6 +689,15 @@ export function AIReceptionist({
                 checked={settings.enabled}
                 onChange={async (e) => {
                   const on = e.target.checked;
+                  if (on && !addonActive) {
+                    e.target.checked = false;
+                    setTab('phone');
+                    document.getElementById('receptionist-subscribe')?.scrollIntoView({
+                      behavior: 'smooth',
+                      block: 'center',
+                    });
+                    return;
+                  }
                   const next = { ...settings, enabled: on };
                   onChangeSettings(next);
                   await onSave(next, messages);
@@ -745,7 +754,7 @@ export function AIReceptionist({
       </div>
 
       {!addonActive && (
-        <div className="mb-6 rounded-2xl border-2 border-violet-300 bg-violet-50 p-5 space-y-3">
+        <div id="receptionist-subscribe" className="mb-6 rounded-2xl border-2 border-violet-300 bg-violet-50 p-5 space-y-3">
           <p className="font-semibold text-violet-950">
             AI Receptionist is not subscribed yet.
           </p>
