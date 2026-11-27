@@ -17,6 +17,13 @@ import {
   sanitizeEmailLinePhotoUrls,
   sanitizeEmailSiteLinePhotos,
 } from '@/lib/email-line-photos';
+import {
+  itemBreakdownForEmailHtml,
+  itemBreakdownForEmailText,
+  presentClientEstimate,
+  renderEmailDiscountRowsHtml,
+  renderEmailDiscountText,
+} from '@/lib/client-estimate-display';
 
 type LineItem = {
   description?: string;
@@ -103,7 +110,13 @@ export async function POST(request: NextRequest) {
     const discountType = body.discountType === 'percent' ? 'percent' : 'dollar';
     const discountValue = Number(body.discountValue) || 0;
     const taxAmount = Math.max(0, Number(body.taxAmount) || 0);
-    const showDiscount = discountAmount > 0.005;
+    const presentation = presentClientEstimate({
+      showClientEstimateDisplay: body.showClientEstimateDisplay !== false,
+      showDiscountOnEstimate: body.showDiscountOnEstimate === true,
+      discountAmount,
+      breakdownSettings: body.breakdownSettings || {},
+    });
+    const showDiscount = presentation.showDiscountLine;
     const depositPercent = Math.max(0, Number(body.depositPercent) || 0);
     const showDepositOnApproval = body.showDepositOnApproval !== false;
     const depositMinimumAmount = Math.max(0, Number(body.depositMinimumAmount) || 0);
@@ -226,7 +239,10 @@ export async function POST(request: NextRequest) {
     const formatLine = (it: LineItem, i: number) => {
       const desc = String(it.description || 'Line item').slice(0, 120);
       const total = money(Number(it.total) || Number(it.qty || 0) * Number(it.price || 0));
-      return `${i + 1}. ${desc} — ${total}`;
+      const breakdown = itemBreakdownForEmailText(it, presentation);
+      return breakdown
+        ? `${i + 1}. ${desc} — ${total}\n${breakdown}`
+        : `${i + 1}. ${desc} — ${total}`;
     };
     const lineLines = includedItems
       .slice(0, 20)
@@ -258,6 +274,12 @@ export async function POST(request: NextRequest) {
         : '',
       hasCertificate ? `Certificate of Insurance: ${certificateUrl}` : '',
       '',
+      renderEmailDiscountText({
+        showDiscountLine: showDiscount,
+        subtotalBeforeDiscount,
+        discountAmount,
+        discountDescription,
+      }),
       `Grand total: ${money(grandTotal)}`,
       amountPaid > 0 ? `Already paid: ${money(amountPaid)}` : '',
       lineLines ? `\nItems:\n${lineLines}` : '',
@@ -282,10 +304,11 @@ export async function POST(request: NextRequest) {
         .map((it) => {
           const desc = escapeHtml(String(it.description || 'Line item').slice(0, 100));
           const total = money(Number(it.total) || Number(it.qty || 0) * Number(it.price || 0));
+          const breakdownHtml = itemBreakdownForEmailHtml(it, presentation);
           return `<tr>
           <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-size:13px;">${desc}${
             it.id != null ? emailLinePhotoThumbsHtml(linePhotoUrls[String(it.id)], escapeHtml) : ''
-          }</td>
+          }${breakdownHtml}</td>
           <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;text-align:right;font-size:13px;white-space:nowrap;">${total}</td>
         </tr>`;
         })
@@ -432,12 +455,12 @@ export async function POST(request: NextRequest) {
             <td style="padding:4px 20px 16px;">
               <p style="margin:0 0 6px;font-size:12px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.04em;">Summary</p>
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
-                ${
-                  showDiscount
-                    ? `<tr><td style="padding:4px 0;font-size:13px;color:#64748b;">Subtotal</td><td style="padding:4px 0;font-size:13px;text-align:right;">${money(subtotalBeforeDiscount)}</td></tr>
-                <tr><td style="padding:4px 0;font-size:13px;color:#b91c1c;">Discount</td><td style="padding:4px 0;font-size:13px;text-align:right;color:#b91c1c;">−${money(discountAmount)}</td></tr>`
-                    : ''
-                }
+                ${renderEmailDiscountRowsHtml({
+                  showDiscountLine: showDiscount,
+                  subtotalBeforeDiscount,
+                  discountAmount,
+                  discountDescription,
+                })}
                 ${taxAmount > 0 ? `<tr><td style="padding:4px 0;font-size:13px;color:#64748b;">Tax</td><td style="padding:4px 0;font-size:13px;text-align:right;">${money(taxAmount)}</td></tr>` : ''}
                 <tr><td style="padding:6px 0;font-size:15px;font-weight:700;">Grand total</td><td style="padding:6px 0;font-size:15px;font-weight:700;text-align:right;">${money(grandTotal)}</td></tr>
                 ${amountPaid > 0 ? `<tr><td style="padding:4px 0;font-size:13px;color:#64748b;">Already paid</td><td style="padding:4px 0;font-size:13px;text-align:right;">${money(amountPaid)}</td></tr>` : ''}

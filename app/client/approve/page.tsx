@@ -75,7 +75,10 @@ type DocPayload = {
     total: number;
     optional?: boolean;
     clientSelected?: boolean;
+    breakdownHtml?: string;
   }>;
+  showDiscountOnEstimate?: boolean;
+  showClientEstimateDisplay?: boolean;
   paymentOptions?: PayOption[];
   /** False when the contractor has not finished Stripe Connect (no card / bank via Stripe). */
   stripeReady?: boolean;
@@ -528,6 +531,13 @@ function ApprovePayInner() {
                     <tr key={it.id || i} className="border-t">
                       <td className="p-2 text-slate-800">
                         {it.description}
+                        {it.breakdownHtml ? (
+                          <div
+                            className="mt-1 text-xs text-slate-600 leading-snug"
+                            data-proof="item-breakdown"
+                            dangerouslySetInnerHTML={{ __html: it.breakdownHtml }}
+                          />
+                        ) : null}
                         <ClientLinePhotoStrip
                           photos={doc?.media?.linePhotos?.[String(it.id || '')]}
                           lineLabel={it.description || 'Line'}
@@ -576,6 +586,13 @@ function ApprovePayInner() {
                     />
                     <span className="min-w-0 flex-1">
                       <span className="block text-sm text-slate-900">{it.description}</span>
+                      {it.breakdownHtml ? (
+                        <div
+                          className="mt-1 text-xs text-slate-600 leading-snug"
+                          data-proof="item-breakdown"
+                          dangerouslySetInnerHTML={{ __html: it.breakdownHtml }}
+                        />
+                      ) : null}
                       <ClientLinePhotoStrip
                         photos={doc?.media?.linePhotos?.[id]}
                         lineLabel={it.description || 'Option'}
@@ -617,7 +634,8 @@ function ApprovePayInner() {
           )}
 
           <div className="rounded-xl bg-slate-50 p-4 space-y-1">
-            {((hasOptionalLines && isEstimate ? choicePreview.discountAmount : Number(doc?.discountAmount)) || 0) > 0.005 && (
+            {((hasOptionalLines && isEstimate ? choicePreview.discountAmount : Number(doc?.discountAmount)) || 0) > 0.005 &&
+            doc?.showDiscountOnEstimate !== false && (
               <>
                 <div className="flex justify-between text-sm text-slate-600">
                   <span>Subtotal</span>
