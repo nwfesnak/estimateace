@@ -269,3 +269,29 @@ export function resolveAmountDue(input: {
     payLabel: amountPaid > 0 ? 'Balance due (after deposit)' : 'Total due',
   };
 }
+
+/**
+ * Deposits are an estimate-stage step: the client approve page and Send preview only ask for a
+ * deposit while the document is still an estimate (resolveAmountDue above). Once it becomes an
+ * invoice the full remaining balance is due. This helper tells the editor when an estimate still
+ * has an uncollected deposit so it can steer the owner to the deposit screen instead of silently
+ * skipping it (e.g. on Mark Approved or Convert to Invoice).
+ */
+export function estimateDepositPending(input: {
+  grandTotal: number;
+  amountPaid?: number;
+  depositPercent?: number;
+  showDepositOnApproval?: boolean;
+  depositMinimumAmount?: number;
+}): { pending: boolean; depositDue: number; depositPercent: number } {
+  const due = resolveAmountDue({
+    documentType: 'estimate',
+    grandTotal: input.grandTotal,
+    amountPaid: input.amountPaid,
+    depositPercent: input.depositPercent,
+    showDepositOnApproval: input.showDepositOnApproval,
+    depositMinimumAmount: input.depositMinimumAmount,
+  });
+  const pending = due.payKind === 'deposit' && due.amountPaid < 0.01;
+  return { pending, depositDue: due.depositDue, depositPercent: due.depositPercent };
+}
