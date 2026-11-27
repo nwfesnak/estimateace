@@ -48,6 +48,7 @@
     "test:platform-tutorials": "node --test scripts/test-platform-tutorials.test.mjs",
     "test:swipe-hint-tabs": "node --test scripts/test-swipe-hint-tabs.test.mjs",
     "test:crew-gaps": "node --test scripts/test-crew-security-gaps.test.mjs",
+    "test:deposit-flow": "node --test scripts/test-deposit-flow.test.mjs",
     "test": "node --test scripts/test-*.test.mjs"
   },
   "dependencies": {

@@ -17,7 +17,12 @@ import {
   type DocRow,
   type MergedMedia,
 } from '@/lib/document-sync';
-import { computeStripeCardFee, STRIPE_CARD_FIXED_USD, STRIPE_CARD_PERCENT } from '@/lib/stripe-fees';
+import {
+  computeStripeCardFee,
+  estimateDepositPending,
+  STRIPE_CARD_FIXED_USD,
+  STRIPE_CARD_PERCENT,
+} from '@/lib/stripe-fees';
 import {
   MileageTracker,
   normalizeMileageLogs,
@@ -7566,6 +7571,17 @@ export default function Home() {
       approvedBy: by,
     });
     if (result.ok) {
+      // Approving the open estimate in the editor: if a deposit is still owed, go straight to the
+      // deposit screen (Send preview → ✅ Approved → Pay Deposit Now / send to client).
+      const deposit = !sourceRow ? getEstimateDepositStatus() : null;
+      if (deposit?.pending) {
+        setView('sendPreview');
+        showMessage(
+          `✅ Estimate approved — deposit due $${deposit.depositDue.toFixed(2)} (${deposit.depositPercent}%). ` +
+            'Send it to the client to pay the deposit, or tap Pay Deposit Now to record it. Convert to Invoice after the deposit.'
+        );
+        return;
+      }
       showMessage(
         '✅ Estimate marked Approved — still an estimate (not an invoice). You can schedule it on the Calendar.'
       );
@@ -7603,6 +7619,28 @@ export default function Home() {
     const nextNumber = prevUpper.startsWith('EST')
       ? previousId.replace(/^est/i, 'INV').replace(/^EST/, 'INV')
       : previousId;
+
+    // Deposits are only requested on estimates. Converting first used to skip the deposit with no
+    // warning (invoice = full amount due). Ask before skipping; Cancel opens the deposit screen.
+    if (documentType !== 'invoice') {
+      const deposit = getEstimateDepositStatus();
+      if (
+        deposit.pending &&
+        !confirm(
+          `No deposit has been collected on this estimate yet (deposit due: $${deposit.depositDue.toFixed(2)}, ` +
+            `${deposit.depositPercent}% of $${grandTotal.toFixed(2)}).\n\n` +
+            'Invoices ask the client for the FULL amount, so converting now skips the deposit.\n\n' +
+            'OK = convert anyway (full amount due)\n' +
+            'Cancel = stay on the estimate and collect the deposit first'
+        )
+      ) {
+        setView('sendPreview');
+        showMessage(
+          'Deposit screen: send this estimate so the client can approve and pay the deposit, or tap Pay Deposit Now to record it.'
+        );
+        return;
+      }
+    }
 
     // Keep deposit already paid — final invoice balance = grand total − deposit
     const depositAlreadyPaid = Math.max(0, Number(amountPaid) || 0);
@@ -11034,6 +11072,17 @@ export default function Home() {
   };
 
   const isDepositOnApprovalEnabled = () => jobSettings.showDepositOnApproval !== false;
+
+  /** Estimate still owes its deposit (deposits on, % > 0, meets minimum, nothing recorded paid). */
+  function getEstimateDepositStatus() {
+    return estimateDepositPending({
+      grandTotal,
+      amountPaid: Number(amountPaid) || 0,
+      depositPercent: Number(jobSettings.depositPercentage) || 0,
+      showDepositOnApproval: jobSettings.showDepositOnApproval !== false,
+      depositMinimumAmount: Math.max(0, Number(jobSettings.depositMinimumAmount) || 0),
+    });
+  }
   const isThirdPartyEscrowProfileEnabled = () => !!jobSettings.thirdPartyEscrowEnabled;
 
   const getDepositMinimumAmount = (): number =>
@@ -20094,6 +20143,15 @@ export default function Home() {
                         <>
                           Full invoice total due:{' '}
                           <span className="font-bold text-2xl">${grandTotal.toFixed(2)}</span>
+                          {shouldShowDepositOnEstimate() && (
+                            <span
+                              className="block text-sm mt-2 text-gray-600"
+                              data-testid="invoice-deposit-stage-hint"
+                            >
+                              Deposits are requested on the estimate, before it becomes an invoice. To ask for a
+                              deposit, use Convert to Estimate, then send it (or Mark Approved → Pay Deposit Now).
+                            </span>
+                          )}
                         </>
                       )}
                       {jobSettings.chargeCCFee && (
