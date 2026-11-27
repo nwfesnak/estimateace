@@ -85,6 +85,12 @@ import {
 } from '@/lib/estimate-approval';
 import { getTaxRateFromZip } from '@/lib/tax-rates';
 import { invoiceSentLabel, readInvoiceSentAt } from '@/lib/invoice-sent';
+import {
+  BLANK_NOTHING_TO_SAVE_MESSAGE,
+  canDiscardBlankDraft,
+  hasMeaningfulEstimateInput,
+  shouldInsertNewDocument,
+} from '@/lib/blank-estimate';
 import { firstInvoiceReminderDays, invoiceReminderHint } from '@/lib/invoice-reminders';
 import {
   isOptionalLine,
@@ -1276,10 +1282,14 @@ export default function Home() {
   const unsavedNewDocIdRef = useRef<string | null>(null);
   const loadSelectedEstimateRef = useRef<(est: any) => Promise<void>>(async () => {});
   const documentSaveChainRef = useRef(Promise.resolve());
-  const saveToDBRef = useRef<(options?: any) => Promise<{ ok: boolean; error?: string; id?: string }>>(
+  const saveToDBRef = useRef<(options?: any) => Promise<{ ok: boolean; error?: string; id?: string; skipped?: boolean }>>(
     async () => ({ ok: false, error: 'not ready' })
   );
   const flushPendingAutosaveRef = useRef<() => Promise<void>>(async () => {});
+  /** Document ids inserted by this browser session — the only ones we may auto-discard if still blank. */
+  const sessionCreatedDocIdsRef = useRef<Set<string>>(new Set());
+  const discardBlankSessionDraftRef = useRef<(opts?: { keepalive?: boolean }) => Promise<void>>(async () => {});
+  const getEstimateContentInputRef = useRef<() => Record<string, unknown>>(() => ({}));
   /** Latest invoice send time, so a save that starts before React re-renders still keeps the mark. */
   const invoiceSentAtRef = useRef<string | null>(null);
   /** Last "include on customer page" choice from Send (photos / renderings); null = default show. */
@@ -3703,6 +3713,103 @@ export default function Home() {
     return { kind: 'write' };
   };
 
+  const getEstimateContentInput = (overrides?: Record<string, unknown>): Record<string, unknown> => {
+    const baseProfile = (
+      overrides && overrides.profile && typeof overrides.profile === 'object'
+        ? (overrides.profile as Record<string, unknown>)
+        : (profileRef.current as unknown as Record<string, unknown>) || {}
+    );
+    const sentAt =
+      overrides && 'invoiceSentAt' in overrides
+        ? overrides.invoiceSentAt
+        : invoiceSentAtRef.current || invoiceSentAt;
+    const profileSnap: Record<string, unknown> = {
+      ...baseProfile,
+      _jobRenderings: overrides?.jobRenderings ?? jobRenderingsRef.current ?? baseProfile._jobRenderings,
+      _mileageLogs: overrides?.mileageLogs ?? jobMileageLogs ?? baseProfile._mileageLogs,
+      _laborLogs: overrides?.laborLogs ?? jobLaborLogs ?? baseProfile._laborLogs,
+      _discount: baseProfile._discount || {
+        discountDescription: appliedDiscountDescription,
+        discountValue: appliedDiscountValue,
+        discountType: appliedDiscountType,
+        discountAmount,
+      },
+      ...(estimateApprovedAt
+        ? { _estimateApprovedAt: estimateApprovedAt, _estimateApprovedBy: estimateApprovedBy || 'owner' }
+        : {}),
+      ...(sentAt ? { _invoiceSentAt: sentAt } : {}),
+    };
+    return {
+      id: invoiceNumber,
+      user_id: workspaceUserId,
+      jobName,
+      address,
+      city,
+      state,
+      zipCode,
+      phones,
+      emails,
+      items: overrides?.items ?? itemsRef.current ?? items,
+      terms,
+      photoUrls: overrides?.photoUrls ?? photoUrls,
+      videoUrls: overrides?.videoUrls ?? videoUrls,
+      receiptUrls: overrides?.receiptUrls ?? receiptUrls,
+      receiptDetails: overrides?.receiptDetails ?? receiptDetails,
+      dueDate,
+      paymentStatus: overrides?.paymentStatus ?? paymentStatus,
+      amountPaid: overrides?.amountPaid ?? amountPaid,
+      paymentMethod: overrides?.paymentMethod ?? paymentMethod,
+      laborLogs: overrides?.laborLogs ?? jobLaborLogs,
+      profile: profileSnap,
+      documentType: overrides?.documentType ?? documentType,
+      isTaxExempt,
+      invoiceNumber,
+    };
+  };
+  getEstimateContentInputRef.current = getEstimateContentInput;
+
+  const discardBlankSessionDraft = async (opts?: { keepalive?: boolean }) => {
+    const id = String(invoiceNumber || loadedDocNumberRef.current || '').trim();
+    if (!id || !workspaceUserId || !supabase) return;
+    if (!sessionCreatedDocIdsRef.current.has(id)) return;
+    const content = getEstimateContentInputRef.current();
+    const decision = canDiscardBlankDraft(
+      { ...content, id, user_id: workspaceUserId, invoiceNumber: id },
+      {
+        ownerUserId: workspaceUserId,
+        defaultTerms: profileRef.current?.disclosure,
+        sessionCreatedIds: sessionCreatedDocIdsRef.current,
+      }
+    );
+    if (!decision.ok) return;
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (token) {
+        await fetch('/api/documents/discard-blank', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ id }),
+          keepalive: opts?.keepalive === true,
+        });
+      } else {
+        await supabase.from('estimates').delete().eq('id', id).eq('user_id', workspaceUserId);
+      }
+    } catch (err) {
+      console.warn('discard blank draft failed:', err);
+      return;
+    }
+    sessionCreatedDocIdsRef.current.delete(id);
+    if (loadedDocNumberRef.current === id) loadedDocNumberRef.current = '';
+    setSavedEstimatesList((prev) =>
+      (prev || []).filter((r: any) => String(r?.id || r?.invoiceNumber || r?.invoicenumber || '') !== id)
+    );
+  };
+  discardBlankSessionDraftRef.current = discardBlankSessionDraft;
+
   const saveToDB = async (options?: {
     profile?: typeof profile;
     breakdown?: typeof estimateBreakdownSettings;
@@ -3732,7 +3839,7 @@ export default function Home() {
      * Only pull in changes saved on another device (tab focus); never writes.
      */
     syncOnly?: boolean;
-  }): Promise<{ ok: boolean; error?: string; id?: string }> => {
+  }): Promise<{ ok: boolean; error?: string; id?: string; skipped?: boolean }> => {
     if (!supabase) {
       const err = 'Not connected to database. Check internet and refresh.';
       if (!options?.quiet) showMessage(err);
@@ -3748,13 +3855,38 @@ export default function Home() {
       return { ok: false, error: err };
     }
 
-    const runSave = async (): Promise<{ ok: boolean; error?: string; id?: string }> => {
+    const runSave = async (): Promise<{ ok: boolean; error?: string; id?: string; skipped?: boolean }> => {
     if (options?.syncOnly) {
       const openId = String(invoiceNumber || '').trim();
       if (!openId || !docSyncBaseRef.current || docSyncBaseRef.current.id !== openId) {
         return { ok: true, id: openId };
       }
     }
+    const contentForGate = getEstimateContentInput({
+      profile: options?.profile,
+      breakdown: options?.breakdown,
+      photoUrls: options?.photoUrls,
+      videoUrls: options?.videoUrls,
+      receiptUrls: options?.receiptUrls,
+      receiptDetails: options?.receiptDetails,
+      mileageLogs: options?.mileageLogs,
+      laborLogs: options?.laborLogs,
+      jobRenderings: options?.jobRenderings,
+      amountPaid: options?.amountPaid,
+      paymentStatus: options?.paymentStatus,
+      paymentMethod: options?.paymentMethod,
+      documentType: options?.documentType,
+      invoiceSentAt: options && 'invoiceSentAt' in options ? options.invoiceSentAt : undefined,
+    });
+    const isUnpersistedNew = !loadedDocNumberRef.current;
+    if (
+      !options?.syncOnly &&
+      isUnpersistedNew &&
+      !shouldInsertNewDocument(contentForGate, { defaultTerms: profileRef.current?.disclosure })
+    ) {
+      return { ok: true, skipped: true };
+    }
+
     let docId = ensureDocumentId();
     if (!options?.syncOnly) setSaveStatus('saving');
     setSaveErrorDetail('');
@@ -3845,6 +3977,10 @@ export default function Home() {
     const markOk = async () => {
       docSyncBaseRef.current = { id: docId, row: payload as unknown as DocRow };
       if (unsavedNewDocIdRef.current === docId) unsavedNewDocIdRef.current = null;
+      if (isUnpersistedNew) {
+        sessionCreatedDocIdsRef.current.add(docId);
+      }
+      loadedDocNumberRef.current = docId;
       if (String(docId).toUpperCase().startsWith('INV')) {
         await removeEstimateWorkOrderForInvoice(
           {
@@ -3981,13 +4117,10 @@ export default function Home() {
     if (profileHydratingRef.current) return;
     if (Date.now() < skipAutosaveUntilRef.current) return;
     if (requires2FA) return;
-    const latestItems = itemsRef.current || [];
-    const hasContent =
-      !!(jobName || '').trim() ||
-      !!(address || '').trim() ||
-      latestItems.some((it: any) => !!(it?.description || '').trim() || Number(it?.price) > 0) ||
-      (jobRenderingsRef.current || []).length > 0;
-    if (freshDocumentRef.current && !hasContent) return;
+    const hasContent = hasMeaningfulEstimateInput(getEstimateContentInputRef.current(), {
+      defaultTerms: profileRef.current?.disclosure,
+    });
+    if ((freshDocumentRef.current || !loadedDocNumberRef.current) && !hasContent) return;
     if (hasContent) freshDocumentRef.current = false;
     const paidToSave = freshDocumentRef.current ? 0 : Number(amountPaid) || 0;
     const statusToSave = freshDocumentRef.current ? 'pending' : paymentStatus;
@@ -5283,6 +5416,7 @@ export default function Home() {
   const loadSelectedEstimate = async (est: any) => {
     // Persist the open job first so a pending auto-save cannot land on the next document id
     await flushPendingAutosaveRef.current();
+    await discardBlankSessionDraftRef.current();
     // This row is now the version later saves compare against (cross-device sync).
     docSyncBaseRef.current = est ? { id: String(est.id || est.invoiceNumber || est.invoicenumber || ''), row: est } : null;
     unsavedNewDocIdRef.current = null;
@@ -5857,8 +5991,9 @@ export default function Home() {
 
   const newEstimate = async (typeOverride?: 'estimate' | 'invoice') => {
     const nextType = typeOverride || documentType || 'estimate';
-    // Flush the current job first, then block autosave so the blank form cannot overwrite it
+    // Flush the current job first, then drop a session-created blank draft before resetting the form
     await flushPendingAutosaveRef.current();
+    await discardBlankSessionDraftRef.current();
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
       saveTimeoutRef.current = null;
@@ -7235,6 +7370,10 @@ export default function Home() {
 
   const saveNamedEstimate = async () => {
     const result = await saveToDB({ quiet: false });
+    if (result.skipped) {
+      showMessage(BLANK_NOTHING_TO_SAVE_MESSAGE);
+      return;
+    }
     if (result.ok) {
       showMessage(`✅ Saved as "${jobName || 'Untitled'} - ${result.id || invoiceNumber}"`);
     }
@@ -10608,13 +10747,10 @@ export default function Home() {
       if (profileHydratingRef.current) return;
       if (Date.now() < skipAutosaveUntilRef.current) return;
       if (profileRef.current?.autoSaveEnabled === false) return;
-      const latestItems = itemsRef.current || [];
-      const hasContent =
-        !!(jobName || '').trim() ||
-        !!(address || '').trim() ||
-        latestItems.some((it: any) => !!(it?.description || '').trim() || Number(it?.price) > 0) ||
-        (jobRenderingsRef.current || []).length > 0;
-      if (freshDocumentRef.current && !hasContent) return;
+      const hasContent = hasMeaningfulEstimateInput(getEstimateContentInputRef.current(), {
+        defaultTerms: profileRef.current?.disclosure,
+      });
+      if ((freshDocumentRef.current || !loadedDocNumberRef.current) && !hasContent) return;
       if (hasContent) freshDocumentRef.current = false;
       // Fresh docs always persist deposit as zero until user records a payment
       const paidToSave = freshDocumentRef.current ? 0 : Number(amountPaid) || 0;
@@ -10636,7 +10772,10 @@ export default function Home() {
     const leavingEditor = prevEditorViewRef.current === 'editor' && view !== 'editor';
     prevEditorViewRef.current = view;
     if (leavingEditor) {
-      void flushPendingAutosaveRef.current();
+      void (async () => {
+        await flushPendingAutosaveRef.current();
+        await discardBlankSessionDraftRef.current();
+      })();
       return;
     }
     if (view === 'editor') debouncedSave();
@@ -10673,13 +10812,19 @@ export default function Home() {
   ]);
 
   useEffect(() => {
+    const flushAndDiscard = (keepalive = false) => {
+      void (async () => {
+        await flushPendingAutosaveRef.current();
+        await discardBlankSessionDraftRef.current({ keepalive });
+      })();
+    };
     const flushIfHidden = () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
-        void flushPendingAutosaveRef.current();
+        flushAndDiscard(true);
       }
     };
     const flushNow = () => {
-      void flushPendingAutosaveRef.current();
+      flushAndDiscard(true);
     };
     window.addEventListener('pagehide', flushNow);
     window.addEventListener('beforeunload', flushNow);

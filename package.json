@@ -41,6 +41,7 @@
     "test:client-estimate-display": "node --test scripts/test-client-estimate-display.test.mjs",
     "test:crew-tabs": "node --test scripts/test-crew-tab-access.test.mjs",
     "test:autosave": "node --test scripts/test-autosave-renderings.test.mjs",
+    "test:blank-estimates": "node --test scripts/test-blank-estimate.test.mjs",
     "test:appointment-notify": "node --test scripts/test-appointment-notify.test.mjs",
     "test:reviewer-demo": "node --test scripts/test-reviewer-demo.test.mjs",
     "test:company-vendors": "node --test scripts/test-company-vendors.test.mjs",

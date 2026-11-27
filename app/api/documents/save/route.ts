@@ -10,6 +10,10 @@ import {
   toMinimalEstimateRow,
   type EstimateSaveInput,
 } from '@/lib/estimate-save';
+import {
+  defaultTermsFromSettingsProfile,
+  shouldInsertNewDocument,
+} from '@/lib/blank-estimate';
 import { enforceAppAccess } from '@/lib/billing-access';
 import { restoreDocumentForCrewWrite } from '@/lib/crew-access';
 import { isReservedDocumentId } from '@/lib/company-profile-access';
@@ -136,6 +140,25 @@ export async function POST(request: NextRequest) {
       id,
       rawInput as unknown as Record<string, unknown>
     )) as unknown as EstimateSaveInput;
+
+    // Never insert a brand-new blank draft. Updates to an existing row still go through.
+    if (!ownsExisting) {
+      let defaultTerms = '';
+      const { data: settings } = await admin
+        .from('estimates')
+        .select('profile')
+        .eq('id', `SETTINGS-${workspaceUserId}`)
+        .maybeSingle();
+      defaultTerms = defaultTermsFromSettingsProfile(settings?.profile);
+      if (!shouldInsertNewDocument(input, { defaultTerms })) {
+        return NextResponse.json({
+          ok: true,
+          skipped: true,
+          reason: 'blank_new_document',
+          id,
+        });
+      }
+    }
 
     const attempts = [
       { name: 'camelCase', row: toCamelEstimateRow(input) },
