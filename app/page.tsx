@@ -225,6 +225,7 @@ import {
   turnstileEnabled,
 } from '@/lib/turnstile';
 import { todayDateKey, parseDateOnly } from '@/lib/local-date';
+import { addClosedJobKey, closedWorkAtMs, tightJobMatchClosesEstimate, type ClosedJobKeys } from '@/lib/closed-work-match';
 
 const DEFAULT_DISCOUNT_NAMES = ['Military', 'Return customer'];
 
@@ -5208,7 +5209,8 @@ export default function Home() {
    */
   const buildClosedWorkIndex = (closedRows: any[]) => {
     const numberKeys = new Set<string>();
-    const jobKeys = new Set<string>();
+    // job key -> when that work was closed (a newer estimate for the same client stays visible)
+    const jobKeys: ClosedJobKeys = new Map();
     for (const row of closedRows || []) {
       if (!row || isSettingsDocRow(row)) continue;
       const isPaid = isPaidDocRow(row);
@@ -5222,7 +5224,8 @@ export default function Home() {
       }
       // Job fingerprint only when work is truly closed (paid / in archive)
       if (isPaid || isArchived) {
-        for (const k of jobMatchKeys(row)) jobKeys.add(k);
+        const closedAt = closedWorkAtMs(row);
+        for (const k of jobMatchKeys(row)) addClosedJobKey(jobKeys, k, closedAt);
       }
     }
     return { numberKeys, jobKeys };
@@ -5235,7 +5238,7 @@ export default function Home() {
    */
   const estimateBelongsToClosedWork = (
     est: any,
-    closed: { numberKeys: Set<string>; jobKeys: Set<string> }
+    closed: { numberKeys: Set<string>; jobKeys: ClosedJobKeys }
   ) => {
     if (!est || isSettingsDocRow(est) || isRecurringPlanRow(est)) return false;
     // Never treat open unpaid invoices as "closed work" leftovers
@@ -5243,11 +5246,9 @@ export default function Home() {
     for (const k of docNumberKeys(est)) {
       if (closed.numberKeys.has(k)) return true;
     }
-    // Optional tight job match (zip or address required) — never bare job title
-    const estJobKeys = jobMatchKeys(est);
-    if (estJobKeys.some((k) => k.startsWith('jobzip:') && closed.jobKeys.has(k))) return true;
-    if (estJobKeys.some((k) => k.startsWith('jobaddr:') && closed.jobKeys.has(k))) return true;
-    return false;
+    // Optional tight job match (zip or address required) — never bare job title, and only
+    // when the estimate predates that closure (a new estimate for a repeat client is new work).
+    return tightJobMatchClosesEstimate(est, jobMatchKeys(est), closed.jobKeys);
   };
 
   /**
