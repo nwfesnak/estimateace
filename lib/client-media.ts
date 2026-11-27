@@ -101,7 +101,18 @@ export type ClientMediaPayload = {
   expiresAt: string | null;
   /** Per-line photos keyed by the client item id (see lib/line-item-photos.ts). */
   linePhotos?: Record<string, Array<{ url: string }>>;
+  /** Line photos repeated (same signed URLs) inside the Site Photos section, captioned by line. */
+  siteLinePhotos?: Array<{ caption: string; photos: Array<{ url: string }> }>;
 };
+
+/** The Send "Site Photos" switch saved on the document (default on). */
+export function clientSitePhotosEnabled(row: Record<string, unknown> | null | undefined): boolean {
+  const profile = (row?.profile && typeof row.profile === 'object' ? row.profile : {}) as Record<string, unknown>;
+  const share = (profile._clientMedia && typeof profile._clientMedia === 'object'
+    ? profile._clientMedia
+    : {}) as Record<string, unknown>;
+  return share.photos !== false;
+}
 
 type SignFn = (
   paths: string[],

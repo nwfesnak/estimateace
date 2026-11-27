@@ -107,6 +107,8 @@ import {
   allLinePhotoRefs,
   getLinePhotos,
   newLinePhotoPath,
+  siteSectionLinePhotoGroups,
+  siteSectionPhotoCount,
   withLinePhotoMoved,
   withLinePhotoRemoved,
   withLinePhotosAdded,
@@ -1044,6 +1046,8 @@ export default function Home() {
 
   // Resolve per-line photo paths (items[n].photos) to signed URLs; Site Photos are separate.
   const linePhotoRefsKey = allLinePhotoRefs(items).join('|');
+  /** Site Photos section size: site photos + line photos (derived). Drives the Send switch. */
+  const sitePhotoSectionTotal = siteSectionPhotoCount(photoUrls, items);
   useEffect(() => {
     const refs = linePhotoRefsKey ? linePhotoRefsKey.split('|') : [];
     const missing = refs.filter((r) => !linePhotoDisplayUrls[r]);
@@ -2452,11 +2456,14 @@ export default function Home() {
     heading?: string;
     gridClassName?: string;
     imgClassName?: string;
+    /** Line photos (derived from items, never copied into photoUrls). Default on. */
+    includeLinePhotos?: boolean;
   }) => {
     const editable = !!options?.editable;
     const forceExpanded = !!options?.forceExpanded;
     const count = photoDisplayUrls.length;
-    if (count === 0 && !editable) return null;
+    const lineGroups = siteSectionLinePhotoGroups(items, photoUrls, options?.includeLinePhotos !== false);
+    if (count === 0 && lineGroups.length === 0 && !editable) return null;
 
     const useFolder = count > PHOTO_FOLDER_THRESHOLD && !forceExpanded;
     const isOpen = !useFolder || photosFolderOpen;
@@ -2594,6 +2601,43 @@ export default function Home() {
         )}
         {folderButton}
         {photoGrid}
+        {lineGroups.length > 0 && (
+          <div className="space-y-3" data-testid="site-section-line-photos">
+            {lineGroups.map((g) => (
+              <div key={g.lineId} className="space-y-2" style={{ breakInside: 'avoid' }}>
+                <div className="text-sm font-medium text-gray-600">📎 {g.caption}</div>
+                <div className={gridClass}>
+                  {g.refs.map((ref, i) => {
+                    const url = linePhotoDisplayUrls[ref] || '';
+                    if (!url && !editable) return null;
+                    return (
+                      <div key={ref} className={editable ? 'relative' : undefined}>
+                        {url ? (
+                          <img src={url} alt={`${g.caption} photo ${i + 1}`} className={imgClass} />
+                        ) : (
+                          <div className="w-full h-40 rounded-lg border bg-gray-50 flex items-center justify-center text-xs text-gray-400">
+                            Loading…
+                          </div>
+                        )}
+                        {editable && typeof g.itemId === 'number' && (
+                          <button
+                            type="button"
+                            onClick={() => removeLinePhoto(g.itemId as number, getLinePhotos(items.find((it) => it.id === g.itemId)).indexOf(ref))}
+                            aria-label={`Remove ${g.caption} photo ${i + 1} from its line`}
+                            title="Removes it from the line too"
+                            className="absolute top-2 right-2 bg-red-600 hover:bg-red-700 text-white text-4xl w-10 h-10 flex items-center justify-center rounded-2xl shadow-xl"
+                          >
+                            ×
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     );
   };
@@ -8208,7 +8252,7 @@ export default function Home() {
   const openSendPreview = () => {
     // Honor saved per-job share choices if present; otherwise default on when media exists
     const savedShare = clientMediaShareRef.current;
-    setSendIncludeSitePhotos(photoUrls.length > 0 && (savedShare ? savedShare.photos : true));
+    setSendIncludeSitePhotos(sitePhotoSectionTotal > 0 && (savedShare ? savedShare.photos : true));
     setSendIncludeVideos(videoUrls.length > 0);
     setSendIncludeJobRenderings(
       jobRenderings.length > 0 && (savedShare ? savedShare.renderings : true)
@@ -8226,7 +8270,7 @@ export default function Home() {
     setSelectedEmailsForSend([...emails.filter((e) => String(e || '').trim())]);
     setSelectedPhonesForSend([...phones.filter((p) => String(p || '').trim())]);
     // Only default ON if never chosen yet and media exists; don't wipe user choices from preview
-    if (photoUrls.length === 0) setSendIncludeSitePhotos(false);
+    if (sitePhotoSectionTotal === 0) setSendIncludeSitePhotos(false);
     if (videoUrls.length === 0) setSendIncludeVideos(false);
     if (jobRenderings.length === 0) setSendIncludeJobRenderings(false);
     setIsSendModalOpen(true);
@@ -14902,9 +14946,12 @@ export default function Home() {
 
               <Card className="mb-8">
                 <CardContent className="p-6">
-                  <h3 className="text-xl font-semibold mb-4">{t('photosSection')} ({photoUrls.length})</h3>
+                  <h3 className="text-xl font-semibold mb-4">{t('photosSection')} ({sitePhotoSectionTotal})</h3>
                   <p className="text-sm text-gray-500 mb-4">
                     Capture site photos for this job. Tap 📷 AI Quote on any photo to price a line item.
+                    {sitePhotoSectionTotal > photoUrls.length
+                      ? ' Line item photos are listed under their line name too; removing one here removes it from its line.'
+                      : ''}
                     {photoUrls.length > PHOTO_FOLDER_THRESHOLD
                       ? ' With more than 6 photos, they are kept in a folder — click the folder to view them.'
                       : ''}
@@ -15887,14 +15934,14 @@ export default function Home() {
 
                 {renderApprovedPaymentSection({ interactive: false })}
 
-                {photoUrls.length > 0 && (
+                {siteSectionPhotoCount(photoUrls, items) > 0 && (
                   <div className="mt-12">
                     {/* Print always expands; on screen, folder when > 6 */}
                     <div className="print:hidden">
-                      {renderPhotoGallery({ heading: 'Site Photos' })}
+                      {renderPhotoGallery({ heading: 'Site Photos', includeLinePhotos: sendIncludeSitePhotos })}
                     </div>
                     <div className="hidden print:block">
-                      {renderPhotoGallery({ heading: 'Site Photos', forceExpanded: true })}
+                      {renderPhotoGallery({ heading: 'Site Photos', forceExpanded: true, includeLinePhotos: sendIncludeSitePhotos })}
                     </div>
                   </div>
                 )}
@@ -19264,7 +19311,7 @@ export default function Home() {
                     {/* Site Photos toggle */}
                     <div
                       className={`rounded-xl border-2 bg-white p-4 ${
-                        photoUrls.length === 0
+                        sitePhotoSectionTotal === 0
                           ? 'border-gray-200 opacity-70'
                           : sendIncludeSitePhotos
                             ? 'border-emerald-400 ring-1 ring-emerald-200'
@@ -19275,9 +19322,11 @@ export default function Home() {
                         <div className="min-w-0 flex-1">
                           <div className="font-semibold text-base">📷 Site Photos</div>
                           <p className="text-sm text-gray-600 mt-0.5">
-                            {photoUrls.length === 0
+                            {sitePhotoSectionTotal === 0
                               ? 'None on this document — add in the editor first'
-                              : `${photoUrls.length} photo${photoUrls.length === 1 ? '' : 's'} available`}
+                              : `${sitePhotoSectionTotal} photo${sitePhotoSectionTotal === 1 ? '' : 's'} available${
+                                  sitePhotoSectionTotal > photoUrls.length ? ' (includes line item photos)' : ''
+                                }`}
                           </p>
                           {photoDisplayUrls.length > 0 && (
                             <div className="flex gap-1 flex-wrap mt-2">
@@ -19295,10 +19344,10 @@ export default function Home() {
                         <div className="flex gap-2 shrink-0">
                           <button
                             type="button"
-                            disabled={photoUrls.length === 0}
+                            disabled={sitePhotoSectionTotal === 0}
                             onClick={() => setSendIncludeSitePhotos(true)}
                             className={`px-4 py-2.5 rounded-xl text-sm font-bold min-w-[5.5rem] transition ${
-                              sendIncludeSitePhotos && photoUrls.length > 0
+                              sendIncludeSitePhotos && sitePhotoSectionTotal > 0
                                 ? 'bg-emerald-600 text-white shadow'
                                 : 'bg-gray-100 text-gray-600 border border-gray-300'
                             } disabled:opacity-40 disabled:cursor-not-allowed`}
@@ -19307,10 +19356,10 @@ export default function Home() {
                           </button>
                           <button
                             type="button"
-                            disabled={photoUrls.length === 0}
+                            disabled={sitePhotoSectionTotal === 0}
                             onClick={() => setSendIncludeSitePhotos(false)}
                             className={`px-4 py-2.5 rounded-xl text-sm font-bold min-w-[5.5rem] transition ${
-                              !sendIncludeSitePhotos || photoUrls.length === 0
+                              !sendIncludeSitePhotos || sitePhotoSectionTotal === 0
                                 ? 'bg-slate-700 text-white shadow'
                                 : 'bg-gray-100 text-gray-600 border border-gray-300'
                             } disabled:opacity-40 disabled:cursor-not-allowed`}
@@ -19428,8 +19477,8 @@ export default function Home() {
                   <div className="rounded-lg bg-white border px-3 py-2 text-xs text-slate-600">
                     <strong className="text-slate-800">Currently selected to send: </strong>
                     {[
-                      sendIncludeSitePhotos && photoUrls.length > 0
-                        ? `Site Photos (${photoUrls.length})`
+                      sendIncludeSitePhotos && sitePhotoSectionTotal > 0
+                        ? `Site Photos (${sitePhotoSectionTotal})`
                         : null,
                       getAiJobRenderingEnabled() &&
                       sendIncludeJobRenderings &&
@@ -19678,7 +19727,7 @@ export default function Home() {
                 )}
 
                 {/* Site Photos — only if user chose to send them */}
-                {sendIncludeSitePhotos && photoUrls.length > 0 && (
+                {sendIncludeSitePhotos && siteSectionPhotoCount(photoUrls, items) > 0 && (
                   <div className="mt-12">
                     {renderPhotoGallery({
                       heading: 'Site Photos',
@@ -19925,7 +19974,7 @@ export default function Home() {
                   {
                     key: 'photos' as const,
                     title: '📷 Site Photos',
-                    count: photoUrls.length,
+                    count: sitePhotoSectionTotal,
                     on: sendIncludeSitePhotos,
                     set: setSendIncludeSitePhotos,
                     empty: 'None on this document',

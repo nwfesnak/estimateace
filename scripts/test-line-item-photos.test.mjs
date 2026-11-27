@@ -107,3 +107,73 @@ test('no new native plugin (ships through the live web app)', () => {
   assert.ok(!deps.includes('@capacitor/camera'));
   assert.match(src('capacitor.config.ts'), /url: 'https:\/\/app\.estimateace\.com'/);
 });
+
+// ---- v2: line photos also appear in the Site Photos section (derived, not copied) ----
+const SITE = [`${UID}/photo/site-1.jpg`];
+const lines = () => [
+  { id: 11, description: 'Rebuild rear deck with composite boards', photos: [p(1), p(2)] },
+  { id: 12, description: 'Paint living room', photos: [p(3)] },
+  { id: 13, description: 'No photos here' },
+];
+
+test('Site Photos section is derived from the lines: captions, order, no copies into photoUrls', () => {
+  const site = [...SITE];
+  const items = lines();
+  const groups = L.siteSectionLinePhotoGroups(items, site);
+  assert.deepEqual(groups.map((g) => [g.itemId, g.caption, g.refs]), [
+    [11, 'Line 1: Rebuild rear deck with composite boards', [p(1), p(2)]],
+    [12, 'Line 2: Paint living room', [p(3)]],
+  ]);
+  assert.deepEqual(site, SITE, 'site photo list untouched');
+  assert.equal(L.siteSectionPhotoCount(site, items), 4);
+  // Same storage object: the refs are the line's own paths
+  assert.equal(groups[0].refs[0], items[0].photos[0]);
+  // A ref that is already a Site Photo is not shown twice
+  const dup = L.siteSectionLinePhotoGroups([{ id: 1, photos: [SITE[0], p(9)] }], SITE);
+  assert.deepEqual(dup[0].refs, [p(9)]);
+  assert.match(L.linePhotoCaption({ description: 'x'.repeat(200) }, 0), /^Line 1: x+…$/);
+  assert.equal(L.linePhotoCaption({}, 4), 'Line 5');
+});
+
+test('removing a photo from its line removes it from the Site Photos section too', () => {
+  let items = lines();
+  items = items.map((it) => (it.id === 11 ? L.withLinePhotoRemoved(it, 0) : it));
+  const groups = L.siteSectionLinePhotoGroups(items, SITE);
+  assert.deepEqual(groups[0].refs, [p(2)]);
+  items = items.map((it) => (it.id === 12 ? L.withLinePhotoRemoved(it, 0) : it));
+  assert.deepEqual(L.siteSectionLinePhotoGroups(items, SITE).map((g) => g.itemId), [11]);
+  assert.equal(L.siteSectionPhotoCount(SITE, items), 2);
+  // deleting the whole line also drops its photos from the section
+  assert.equal(L.siteSectionLinePhotoGroups(items.filter((it) => it.id !== 11), SITE).length, 0);
+});
+
+test('switch off: no line photos in the Site Photos section, still under their lines', async () => {
+  const items = lines();
+  assert.deepEqual(L.siteSectionLinePhotoGroups(items, SITE, false), []);
+  assert.equal(L.siteSectionPhotoCount(SITE, items, false), 1);
+  const signed = await L.signClientLinePhotos(L.planClientLinePhotos(items, UID), async (paths) => paths.map((x) => ({ path: x, signedUrl: `https://s/${x.slice(-6)}` })), 900);
+  assert.equal(Object.keys(signed).length, 2, 'under-line photos are independent of the switch');
+  assert.deepEqual(L.clientSiteLinePhotoGroups(items, signed, false), []);
+  const on = L.clientSiteLinePhotoGroups(items, signed, true);
+  assert.deepEqual(on.map((g) => [g.caption, g.photos.length]), [['Line 1: Rebuild rear deck with composite boards', 2], ['Line 2: Paint living room', 1]]);
+  assert.equal(on[0].photos[0].url, signed['11'][0].url, 'same signed URL / same object');
+  const CM = await jiti.import(path.join(root, 'lib/client-media.ts'));
+  assert.equal(CM.clientSitePhotosEnabled({ profile: {} }), true);
+  assert.equal(CM.clientSitePhotosEnabled({ profile: { _clientMedia: { photos: false } } }), false);
+});
+
+test('v2 wiring: editor/print/preview galleries, Send switch counts, customer section, quick lines text only', () => {
+  const page = src('app/page.tsx');
+  assert.match(page, /siteSectionLinePhotoGroups\(items, photoUrls, options\?\.includeLinePhotos !== false\)/);
+  assert.match(page, /sendIncludeSitePhotos && siteSectionPhotoCount\(photoUrls, items\) > 0/);
+  assert.match(page, /forceExpanded: true, includeLinePhotos: sendIncludeSitePhotos/);
+  assert.match(page, /setSendIncludeSitePhotos\(sitePhotoSectionTotal > 0/);
+  assert.doesNotMatch(page, /setPhotoUrls\([^)]*line-photo/);
+  const quick = page.slice(page.indexOf('const saveAsQuickLine = '), page.indexOf('const applyQuickLine = '));
+  assert.doesNotMatch(quick, /photos/);
+  const route = src('app/api/client/document/route.ts');
+  assert.match(route, /clientSiteLinePhotoGroups\(ownedItems, linePhotos, clientSitePhotosEnabled\(row\), 40\)/);
+  const c = src('components/ClientJobMedia.tsx');
+  assert.match(c, /siteLinePhotos/);
+  assert.match(c, /Site photos \(\{photos\.length \+ linePhotoTotal\}\)/);
+});

@@ -9,6 +9,8 @@ export type ClientJobMediaData = {
   expiresAt?: string | null;
   /** Per-line photos keyed by the line id from the document's items list. */
   linePhotos?: Record<string, Array<{ url: string }>>;
+  /** Line photos repeated in the Site Photos section, captioned by line. */
+  siteLinePhotos?: Array<{ caption: string; photos: Array<{ url: string }> }>;
 };
 
 type Props = {
@@ -21,6 +23,8 @@ type Props = {
 export function ClientJobMedia({ media, onExpired }: Props) {
   const photos = media?.photos || [];
   const renderings = media?.renderings || [];
+  const lineGroups = (media?.siteLinePhotos || []).filter((g) => g.photos?.length);
+  const linePhotoTotal = lineGroups.reduce((n, g) => n + g.photos.length, 0);
   const [zoom, setZoom] = React.useState<{ url: string; alt: string } | null>(null);
   const expiredRef = React.useRef(false);
 
@@ -37,7 +41,7 @@ export function ClientJobMedia({ media, onExpired }: Props) {
     return () => window.removeEventListener('keydown', onKey);
   }, [zoom]);
 
-  if (photos.length === 0 && renderings.length === 0) return null;
+  if (photos.length === 0 && renderings.length === 0 && linePhotoTotal === 0) return null;
 
   const handleError = () => {
     if (expiredRef.current) return;
@@ -97,14 +101,26 @@ export function ClientJobMedia({ media, onExpired }: Props) {
         </section>
       )}
 
-      {photos.length > 0 && (
+      {(photos.length > 0 || linePhotoTotal > 0) && (
         <section className="space-y-2">
-          <p className="text-sm font-semibold text-slate-900">Site photos ({photos.length})</p>
-          <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-            {photos.map((p, i) => (
-              <React.Fragment key={`${p.url}-${i}`}>{thumb(p.url, `Site photo ${i + 1}`, 'aspect-square')}</React.Fragment>
-            ))}
-          </div>
+          <p className="text-sm font-semibold text-slate-900">Site photos ({photos.length + linePhotoTotal})</p>
+          {photos.length > 0 && (
+            <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+              {photos.map((p, i) => (
+                <React.Fragment key={`${p.url}-${i}`}>{thumb(p.url, `Site photo ${i + 1}`, 'aspect-square')}</React.Fragment>
+              ))}
+            </div>
+          )}
+          {lineGroups.map((g, gi) => (
+            <div key={`${g.caption}-${gi}`} className="space-y-1" data-testid="client-site-line-photos">
+              <p className="text-xs font-medium text-slate-600">{g.caption}</p>
+              <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                {g.photos.map((p, i) => (
+                  <React.Fragment key={`${p.url}-${i}`}>{thumb(p.url, `${g.caption} photo ${i + 1}`, 'aspect-square')}</React.Fragment>
+                ))}
+              </div>
+            </div>
+          ))}
         </section>
       )}
 

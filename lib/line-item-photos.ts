@@ -142,3 +142,76 @@ export function newLinePhotoPath(workspaceUserId: string, ext: string, rand: str
   const safeExt = String(ext || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
   return `${workspaceUserId}/${LINE_PHOTO_FOLDER}/${now}-${rand}.${safeExt}`;
 }
+
+/** Short caption for a line's photos inside the Site Photos section ("Line 2: Paint living room"). */
+export function linePhotoCaption(item: unknown, index: number, max = 60): string {
+  const desc = String((item as { description?: unknown } | null)?.description || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const short = desc.length > max ? `${desc.slice(0, max - 1).trimEnd()}…` : desc;
+  return short ? `Line ${index + 1}: ${short}` : `Line ${index + 1}`;
+}
+
+export type LinePhotoGroup = {
+  /** Same id the customer document uses (lineOptionId). */
+  lineId: string;
+  /** Editor line id (items[n].id) for remove/sync; null for legacy lines without an id. */
+  itemId: number | string | null;
+  lineIndex: number;
+  caption: string;
+  refs: string[];
+};
+
+/**
+ * Line photos as shown inside the Site Photos section. DERIVED from the line items every
+ * render (never copied into photoUrls), so removing a photo from its line removes it here too.
+ * Refs that are already a Site Photo are skipped so nothing shows twice.
+ * `include: false` (the Send "Site Photos" switch is off) → no line photos in the section;
+ * they still show under their own lines.
+ */
+export function siteSectionLinePhotoGroups(
+  items: unknown,
+  sitePhotoRefs: string[] = [],
+  include = true
+): LinePhotoGroup[] {
+  if (!include || !Array.isArray(items)) return [];
+  const site = new Set((sitePhotoRefs || []).map((r) => String(r || '').trim()).filter(Boolean));
+  const seen = new Set<string>();
+  const groups: LinePhotoGroup[] = [];
+  items.forEach((it, index) => {
+    const refs = getLinePhotos(it).filter((r) => !site.has(r) && !seen.has(r));
+    refs.forEach((r) => seen.add(r));
+    if (refs.length === 0) return;
+    const rawId = (it as { id?: unknown } | null)?.id;
+    groups.push({
+      lineId: lineOptionId(it, index),
+      itemId: typeof rawId === 'number' || typeof rawId === 'string' ? rawId : null,
+      lineIndex: index,
+      caption: linePhotoCaption(it, index),
+      refs,
+    });
+  });
+  return groups;
+}
+
+/** Total photos the Site Photos section shows: site photos + derived line photos. */
+export function siteSectionPhotoCount(sitePhotoRefs: string[], items: unknown, include = true): number {
+  const site = (sitePhotoRefs || []).filter((r) => String(r || '').trim()).length;
+  return site + siteSectionLinePhotoGroups(items, sitePhotoRefs, include).reduce((n, g) => n + g.refs.length, 0);
+}
+
+/** Customer page: signed line photos grouped with captions for the Site Photos section. */
+export function clientSiteLinePhotoGroups(
+  items: unknown,
+  linePhotos: ClientLinePhotos,
+  include: boolean,
+  maxLines = 40
+): Array<{ caption: string; photos: Array<{ url: string }> }> {
+  if (!include || !Array.isArray(items)) return [];
+  const out: Array<{ caption: string; photos: Array<{ url: string }> }> = [];
+  items.slice(0, maxLines).forEach((it, index) => {
+    const photos = linePhotos[lineOptionId(it, index)];
+    if (photos && photos.length) out.push({ caption: linePhotoCaption(it, index), photos });
+  });
+  return out;
+}

@@ -4,8 +4,14 @@ import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { isMediaPdfRef } from '@/lib/media-url';
 import { ownedMediaPath } from '@/lib/storage-paths';
 import { readEstimateApproval } from '@/lib/estimate-approval';
-import { CLIENT_MEDIA_LIMITS, planClientMedia, signClientMedia, type ClientMediaPayload } from '@/lib/client-media';
-import { planClientLinePhotos, signClientLinePhotos } from '@/lib/line-item-photos';
+import {
+  CLIENT_MEDIA_LIMITS,
+  clientSitePhotosEnabled,
+  planClientMedia,
+  signClientMedia,
+  type ClientMediaPayload,
+} from '@/lib/client-media';
+import { clientSiteLinePhotoGroups, planClientLinePhotos, signClientLinePhotos } from '@/lib/line-item-photos';
 import {
   includedItemsSubtotal,
   isClientSelectedOption,
@@ -274,9 +280,10 @@ export async function GET(request: NextRequest) {
     // keyed by the same line id the items list below uses.
     try {
       const ttl = CLIENT_MEDIA_LIMITS.signedUrlTtlSec;
+      const ownedItems = String(row.user_id || '').trim() === uid ? stripItemTranslations(items) : [];
       const linePhotos = await signClientLinePhotos(
         planClientLinePhotos(
-          String(row.user_id || '').trim() === uid ? stripItemTranslations(items) : [],
+          ownedItems,
           uid,
           40
         ),
@@ -291,6 +298,8 @@ export async function GET(request: NextRequest) {
         media = {
           ...media,
           linePhotos,
+          // Also listed in Site Photos (same signed URLs) unless the Send switch is off.
+          siteLinePhotos: clientSiteLinePhotoGroups(ownedItems, linePhotos, clientSitePhotosEnabled(row), 40),
           expiresAt: media.expiresAt || new Date(Date.now() + ttl * 1000).toISOString(),
         };
       }
