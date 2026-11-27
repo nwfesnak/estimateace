@@ -104,3 +104,25 @@ test('route: payment methods follow company settings; deposit/fee terms stay per
     assert.match(route, new RegExp(`${k}: snap\\.${k}`));
   }
 });
+
+test('Stripe connected flag follows the status API both ways', () => {
+  const { stripeConnectedFlagFromStatus: f } = loadTsModule('lib/client-payment-options.ts');
+  assert.equal(f({ connected: true, connectReady: true }), true);
+  assert.equal(f({ connected: true, connectReady: false }), true);
+  // Mitigation Hero today: no Connect account id → status says connected:false
+  assert.equal(f({ connected: false, connectReady: false }), false);
+  // odd / partial replies and crew never change the flag
+  assert.equal(f({}), null);
+  assert.equal(f(null), null);
+  assert.equal(f({ error: 'Unauthorized' }), null);
+  assert.equal(f({ connected: false, isCrew: true }), null);
+});
+
+test('page: refreshStripeConnectStatus can clear the flag and only on res.ok', () => {
+  const page = fs.readFileSync(path.join(root, 'app/page.tsx'), 'utf8');
+  const i = page.indexOf('const refreshStripeConnectStatus');
+  const body = page.slice(i, page.indexOf('const startStripeConnectOnboard', i));
+  assert.match(body, /if \(res\.ok\) \{[\s\S]*stripeConnectedFlagFromStatus\(json\)/);
+  assert.match(body, /connected: nextStripeConnected/);
+  assert.doesNotMatch(body, /if \(json\.connectReady \|\| json\.connected\) \{/);
+});
