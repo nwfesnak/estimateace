@@ -69,7 +69,7 @@ async function smsChannelStatus(phones: string[]) {
     }
     try {
       const consent = await getSmsOptIn(e164);
-      if (consent && consent.optedIn === false) {
+      if (consent?.optedOut) {
         details.push({ phone, eligible: false, reason: 'This number has opted out of SMS (STOP).' });
         continue;
       }

@@ -138,7 +138,7 @@ test('API route previews without sending, honors channel flags, records status, 
   assert.match(route, /sendEmail === true/);
   assert.match(route, /sendSms === true/);
   assert.match(route, /getSmsOptIn/);
-  assert.match(route, /optedIn === false/);
+  assert.match(route, /consent\?\.optedOut/);
   assert.match(route, /sendEmailNotification/);
   assert.match(route, /sendSmsNotification/);
   assert.match(route, /companyName:/);

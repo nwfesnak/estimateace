@@ -37,7 +37,10 @@ export async function upsertSmsOptIn(record: SmsOptInRecord): Promise<{ ok: bool
     row.confirmed_at = now;
     row.opted_out_at = null;
   }
-  if (!record.optedIn) {
+  if (!record.optedIn && record.pendingConfirm) {
+    // START / web form waiting for YES is a (re-)subscribe, not an opt-out.
+    row.opted_out_at = null;
+  } else if (!record.optedIn) {
     row.opted_out_at = now;
   }
 
@@ -50,9 +53,26 @@ export async function upsertSmsOptIn(record: SmsOptInRecord): Promise<{ ok: bool
   return { ok: true };
 }
 
+/**
+ * Pending double-opt-in rows (START keyword or web form, waiting for YES) are stored
+ * with opted_in=false. They must not be read as STOP: older rows also carry an
+ * opted_out_at timestamp, so the method suffix is the reliable signal.
+ */
+export function consentFromRow(data: {
+  opted_in?: boolean | null;
+  method?: string | null;
+} | null | undefined): { optedIn: boolean; pendingConfirm: boolean; optedOut: boolean } | null {
+  if (!data) return null;
+  const optedIn = !!data.opted_in;
+  const pendingConfirm = !optedIn && /_pending$/.test(String(data.method || ''));
+  return { optedIn, pendingConfirm, optedOut: !optedIn && !pendingConfirm };
+}
+
 export async function getSmsOptIn(phoneRaw: string): Promise<{
   optedIn: boolean;
-  pendingConfirm?: boolean;
+  pendingConfirm: boolean;
+  /** True only after STOP (or equivalent). Transactional texts are blocked only then. */
+  optedOut: boolean;
 } | null> {
   const phone = normalizePhone(phoneRaw);
   if (!phone) return null;
@@ -60,8 +80,5 @@ export async function getSmsOptIn(phoneRaw: string): Promise<{
   if (!admin) return null;
 
   const { data } = await admin.from('sms_opt_ins').select('*').eq('phone', phone).maybeSingle();
-  if (data) {
-    return { optedIn: !!data.opted_in };
-  }
-  return null;
+  return consentFromRow(data);
 }

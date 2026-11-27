@@ -74,6 +74,8 @@ export async function POST(request: NextRequest) {
     }
 
     const keyword = bodyText.trim().toUpperCase().split(/\s+/)[0] || '';
+    // Trace keyword handling without logging the full number.
+    console.log('[sms inbound]', JSON.stringify({ keyword, from: `***${from.replace(/\D/g, '').slice(-4)}` }));
 
     if (keyword === SMS_KEYWORD_OPT_IN || keyword === 'UNSTOP' || keyword === 'SUBSCRIBE') {
       // Pending until they reply YES
