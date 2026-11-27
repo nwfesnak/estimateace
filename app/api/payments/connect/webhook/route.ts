@@ -3,6 +3,7 @@ import type Stripe from 'stripe';
 import { getStripe } from '@/lib/stripe-server';
 import { handleDisputeEvent } from '@/lib/stripe-disputes';
 import {
+  clearPaymentAccountOnDeauthorize,
   markDocumentPaidFromJobCheckout,
   updatePaymentAccountFromStripe,
 } from '@/lib/job-payments';
@@ -20,7 +21,7 @@ export const runtime = 'nodejs';
  *
  * In Stripe: Developers → Webhooks → Add endpoint → "Events on Connected accounts"
  *   URL: https://app.estimateace.com/api/payments/connect/webhook
- *   Events: account.updated, checkout.session.completed,
+ *   Events: account.updated, account.application.deauthorized, checkout.session.completed,
  *           checkout.session.async_payment_succeeded, invoice.paid,
  *           invoice.payment_failed, customer.subscription.updated,
  *           customer.subscription.deleted, charge.dispute.created,
@@ -63,6 +64,16 @@ export async function POST(request: NextRequest) {
         const result = await updatePaymentAccountFromStripe(acct);
         if (!result.ok) console.error('connect webhook account.updated:', result.error);
         else if (!result.matched) console.warn('connect webhook: no payment_accounts row for', acct.id);
+        break;
+      }
+
+      case 'account.application.deauthorized': {
+        // The contractor disconnected EstimateAce in Stripe — the only time a linked id may be cleared.
+        if (connectedAccount) {
+          const result = await clearPaymentAccountOnDeauthorize(connectedAccount);
+          if (!result.ok) console.error('connect webhook deauthorized:', result.error);
+          else console.warn('connect webhook: account deauthorized', { account: connectedAccount, matched: result.matched });
+        }
         break;
       }
 

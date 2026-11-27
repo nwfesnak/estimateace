@@ -23,6 +23,10 @@ payments through Stripe are hidden on the client pay page and the API returns
    `/?stripe_connect=refresh` (app makes a fresh link automatically).
 3. Status: `account.updated` on the Connect webhook updates `payment_accounts`. The status
    endpoint and checkout also re-check Stripe live whenever the stored flags say "not ready".
+   A linked `stripe_account_id` is never cleared by a status check: if Stripe can't find it,
+   the id is kept and the account is marked not ready (logged). Only
+   `account.application.deauthorized` clears it; tapping Connect Stripe again replaces it (logged
+   with the old id, and the new account's metadata records `replaced_account_id`).
 4. When ready, the button changes to **Stripe dashboard** (`POST /api/payments/connect/dashboard`,
    Express login link) for payouts and bank changes.
 5. Payouts go to the contractor's bank on Stripe's default schedule. EstimateAce takes no
@@ -39,7 +43,7 @@ payments through Stripe are hidden on the client pay page and the API returns
 - Settings → Payment methods → **connected accounts**: Cards and US bank account (ACH) on.
 - Webhooks → Add endpoint → **Events on Connected accounts**:
   `https://app.estimateace.com/api/payments/connect/webhook` with
-  `account.updated`, `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+  `account.updated`, `account.application.deauthorized`, `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
   `invoice.paid`, `invoice.payment_failed`, `customer.subscription.updated`,
   `customer.subscription.deleted`.
   Put its signing secret in Vercel as `STRIPE_CONNECT_WEBHOOK_SECRET` and redeploy.
