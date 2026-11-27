@@ -132,7 +132,7 @@ import {
 } from '@/lib/line-item-photos';
 import { LineItemPhotoThumbs, LineItemPhotosEditor } from '@/components/LineItemPhotos';
 import { buildAccountExportZip } from '@/lib/account-export';
-import { mergeFilledPaymentSettings } from '@/lib/client-payment-options';
+import { mergeFilledPaymentSettings, stripeConnectedFlagFromStatus } from '@/lib/client-payment-options';
 import {
   DEFAULT_JOB_SETTINGS_SNAPSHOT,
   buildNewJobSettingsSnapshot,
@@ -12546,20 +12546,27 @@ export default function Home() {
           canManage: json.canManage !== false,
           accountType: json.accountType ?? null,
         });
-        if (json.connectReady || json.connected) {
+        // Keep the saved Stripe "connected" flag in step with the server, both ways. It used to
+        // only ever be set to true, so an account whose Connect id was later removed stayed
+        // "connected" forever. Only a successful status reply with an explicit boolean can change
+        // it (network errors and odd replies leave it alone); crew never rewrite the owner's flag.
+        const nextStripeConnected = stripeConnectedFlagFromStatus(json);
+        if (nextStripeConnected !== null) {
           const currentPay = mergePaymentSettings(profileRef.current.paymentSettings);
-          const nextProfile = {
-            ...profileRef.current,
-            paymentSettings: {
-              ...currentPay,
-              stripe: {
-                ...currentPay.stripe,
-                connected: !!json.connectReady || !!json.connected,
+          if (!!currentPay.stripe?.connected !== nextStripeConnected) {
+            const nextProfile = {
+              ...profileRef.current,
+              paymentSettings: {
+                ...currentPay,
+                stripe: {
+                  ...currentPay.stripe,
+                  connected: nextStripeConnected,
+                },
               },
-            },
-          };
-          profileRef.current = nextProfile;
-          setProfile(nextProfile);
+            };
+            profileRef.current = nextProfile;
+            setProfile(nextProfile);
+          }
         }
       }
     } catch {

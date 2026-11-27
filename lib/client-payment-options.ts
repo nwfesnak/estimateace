@@ -374,3 +374,17 @@ export function buildClientPaymentOptions(input: {
 
   return options;
 }
+
+/**
+ * Saved Stripe "connected" flag from a successful /api/payments/connect/status reply.
+ * Returns true/false when the reply is explicit, or null to leave the flag unchanged
+ * (missing/odd fields, or a crew member's view of the owner's account).
+ */
+export function stripeConnectedFlagFromStatus(json: unknown): boolean | null {
+  if (!json || typeof json !== 'object') return null;
+  const r = json as { connected?: unknown; connectReady?: unknown; isCrew?: unknown };
+  if (r.isCrew === true) return null;
+  if (r.connectReady === true || r.connected === true) return true;
+  if (r.connected === false) return false;
+  return null;
+}

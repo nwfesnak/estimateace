@@ -146,10 +146,15 @@ export async function GET(request: NextRequest) {
         const snap = resolveJobSettingsFromDoc(profile, sp);
         profile = {
           ...profile,
-          paymentSettings:
-            typeof profile._jobSettingsSnapshottedAt === 'string'
-              ? snap.paymentSettings
-              : mergeFilledPaymentSettings(profile.paymentSettings, sp.paymentSettings),
+          // HOW the client can pay follows the contractor's CURRENT Client Payments settings
+          // (company on/off wins; handles fall back to the job copy). Amounts stay frozen per job:
+          // deposit %, minimum, and card-fee settings below still come from the job snapshot.
+          // Previously a job created before Venmo/Zelle were turned on showed "Deposit due" with
+          // no way to pay (EST-14454A-0030, Nov 27).
+          paymentSettings: mergeFilledPaymentSettings(
+            profile.paymentSettings || snap.paymentSettings,
+            sp.paymentSettings
+          ),
           chargeCCFee: snap.chargeCCFee,
           ccFeePercentage: snap.ccFeePercentage,
           taxesEnabled: snap.taxesEnabled,
