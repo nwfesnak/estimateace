@@ -11,6 +11,7 @@ import {
 import type Stripe from 'stripe';
 import { cardTrialDaysForPromo, isEligibleForCardTrial, isStripeConfigured } from '@/lib/billing';
 import { ensureStripeCustomerForOwner } from '@/lib/crew-billing';
+import { crewPermissionDeniedResponse, crewSeatInactiveResponse, resolveWorkspace } from '@/lib/workspace';
 
 /** Stripe Checkout rejects subscription_data.trial_end less than 48h away; keep a buffer. */
 const CHECKOUT_MIN_TRIAL_MS = 49 * 60 * 60 * 1000;
@@ -44,6 +45,10 @@ export async function POST(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: error || 'Unauthorized' }, { status: 401 });
     }
+
+    const ws = await resolveWorkspace(user.id);
+    if (!ws.ok) return crewSeatInactiveResponse();
+    if (ws.isCrew) return crewPermissionDeniedResponse();
 
     const body = await request.json().catch(() => ({}));
     const planRaw = String(body.plan || 'monthly').toLowerCase();

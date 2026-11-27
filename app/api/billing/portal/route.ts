@@ -5,6 +5,7 @@ import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { getAppUrl, getStripe } from '@/lib/stripe-server';
 import type Stripe from 'stripe';
 import { isStripeConfigured } from '@/lib/billing';
+import { crewPermissionDeniedResponse, crewSeatInactiveResponse, resolveWorkspace } from '@/lib/workspace';
 
 export async function POST(request: NextRequest) {
   // Store apps never start a purchase of plans / add-ons / seats (Apple 3.1.1, Google Play).
@@ -19,6 +20,10 @@ export async function POST(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: error || 'Unauthorized' }, { status: 401 });
     }
+
+    const ws = await resolveWorkspace(user.id);
+    if (!ws.ok) return crewSeatInactiveResponse();
+    if (ws.isCrew) return crewPermissionDeniedResponse();
 
     const admin = getSupabaseAdmin();
     if (!admin) {

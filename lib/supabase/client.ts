@@ -50,10 +50,10 @@ export function getSupabaseConfigHelpMessage(): string {
 }
 
 /**
- * Restricted crew (missing "See pricing" or "See estimates & financials") cannot read
- * the owner's documents directly — RLS blocks it. When enabled, this client sends
- * their `estimates` / `archive-est` requests to /api/crew/data/*, which applies the
- * crew member's access level server-side. Owners and fully-permitted crew are unaffected.
+ * When enabled (every crew login), this client sends `estimates` / `archive-est`
+ * requests to /api/crew/data/*, which applies the crew member's access level and
+ * strips owner-only settings secrets. Owners are unaffected. RLS still blocks
+ * direct PostgREST access to SETTINGS and to documents for denied tabs / flags.
  */
 let crewDataProxyEnabled = false;
 export function setCrewDataProxy(enabled: boolean): void {

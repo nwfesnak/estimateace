@@ -99,7 +99,6 @@ import {
   CREW_TABS,
   CREW_TAB_DENIED_MESSAGE,
   DEFAULT_CREW_TAB_ACCESS,
-  allCrewTabsAllowed,
   countAllowedCrewTabs,
   createUniformCrewTabAccess,
   crewHasTab as checkCrewHasTab,
@@ -2778,12 +2777,10 @@ export default function Home() {
         if (cancelled) return;
         if (res.ok && json.isCrew && json.ownerUserId) {
           const tabAccess = normalizeCrewTabAccess(json.tabAccess);
-          // Restricted crew read/write the owner's documents through /api/crew/data
-          // (server applies their access level and tab permissions); unrestricted crew stay direct.
-          setCrewDataProxy(
-            !(json.canSeePricing === true && json.canSeeEstimatesAndFinancials === true) ||
-              !allCrewTabsAllowed(tabAccess)
-          );
+          // Every crew login goes through /api/crew/data so SETTINGS secrets and
+          // tab/flag rules are applied even for full-data crew. Direct PostgREST is
+          // also blocked by RLS (no SETTINGS row, tab-aware document policies).
+          setCrewDataProxy(true);
           setCurrentCrew({
             email: json.email || user.email,
             ownerUserId: json.ownerUserId,

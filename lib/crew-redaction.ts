@@ -20,9 +20,56 @@ export type CrewAccess = {
   tabAccess?: CrewTabAccess;
 };
 
-/** Fully-permitted crew read/write directly (RLS); everyone else is proxied. */
+/** Fully-permitted crew may see document prices/financials; secrets are still stripped. */
 export function crewHasFullDataAccess(a: Pick<CrewAccess, 'canSeePricing' | 'canSeeFinancials'>): boolean {
   return a.canSeePricing && a.canSeeFinancials;
+}
+
+/**
+ * Profile keys never returned to ANY crew login, including full-data crew.
+ * Letterhead (company, logo, address, phone, email, slogan, certificate) stays visible
+ * so jobs and PDFs still render. Payment rails, price memory, 2FA, and billing stay owner-only.
+ */
+export const CREW_ALWAYS_HIDDEN_PROFILE_KEYS = [
+  'twoFactorPhone',
+  'aiPriceMemory',
+  'paymentSettings',
+  'receptionistBilling',
+] as const;
+
+/** Letterhead / company-display keys exposed by public.crew_company_display(). */
+export const CREW_COMPANY_DISPLAY_PROFILE_KEYS = [
+  'company',
+  'slogan',
+  'logo',
+  'logoUrl',
+  'logoSize',
+  'certificateUrl',
+  'phone',
+  'email',
+  'address',
+  'city',
+  'state',
+  'zipCode',
+  'zip',
+  'website',
+  'license',
+  'licenseNumber',
+  'tradeId',
+  'trade',
+  'terms',
+] as const;
+
+export function pickCrewCompanyDisplayProfile(
+  profile: unknown
+): Record<string, unknown> {
+  if (!profile || typeof profile !== 'object' || Array.isArray(profile)) return {};
+  const src = profile as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const k of CREW_COMPANY_DISPLAY_PROFILE_KEYS) {
+    if (k in src && src[k] !== undefined) out[k] = src[k];
+  }
+  return out;
 }
 
 /** Keys we add to redacted rows that are not real table columns (strip before writes). */
@@ -153,12 +200,10 @@ const LABOR_MONEY_COLUMNS = [
 ];
 /** Top-level financial columns hidden without "See estimates & financials". */
 const FINANCIAL_NUMBER_COLUMNS = ['amountPaid', 'amountpaid', 'taxAmount', 'taxamount'];
-/** Profile keys hidden without pricing (price memory / saved price lists). */
-const PRICING_PROFILE_HIDDEN = ['aiPriceMemory'];
-/** Profile keys hidden without financials. */
-const FINANCIAL_PROFILE_HIDDEN = ['paymentSettings', 'receptionistBilling'];
-/** Profile keys never shown to restricted crew (owner's private contact / security data). */
-const ALWAYS_PROFILE_HIDDEN = ['twoFactorPhone'];
+/** Extra profile keys hidden when the crew member cannot see pricing. */
+const PRICING_PROFILE_HIDDEN: string[] = [];
+/** Extra profile keys hidden when the crew member cannot see financials. */
+const FINANCIAL_PROFILE_HIDDEN: string[] = [];
 
 const CALENDAR_PROFILE_HIDDEN = ['_appointments', 'appointmentReminderEnabled'];
 const RECEPTIONIST_PROFILE_HIDDEN = [
@@ -183,9 +228,8 @@ function hiddenTabProfileKeys(a: CrewAccess): string[] {
 }
 
 function hiddenProfileKeys(a: CrewAccess): string[] {
-  const fullData = crewHasFullDataAccess(a);
   return [
-    ...(fullData ? [] : ALWAYS_PROFILE_HIDDEN),
+    ...CREW_ALWAYS_HIDDEN_PROFILE_KEYS,
     ...(a.canSeePricing ? [] : PRICING_PROFILE_HIDDEN),
     ...(a.canSeeFinancials ? [] : FINANCIAL_PROFILE_HIDDEN),
     ...hiddenTabProfileKeys(a),
@@ -210,8 +254,10 @@ export function redactRow(row: unknown, a: CrewAccess): unknown {
   if (!isPlainObject(row)) return row;
   const fullData = crewHasFullDataAccess(a);
   const tabRestricted = Boolean(a.tabAccess && !allCrewTabsAllowed(a.tabAccess));
-  if (fullData && !tabRestricted) return row;
   const out: Record<string, unknown> = { ...row };
+  // Always strip owner-only profile secrets, including for full-data crew.
+  if ('profile' in out) out.profile = redactProfile(out.profile, a);
+  if (fullData && !tabRestricted) return out;
 
   if (!a.canSeePricing) {
     if (a.canSeeFinancials && 'items' in row && !String(row.id || '').startsWith('SETTINGS-')) {
@@ -234,7 +280,6 @@ export function redactRow(row: unknown, a: CrewAccess): unknown {
     if ('receipturls' in out) out.receipturls = [];
   }
 
-  if ('profile' in out) out.profile = redactProfile(out.profile, a);
   return out;
 }
 
@@ -273,8 +318,22 @@ export function restoreRow(
   for (const k of INJECTED_KEYS) delete out[k];
   const fullData = crewHasFullDataAccess(a);
   const tabRestricted = Boolean(a.tabAccess && !allCrewTabsAllowed(a.tabAccess));
-  if (fullData && !tabRestricted) return out;
   const existing = src.existing;
+  // Full-data crew still must not wipe owner-only profile secrets they cannot see.
+  if (fullData && !tabRestricted) {
+    if ('profile' in out && isPlainObject(out.profile)) {
+      const storedProfile = isPlainObject(existing?.profile)
+        ? (existing!.profile as Record<string, unknown>)
+        : src.ownerSettingsProfile || {};
+      const p: Record<string, unknown> = { ...(out.profile as Record<string, unknown>) };
+      for (const k of hiddenProfileKeys(a)) {
+        if (k in storedProfile) p[k] = storedProfile[k];
+        else delete p[k];
+      }
+      out.profile = p;
+    }
+    return out;
+  }
 
   if (!a.canSeePricing) {
     if ('items' in incoming) {
