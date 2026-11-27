@@ -7,6 +7,10 @@
       "schedule": "0 13 * * *"
     },
     {
+      "path": "/api/cron/client-appointment-reminders",
+      "schedule": "0 * * * *"
+    },
+    {
       "path": "/api/cron/invoice-reminders",
       "schedule": "0 13 * * *"
     },

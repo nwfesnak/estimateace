@@ -284,7 +284,9 @@ export async function POST(request: NextRequest) {
         result.errors.push(sms.details[0]?.reason || 'This number cannot be texted.');
       } else {
         for (const phone of sms.eligiblePhones) {
-          const smsResult = await sendSmsNotification(phone, messages.smsText);
+          // Twilio accepts (201) messages that the carrier later blocks (e.g. 30034
+          // unregistered A2P 10DLC). Poll briefly so we don't report "texted" when it wasn't.
+          const smsResult = await sendSmsNotification(phone, messages.smsText, { waitForStatus: true });
           if (smsResult.ok) result.smsSent.push(phone);
           else result.errors.push(`Text to ${phone} failed: ${smsResult.error || 'Unknown error'}`);
         }
