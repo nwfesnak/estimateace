@@ -10455,6 +10455,8 @@ export default function Home() {
         if (data.smsSent?.length) sentParts.push(`text to ${data.smsSent.join(', ')}`);
         if (sentParts.length > 0) {
           notificationSummary = `Sent ${sentParts.join(' and ')}.`;
+          // e.g. email went out but the text was blocked by the carrier: say so.
+          if (data.errors?.length) notificationSummary += ` ${data.errors.join(' ')}`;
         } else {
           notificationSummary = data.errors?.[0] || 'Notifications could not be sent.';
         }

@@ -322,7 +322,13 @@ export async function sendSmsNotification(
             if (status === 'delivered') break;
             if (status === 'failed' || status === 'undelivered') {
               const hint =
-                errCode === 30032
+                errCode === 30034
+                  ? ' Sending number is not in an approved A2P 10DLC campaign (Twilio Console → Messaging → Regulatory Compliance / Messaging Service sender pool).'
+                  : errCode === 30007
+                    ? ' Carrier filtered the message as spam (Twilio error 30007).'
+                    : errCode === 30003 || errCode === 30005 || errCode === 30006
+                      ? ` The phone number cannot receive texts (Twilio error ${errCode}).`
+                      : errCode === 30032
                   ? ' Toll-free number is not verified for US SMS (Twilio Console → Toll-Free Verification).'
                   : errCode === 21608
                     ? ' Trial accounts can only text verified numbers (Twilio Console → Verified Caller IDs).'
