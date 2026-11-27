@@ -10,6 +10,13 @@ import { TouchDoubleTapTextarea } from '@/components/TouchDoubleTapTextarea';
 import { DeviceCamera, type DeviceCameraMode } from '@/components/DeviceCamera';
 import { RecurringServicesPanel } from '@/components/RecurringServicesPanel';
 import { DOC_ID_REFUSED_MESSAGE, isRlsRefusal, newDocumentNumber } from '@/lib/document-ids';
+import {
+  applyMergedMedia,
+  decideDocumentSync,
+  nextDocumentSequence,
+  type DocRow,
+  type MergedMedia,
+} from '@/lib/document-sync';
 import { computeStripeCardFee, STRIPE_CARD_FIXED_USD, STRIPE_CARD_PERCENT } from '@/lib/stripe-fees';
 import {
   MileageTracker,
@@ -1261,6 +1268,14 @@ export default function Home() {
   jobSettingsRef.current = jobSettings;
   itemsRef.current = items;
   const autosavePendingRef = useRef(false);
+  /**
+   * Cross-device sync: the version of the open document this tab last loaded or saved.
+   * Saves compare against it so a stale tab cannot overwrite photos saved on another device.
+   */
+  const docSyncBaseRef = useRef<{ id: string; row: DocRow } | null>(null);
+  /** Number minted by New Estimate on this device that has not been written yet. */
+  const unsavedNewDocIdRef = useRef<string | null>(null);
+  const loadSelectedEstimateRef = useRef<(est: any) => Promise<void>>(async () => {});
   const documentSaveChainRef = useRef(Promise.resolve());
   const saveToDBRef = useRef<(options?: any) => Promise<{ ok: boolean; error?: string; id?: string }>>(
     async () => ({ ok: false, error: 'not ready' })
@@ -3558,8 +3573,137 @@ export default function Home() {
     }
     const prefix = documentType === 'invoice' ? 'INV' : 'EST';
     const id = newDocumentNumber(prefix, n, workspaceUserId);
+    unsavedNewDocIdRef.current = id;
     setInvoiceNumber(id);
     return id;
+  };
+
+  /** Read the current saved row for this workspace (null when missing or unreadable). */
+  const fetchOwnDocumentRow = async (docId: string): Promise<DocRow | null> => {
+    if (!supabase || !workspaceUserId || !docId) return null;
+    try {
+      const { data, error } = await supabase
+        .from('estimates')
+        .select('*')
+        .eq('id', docId)
+        .eq('user_id', workspaceUserId)
+        .maybeSingle();
+      if (error) return null;
+      return (data as DocRow) || null;
+    } catch {
+      return null;
+    }
+  };
+
+  /** Next free document number for this workspace (all devices, active + paid folder). */
+  const mintFreshDocumentId = async (prefix: 'EST' | 'INV'): Promise<string> => {
+    let localCounter = 0;
+    try {
+      localCounter = parseInt(localStorage.getItem('estimateCount') || '0', 10) || 0;
+    } catch {
+      /* ignore */
+    }
+    const ids: unknown[] = [...savedEstimatesList, ...archivesList];
+    if (supabase && workspaceUserId) {
+      for (const table of ['estimates', 'archive-est']) {
+        const { data } = await supabase.from(table).select('id').eq('user_id', workspaceUserId);
+        if (Array.isArray(data)) ids.push(...data);
+      }
+    }
+    const seq = nextDocumentSequence(localCounter, ids);
+    try {
+      localStorage.setItem('estimateCount', String(seq));
+    } catch {
+      /* ignore */
+    }
+    return newDocumentNumber(prefix, seq, workspaceUserId);
+  };
+
+  /** Show a newer saved version (from another device) in this tab without writing anything. */
+  const adoptRemoteDocument = (row: DocRow) => {
+    docSyncBaseRef.current = { id: String(row.id || ''), row };
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
+    }
+    autosavePendingRef.current = false;
+    // Re-hydrating fires the autosave effect; let it settle before any write.
+    skipAutosaveUntilRef.current = Date.now() + 1500;
+    // Never await inside a save (the save chain would wait on itself).
+    setTimeout(() => {
+      void loadSelectedEstimateRef.current(row);
+    }, 0);
+  };
+
+  type DocSyncOutcome =
+    | { kind: 'write' }
+    | { kind: 'renumbered'; id: string }
+    | { kind: 'merged'; media: MergedMedia }
+    | { kind: 'done'; result: { ok: boolean; error?: string; id?: string } };
+
+  /**
+   * Compare the row about to be written with the database before writing it:
+   * - a brand-new number already used by another device -> renumber instead of overwriting
+   * - nothing new on either side -> skip the write
+   * - only another device changed it -> show that version, do not write the stale one
+   * - both changed -> keep this tab's edits but merge photos / videos / receipts / line
+   *   photos / renderings so the other device's media is not dropped
+   */
+  const syncDocumentBeforeSave = async (
+    docId: string,
+    local: DocRow,
+    syncOnly: boolean
+  ): Promise<DocSyncOutcome> => {
+    const base = docSyncBaseRef.current && docSyncBaseRef.current.id === docId ? docSyncBaseRef.current.row : null;
+    const isUnsavedNew = unsavedNewDocIdRef.current === docId;
+    if (!base && !isUnsavedNew) return syncOnly ? { kind: 'done', result: { ok: true, id: docId } } : { kind: 'write' };
+    const remote = await fetchOwnDocumentRow(docId);
+    if (!base) {
+      if (!remote) return { kind: 'write' };
+      // Another device already saved a document under this number: never overwrite it.
+      const prefix = String(docId).toUpperCase().startsWith('INV') ? 'INV' : 'EST';
+      const fresh = await mintFreshDocumentId(prefix);
+      unsavedNewDocIdRef.current = fresh;
+      setInvoiceNumber(fresh);
+      return { kind: 'renumbered', id: fresh };
+    }
+    const decision = decideDocumentSync(base, local, remote, LINE_PHOTO_LIMIT);
+    const doneOk = () => {
+      if (!syncOnly) {
+        setSaveStatus('saved');
+        setSaveErrorDetail('');
+      }
+      return { kind: 'done' as const, result: { ok: true, id: docId } };
+    };
+    if (decision.action === 'skip') return doneOk();
+    if (decision.action === 'adopt-remote' && remote) {
+      adoptRemoteDocument(remote);
+      return doneOk();
+    }
+    if (decision.action === 'write-merged') {
+      const m = decision.media;
+      const before =
+        ((local.photoUrls as unknown[]) || []).length +
+        ((local.items as Array<{ photos?: unknown[] }>) || []).reduce((n, it) => n + (it?.photos?.length || 0), 0);
+      const after = m.photoUrls.length + m.items.reduce((n, it) => n + (((it as { photos?: unknown[] }).photos) || []).length, 0);
+      setPhotoUrls(m.photoUrls);
+      setVideoUrls(m.videoUrls);
+      setReceiptUrls(m.receiptUrls);
+      setReceiptDetails(m.receiptDetails);
+      itemsRef.current = m.items as any;
+      setItems(m.items as any);
+      jobRenderingsRef.current = m.jobRenderings as unknown as JobRendering[];
+      setJobRenderings(m.jobRenderings as unknown as JobRendering[]);
+      if (after > before) showMessage('📷 Added photos saved from your other device.');
+      if (syncOnly) {
+        // Next save writes this tab's edits plus the merged media on top of the newer row.
+        docSyncBaseRef.current = { id: docId, row: remote as DocRow };
+        return { kind: 'done', result: { ok: true, id: docId } };
+      }
+      return { kind: 'merged', media: m };
+    }
+    if (syncOnly) return { kind: 'done', result: { ok: true, id: docId } };
+    return { kind: 'write' };
   };
 
   const saveToDB = async (options?: {
@@ -3587,6 +3731,10 @@ export default function Home() {
     invoiceSentAt?: string | null;
     /** Suppress error toasts (auto-save) — still shows on hard failure */
     quiet?: boolean;
+    /**
+     * Only pull in changes saved on another device (tab focus); never writes.
+     */
+    syncOnly?: boolean;
   }): Promise<{ ok: boolean; error?: string; id?: string }> => {
     if (!supabase) {
       const err = 'Not connected to database. Check internet and refresh.';
@@ -3604,8 +3752,14 @@ export default function Home() {
     }
 
     const runSave = async (): Promise<{ ok: boolean; error?: string; id?: string }> => {
-    const docId = ensureDocumentId();
-    setSaveStatus('saving');
+    if (options?.syncOnly) {
+      const openId = String(invoiceNumber || '').trim();
+      if (!openId || !docSyncBaseRef.current || docSyncBaseRef.current.id !== openId) {
+        return { ok: true, id: openId };
+      }
+    }
+    let docId = ensureDocumentId();
+    if (!options?.syncOnly) setSaveStatus('saving');
     setSaveErrorDetail('');
 
     const profileToSave = options?.profile ?? profile;
@@ -3629,7 +3783,7 @@ export default function Home() {
     const laborHoursToSave = sumLaborHours(laborToSave);
     const laborRateToSave =
       laborToSave.length > 0 ? Number(laborToSave[laborToSave.length - 1].rate) || 0 : 0;
-    const payload = {
+    let payload = {
       id: docId,
       user_id: workspaceUserId,
       jobName: jobName || '',
@@ -3677,7 +3831,23 @@ export default function Home() {
       updated_at: new Date().toISOString(),
     };
 
+    // ── Cross-device sync (owner only; crew reads stay on their redacted paths) ──
+    if (!currentCrew) {
+      const sync = await syncDocumentBeforeSave(docId, payload as unknown as DocRow, !!options?.syncOnly);
+      if (sync.kind === 'done') return sync.result;
+      if (sync.kind === 'renumbered') {
+        docId = sync.id;
+        payload = { ...payload, id: sync.id, invoiceNumber: sync.id };
+      } else if (sync.kind === 'merged') {
+        payload = applyMergedMedia(payload as unknown as DocRow, sync.media) as unknown as typeof payload;
+      }
+    } else if (options?.syncOnly) {
+      return { ok: true, id: docId };
+    }
+
     const markOk = async () => {
+      docSyncBaseRef.current = { id: docId, row: payload as unknown as DocRow };
+      if (unsavedNewDocIdRef.current === docId) unsavedNewDocIdRef.current = null;
       if (String(docId).toUpperCase().startsWith('INV')) {
         await removeEstimateWorkOrderForInvoice(
           {
@@ -5116,6 +5286,9 @@ export default function Home() {
   const loadSelectedEstimate = async (est: any) => {
     // Persist the open job first so a pending auto-save cannot land on the next document id
     await flushPendingAutosaveRef.current();
+    // This row is now the version later saves compare against (cross-device sync).
+    docSyncBaseRef.current = est ? { id: String(est.id || est.invoiceNumber || est.invoicenumber || ''), row: est } : null;
+    unsavedNewDocIdRef.current = null;
     loadedDocNumberRef.current = String(est?.invoiceNumber || est?.invoicenumber || est?.id || '');
     freshDocumentRef.current = false;
     editorOpenedAsNewRef.current = false;
@@ -5683,6 +5856,8 @@ export default function Home() {
     }
   };
 
+  loadSelectedEstimateRef.current = loadSelectedEstimate;
+
   const newEstimate = async (typeOverride?: 'estimate' | 'invoice') => {
     const nextType = typeOverride || documentType || 'estimate';
     // Flush the current job first, then block autosave so the blank form cannot overwrite it
@@ -5737,10 +5912,18 @@ export default function Home() {
     setDueDate('');
     const today = new Date().toISOString().split('T')[0];
     setDate(today);
-    const savedCount = parseInt(localStorage.getItem('estimateCount') || '0') + 1;
+    // Per-device counter alone let a phone and a PC mint the same number (second save
+    // overwrote the first). Never go below a number already used in this workspace.
+    const savedCount = nextDocumentSequence(
+      parseInt(localStorage.getItem('estimateCount') || '0', 10) || 0,
+      [...savedEstimatesList, ...archivesList]
+    );
     localStorage.setItem('estimateCount', savedCount.toString());
     const prefix = nextType === 'invoice' ? 'INV' : 'EST';
-    setInvoiceNumber(newDocumentNumber(prefix, savedCount, workspaceUserId));
+    const freshNumber = newDocumentNumber(prefix, savedCount, workspaceUserId);
+    docSyncBaseRef.current = null;
+    unsavedNewDocIdRef.current = freshNumber;
+    setInvoiceNumber(freshNumber);
     const loadedProfile = await loadLatestProfile();
     {
       const cachedForNew = getProfileSettingsCache();
@@ -5825,7 +6008,9 @@ export default function Home() {
       showMessage(CREW_TAB_DENIED_MESSAGE);
       return;
     }
-    await loadSelectedEstimate(est);
+    // The list can be minutes old; open the latest saved version (e.g. photos from the phone).
+    const fresh = !currentCrew && est.id ? await fetchOwnDocumentRow(String(est.id)) : null;
+    await loadSelectedEstimate(fresh || est);
     setSelectedIds([]);
     setView('editor');
     if (mainScrollRef.current) mainScrollRef.current.scrollTop = 0;
@@ -10509,6 +10694,26 @@ export default function Home() {
       document.removeEventListener('visibilitychange', flushIfHidden);
     };
   }, []);
+
+  // Coming back to this tab/app: pull in anything another device saved meanwhile
+  // (e.g. photos taken on the phone) before this tab's next autosave can run.
+  useEffect(() => {
+    if (view !== 'editor' || currentCrew) return;
+    let last = 0;
+    const pull = () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      const now = Date.now();
+      if (now - last < 3000) return;
+      last = now;
+      void saveToDBRef.current({ quiet: true, syncOnly: true });
+    };
+    window.addEventListener('focus', pull);
+    document.addEventListener('visibilitychange', pull);
+    return () => {
+      window.removeEventListener('focus', pull);
+      document.removeEventListener('visibilitychange', pull);
+    };
+  }, [view, currentCrew]);
 
   useEffect(() => {
     // Local fallback only — company SETTINGS (loadLatestProfile) wins when available
