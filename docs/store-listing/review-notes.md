@@ -21,4 +21,4 @@ Payments (guideline 3.1.3(f)): EstimateAce subscriptions are sold only on our we
 
 The app loads our live web app inside a native shell, and adds native camera/video capture, LiDAR room scan on supported Pro iPhones (manual length × width × height on other devices), an offline screen, splash screen, system-browser handoff and in-app account deletion.
 
-Contact: support@estimateace.com
+Contact: admin@estimateace.com

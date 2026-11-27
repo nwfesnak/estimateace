@@ -2045,7 +2045,7 @@ export default function Home() {
   const nativeApp = useIsNativeApp();
   const SUPPORT_EMAIL =
     (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_SUPPORT_EMAIL) ||
-    'support@estimateace.com';
+    'admin@estimateace.com';
   /** True only for platform operators — used to hide ops/debug UI from customers */
   const isOpsAdmin = isPlatformAdminEmail(user?.email);
   const [billingContactSubject, setBillingContactSubject] = useState('EstimateAce billing / account help');

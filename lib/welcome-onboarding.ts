@@ -68,7 +68,7 @@ export function buildWelcomeEmail(input: {
     '',
     `Tip: on your phone, open the app link in Safari (iPhone) or Chrome (Android) and Add to Home Screen so it feels like a regular app.`,
     '',
-    `Questions? Reply to this email or contact support@estimateace.com.`,
+    `Questions? Reply to this email or contact admin@estimateace.com.`,
     '',
     `— EstimateAce`,
   ].join('\n');
@@ -95,7 +95,7 @@ export function buildWelcomeEmail(input: {
       </p>
       <p style="font-size:13px;color:#64748b">
         Questions? Reply to this email or contact
-        <a href="mailto:support@estimateace.com">support@estimateace.com</a>.
+        <a href="mailto:admin@estimateace.com">admin@estimateace.com</a>.
       </p>
       <p>— EstimateAce</p>
     </div>

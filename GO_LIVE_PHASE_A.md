@@ -35,7 +35,7 @@ Goal: ship EstimateAce as a **real multi-customer product** for estimating/invoi
    NEXT_PUBLIC_BILLING_ENFORCE=false   # set true only when ready to hard-paywall
    NEXT_PUBLIC_TRIAL_DAYS=14
    NEXT_PUBLIC_APP_URL=https://app.estimateace.com
-   NEXT_PUBLIC_SUPPORT_EMAIL=support@estimateace.com
+   NEXT_PUBLIC_SUPPORT_EMAIL=admin@estimateace.com
    ```
 
 3. **Stripe Dashboard**

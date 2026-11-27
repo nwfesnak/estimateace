@@ -107,7 +107,7 @@ export function confirmationSms(companyLabel = 'EstimateAce'): string {
 export function helpSms(): string {
   return (
     `EstimateAce Help: Transactional SMS for appointments, estimates/invoices & account alerts. ` +
-    `Msg & data rates may apply. Reply ${SMS_KEYWORD_STOP} to opt out. Support: support@estimateace.com ` +
+    `Msg & data rates may apply. Reply ${SMS_KEYWORD_STOP} to opt out. Support: admin@estimateace.com ` +
     `Privacy ${privacyPolicyUrl()} Terms ${termsUrl()}`
   ).slice(0, 1600);
 }
