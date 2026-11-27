@@ -2,6 +2,11 @@ import type Stripe from 'stripe';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { getStripe, getAppUrl, getStripeMode } from '@/lib/stripe-server';
 import { computeStripeCardFee, shouldPassProcessingFeeToPayee } from '@/lib/stripe-fees';
+import {
+  CONNECT_ACCOUNT_CONTROLLER,
+  CONNECT_ACCOUNT_CREATE_API_VERSION,
+  accountTypeFromStripe,
+} from '@/lib/connect-account-params';
 
 export type PaymentAccountRow = {
   user_id: string;
@@ -61,8 +66,7 @@ export function isNoSuchAccountError(e: unknown): boolean {
 }
 
 function accountTypeFrom(acct: Stripe.Account | null | undefined, fallback = 'express'): string {
-  const t = String(acct?.type || '').trim();
-  return t && t !== 'none' ? t : fallback;
+  return accountTypeFromStripe(acct, fallback);
 }
 
 /** Clear a stored connected account id that no longer exists in Stripe. */
@@ -219,7 +223,7 @@ export async function createConnectOnboardingLink(
   if (!accountId) {
     try {
       const account = await stripe.accounts.create({
-        type: 'express',
+        controller: CONNECT_ACCOUNT_CONTROLLER,
         email: email || undefined,
         capabilities: {
           card_payments: { requested: true },
@@ -229,7 +233,7 @@ export async function createConnectOnboardingLink(
           supabase_user_id: userId,
           purpose: 'job_payments',
         },
-      });
+      }, { apiVersion: CONNECT_ACCOUNT_CREATE_API_VERSION });
       accountId = account.id;
       await upsertPaymentAccount(userId, {
         stripe_account_id: accountId,
