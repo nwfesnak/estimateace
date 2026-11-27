@@ -51,6 +51,7 @@
     "test:crew-gaps": "node --test scripts/test-crew-security-gaps.test.mjs",
     "test:deposit-flow": "node --test scripts/test-deposit-flow.test.mjs",
     "test:connect-id-guard": "node --test scripts/test-connect-account-id-guard.test.mjs",
+    "test:client-payment-methods": "node --test scripts/test-client-live-payment-methods.test.mjs",
     "test": "node --test scripts/test-*.test.mjs"
   },
   "dependencies": {
