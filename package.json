@@ -54,6 +54,7 @@
     "test:deposit-flow": "node --test scripts/test-deposit-flow.test.mjs",
     "test:connect-id-guard": "node --test scripts/test-connect-account-id-guard.test.mjs",
     "test:client-payment-methods": "node --test scripts/test-client-live-payment-methods.test.mjs",
+    "test:closed-work-match": "node --test scripts/test-closed-work-match.test.mjs",
     "test": "node --test scripts/test-*.test.mjs"
   },
   "dependencies": {
