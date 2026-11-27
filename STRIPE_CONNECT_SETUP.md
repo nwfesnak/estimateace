@@ -14,7 +14,9 @@ payments through Stripe are hidden on the client pay page and the API returns
 ## Contractor flow
 
 1. Profile → Payments → **Connect Stripe** (`POST /api/payments/connect/onboard`).
-   Creates one Express account per workspace owner (reused on retry; recreated if the stored id
+   Creates one connected account per workspace owner with controller properties (Express
+   dashboard, Stripe-hosted onboarding, Stripe owns losses, contractor pays Stripe fees; see
+   `lib/connect-account-params.ts`) — reused on retry; recreated if the stored id
    no longer exists in Stripe, e.g. test vs live key). Crew members cannot connect.
 2. Stripe onboarding (identity, business, bank account for payouts).
    Return → `/?stripe_connect=return` (app re-checks status). Expired link →
@@ -30,8 +32,10 @@ payments through Stripe are hidden on the client pay page and the API returns
 
 - Connect enabled; platform profile / questionnaire complete.
 - Connect branding set (business name, icon, color) — required before live Express onboarding links work.
-- Understand: for Express accounts the platform is responsible for losses / negative balances
-  (refunds and disputes are taken from the contractor's balance first).
+- Losses: new accounts use `controller.losses.payments = stripe` (Stripe Managed Risk), because
+  Stripe rejects legacy `type: express` when the platform is the losses collector. Refunds and
+  disputes are still taken from the contractor's balance first. Requires direct charges (we use
+  them) and Radar for connected accounts.
 - Settings → Payment methods → **connected accounts**: Cards and US bank account (ACH) on.
 - Webhooks → Add endpoint → **Events on Connected accounts**:
   `https://app.estimateace.com/api/payments/connect/webhook` with
