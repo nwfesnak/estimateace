@@ -33,7 +33,7 @@ function supportInbox(): string {
     (process.env.ADMIN_EMAIL || '').trim() ||
     (process.env.SUPPORT_EMAIL || '').trim() ||
     (process.env.NEXT_PUBLIC_SUPPORT_EMAIL || '').trim() ||
-    'support@estimateace.com'
+    'admin@estimateace.com'
   );
 }
 

@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 
-const SUPPORT = process.env.NEXT_PUBLIC_SUPPORT_EMAIL || 'support@estimateace.com';
+const SUPPORT = process.env.NEXT_PUBLIC_SUPPORT_EMAIL || 'admin@estimateace.com';
 
 function displayNumber(): string {
   const raw = (

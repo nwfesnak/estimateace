@@ -5,7 +5,7 @@ export const metadata = {
   description: 'How to delete your EstimateAce account and data (web, iPhone and Android app).',
 };
 
-const SUPPORT = process.env.NEXT_PUBLIC_SUPPORT_EMAIL || 'support@estimateace.com';
+const SUPPORT = process.env.NEXT_PUBLIC_SUPPORT_EMAIL || 'admin@estimateace.com';
 
 /**
  * Public account-deletion instructions. Google Play requires a web link for this

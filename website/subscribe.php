@@ -3,7 +3,7 @@
 // Primary: sends you an email notification
 // Secondary: appends to data/leads.csv if the folder is writable
 
-$notify_email = 'support@estimateace.com'; // ← CHANGE to your real inbox
+$notify_email = 'admin@estimateace.com'; // ← CHANGE to your real inbox
 $redirect_base = '/index.php';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -59,5 +59,5 @@ if ($saved_to_file || $emailed) {
   exit;
 }
 
-header('Location: ' . $return_path . '?error=' . urlencode('Could not save signup. Email support@estimateace.com and we will add you manually.'));
+header('Location: ' . $return_path . '?error=' . urlencode('Could not save signup. Email admin@estimateace.com and we will add you manually.'));
 exit;

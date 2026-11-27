@@ -82,7 +82,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(
           {
             error:
-              'Billing portal is not set up in Stripe yet. Contact support@estimateace.com to change or cancel your plan.',
+              'Billing portal is not set up in Stripe yet. Contact admin@estimateace.com to change or cancel your plan.',
           },
           { status: 503 }
         );

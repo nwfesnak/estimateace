@@ -13,7 +13,7 @@ Keep the rest of the App Store description (invoices, organization, AI reception
 
 **App category**: Business
 **Tags** (pick up to 5 in Play Console): Business tools, Productivity, Invoicing, Construction, Small business
-**Contact email**: support@estimateace.com
+**Contact email**: admin@estimateace.com
 **Website**: https://estimateace.com
 **Privacy policy**: https://app.estimateace.com/privacy
 **Delete account URL** (Data safety form): https://app.estimateace.com/delete-account

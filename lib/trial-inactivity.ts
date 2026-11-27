@@ -154,7 +154,7 @@ export function formatEmailDate(iso: string | Date): string {
   });
 }
 
-const SUPPORT = 'support@estimateace.com';
+const SUPPORT = 'admin@estimateace.com';
 
 function shell(inner: string): string {
   return `<!doctype html><html><body style="margin:0;background:#f4f4f4;padding:24px 12px">

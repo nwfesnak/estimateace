@@ -43,7 +43,7 @@ There are no push-notification or haptics plugins in this release.
 | Privacy policy URL | https://app.estimateace.com/privacy |
 | Terms URL | https://app.estimateace.com/terms |
 | Account deletion URL | https://app.estimateace.com/delete-account |
-| Support email | support@estimateace.com |
+| Support email | admin@estimateace.com |
 | Current store version | iOS 1.0.1 (build 2) · Android versionName 1.0.1 / versionCode 2 |
 
 ---

@@ -5,7 +5,7 @@
 import { sendEmailNotification, sendSmsNotification } from '@/lib/notifications';
 import { claimSubscriptionMarker } from '@/lib/server-markers';
 
-const DEFAULT_OWNER_EMAILS = ['support@estimateace.com', 'nwfesnak@gmail.com'];
+const DEFAULT_OWNER_EMAILS = ['admin@estimateace.com', 'nwfesnak@gmail.com'];
 /** Mitigation Hero / owner mobile. Override with PLATFORM_OWNER_ALERT_PHONE. */
 const DEFAULT_OWNER_PHONE = '7045767062';
 

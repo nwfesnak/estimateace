@@ -6,7 +6,7 @@ export const metadata = {
   description: 'Terms of Service for EstimateAce contractor estimating software.',
 };
 
-const SUPPORT = process.env.NEXT_PUBLIC_SUPPORT_EMAIL || 'support@estimateace.com';
+const SUPPORT = process.env.NEXT_PUBLIC_SUPPORT_EMAIL || 'admin@estimateace.com';
 
 export default function TermsPage() {
   return (
