@@ -11,7 +11,7 @@ import {
 } from '@/lib/stripe-fees';
 import { quoteTotalsForItems } from '@/lib/optional-line-items';
 import { openPayPalPaymentPage, openVenmoPaymentPage } from '@/lib/payment-links';
-import { ClientJobMedia, type ClientJobMediaData } from '@/components/ClientJobMedia';
+import { ClientJobMedia, ClientLinePhotoStrip, type ClientJobMediaData } from '@/components/ClientJobMedia';
 
 type PayOption = {
   method: string;
@@ -526,7 +526,14 @@ function ApprovePayInner() {
                 <tbody>
                   {requiredItems.map((it, i) => (
                     <tr key={it.id || i} className="border-t">
-                      <td className="p-2 text-slate-800">{it.description}</td>
+                      <td className="p-2 text-slate-800">
+                        {it.description}
+                        <ClientLinePhotoStrip
+                          photos={doc?.media?.linePhotos?.[String(it.id || '')]}
+                          lineLabel={it.description || 'Line'}
+                          onExpired={refreshMedia}
+                        />
+                      </td>
                       <td className="p-2 text-right whitespace-nowrap">{money(it.total)}</td>
                     </tr>
                   ))}
@@ -569,6 +576,11 @@ function ApprovePayInner() {
                     />
                     <span className="min-w-0 flex-1">
                       <span className="block text-sm text-slate-900">{it.description}</span>
+                      <ClientLinePhotoStrip
+                        photos={doc?.media?.linePhotos?.[id]}
+                        lineLabel={it.description || 'Option'}
+                        onExpired={refreshMedia}
+                      />
                       <span className="block text-sm font-semibold text-amber-900 mt-0.5">
                         {money(it.total)}
                       </span>
@@ -587,6 +599,11 @@ function ApprovePayInner() {
                     <tr key={it.id || i} className="border-t">
                       <td className="p-2 text-slate-800">
                         {it.description}
+                        <ClientLinePhotoStrip
+                          photos={doc?.media?.linePhotos?.[String(it.id || '')]}
+                          lineLabel={it.description || 'Option'}
+                          onExpired={refreshMedia}
+                        />
                         <span className="block text-[11px] text-amber-800">
                           {it.clientSelected ? 'Added' : 'Optional — not included'}
                         </span>

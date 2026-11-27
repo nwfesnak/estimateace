@@ -59,6 +59,9 @@ function mediaRefs(row: any): { photos: string[]; videos: string[]; receipts: st
     if (render?.sourcePath) photos.push(String(render.sourcePath));
     if (render?.resultPath) photos.push(String(render.resultPath));
   }
+  // Per-line photos (items[n].photos)
+  const items = Array.isArray(row?.items) ? row.items : [];
+  for (const item of items) photos.push(...stringList(item?.photos));
   if (profile.logoUrl) photos.push(String(profile.logoUrl));
   if (profile.certificateUrl) photos.push(String(profile.certificateUrl));
   const qr = profile.paymentSettings?.zelle?.qrUrl;

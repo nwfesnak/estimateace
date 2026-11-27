@@ -7,6 +7,10 @@ export type ClientJobMediaData = {
   photos?: Array<{ url: string }>;
   renderings?: Array<{ beforeUrl: string | null; afterUrl: string; label: string }>;
   expiresAt?: string | null;
+  /** Per-line photos keyed by the line id from the document's items list. */
+  linePhotos?: Record<string, Array<{ url: string }>>;
+  /** Line photos repeated in the Site Photos section, captioned by line. */
+  siteLinePhotos?: Array<{ caption: string; photos: Array<{ url: string }> }>;
 };
 
 type Props = {
@@ -19,6 +23,8 @@ type Props = {
 export function ClientJobMedia({ media, onExpired }: Props) {
   const photos = media?.photos || [];
   const renderings = media?.renderings || [];
+  const lineGroups = (media?.siteLinePhotos || []).filter((g) => g.photos?.length);
+  const linePhotoTotal = lineGroups.reduce((n, g) => n + g.photos.length, 0);
   const [zoom, setZoom] = React.useState<{ url: string; alt: string } | null>(null);
   const expiredRef = React.useRef(false);
 
@@ -35,7 +41,7 @@ export function ClientJobMedia({ media, onExpired }: Props) {
     return () => window.removeEventListener('keydown', onKey);
   }, [zoom]);
 
-  if (photos.length === 0 && renderings.length === 0) return null;
+  if (photos.length === 0 && renderings.length === 0 && linePhotoTotal === 0) return null;
 
   const handleError = () => {
     if (expiredRef.current) return;
@@ -95,14 +101,26 @@ export function ClientJobMedia({ media, onExpired }: Props) {
         </section>
       )}
 
-      {photos.length > 0 && (
+      {(photos.length > 0 || linePhotoTotal > 0) && (
         <section className="space-y-2">
-          <p className="text-sm font-semibold text-slate-900">Site photos ({photos.length})</p>
-          <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-            {photos.map((p, i) => (
-              <React.Fragment key={`${p.url}-${i}`}>{thumb(p.url, `Site photo ${i + 1}`, 'aspect-square')}</React.Fragment>
-            ))}
-          </div>
+          <p className="text-sm font-semibold text-slate-900">Site photos ({photos.length + linePhotoTotal})</p>
+          {photos.length > 0 && (
+            <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+              {photos.map((p, i) => (
+                <React.Fragment key={`${p.url}-${i}`}>{thumb(p.url, `Site photo ${i + 1}`, 'aspect-square')}</React.Fragment>
+              ))}
+            </div>
+          )}
+          {lineGroups.map((g, gi) => (
+            <div key={`${g.caption}-${gi}`} className="space-y-1" data-testid="client-site-line-photos">
+              <p className="text-xs font-medium text-slate-600">{g.caption}</p>
+              <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                {g.photos.map((p, i) => (
+                  <React.Fragment key={`${p.url}-${i}`}>{thumb(p.url, `${g.caption} photo ${i + 1}`, 'aspect-square')}</React.Fragment>
+                ))}
+              </div>
+            </div>
+          ))}
         </section>
       )}
 
@@ -127,5 +145,73 @@ export function ClientJobMedia({ media, onExpired }: Props) {
         </div>
       )}
     </div>
+  );
+}
+
+/** Customer approve page: up to 5 photos shown under one line's description. */
+export function ClientLinePhotoStrip({
+  photos,
+  lineLabel,
+  onExpired,
+}: {
+  photos?: Array<{ url: string }> | null;
+  lineLabel: string;
+  onExpired?: () => void;
+}) {
+  const [zoom, setZoom] = React.useState<string | null>(null);
+  const expiredRef = React.useRef(false);
+  const list = (photos || []).filter((p) => p?.url).slice(0, 5);
+  React.useEffect(() => {
+    expiredRef.current = false;
+  }, [photos]);
+  if (list.length === 0) return null;
+  return (
+    <>
+      <div className="mt-2 flex flex-wrap gap-2" data-testid="client-line-photos">
+        {list.map((p, i) => (
+          <button
+            key={`${p.url}-${i}`}
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setZoom(p.url);
+            }}
+            className="h-16 w-16 sm:h-20 sm:w-20 overflow-hidden rounded-md border bg-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            aria-label={`View larger: ${lineLabel} photo ${i + 1}`}
+          >
+            <img
+              src={p.url}
+              alt={`${lineLabel} photo ${i + 1}`}
+              loading="lazy"
+              decoding="async"
+              referrerPolicy="no-referrer"
+              onError={() => {
+                if (expiredRef.current) return;
+                expiredRef.current = true;
+                onExpired?.();
+              }}
+              className="h-full w-full object-cover"
+            />
+          </button>
+        ))}
+      </div>
+      {zoom && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={`${lineLabel} photo`}
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/85 p-3"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setZoom(null);
+          }}
+        >
+          <img src={zoom} alt={`${lineLabel} photo`} referrerPolicy="no-referrer" className="max-h-[85vh] max-w-full rounded-lg object-contain" />
+          <p className="mt-2 text-center text-xs text-white/90">Tap anywhere to close</p>
+        </div>
+      )}
+    </>
   );
 }

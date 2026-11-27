@@ -11,6 +11,12 @@ import { getAppUrl } from '@/lib/stripe-server';
 import { isClientSelectedOption, isOptionalLine } from '@/lib/optional-line-items';
 import { stripItemTranslations } from '@/lib/item-translations';
 import { enforceAppAccess } from '@/lib/billing-access';
+import {
+  emailLinePhotoThumbsHtml,
+  emailSitePhotosBlockHtml,
+  sanitizeEmailLinePhotoUrls,
+  sanitizeEmailSiteLinePhotos,
+} from '@/lib/email-line-photos';
 
 type LineItem = {
   description?: string;
@@ -267,6 +273,9 @@ export async function POST(request: NextRequest) {
       .join('\n');
 
     // Compact line list (no long breakdowns in email — keeps Total due + buttons above Gmail clip)
+    // Line photos: always under their own line; also in the Site photos block when the switch is on.
+    const linePhotoUrls = sanitizeEmailLinePhotoUrls(body.linePhotoUrls);
+    const siteLinePhotos = sanitizeEmailSiteLinePhotos(body.siteLinePhotos, body.includeSitePhotos !== false);
     const rowHtmlFor = (list: LineItem[]) =>
       list
         .slice(0, 15)
@@ -274,7 +283,9 @@ export async function POST(request: NextRequest) {
           const desc = escapeHtml(String(it.description || 'Line item').slice(0, 100));
           const total = money(Number(it.total) || Number(it.qty || 0) * Number(it.price || 0));
           return `<tr>
-          <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-size:13px;">${desc}</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-size:13px;">${desc}${
+            it.id != null ? emailLinePhotoThumbsHtml(linePhotoUrls[String(it.id)], escapeHtml) : ''
+          }</td>
           <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;text-align:right;font-size:13px;white-space:nowrap;">${total}</td>
         </tr>`;
         })
@@ -313,15 +324,7 @@ export async function POST(request: NextRequest) {
       : [];
 
     let mediaHtml = '';
-    if (sitePhotoUrls.length > 0) {
-      const thumbs = sitePhotoUrls
-        .map(
-          (url) =>
-            `<img src="${escapeHtml(url)}" alt="Site photo" width="96" height="96" style="object-fit:cover;border-radius:8px;border:1px solid #e2e8f0;width:96px;height:96px;margin:3px;" />`
-        )
-        .join('');
-      mediaHtml += `<div style="margin-top:20px;"><p style="font-size:13px;font-weight:600;margin:0 0 8px;">Site photos</p>${thumbs}</div>`;
-    }
+    mediaHtml += emailSitePhotosBlockHtml(sitePhotoUrls, siteLinePhotos, escapeHtml);
     if (jobRenderings.length > 0) {
       const blocks = jobRenderings
         .map((r) => {

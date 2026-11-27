@@ -102,6 +102,18 @@ import {
   type CrewTabKey,
 } from '@/lib/crew-tab-access';
 import { extractMediaStoragePath, isMediaPdfRef, resolveMediaDisplayUrl } from '@/lib/media-url';
+import {
+  LINE_PHOTO_LIMIT,
+  allLinePhotoRefs,
+  getLinePhotos,
+  newLinePhotoPath,
+  siteSectionLinePhotoGroups,
+  siteSectionPhotoCount,
+  withLinePhotoMoved,
+  withLinePhotoRemoved,
+  withLinePhotosAdded,
+} from '@/lib/line-item-photos';
+import { LineItemPhotoThumbs, LineItemPhotosEditor } from '@/components/LineItemPhotos';
 import { buildAccountExportZip } from '@/lib/account-export';
 import { mergeFilledPaymentSettings } from '@/lib/client-payment-options';
 import {
@@ -1031,6 +1043,32 @@ export default function Home() {
       cancelled = true;
     };
   }, [photoUrls, videoUrls, receiptUrls, supabase]);
+
+  // Resolve per-line photo paths (items[n].photos) to signed URLs; Site Photos are separate.
+  const linePhotoRefsKey = allLinePhotoRefs(items).join('|');
+  /** Site Photos section size: site photos + line photos (derived). Drives the Send switch. */
+  const sitePhotoSectionTotal = siteSectionPhotoCount(photoUrls, items);
+  useEffect(() => {
+    const refs = linePhotoRefsKey ? linePhotoRefsKey.split('|') : [];
+    const missing = refs.filter((r) => !linePhotoDisplayUrls[r]);
+    if (missing.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      const urls = await Promise.all(missing.map((p) => resolveMediaDisplayUrl(p, getMediaUrl)));
+      if (cancelled) return;
+      setLinePhotoDisplayUrls((prev) => {
+        const next = { ...prev };
+        missing.forEach((ref, i) => {
+          if (urls[i]) next[ref] = urls[i];
+        });
+        return next;
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linePhotoRefsKey, supabase]);
 
   // Resolve before/after paths for AI job renderings
   useEffect(() => {
@@ -1976,7 +2014,12 @@ export default function Home() {
   const [isDeviceCameraOpen, setIsDeviceCameraOpen] = useState(false);
   const [deviceCameraMode, setDeviceCameraMode] = useState<DeviceCameraMode>('photo');
   /** Device camera photo saves as job photo or receipt */
-  const [deviceCameraPhotoTarget, setDeviceCameraPhotoTarget] = useState<'photo' | 'receipt'>('photo');
+  const [deviceCameraPhotoTarget, setDeviceCameraPhotoTarget] = useState<'photo' | 'receipt' | 'line'>('photo');
+  /** Line photos: which line the in-app camera is shooting for (deviceCameraPhotoTarget === 'line'). */
+  const linePhotoCameraItemIdRef = useRef<number | null>(null);
+  /** Line photos: storage ref → signed display URL (resolved lazily, cached for the session). */
+  const [linePhotoDisplayUrls, setLinePhotoDisplayUrls] = useState<Record<string, string>>({});
+  const [linePhotoBusyId, setLinePhotoBusyId] = useState<number | null>(null);
   /** When more than 6 photos, collapse into a click-to-open folder */
   const PHOTO_FOLDER_THRESHOLD = 6;
   const [photosFolderOpen, setPhotosFolderOpen] = useState(false);
@@ -2413,11 +2456,14 @@ export default function Home() {
     heading?: string;
     gridClassName?: string;
     imgClassName?: string;
+    /** Line photos (derived from items, never copied into photoUrls). Default on. */
+    includeLinePhotos?: boolean;
   }) => {
     const editable = !!options?.editable;
     const forceExpanded = !!options?.forceExpanded;
     const count = photoDisplayUrls.length;
-    if (count === 0 && !editable) return null;
+    const lineGroups = siteSectionLinePhotoGroups(items, photoUrls, options?.includeLinePhotos !== false);
+    if (count === 0 && lineGroups.length === 0 && !editable) return null;
 
     const useFolder = count > PHOTO_FOLDER_THRESHOLD && !forceExpanded;
     const isOpen = !useFolder || photosFolderOpen;
@@ -2555,6 +2601,43 @@ export default function Home() {
         )}
         {folderButton}
         {photoGrid}
+        {lineGroups.length > 0 && (
+          <div className="space-y-3" data-testid="site-section-line-photos">
+            {lineGroups.map((g) => (
+              <div key={g.lineId} className="space-y-2" style={{ breakInside: 'avoid' }}>
+                <div className="text-sm font-medium text-gray-600">📎 {g.caption}</div>
+                <div className={gridClass}>
+                  {g.refs.map((ref, i) => {
+                    const url = linePhotoDisplayUrls[ref] || '';
+                    if (!url && !editable) return null;
+                    return (
+                      <div key={ref} className={editable ? 'relative' : undefined}>
+                        {url ? (
+                          <img src={url} alt={`${g.caption} photo ${i + 1}`} className={imgClass} />
+                        ) : (
+                          <div className="w-full h-40 rounded-lg border bg-gray-50 flex items-center justify-center text-xs text-gray-400">
+                            Loading…
+                          </div>
+                        )}
+                        {editable && typeof g.itemId === 'number' && (
+                          <button
+                            type="button"
+                            onClick={() => removeLinePhoto(g.itemId as number, getLinePhotos(items.find((it) => it.id === g.itemId)).indexOf(ref))}
+                            aria-label={`Remove ${g.caption} photo ${i + 1} from its line`}
+                            title="Removes it from the line too"
+                            className="absolute top-2 right-2 bg-red-600 hover:bg-red-700 text-white text-4xl w-10 h-10 flex items-center justify-center rounded-2xl shadow-xl"
+                          >
+                            ×
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     );
   };
@@ -4423,6 +4506,99 @@ export default function Home() {
     removeMedia('video', index);
   };
 
+  /** Replace one line in items (sync ref so the next save never writes stale lines). */
+  const commitLineItemChange = (
+    itemId: number,
+    change: (item: Record<string, unknown>) => Record<string, unknown>
+  ) => {
+    const next = (itemsRef.current || []).map((it: { id: number }) =>
+      it.id === itemId ? change(it as unknown as Record<string, unknown>) : it
+    );
+    itemsRef.current = next;
+    setItems(next);
+    return next;
+  };
+
+  /** Upload up to the remaining slots (max 5 per line) into the private media bucket and link them to the line. */
+  const uploadLinePhotos = async (itemId: number, files: File[]): Promise<number> => {
+    if (!files.length) return 0;
+    if (!user || !supabase || !workspaceUserId) {
+      showMessage('Please log in before adding photos.');
+      return 0;
+    }
+    const line = (itemsRef.current || []).find((it: { id: number }) => it.id === itemId);
+    if (!line) return 0;
+    const slots = Math.max(0, LINE_PHOTO_LIMIT - getLinePhotos(line).length);
+    if (slots === 0) {
+      showMessage(`This line already has ${LINE_PHOTO_LIMIT} photos. Remove one to add another.`);
+      return 0;
+    }
+    const batch = files.slice(0, slots);
+    if (files.length > slots) {
+      showMessage(`Only ${slots} more photo${slots === 1 ? '' : 's'} fit on this line (max ${LINE_PHOTO_LIMIT}).`);
+    }
+    setLinePhotoBusyId(itemId);
+    const newPaths: string[] = [];
+    const newUrls: Record<string, string> = {};
+    try {
+      for (const original of batch) {
+        const prepared = await prepareFileForMediaUpload(original, 'photo');
+        if (!prepared) {
+          showMessage('Could not read that photo. Try another one or use Take photo.');
+          continue;
+        }
+        const filePath = newLinePhotoPath(workspaceUserId, prepared.ext, randomUploadId());
+        const { error } = await supabase.storage.from('media').upload(filePath, prepared.blob, {
+          upsert: false,
+          contentType: prepared.contentType,
+          cacheControl: '3600',
+        });
+        if (error) {
+          console.error('Line photo upload failed:', error);
+          showMessage(`Failed to upload line photo: ${(error as { message?: string }).message || 'Upload failed'}`);
+          continue;
+        }
+        newPaths.push(filePath);
+        try {
+          newUrls[filePath] = URL.createObjectURL(prepared.blob);
+        } catch {
+          /* resolved from storage instead */
+        }
+      }
+    } finally {
+      setLinePhotoBusyId(null);
+    }
+    if (newPaths.length === 0) return 0;
+    if (Object.keys(newUrls).length) setLinePhotoDisplayUrls((prev) => ({ ...prev, ...newUrls }));
+    commitLineItemChange(itemId, (it) => withLinePhotosAdded(it, newPaths));
+    await saveToDB({ quiet: true });
+    showMessage(`✅ ${newPaths.length} photo${newPaths.length === 1 ? '' : 's'} added to this line.`);
+    return newPaths.length;
+  };
+
+  const removeLinePhoto = (itemId: number, index: number) => {
+    commitLineItemChange(itemId, (it) => withLinePhotoRemoved(it, index));
+    void saveToDB({ quiet: true });
+    showMessage('Photo removed from this line.');
+  };
+
+  const moveLinePhoto = (itemId: number, index: number, dir: -1 | 1) => {
+    commitLineItemChange(itemId, (it) => withLinePhotoMoved(it, index, dir));
+    void saveToDB({ quiet: true });
+  };
+
+  /** Same in-app camera as Site Photos; each shot is linked to this line. */
+  const openLinePhotoCamera = (itemId: number) => {
+    if (!user || !supabase) {
+      showMessage('Please log in before taking photos.');
+      return;
+    }
+    linePhotoCameraItemIdRef.current = itemId;
+    setDeviceCameraPhotoTarget('line');
+    setDeviceCameraMode('photo');
+    setIsDeviceCameraOpen(true);
+  };
+
   const openPhotoPicker = () => {
     if (!user || !supabase) {
       showMessage('Please log in before adding photos.');
@@ -4529,6 +4705,18 @@ export default function Home() {
   const handleDeviceCameraPhoto = async (file: File) => {
     const dt = new DataTransfer();
     dt.items.add(file);
+    if (deviceCameraPhotoTarget === 'line') {
+      const itemId = linePhotoCameraItemIdRef.current;
+      if (itemId == null) return;
+      await uploadLinePhotos(itemId, [file]);
+      const line = (itemsRef.current || []).find((it: { id: number }) => it.id === itemId);
+      if (line && getLinePhotos(line).length >= LINE_PHOTO_LIMIT) {
+        setIsDeviceCameraOpen(false);
+        setDeviceCameraPhotoTarget('photo');
+        linePhotoCameraItemIdRef.current = null;
+      }
+      return;
+    }
     const asReceipt = deviceCameraPhotoTarget === 'receipt';
     const saved = await handleMediaUpload(dt.files, asReceipt ? 'receipt' : 'photo');
     if (saved.count > 0) {
@@ -4571,6 +4759,11 @@ export default function Home() {
 
   const handleDeviceCameraClose = (count: number) => {
     setIsDeviceCameraOpen(false);
+    if (deviceCameraPhotoTarget === 'line') {
+      linePhotoCameraItemIdRef.current = null;
+      setDeviceCameraPhotoTarget('photo');
+      return;
+    }
     if (count > 0) {
       const kind =
         deviceCameraMode === 'video'
@@ -8059,7 +8252,7 @@ export default function Home() {
   const openSendPreview = () => {
     // Honor saved per-job share choices if present; otherwise default on when media exists
     const savedShare = clientMediaShareRef.current;
-    setSendIncludeSitePhotos(photoUrls.length > 0 && (savedShare ? savedShare.photos : true));
+    setSendIncludeSitePhotos(sitePhotoSectionTotal > 0 && (savedShare ? savedShare.photos : true));
     setSendIncludeVideos(videoUrls.length > 0);
     setSendIncludeJobRenderings(
       jobRenderings.length > 0 && (savedShare ? savedShare.renderings : true)
@@ -8077,7 +8270,7 @@ export default function Home() {
     setSelectedEmailsForSend([...emails.filter((e) => String(e || '').trim())]);
     setSelectedPhonesForSend([...phones.filter((p) => String(p || '').trim())]);
     // Only default ON if never chosen yet and media exists; don't wipe user choices from preview
-    if (photoUrls.length === 0) setSendIncludeSitePhotos(false);
+    if (sitePhotoSectionTotal === 0) setSendIncludeSitePhotos(false);
     if (videoUrls.length === 0) setSendIncludeVideos(false);
     if (jobRenderings.length === 0) setSendIncludeJobRenderings(false);
     setIsSendModalOpen(true);
@@ -14199,6 +14392,18 @@ export default function Home() {
                             </p>
                           ) : null}
 
+                          <LineItemPhotosEditor
+                            photos={getLinePhotos(item)}
+                            displayUrls={linePhotoDisplayUrls}
+                            lineNumber={idx + 1}
+                            busy={linePhotoBusyId === item.id}
+                            disabled={linePhotoBusyId != null && linePhotoBusyId !== item.id}
+                            onCamera={() => openLinePhotoCamera(item.id)}
+                            onFiles={(files) => void uploadLinePhotos(item.id, Array.from(files || []))}
+                            onRemove={(i) => removeLinePhoto(item.id, i)}
+                            onMove={(i, dir) => moveLinePhoto(item.id, i, dir)}
+                          />
+
                           <Button
                             size="sm"
                             variant="ghost"
@@ -14741,9 +14946,12 @@ export default function Home() {
 
               <Card className="mb-8">
                 <CardContent className="p-6">
-                  <h3 className="text-xl font-semibold mb-4">{t('photosSection')} ({photoUrls.length})</h3>
+                  <h3 className="text-xl font-semibold mb-4">{t('photosSection')} ({sitePhotoSectionTotal})</h3>
                   <p className="text-sm text-gray-500 mb-4">
                     Capture site photos for this job. Tap 📷 AI Quote on any photo to price a line item.
+                    {sitePhotoSectionTotal > photoUrls.length
+                      ? ' Line item photos are listed under their line name too; removing one here removes it from its line.'
+                      : ''}
                     {photoUrls.length > PHOTO_FOLDER_THRESHOLD
                       ? ' With more than 6 photos, they are kept in a folder — click the folder to view them.'
                       : ''}
@@ -15668,6 +15876,10 @@ export default function Home() {
                           <span className="text-xs text-gray-500">Line {i + 1}: </span>{item.description}
                           {optionalLineNote(item)}
                           {renderClientItemBreakdown(item, 'mt-1 text-xs text-gray-600 leading-snug pl-2')}
+                          <LineItemPhotoThumbs
+                            urls={getLinePhotos(item).map((ref) => linePhotoDisplayUrls[ref] || '')}
+                            lineNumber={i + 1}
+                          />
                         </td>
                         <td className="py-3 text-right">{item.qty}</td>
                         <td className="py-3 text-right">{item.unit || '—'}</td>
@@ -15722,7 +15934,8 @@ export default function Home() {
 
                 {renderApprovedPaymentSection({ interactive: false })}
 
-                {photoUrls.length > 0 && (
+                {/* Print view follows the Send "Site Photos" switch (site + line photos) */}
+                {sendIncludeSitePhotos && siteSectionPhotoCount(photoUrls, items) > 0 && (
                   <div className="mt-12">
                     {/* Print always expands; on screen, folder when > 6 */}
                     <div className="print:hidden">
@@ -19099,7 +19312,7 @@ export default function Home() {
                     {/* Site Photos toggle */}
                     <div
                       className={`rounded-xl border-2 bg-white p-4 ${
-                        photoUrls.length === 0
+                        sitePhotoSectionTotal === 0
                           ? 'border-gray-200 opacity-70'
                           : sendIncludeSitePhotos
                             ? 'border-emerald-400 ring-1 ring-emerald-200'
@@ -19110,9 +19323,11 @@ export default function Home() {
                         <div className="min-w-0 flex-1">
                           <div className="font-semibold text-base">📷 Site Photos</div>
                           <p className="text-sm text-gray-600 mt-0.5">
-                            {photoUrls.length === 0
+                            {sitePhotoSectionTotal === 0
                               ? 'None on this document — add in the editor first'
-                              : `${photoUrls.length} photo${photoUrls.length === 1 ? '' : 's'} available`}
+                              : `${sitePhotoSectionTotal} photo${sitePhotoSectionTotal === 1 ? '' : 's'} available${
+                                  sitePhotoSectionTotal > photoUrls.length ? ' (includes line item photos)' : ''
+                                }`}
                           </p>
                           {photoDisplayUrls.length > 0 && (
                             <div className="flex gap-1 flex-wrap mt-2">
@@ -19130,10 +19345,10 @@ export default function Home() {
                         <div className="flex gap-2 shrink-0">
                           <button
                             type="button"
-                            disabled={photoUrls.length === 0}
+                            disabled={sitePhotoSectionTotal === 0}
                             onClick={() => setSendIncludeSitePhotos(true)}
                             className={`px-4 py-2.5 rounded-xl text-sm font-bold min-w-[5.5rem] transition ${
-                              sendIncludeSitePhotos && photoUrls.length > 0
+                              sendIncludeSitePhotos && sitePhotoSectionTotal > 0
                                 ? 'bg-emerald-600 text-white shadow'
                                 : 'bg-gray-100 text-gray-600 border border-gray-300'
                             } disabled:opacity-40 disabled:cursor-not-allowed`}
@@ -19142,10 +19357,10 @@ export default function Home() {
                           </button>
                           <button
                             type="button"
-                            disabled={photoUrls.length === 0}
+                            disabled={sitePhotoSectionTotal === 0}
                             onClick={() => setSendIncludeSitePhotos(false)}
                             className={`px-4 py-2.5 rounded-xl text-sm font-bold min-w-[5.5rem] transition ${
-                              !sendIncludeSitePhotos || photoUrls.length === 0
+                              !sendIncludeSitePhotos || sitePhotoSectionTotal === 0
                                 ? 'bg-slate-700 text-white shadow'
                                 : 'bg-gray-100 text-gray-600 border border-gray-300'
                             } disabled:opacity-40 disabled:cursor-not-allowed`}
@@ -19263,8 +19478,8 @@ export default function Home() {
                   <div className="rounded-lg bg-white border px-3 py-2 text-xs text-slate-600">
                     <strong className="text-slate-800">Currently selected to send: </strong>
                     {[
-                      sendIncludeSitePhotos && photoUrls.length > 0
-                        ? `Site Photos (${photoUrls.length})`
+                      sendIncludeSitePhotos && sitePhotoSectionTotal > 0
+                        ? `Site Photos (${sitePhotoSectionTotal})`
                         : null,
                       getAiJobRenderingEnabled() &&
                       sendIncludeJobRenderings &&
@@ -19394,6 +19609,10 @@ export default function Home() {
                           <span className="text-xs text-gray-500">Line {i + 1}: </span>{item.description}
                           {optionalLineNote(item)}
                           {renderClientItemBreakdown(item, 'mt-1 text-xs text-gray-600 leading-snug pl-2')}
+                          <LineItemPhotoThumbs
+                            urls={getLinePhotos(item).map((ref) => linePhotoDisplayUrls[ref] || '')}
+                            lineNumber={i + 1}
+                          />
                         </td>
                         <td className="py-3 text-right border-l border-gray-400 px-3">{item.qty}</td>
                         <td className="py-3 text-right border-l border-gray-400 px-3">{item.unit || '—'}</td>
@@ -19509,7 +19728,7 @@ export default function Home() {
                 )}
 
                 {/* Site Photos — only if user chose to send them */}
-                {sendIncludeSitePhotos && photoUrls.length > 0 && (
+                {sendIncludeSitePhotos && siteSectionPhotoCount(photoUrls, items) > 0 && (
                   <div className="mt-12">
                     {renderPhotoGallery({
                       heading: 'Site Photos',
@@ -19756,7 +19975,7 @@ export default function Home() {
                   {
                     key: 'photos' as const,
                     title: '📷 Site Photos',
-                    count: photoUrls.length,
+                    count: sitePhotoSectionTotal,
                     on: sendIncludeSitePhotos,
                     set: setSendIncludeSitePhotos,
                     empty: 'None on this document',
@@ -19916,7 +20135,7 @@ export default function Home() {
                   }
 
                   // Resolve client-facing media only for toggled-on items
-                  const includePhotos = sendIncludeSitePhotos && photoUrls.length > 0;
+                  const includePhotos = sendIncludeSitePhotos && sitePhotoSectionTotal > 0;
                   const includeVideos = sendIncludeVideos && videoUrls.length > 0;
                   const includeRenders =
                     getAiJobRenderingEnabled() &&
@@ -19925,6 +20144,26 @@ export default function Home() {
 
                   const sitePhotoUrls = includePhotos
                     ? await createEmailMediaUrls(photoUrls.slice(0, 24))
+                    : [];
+                  // Line photos: signed like site photos; always under their lines, and in the
+                  // Site photos block only when the switch is on.
+                  const linePhotoUrlByRef: Record<string, string> = {};
+                  for (const ref of allLinePhotoRefs((items || []).slice(0, 40))) {
+                    const [signed] = await createEmailMediaUrls([ref]);
+                    if (signed) linePhotoUrlByRef[ref] = signed;
+                  }
+                  const emailLinePhotoUrls: Record<string, string[]> = {};
+                  for (const it of (items || []).slice(0, 40)) {
+                    const urls = getLinePhotos(it).map((r) => linePhotoUrlByRef[r]).filter(Boolean);
+                    if (urls.length && it?.id != null) emailLinePhotoUrls[String(it.id)] = urls;
+                  }
+                  const emailSiteLinePhotos = includePhotos
+                    ? siteSectionLinePhotoGroups((items || []).slice(0, 40), photoUrls, true)
+                        .map((g) => ({
+                          caption: g.caption,
+                          urls: g.refs.map((r) => linePhotoUrlByRef[r]).filter(Boolean),
+                        }))
+                        .filter((g) => g.urls.length > 0)
                     : [];
                   const clientVideoUrls = includeVideos
                     ? await createEmailMediaUrls(videoUrls.slice(0, 12))
@@ -20046,6 +20285,8 @@ export default function Home() {
                       includeVideos: includeVideos,
                       includeJobRenderings: includeRenders,
                       sitePhotoUrls,
+                      linePhotoUrls: emailLinePhotoUrls,
+                      siteLinePhotos: emailSiteLinePhotos,
                       videoUrls: clientVideoUrls,
                       jobRenderings: clientRenderings,
                     }),
@@ -20076,6 +20317,11 @@ export default function Home() {
                   }
                   const mediaBits: string[] = [];
                   if (includePhotos) mediaBits.push(`${sitePhotoUrls.length} site photos`);
+                  if (Object.keys(emailLinePhotoUrls).length) {
+                    mediaBits.push(
+                      `${Object.values(emailLinePhotoUrls).reduce((n, u) => n + u.length, 0)} line item photos`
+                    );
+                  }
                   if (includeRenders) mediaBits.push(`${clientRenderings.length} AI renderings`);
                   if (includeVideos) mediaBits.push(`${clientVideoUrls.length} videos`);
                   if (mediaBits.length) {
