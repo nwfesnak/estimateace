@@ -114,7 +114,11 @@ export function crewCanAccessTab(
 export async function requireWorkspaceOwner(
   userId: string,
   adminClient?: SupabaseClient | null,
-  options?: { requireFinancials?: boolean; requireTab?: CrewTabKey | readonly CrewTabKey[] }
+  options?: {
+    requireFinancials?: boolean;
+    requirePricing?: boolean;
+    requireTab?: CrewTabKey | readonly CrewTabKey[];
+  }
 ): Promise<
   | { ownerUserId: string; isCrew: boolean; tabAccess: CrewTabAccess; denied?: undefined }
   | { denied: NextResponse }
@@ -122,6 +126,9 @@ export async function requireWorkspaceOwner(
   const ws = await resolveWorkspace(userId, adminClient);
   if (!ws.ok) return { denied: crewSeatInactiveResponse() };
   if (options?.requireFinancials && !crewMayHandleClientMoney(ws)) {
+    return { denied: crewPermissionDeniedResponse() };
+  }
+  if (options?.requirePricing && !crewMaySeePricing(ws)) {
     return { denied: crewPermissionDeniedResponse() };
   }
   if (options?.requireTab && !crewCanAccessTab(ws, options.requireTab)) {
@@ -146,6 +153,13 @@ export function crewMayHandleClientMoney(ws: WorkspaceResolution): boolean {
   if (!ws.isCrew) return true;
   const row = ws.crew;
   return row?.can_see_pricing === true && row?.can_see_estimates_and_financials === true;
+}
+
+/** Owners always; crew only when "See pricing" is on. */
+export function crewMaySeePricing(ws: WorkspaceResolution): boolean {
+  if (!ws.ok) return false;
+  if (!ws.isCrew) return true;
+  return ws.crew?.can_see_pricing === true;
 }
 
 export function crewPermissionDeniedResponse(): NextResponse {

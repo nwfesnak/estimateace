@@ -60,7 +60,10 @@ export async function POST(request: NextRequest) {
     }
     const paywall = await enforceAppAccess(user.id);
     if (paywall) return paywall;
-    const ws = await requireWorkspaceOwner(user.id, undefined, { requireTab: ['estimates', 'invoices', 'newEstimate'] });
+    const ws = await requireWorkspaceOwner(user.id, undefined, {
+      requirePricing: true,
+      requireTab: ['estimates', 'invoices', 'newEstimate'],
+    });
     if (ws.denied) return ws.denied;
 
     const rate = checkRateLimit(user.id);

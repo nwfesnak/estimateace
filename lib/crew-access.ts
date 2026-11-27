@@ -80,7 +80,9 @@ export async function restoreDocumentForCrewWrite<T extends Record<string, unkno
   row: T
 ): Promise<T> {
   const access = await getCrewAccess(admin, userId);
-  if (!access || crewHasFullDataAccess(access)) return row;
+  // Every crew login, including full-data, must restore owner-only profile secrets
+  // (and, for restricted crew, hidden prices/financials) before a write lands.
+  if (!access) return row;
   const { data: existing } = await admin
     .from('estimates')
     .select('*')

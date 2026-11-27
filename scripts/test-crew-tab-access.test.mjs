@@ -120,14 +120,23 @@ test('redaction strips tab-specific SETTINGS fields even for full-access crew wh
   assert.equal('emailLeadSummaries' in redacted.profile, false);
   assert.equal('monitoredEmail' in redacted.profile, false);
 
-  // Full-access crew with ALL tabs enabled keeps those SETTINGS fields untouched
+  // Full-access crew with ALL tabs enabled still keep tab-scoped operational fields,
+  // but owner-only billing secrets stay hidden.
   const allTabs = {
     canSeePricing: true,
     canSeeFinancials: true,
     tabAccess: T.DEFAULT_CREW_TAB_ACCESS,
   };
-  const untouched = R.redactRow(settingsRow, allTabs);
-  assert.deepEqual(untouched, settingsRow);
+  const kept = R.redactRow(settingsRow, allTabs);
+  assert.equal(kept.profile.company, 'Acme Roofing');
+  assert.deepEqual(kept.profile._appointments, [{ id: 'a1' }]);
+  assert.equal(kept.profile.appointmentReminderEnabled, true);
+  assert.deepEqual(kept.profile.aiReceptionistSettings, { enabled: true });
+  assert.deepEqual(kept.profile.receptionistConfig, { status: 'on' });
+  assert.equal(kept.profile.emailLeadSummariesEnabled, true);
+  assert.deepEqual(kept.profile.emailLeadSummaries, [{ id: 'l1' }]);
+  assert.equal(kept.profile.monitoredEmail, 'leads@acme.com');
+  assert.equal('receptionistBilling' in kept.profile, false);
 });
 
 test('server routes enforce per-tab crew permissions', () => {

@@ -17,7 +17,10 @@ export async function POST(request: NextRequest) {
     }
     const paywall = await enforceAppAccess(user.id);
     if (paywall) return paywall;
-    const ws = await requireWorkspaceOwner(user.id, undefined, { requireTab: ['estimates', 'invoices', 'newEstimate', 'reports'] });
+    const ws = await requireWorkspaceOwner(user.id, undefined, {
+      requireFinancials: true,
+      requireTab: ['estimates', 'invoices', 'newEstimate', 'reports'],
+    });
     if (ws.denied) return ws.denied;
 
     const burst = await rateLimit(`ai:receipt-scan:min:${user.id}`, 60, 10);

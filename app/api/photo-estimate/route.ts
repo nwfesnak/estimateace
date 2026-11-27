@@ -35,7 +35,10 @@ export async function POST(request: NextRequest) {
     if (!user) return NextResponse.json({ error: authError || 'Unauthorized' }, { status: 401 });
     const paywall = await enforceAppAccess(user.id);
     if (paywall) return paywall;
-    const ws = await requireWorkspaceOwner(user.id, undefined, { requireTab: ['estimates', 'invoices', 'newEstimate'] });
+    const ws = await requireWorkspaceOwner(user.id, undefined, {
+      requirePricing: true,
+      requireTab: ['estimates', 'invoices', 'newEstimate'],
+    });
     if (ws.denied) return ws.denied;
 
     const minute = await rateLimit(`photo-estimate:${user.id}`, 60, 4);

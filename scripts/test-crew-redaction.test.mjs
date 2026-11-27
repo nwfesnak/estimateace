@@ -50,8 +50,18 @@ const stored = {
   },
 };
 
-test('full-access crew rows are untouched', () => {
-  assert.deepEqual(R.redactRow(stored, full), stored);
+test('full-access crew keep prices and financials but lose owner-only settings secrets', () => {
+  const r = R.redactRow(stored, full);
+  assert.equal(r.items[0].price, 12.5);
+  assert.equal(r.amountPaid, 100);
+  assert.equal(r.laborRate, 60);
+  assert.deepEqual(r.receiptDetails, stored.receiptDetails);
+  assert.equal(r.profile.company, 'Acme');
+  assert.equal(r.profile.twoFactorPhone, undefined);
+  assert.equal(r.profile.aiPriceMemory, undefined);
+  assert.equal(r.profile.paymentSettings, undefined);
+  assert.equal(r.profile.receptionistBilling, undefined);
+  assert.equal(stored.profile.twoFactorPhone, '5555550100', 'source row not mutated');
 });
 
 test('no pricing + no financials: money hidden, descriptions kept', () => {
@@ -86,7 +96,7 @@ test('pricing only: prices visible, financials hidden', () => {
   assert.equal(r.laborRate, 60);
   assert.equal(r.amountPaid, 0);
   assert.equal(r.profile.paymentSettings, undefined);
-  assert.deepEqual(r.profile.aiPriceMemory, { pine: 4 });
+  assert.equal(r.profile.aiPriceMemory, undefined, 'price memory is owner-only even with See pricing');
 });
 
 test('financials only: unit prices hidden but real grand total provided', () => {
@@ -94,7 +104,7 @@ test('financials only: unit prices hidden but real grand total provided', () => 
   assert.equal(r.items[0].price, 0);
   assert.equal(r.amountPaid, 100);
   assert.ok(r.grandTotal > 0, 'grandTotal injected');
-  assert.deepEqual(r.profile.paymentSettings, { zelle: 'acme@example.com' });
+  assert.equal(r.profile.paymentSettings, undefined, 'payment rails are owner-only even with financials');
 });
 
 test('restore: redacted round-trip saves the owner values unchanged', () => {
